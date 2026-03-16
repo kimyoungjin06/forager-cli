@@ -80,6 +80,23 @@ def compact_reason(raw: Any, limit: int = 120) -> str:
     return text
 
 
+def _preset_operator_hint(phase1_preset: str, phase2_preset: str) -> str:
+    preset = str(phase2_preset or phase1_preset or "").strip().lower()
+    if preset == "writer":
+        return "focus draft/handoff artifacts"
+    if preset == "analysis":
+        return "focus findings and evidence quality"
+    if preset == "build":
+        return "focus implementation progress and rerun lanes"
+    if preset == "data":
+        return "focus schema/null evidence and transformations"
+    if preset == "review":
+        return "focus risks, regressions, and verifier findings"
+    if preset == "mixed":
+        return "focus execution/review split across lanes"
+    return ""
+
+
 def _sync_counter_map(raw: Any) -> Dict[str, int]:
     if not isinstance(raw, dict):
         return {}
@@ -817,6 +834,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                     phase2=phase2_team_preset or phase1_role_preset or "-",
                 )
             )
+            preset_hint = _preset_operator_hint(phase1_role_preset, phase2_team_preset)
+            if preset_hint:
+                lines.append("  active_task_preset_hint: " + preset_hint)
         if latest_task.get("requested_roles") or latest_task.get("executed_roles"):
             lines.append(
                 "  active_task_roles: requested={requested} | executed={executed}".format(

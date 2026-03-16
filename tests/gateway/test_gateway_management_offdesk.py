@@ -1495,15 +1495,15 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
 
 
 @pytest.mark.parametrize(
-    ("preset", "roles"),
+    ("preset", "roles", "hint"),
     [
-        ("build", ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"]),
-        ("data", ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"]),
-        ("review", ["Codex-Reviewer", "Claude-Reviewer"]),
-        ("mixed", ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"]),
+        ("build", ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"], "focus implementation progress and rerun lanes"),
+        ("data", ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"], "focus schema/null evidence and transformations"),
+        ("review", ["Codex-Reviewer", "Claude-Reviewer"], "focus risks, regressions, and verifier findings"),
+        ("mixed", ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"], "focus execution/review split across lanes"),
     ],
 )
-def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: str, roles: list[str]) -> None:
+def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: str, roles: list[str], hint: str) -> None:
     state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
     project_root = tmp_path / ("Preset-" + preset)
     team_dir = project_root / ".aoe-team"
@@ -1541,6 +1541,7 @@ def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: s
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="prepare O8")
 
     assert f"active_task_preset: phase1={preset} phase2={preset}" in text
+    assert f"active_task_preset_hint: {hint}" in text
 
 
 def test_offdesk_prepare_warns_on_active_task_role_mismatch(tmp_path: Path) -> None:
