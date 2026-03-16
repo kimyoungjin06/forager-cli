@@ -1506,15 +1506,15 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
 
 
 @pytest.mark.parametrize(
-    ("preset", "roles", "hint"),
+    ("preset", "roles", "hint", "focus"),
     [
-        ("build", ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"], "focus implementation progress and rerun lanes"),
-        ("data", ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"], "focus schema/null evidence and transformations"),
-        ("review", ["Codex-Reviewer", "Claude-Reviewer"], "focus risks, regressions, and verifier findings"),
-        ("mixed", ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"], "focus execution/review split across lanes"),
+        ("build", ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"], "focus implementation progress and rerun lanes", "check implementation delta, tests, and rerun candidates"),
+        ("data", ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"], "focus schema/null evidence and transformations", "check schema/null evidence and transformed outputs"),
+        ("review", ["Codex-Reviewer", "Claude-Reviewer"], "focus risks, regressions, and verifier findings", "check verifier findings and regression risks"),
+        ("mixed", ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"], "focus execution/review split across lanes", "check work lanes first, then review handoff"),
     ],
 )
-def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: str, roles: list[str], hint: str) -> None:
+def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: str, roles: list[str], hint: str, focus: str) -> None:
     state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
     project_root = tmp_path / ("Preset-" + preset)
     team_dir = project_root / ".aoe-team"
@@ -1553,6 +1553,7 @@ def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: s
 
     assert f"active_task_preset: phase1={preset} phase2={preset}" in text
     assert f"active_task_preset_hint: {hint}" in text
+    assert f"active_task_next_focus: {focus}" in text
 
 
 def test_offdesk_prepare_warns_on_active_task_role_mismatch(tmp_path: Path) -> None:
