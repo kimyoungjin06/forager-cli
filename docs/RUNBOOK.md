@@ -96,6 +96,35 @@ provider capacity override 후 재개:
 5. Auto-run after logout/reboot:
 `sudo loginctl enable-linger kimyoungjin06`
 
+## 2.2 Preset Routing
+- Plain-text work requests are classified into explicit Orch presets before TF execution.
+- Operators can read the current preset in:
+  - `/task` -> `team_preset: phase1=... phase2=...`
+  - `/monitor` -> `preset=...`
+
+Default prompt-to-preset routing:
+
+- `writer`
+  - report, write, draft, summary, handoff, documentation, manuscript style prompts
+- `analysis`
+  - analyze, investigate, compare, inspect, explain, diagnose style prompts
+- `build`
+  - implement, fix, refactor, patch, change code, modify behavior style prompts
+- `data`
+  - csv, sql, schema, null, ingestion, extract, transform, pipeline style prompts
+- `review`
+  - review, risk, regression, verify, cross-check, audit style prompts
+- `mixed`
+  - requests that combine work families such as implementation + handoff, build + review, or analysis + writing
+- `general`
+  - fallback when no stronger preset is derived
+
+Operational rule:
+
+- `phase1_role_preset` explains the planning-time team choice
+- `phase2_team_preset` controls execution/review lane shape
+- when planner owner roles drift, `phase2_team_preset` wins
+
 ## 3. Health Checks
 1. Process check:
 `ps -ef | rg 'aoe-telegram-gateway|aoe-orch worker'`

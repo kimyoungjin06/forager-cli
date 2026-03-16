@@ -90,6 +90,38 @@ Important policy:
 - role assignments are role-scoped, not backend-scoped
 - `meta.phase2_team_spec` must make Phase2 execution lanes and critic lanes explicit
 
+### 2.2.2 Preset Metadata
+
+Phase planning and execution also carry explicit preset metadata.
+
+Fields:
+
+- `meta.phase1_role_preset`
+- `meta.phase2_team_preset`
+
+Allowed values:
+
+- `general`
+- `review`
+- `writer`
+- `analysis`
+- `build`
+- `data`
+- `mixed`
+
+Operational meaning:
+
+- `phase1_role_preset` is the prompt/role-classification result used during planning
+- `phase2_team_preset` is the execution-facing preset used to build Phase2 lanes
+- both fields should stay stable across retries unless an explicit replan changes task shape
+
+Important policy:
+
+- preset selection is derived from the incoming prompt and the selected role mix
+- `phase2_team_preset` may override planner owner-role drift when execution lanes would otherwise collapse into the wrong role family
+- `writer`, `analysis`, `build`, `data`, `review`, and `mixed` presets are expected to keep reviewer roles in review lanes unless the preset itself is `review`
+- operator surfaces should expose preset values directly so `/task` and `/monitor` explain why a given team shape was chosen
+
 ### 2.2.1 Phase2TeamSpec
 
 This is the execution-facing team contract derived from the plan after Phase1 stabilizes.
@@ -245,6 +277,7 @@ The output of Phase1 is:
 - one stable `TFPlan`
 - critic issues reduced to a dispatchable level
 - explicit execution team shape for Phase2
+- explicit `phase1_role_preset` and `phase2_team_preset` values for downstream observability
 
 ### 3.2 Phase2: execution
 
@@ -257,6 +290,7 @@ Default policy:
 - critic/verifier review should also be parallel where possible
 - terminal outcome is captured as `TFVerdict`
 - any new work enters via `FollowupProposal`, not direct backlog mutation
+- execution/review lane templates should respect `phase2_team_preset` even when planner subtasks drift toward an over-narrow owner role
 
 The intended lifecycle states are:
 
