@@ -107,6 +107,38 @@ def _lane_verdict_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
     return {key: value for key, value in counts.items() if value}
 
 
+def _dedupe_phase2_roles(rows: Any) -> List[str]:
+    seen: Set[str] = set()
+    result: List[str] = []
+    if not isinstance(rows, list):
+        return result
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role", "")).strip()
+        if not role or role in seen:
+            continue
+        seen.add(role)
+        result.append(role)
+    return result
+
+
+def _phase2_shape_roles(task: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
+    exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
+
+    exec_roles = _dedupe_phase2_roles(team_spec.get("execution_groups"))
+    review_roles = _dedupe_phase2_roles(team_spec.get("review_groups"))
+    if exec_roles or review_roles:
+        return exec_roles, review_roles
+
+    exec_roles = _dedupe_phase2_roles(exec_plan.get("execution_lanes"))
+    review_roles = _dedupe_phase2_roles(exec_plan.get("review_lanes"))
+    return exec_roles, review_roles
+
+
 def derive_role_execution_snapshot(
     requested_roles: Iterable[str],
     executed_roles: Iterable[str],
@@ -1051,6 +1083,7 @@ def summarize_task_monitor(
         exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
         exec_lanes = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else []
         review_lanes = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else []
+        shape_exec_roles, shape_review_roles = _phase2_shape_roles(task)
         lane_text = ""
         if exec_lanes or review_lanes:
             lane_text = f" | lanes E{len(exec_lanes)}/R{len(review_lanes)}"
@@ -1096,6 +1129,13 @@ def summarize_task_monitor(
             lane_parts.append("review " + ",".join(f"{key}={value}" for key, value in sorted(review_summary.items())))
         if review_verdicts:
             lane_parts.append("review_verdict " + ",".join(f"{key}={value}" for key, value in sorted(review_verdicts.items())))
+        if shape_exec_roles or shape_review_roles:
+            lane_parts.append(
+                "shape E:{exec_roles} R:{review_roles}".format(
+                    exec_roles=",".join(shape_exec_roles) if shape_exec_roles else "-",
+                    review_roles=",".join(shape_review_roles) if shape_review_roles else "-",
+                )
+            )
         lane_targets = task_lane_target_snapshot(task)
         rerun_exec = list(lane_targets.get("rerun_execution_lane_ids") or [])
         rerun_review = list(lane_targets.get("rerun_review_lane_ids") or [])
