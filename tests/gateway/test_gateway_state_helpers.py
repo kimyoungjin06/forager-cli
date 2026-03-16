@@ -1012,6 +1012,22 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
             "phase1_current_total_rounds": 3,
             "phase1_current_provider": "codex",
             "stages": {"planning": "running"},
+            "plan": {
+                "evidence_required": [
+                    "Findings are summarized with concrete evidence.",
+                    "Open questions or weak spots are called out explicitly.",
+                ],
+                "meta": {
+                    "phase2_team_spec": {
+                        "execution_mode": "parallel",
+                        "execution_groups": [{"group_id": "E1", "role": "Codex-Analyst"}],
+                        "review_mode": "single",
+                        "review_groups": [{"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier"}],
+                        "critic_role": "Codex-Reviewer",
+                        "integration_role": "Codex-Analyst",
+                    }
+                },
+            },
         },
     )
 
@@ -1019,6 +1035,8 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
     assert "phase1_progress: planner 1/3 provider=codex" in summary
     assert "phase1_candidate_roles: Codex-Analyst, Claude-Analyst, Codex-Reviewer" in summary
     assert "team_preset: phase1=analysis phase2=analysis" in summary
+    assert "phase2_quality: critic=Codex-Reviewer integration=Codex-Analyst" in summary
+    assert "phase2_evidence: Findings are summarized with concrete evidence. | Open questions or weak spots are called out explicitly." in summary
 
 
 def test_task_lifecycle_summary_omits_empty_phase1_actor_placeholder() -> None:
