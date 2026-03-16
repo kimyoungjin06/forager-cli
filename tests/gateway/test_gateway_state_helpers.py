@@ -1231,6 +1231,98 @@ def test_apply_exec_critic_lifecycle_marks_manual_followup_lane_targets() -> Non
     assert "exec_manual_followup_targets: execution=L1, L2 review=R1" in summary
 
 
+def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets() -> None:
+    task = {
+        "status": "running",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "staffing": "done",
+            "execution": "done",
+            "verification": "done",
+            "integration": "running",
+            "close": "running",
+        },
+        "plan": {
+            "meta": {
+                "phase2_team_spec": {
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Dev",
+                }
+            }
+        },
+        "lane_states": {
+            "execution": [
+                {"lane_id": "L1", "role": "Codex-Dev", "status": "done"},
+                {"lane_id": "L2", "role": "Codex-Writer", "status": "done"},
+            ],
+            "review": [
+                {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+                {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+            ],
+            "summary": {
+                "execution": {"done": 2},
+                "review": {"done": 2},
+            },
+        },
+    }
+
+    task_state.apply_exec_critic_lifecycle(
+        task,
+        {"verdict": "retry", "action": "retry", "reason": "recheck build lane first"},
+        lifecycle_set_stage=gw.lifecycle_set_stage,
+    )
+
+    assert task["exec_critic"]["rerun_execution_lane_ids"] == ["L1"]
+    assert task["exec_critic"]["rerun_review_lane_ids"] == ["R1"]
+
+
+def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_manual_followup_targets() -> None:
+    task = {
+        "status": "running",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "staffing": "done",
+            "execution": "done",
+            "verification": "done",
+            "integration": "running",
+            "close": "running",
+        },
+        "plan": {
+            "meta": {
+                "phase2_team_spec": {
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Dev",
+                }
+            }
+        },
+        "lane_states": {
+            "execution": [
+                {"lane_id": "L1", "role": "Codex-Dev", "status": "done"},
+                {"lane_id": "L2", "role": "Codex-Writer", "status": "done"},
+            ],
+            "review": [
+                {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+                {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+            ],
+            "summary": {
+                "execution": {"done": 2},
+                "review": {"done": 2},
+            },
+        },
+    }
+
+    task_state.apply_exec_critic_lifecycle(
+        task,
+        {"verdict": "intervention", "action": "escalate", "reason": "manual follow-up should start from the primary build lane"},
+        lifecycle_set_stage=gw.lifecycle_set_stage,
+    )
+
+    assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L1"]
+    assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
+
+
 def test_blocked_state_helpers_render_manual_followup_summary() -> None:
     rows = [
         {"id": "TODO-1", "status": "blocked", "blocked_bucket": "manual_followup", "blocked_reason": "need review", "blocked_count": 2, "updated_at": "2026-03-10T10:00:00+0900"},

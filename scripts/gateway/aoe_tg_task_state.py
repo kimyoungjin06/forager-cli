@@ -161,16 +161,43 @@ def derive_role_execution_snapshot(
 
 
 def _execution_lane_catalog(task: Dict[str, Any]) -> List[str]:
+    return [row["lane_id"] for row in _execution_lane_rows(task)]
+
+
+def _execution_lane_rows(task: Dict[str, Any]) -> List[Dict[str, str]]:
     lane_states = task.get("lane_states") if isinstance(task.get("lane_states"), dict) else {}
     execution_rows = lane_states.get("execution") if isinstance(lane_states.get("execution"), list) else []
-    lane_ids = [str(row.get("lane_id", "")).strip()[:32] for row in execution_rows if isinstance(row, dict) and str(row.get("lane_id", "")).strip()]
-    if lane_ids:
-        return lane_ids
+    normalized_rows = [
+        {
+            "lane_id": str(row.get("lane_id", "")).strip()[:32],
+            "role": str(row.get("role", "")).strip()[:64],
+        }
+        for row in execution_rows
+        if isinstance(row, dict) and str(row.get("lane_id", "")).strip()
+    ]
+    if normalized_rows:
+        return normalized_rows
     plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
     meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
     exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
     execution_lanes = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else []
-    return [str(row.get("lane_id", "")).strip()[:32] for row in execution_lanes if isinstance(row, dict) and str(row.get("lane_id", "")).strip()]
+    return [
+        {
+            "lane_id": str(row.get("lane_id", "")).strip()[:32],
+            "role": str(row.get("role", "")).strip()[:64],
+        }
+        for row in execution_lanes
+        if isinstance(row, dict) and str(row.get("lane_id", "")).strip()
+    ]
+
+
+def _phase2_quality_roles(task: Dict[str, Any]) -> Tuple[str, str]:
+    plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
+    critic_role = str(team_spec.get("critic_role", "")).strip()
+    integration_role = str(team_spec.get("integration_role", "")).strip()
+    return critic_role, integration_role
 
 
 def _derive_exec_critic_lane_targets(task: Dict[str, Any], critic: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -196,6 +223,15 @@ def _derive_exec_critic_lane_targets(task: Dict[str, Any], critic: Dict[str, Any
     if not review_done_or_failed:
         review_done_or_failed = [row for row in review_rows if isinstance(row, dict)]
 
+    critic_role, integration_role = _phase2_quality_roles(task)
+    if critic_role:
+        critic_review_rows = [
+            row for row in review_done_or_failed
+            if isinstance(row, dict) and str(row.get("role", "")).strip() == critic_role
+        ]
+        if critic_review_rows:
+            review_done_or_failed = critic_review_rows
+
     derived_review_lane_ids = [str(row.get("lane_id", "")).strip()[:32] for row in review_done_or_failed if str(row.get("lane_id", "")).strip()]
     derived_exec_lane_ids: List[str] = []
     for row in review_done_or_failed:
@@ -205,6 +241,23 @@ def _derive_exec_critic_lane_targets(task: Dict[str, Any], critic: Dict[str, Any
             token = str(lane_id).strip()[:32]
             if token and token not in derived_exec_lane_ids:
                 derived_exec_lane_ids.append(token)
+
+    integration_lane_ids: List[str] = []
+    if integration_role:
+        integration_lane_ids = [
+            str(row.get("lane_id", "")).strip()[:32]
+            for row in _execution_lane_rows(task)
+            if isinstance(row, dict)
+            and str(row.get("lane_id", "")).strip()
+            and str(row.get("role", "")).strip() == integration_role
+        ]
+    if integration_lane_ids:
+        if derived_exec_lane_ids:
+            narrowed = [lane_id for lane_id in derived_exec_lane_ids if lane_id in integration_lane_ids]
+            if narrowed:
+                derived_exec_lane_ids = narrowed
+        else:
+            derived_exec_lane_ids = integration_lane_ids
     if not derived_exec_lane_ids:
         derived_exec_lane_ids = _execution_lane_catalog(task)
 
