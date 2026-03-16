@@ -1494,6 +1494,55 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
     assert "active_task_rerun: execution=L2 review=R1" in text
 
 
+@pytest.mark.parametrize(
+    ("preset", "roles"),
+    [
+        ("build", ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"]),
+        ("data", ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"]),
+        ("review", ["Codex-Reviewer", "Claude-Reviewer"]),
+        ("mixed", ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"]),
+    ],
+)
+def test_offdesk_prepare_shows_active_task_preset_line(tmp_path: Path, preset: str, roles: list[str]) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / ("Preset-" + preset)
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] preset task\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["preset_project"] = {
+        "name": "preset_project",
+        "display_name": "PresetProject",
+        "project_alias": "O8",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "preset task", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "last_sync_at": "2026-03-12T20:00:00+0900",
+        "last_sync_mode": "scenario",
+        "last_sync_candidate_classes": {"scenario": 1},
+        "last_sync_candidate_doc_types": {"todo": 1},
+        "tasks": {
+            "req-preset": {
+                "request_id": "req-preset",
+                "short_id": "T-808",
+                "status": "running",
+                "phase1_role_preset": preset,
+                "phase2_team_preset": preset,
+                "roles": roles,
+                "updated_at": "2026-03-12T21:00:00+0900",
+                "created_at": "2026-03-12T20:55:00+0900",
+            }
+        },
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="prepare O8")
+
+    assert f"active_task_preset: phase1={preset} phase2={preset}" in text
+
+
 def test_offdesk_prepare_warns_on_active_task_role_mismatch(tmp_path: Path) -> None:
     state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
     project_root = tmp_path / "MismatchProject"
