@@ -97,6 +97,23 @@ def _preset_operator_hint(phase1_preset: str, phase2_preset: str) -> str:
     return ""
 
 
+def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
+    preset = str(phase2_preset or phase1_preset or "").strip().lower()
+    if preset == "writer":
+        return "check draft completeness, artifacts, and handoff readiness"
+    if preset == "analysis":
+        return "check findings, evidence, and unresolved questions"
+    if preset == "build":
+        return "check implementation delta, tests, and rerun candidates"
+    if preset == "data":
+        return "check schema/null evidence and transformed outputs"
+    if preset == "review":
+        return "check verifier findings and regression risks"
+    if preset == "mixed":
+        return "check work lanes first, then review handoff"
+    return ""
+
+
 def _sync_counter_map(raw: Any) -> Dict[str, int]:
     if not isinstance(raw, dict):
         return {}
@@ -858,6 +875,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             preset_hint = _preset_operator_hint(phase1_role_preset, phase2_team_preset)
             if preset_hint:
                 lines.append("  active_task_preset_hint: " + preset_hint)
+            preset_focus = _preset_next_focus(phase1_role_preset, phase2_team_preset)
+            if preset_focus:
+                lines.append("  active_task_next_focus: " + preset_focus)
         exec_roles = list(latest_task.get("phase2_execution_roles") or [])
         review_roles = list(latest_task.get("phase2_review_roles") or [])
         if exec_roles or review_roles:
