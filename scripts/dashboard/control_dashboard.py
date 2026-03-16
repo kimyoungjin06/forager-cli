@@ -21,6 +21,7 @@ if str(ROOT / "scripts" / "dashboard") not in sys.path:
 
 from control_dashboard_state import (
     load_dashboard_snapshot,
+    load_dashboard_runtime_page,
     load_dashboard_task_page,
     load_task_detail,
     resolve_task_request_for_alias_route,
@@ -144,6 +145,29 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                 "dashboard/tasks.html",
                 page_title="Active Tasks",
                 snapshot=snapshot,
+                current_path=path,
+            )
+        )
+
+    runtime_prefix = "/control/runtimes/"
+    if path.startswith(runtime_prefix):
+        project_alias = unquote(path[len(runtime_prefix) :]).strip()
+        if not project_alias:
+            return _not_found("missing runtime alias")
+        snapshot, detail = load_dashboard_runtime_page(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+            project_alias=project_alias,
+        )
+        if detail is None:
+            return _not_found(f"runtime not found: {project_alias}")
+        return _html(
+            render_template(
+                "dashboard/runtime_detail.html",
+                page_title=f"Runtime {detail.project_alias}",
+                snapshot=snapshot,
+                detail=detail,
                 current_path=path,
             )
         )

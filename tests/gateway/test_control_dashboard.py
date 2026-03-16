@@ -128,10 +128,49 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                     },
                 },
                 "REQ-1",
-            )
+            ),
+            "REQ-2": gw.sanitize_task_record(
+                {
+                    "request_id": "REQ-2",
+                    "short_id": "T-002",
+                    "alias": "analysis-followup",
+                    "prompt": "Close out the completed findings summary.",
+                    "status": "completed",
+                    "stage": "completed",
+                    "roles": ["Codex-Analyst", "Codex-Reviewer"],
+                    "verifier_roles": ["Codex-Reviewer"],
+                    "phase1_role_preset": "analysis",
+                    "phase2_team_preset": "analysis",
+                    "updated_at": "2026-03-16T09:40:00+09:00",
+                    "created_at": "2026-03-16T09:20:00+09:00",
+                    "plan": {
+                        "summary": "completed analysis followup",
+                        "meta": {
+                            "phase1_role_preset": "analysis",
+                            "phase2_team_preset": "analysis",
+                            "phase2_team_spec": {
+                                "execution_groups": [{"role": "Codex-Analyst"}],
+                                "review_groups": [{"role": "Codex-Reviewer"}],
+                                "critic_role": "Codex-Reviewer",
+                                "integration_role": "Codex-Analyst",
+                            },
+                            "phase2_execution_plan": {
+                                "execution_lanes": [{"lane_id": "L1", "role": "Codex-Analyst"}],
+                                "review_lanes": [{"lane_id": "R1", "role": "Codex-Reviewer"}],
+                            },
+                        },
+                    },
+                    "context": {
+                        "project_key": "alpha",
+                        "project_alias": "O2",
+                        "task_short_id": "T-002",
+                    },
+                },
+                "REQ-2",
+            ),
         },
-        "task_alias_index": {"T001": "REQ-1", "ANALYSISCHECK": "REQ-1"},
-        "task_seq": 1,
+        "task_alias_index": {"T001": "REQ-1", "ANALYSISCHECK": "REQ-1", "T002": "REQ-2", "ANALYSISFOLLOWUP": "REQ-2"},
+        "task_seq": 2,
         "todos": [{"id": "TODO-1", "summary": "Review findings", "priority": "P1", "status": "running"}],
         "todo_seq": 1,
         "todo_proposals": [],
@@ -271,6 +310,30 @@ def test_control_dashboard_state_resolves_alias_route_via_request_id(tmp_path: P
     )
 
     assert resolved == "REQ-1"
+
+
+def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Runtime O2" in text
+    assert "open=0 running=1 blocked=0 followup=0 pending=no" in text
+    assert "open=0 | priorities=- | kinds=-" in text
+    assert "score=0 | providers=0 | retry_wait=-" in text
+    assert "analysis-check" in text
+    assert "analysis-followup" in text
 
 
 def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:

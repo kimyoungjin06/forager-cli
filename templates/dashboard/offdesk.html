@@ -6,7 +6,7 @@
   <div class="runtime-list single">
     {% for card in snapshot.runtime_cards %}
     <div class="runtime-card {{ card.status }}">
-      <h3>{{ card.project_alias }} {{ card.project_label }}</h3>
+      <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
       <p><strong>runtime</strong> {{ card.readiness }}</p>
       <p><strong>attention</strong> {{ card.attention_summary }}</p>
       <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>

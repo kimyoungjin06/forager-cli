@@ -59,6 +59,7 @@ class RuntimeCardDTO:
     project_key: str
     project_alias: str
     project_label: str
+    runtime_path: str
     status: str
     readiness: str
     attention_summary: str
@@ -85,6 +86,7 @@ class ActiveTaskRowDTO:
     project_key: str
     project_alias: str
     project_label: str
+    runtime_path: str
     request_id: str
     label: str
     status: str
@@ -129,6 +131,39 @@ class TaskDetailDTO:
 
 
 @dataclass(frozen=True)
+class RuntimeDetailDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    runtime_path: str
+    status: str
+    readiness: str
+    attention_summary: str
+    priority_action: str
+    priority_reason: str
+    next_focus: str
+    queue_summary: str
+    proposal_summary: str
+    sync_summary: str
+    provider_pressure_summary: str
+    repeat_summary: str
+    active_task_request_id: str
+    active_task_label: str
+    active_task_path: str
+    active_task_phase: str
+    active_task_status: str
+    active_task_preset: str
+    active_task_phase2_shape: str
+    active_task_phase2_quality: str
+    active_task_backend: str
+    active_task_backend_note: str
+    active_task_rate_limit: str
+    notes: List[str] = field(default_factory=list)
+    lines: List[str] = field(default_factory=list)
+    recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class DashboardSnapshotDTO:
     control_root: str
     team_dir: str
@@ -145,6 +180,7 @@ class DashboardSnapshotDTO:
 class DashboardSnapshotLoadResult:
     snapshot: DashboardSnapshotDTO
     manager_state: Dict[str, Any]
+    provider_state: Dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -418,9 +454,15 @@ def _task_rate_limit_summary(task: Dict[str, Any]) -> str:
     )
 
 
-def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any]) -> List[RuntimeCardDTO]:
-    reports: List[Dict[str, Any]] = []
-    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+def _runtime_path(project_alias: str) -> str:
+    return f"/control/runtimes/{quote(str(project_alias or '').strip(), safe='')}"
+
+
+def _detail_path(request_id: str) -> str:
+    return f"/control/tasks/by-request/{quote(str(request_id or '').strip(), safe='')}"
+
+
+def _provider_repeat_counts(provider_state: Dict[str, Any]) -> Dict[str, int]:
     repeat_history = provider_state.get("recovery_repeat_history") if isinstance(provider_state.get("recovery_repeat_history"), list) else []
     repeat_counts: Dict[str, int] = {}
     for row in repeat_history:
@@ -430,22 +472,35 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             token = str(alias or "").strip().upper()
             if token:
                 repeat_counts[token] = int(repeat_counts.get(token, 0) or 0) + 1
+    return repeat_counts
+
+
+def _runtime_reports(manager_state: Dict[str, Any], provider_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    reports: List[Dict[str, Any]] = []
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    repeat_counts = _provider_repeat_counts(provider_state)
     for key, entry in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
         report = dict(offdesk_flow.offdesk_prepare_project_report(manager_state, key, entry))
         alias = str(report.get("alias", "")).strip().upper()
         report["capacity_repeat_count"] = int(repeat_counts.get(alias, 0) or 0)
         reports.append(report)
-    reports = offdesk_flow.sort_offdesk_reports(reports)
+    return offdesk_flow.sort_offdesk_reports(reports)
+
+
+def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any]) -> List[RuntimeCardDTO]:
+    reports = _runtime_reports(manager_state, provider_state)
 
     cards: List[RuntimeCardDTO] = []
     for row in reports:
         phase1_preset = str(row.get("active_task_phase1_role_preset", "")).strip()
         phase2_preset = str(row.get("active_task_phase2_team_preset", "")).strip()
+        alias = str(row.get("alias", "")).strip()
         cards.append(
             RuntimeCardDTO(
                 project_key=str(row.get("key", "")).strip() or str(row.get("alias", "")).strip(),
-                project_alias=str(row.get("alias", "")).strip(),
-                project_label=str(row.get("display", "")).strip() or str(row.get("alias", "")).strip(),
+                project_alias=alias,
+                project_label=str(row.get("display", "")).strip() or alias,
+                runtime_path=_runtime_path(alias),
                 status=str(row.get("status", "ready")).strip(),
                 readiness=str(row.get("runtime_label", row.get("runtime", "ready"))).strip() or "ready",
                 attention_summary=str(row.get("attention_summary", "-")).strip() or "-",
@@ -503,6 +558,7 @@ def _build_active_task_rows(manager_state: Dict[str, Any], *, cap: int = 60) -> 
                     project_key=str(key),
                     project_alias=alias,
                     project_label=display,
+                    runtime_path=_runtime_path(alias),
                     request_id=str(snap.get("request_id", "")).strip(),
                     label=str(snap.get("label", "")).strip(),
                     status=str(snap.get("status", "")).strip(),
@@ -518,10 +574,61 @@ def _build_active_task_rows(manager_state: Dict[str, Any], *, cap: int = 60) -> 
                         str(snap.get("backend_contract", "")).strip(),
                     ),
                     updated_at=str(snap.get("updated_at", "")).strip(),
-                    detail_path=f"/control/tasks/by-request/{quote(str(request_id or '').strip(), safe='')}",
+                    detail_path=_detail_path(str(request_id or "").strip()),
                 )
             )
     rows.sort(key=lambda row: (row.updated_at, row.project_alias, row.request_id), reverse=True)
+    return rows[: max(1, int(cap))]
+
+
+def _build_runtime_recent_task_rows(
+    entry: Dict[str, Any],
+    *,
+    project_key: str,
+    project_alias: str,
+    project_label: str,
+    cap: int = 8,
+) -> List[ActiveTaskRowDTO]:
+    rows: List[ActiveTaskRowDTO] = []
+    tasks = task_state.ensure_project_tasks(entry)
+    for request_id, task in tasks.items():
+        if not isinstance(task, dict):
+            continue
+        status = runtime_read.normalize_task_status(task.get("status", "pending"))
+        if status == "canceled":
+            continue
+        snap = task_state.task_monitor_row_snapshot(
+            task,
+            str(request_id or "").strip(),
+            normalize_task_status=runtime_read.normalize_task_status,
+            task_display_label=task_view.task_display_label,
+        )
+        preset = str(snap.get("phase2_team_preset", "")).strip() or str(snap.get("phase1_role_preset", "")).strip() or "-"
+        rows.append(
+            ActiveTaskRowDTO(
+                project_key=project_key,
+                project_alias=project_alias,
+                project_label=project_label,
+                runtime_path=_runtime_path(project_alias),
+                request_id=str(snap.get("request_id", "")).strip(),
+                label=str(snap.get("label", "")).strip(),
+                status=str(snap.get("status", "")).strip(),
+                stage=str(snap.get("stage", "")).strip(),
+                tf_phase=str(snap.get("tf_phase", "")).strip(),
+                preset=preset,
+                phase2_shape=_compose_phase2_shape(snap.get("phase2_execution_roles") or [], snap.get("phase2_review_roles") or []),
+                lane_summary=_compose_lane_summary(snap),
+                backend_summary=_compose_backend_summary(
+                    str(snap.get("backend", "")).strip(),
+                    str(snap.get("backend_profile", "")).strip(),
+                    str(snap.get("backend_verdict", "")).strip(),
+                    str(snap.get("backend_contract", "")).strip(),
+                ),
+                updated_at=str(snap.get("updated_at", "")).strip(),
+                detail_path=_detail_path(str(request_id or "").strip()),
+            )
+        )
+    rows.sort(key=lambda row: (row.updated_at, row.request_id), reverse=True)
     return rows[: max(1, int(cap))]
 
 
@@ -575,6 +682,147 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
         )
     return None
+
+
+def _runtime_detail_sync_summary(row: Dict[str, Any]) -> str:
+    syncback = row.get("syncback_counts") if isinstance(row.get("syncback_counts"), dict) else {}
+    return (
+        "quality={quality} | syncback done={done} reopen={reopen} append={append} blocked={blocked}".format(
+            quality=str(row.get("sync_quality", "")).strip() or "-",
+            done=int(syncback.get("done", 0) or 0),
+            reopen=int(syncback.get("reopen", 0) or 0),
+            append=int(syncback.get("append", 0) or 0),
+            blocked=int(syncback.get("blocked", 0) or 0),
+        )
+    )
+
+
+def _runtime_detail_queue_summary(row: Dict[str, Any]) -> str:
+    return "open={open} running={running} blocked={blocked} followup={followup} pending={pending}".format(
+        open=int(row.get("open", 0) or 0),
+        running=int(row.get("running", 0) or 0),
+        blocked=int(row.get("blocked_count", 0) or 0),
+        followup=int(row.get("followup_count", 0) or 0),
+        pending="yes" if bool(row.get("pending_flag", False)) else "no",
+    )
+
+
+def _runtime_detail_proposal_summary(row: Dict[str, Any]) -> str:
+    triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
+    return "open={open} | priorities={priorities} | kinds={kinds}".format(
+        open=int(row.get("proposals", 0) or 0),
+        priorities=str(triage.get("priority_summary", "-")).strip() or "-",
+        kinds=str(triage.get("kind_summary", "-")).strip() or "-",
+    )
+
+
+def _runtime_detail_provider_pressure_summary(row: Dict[str, Any]) -> str:
+    retry_wait_sec = int(row.get("capacity_retry_wait_sec", 0) or 0)
+    retry_wait = f"{retry_wait_sec}s" if retry_wait_sec > 0 else "-"
+    return "score={score} | providers={providers} | retry_wait={wait}".format(
+        score=int(row.get("capacity_pressure_score", 0) or 0),
+        providers=int(row.get("capacity_provider_count", 0) or 0),
+        wait=retry_wait,
+    )
+
+
+def _runtime_detail_repeat_summary(row: Dict[str, Any]) -> str:
+    count = int(row.get("capacity_repeat_count", 0) or 0)
+    if count <= 0:
+        return "-"
+    return f"repeat_count={count}"
+
+
+def _runtime_active_task_rate_limit_summary(row: Dict[str, Any]) -> str:
+    rate_limit = row.get("active_task_rate_limit") if isinstance(row.get("active_task_rate_limit"), dict) else {}
+    if not rate_limit:
+        return "-"
+    providers = [str(x).strip() for x in (rate_limit.get("limited_providers") or []) if str(x).strip()]
+    retry_at = str(rate_limit.get("retry_at", "")).strip() or "-"
+    retry_after = int(rate_limit.get("retry_after_sec", 0) or 0)
+    degraded = [str(x).strip() for x in (row.get("active_task_degraded_by") or []) if str(x).strip()]
+    return "mode={mode} providers={providers} retry_after={retry_after} retry_at={retry_at} degraded={degraded}".format(
+        mode=str(rate_limit.get("mode", "")).strip() or "-",
+        providers=",".join(providers) if providers else "-",
+        retry_after=(f"{retry_after}s" if retry_after > 0 else "-"),
+        retry_at=retry_at,
+        degraded=",".join(degraded) if degraded else "-",
+    )
+
+
+def _resolve_runtime_entry(manager_state: Dict[str, Any], project_alias: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+    token = str(project_alias or "").strip().upper()
+    if not token:
+        return None
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    for key, entry in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
+        if ops_policy.project_alias(entry, str(key)).upper() == token:
+            return str(key), entry
+    return None
+
+
+def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[str, Any], project_alias: str) -> Optional[RuntimeDetailDTO]:
+    resolved = _resolve_runtime_entry(manager_state, project_alias)
+    if resolved is None:
+        return None
+    key, entry = resolved
+    reports = _runtime_reports(manager_state, provider_state)
+    target_alias = ops_policy.project_alias(entry, key).upper()
+    row = next((report for report in reports if str(report.get("alias", "")).strip().upper() == target_alias), None)
+    if row is None:
+        return None
+    display = str(row.get("display", "")).strip() or target_alias
+    phase1_preset = str(row.get("active_task_phase1_role_preset", "")).strip()
+    phase2_preset = str(row.get("active_task_phase2_team_preset", "")).strip()
+    runtime_path = _runtime_path(target_alias)
+    active_request_id = str(row.get("active_task_request_id", "")).strip()
+    return RuntimeDetailDTO(
+        project_key=key,
+        project_alias=target_alias,
+        project_label=display,
+        runtime_path=runtime_path,
+        status=str(row.get("status", "ready")).strip(),
+        readiness=str(row.get("runtime_label", "ready")).strip() or "ready",
+        attention_summary=str(row.get("attention_summary", "-")).strip() or "-",
+        priority_action=str(row.get("priority_action", "-")).strip() or "-",
+        priority_reason=str(row.get("priority_reason", "-")).strip() or "-",
+        next_focus=offdesk_flow.preset_next_focus(phase1_preset, phase2_preset),
+        queue_summary=_runtime_detail_queue_summary(row),
+        proposal_summary=_runtime_detail_proposal_summary(row),
+        sync_summary=_runtime_detail_sync_summary(row),
+        provider_pressure_summary=_runtime_detail_provider_pressure_summary(row),
+        repeat_summary=_runtime_detail_repeat_summary(row),
+        active_task_request_id=active_request_id,
+        active_task_label=str(row.get("active_task_label", "")).strip(),
+        active_task_path=_detail_path(active_request_id) if active_request_id else "",
+        active_task_phase=str(row.get("active_task_tf_phase", "")).strip(),
+        active_task_status=str(row.get("active_task_status", "")).strip(),
+        active_task_preset="phase1={phase1} phase2={phase2}".format(
+            phase1=phase1_preset or "-",
+            phase2=phase2_preset or phase1_preset or "-",
+        ) if (phase1_preset or phase2_preset) else "-",
+        active_task_phase2_shape=_compose_phase2_shape(
+            row.get("active_task_phase2_execution_roles") or [],
+            row.get("active_task_phase2_review_roles") or [],
+        ),
+        active_task_phase2_quality=_compose_phase2_quality(row),
+        active_task_backend=_compose_backend_summary(
+            str(row.get("active_task_backend", "")).strip(),
+            str(row.get("active_task_backend_profile", "")).strip(),
+            str(row.get("active_task_backend_verdict", "")).strip(),
+            str(row.get("active_task_backend_contract", "")).strip(),
+        ),
+        active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
+        active_task_rate_limit=_runtime_active_task_rate_limit_summary(row),
+        notes=list(row.get("notes") or []),
+        lines=list(row.get("lines") or []),
+        recent_tasks=_build_runtime_recent_task_rows(
+            entry,
+            project_key=key,
+            project_alias=target_alias,
+            project_label=display,
+        ),
+    )
 
 
 def resolve_task_request_for_alias(manager_state: Dict[str, Any], project_alias: str, task_short_id: str) -> str:
@@ -666,6 +914,7 @@ def load_dashboard_snapshot_result(
             active_task_rows=active_rows,
         ),
         manager_state=manager_loaded.state,
+        provider_state=provider_state,
     )
 
 
@@ -694,3 +943,31 @@ def load_dashboard_task_page(
         manager_state_file=manager_state_file,
     )
     return loaded.snapshot, _build_task_detail(loaded.manager_state, request_id)
+
+
+def load_runtime_detail(
+    *,
+    control_root: Path | str,
+    project_alias: str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+) -> Optional[RuntimeDetailDTO]:
+    paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
+    manager_loaded = _load_manager_state(paths)
+    provider_state, _provider_freshness = _load_json_file(paths.provider_capacity_file, name="provider_capacity")
+    return _build_runtime_detail(manager_loaded.state, provider_state, project_alias)
+
+
+def load_dashboard_runtime_page(
+    *,
+    control_root: Path | str,
+    project_alias: str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+) -> Tuple[DashboardSnapshotDTO, Optional[RuntimeDetailDTO]]:
+    loaded = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    return loaded.snapshot, _build_runtime_detail(loaded.manager_state, loaded.provider_state, project_alias)

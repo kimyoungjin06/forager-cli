@@ -137,7 +137,7 @@
     - `ActiveTaskRowDTO`
     - `TaskDetailDTO`
     - dashboard adapter가 policy layer가 되지 않도록 shared helper ownership 정리
-- [ ] `Project Runtime Detail` 2단계 설계/구현
+- [x] `Project Runtime Detail` 2단계 설계/구현
   - 목적:
     - condensed board card와 task detail 사이의 중간 관제면 추가
   - 포함:

@@ -1,0 +1,79 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>{{ detail.project_alias }} {{ detail.project_label }}</h2>
+  <ul class="kv-list">
+    <li><span>runtime</span><strong>{{ detail.readiness }}</strong></li>
+    <li><span>status</span><strong>{{ detail.status }}</strong></li>
+    <li><span>attention</span><strong>{{ detail.attention_summary }}</strong></li>
+    <li><span>first</span><strong>{{ detail.priority_action }} | {{ detail.priority_reason }}</strong></li>
+    {% if detail.next_focus %}<li><span>next_focus</span><strong>{{ detail.next_focus }}</strong></li>{% endif %}
+    <li><span>queue</span><strong>{{ detail.queue_summary }}</strong></li>
+    <li><span>proposals</span><strong>{{ detail.proposal_summary }}</strong></li>
+    <li><span>sync</span><strong>{{ detail.sync_summary }}</strong></li>
+    <li><span>provider_pressure</span><strong>{{ detail.provider_pressure_summary }}</strong></li>
+    <li><span>repeat_memory</span><strong>{{ detail.repeat_summary }}</strong></li>
+  </ul>
+</section>
+
+{% if detail.active_task_label %}
+<section class="panel">
+  <h2>Active Task</h2>
+  <ul class="kv-list">
+    <li><span>task</span><strong><a href="{{ detail.active_task_path }}">{{ detail.active_task_label }}</a></strong></li>
+    <li><span>request_id</span><strong>{{ detail.active_task_request_id }}</strong></li>
+    <li><span>status</span><strong>{{ detail.active_task_status }}/{{ detail.active_task_phase }}</strong></li>
+    <li><span>preset</span><strong>{{ detail.active_task_preset }}</strong></li>
+    <li><span>phase2_shape</span><strong>{{ detail.active_task_phase2_shape }}</strong></li>
+    <li><span>phase2_quality</span><strong>{{ detail.active_task_phase2_quality }}</strong></li>
+    <li><span>backend</span><strong>{{ detail.active_task_backend }}</strong></li>
+    {% if detail.active_task_backend_note %}<li><span>backend_note</span><strong>{{ detail.active_task_backend_note }}</strong></li>{% endif %}
+    <li><span>rate_limit</span><strong>{{ detail.active_task_rate_limit }}</strong></li>
+  </ul>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Recent Tasks</h2>
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Status</th>
+        <th>Preset</th>
+        <th>Phase2 Shape</th>
+        <th>Backend</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in detail.recent_tasks %}
+      <tr>
+        <td><a href="{{ row.detail_path }}">{{ row.label }}</a><br><span class="muted">{{ row.request_id }}</span></td>
+        <td>{{ row.status }}/{{ row.tf_phase }}</td>
+        <td>{{ row.preset }}</td>
+        <td>{{ row.phase2_shape }}</td>
+        <td>{{ row.backend_summary }}</td>
+        <td>{{ row.updated_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if detail.notes %}
+<section class="panel">
+  <h2>Runtime Notes</h2>
+  <ul class="notes">
+    {% for note in detail.notes %}
+    <li>{{ note }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Telegram Parity Snapshot</h2>
+  <pre class="code-block">{{ detail.lines | join('\n') }}</pre>
+</section>
+{% endblock %}

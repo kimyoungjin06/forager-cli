@@ -18,7 +18,7 @@
     <tbody>
       {% for row in snapshot.active_task_rows %}
       <tr>
-        <td>{{ row.project_alias }} {{ row.project_label }}</td>
+        <td><a href="{{ row.runtime_path }}">{{ row.project_alias }} {{ row.project_label }}</a></td>
         <td><a href="{{ row.detail_path }}">{{ row.label }}</a><br><span class="muted">{{ row.request_id }}</span></td>
         <td>{{ row.status }}/{{ row.tf_phase }}</td>
         <td>{{ row.preset }}</td>
