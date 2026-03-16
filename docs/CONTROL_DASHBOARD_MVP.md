@@ -16,12 +16,13 @@
 - Active `Task Team` drill-down
 - Offdesk preparation and recovery visibility
 - Provider capacity and retry visibility
-- Links/buttons that mirror existing operator actions
+- Read-only command/deep-link hints that mirror existing operator actions
 
 ### 2.2 Out of Scope
 - Dashboard-only business logic
 - A new state store
 - Replacing Telegram commands
+- Executing mutating operator actions through HTTP in Phase 1
 - Real-time streaming infrastructure as a first milestone
 - A generalized multi-user web product
 
@@ -31,6 +32,10 @@
 - Logs/artifacts remain the evidence surface.
 
 The dashboard must read existing runtime state first and only later trigger existing handlers.
+
+Ultimate direction:
+- Phase 1: read-only visual operations surface
+- Phase 2: action-capable operations surface that calls existing handlers without introducing new policy logic
 
 ## 4. Primary Users
 - Owner/operator preparing the system before leaving
@@ -97,8 +102,26 @@ The dashboard must read existing runtime state first and only later trigger exis
 - Primary source reuse:
   - `/task`
 - Canonical route rule:
-  - `project_alias + task_short_id` is the default read path
-  - `request_id` may be used as a stable deep-link path
+  - `request_id` is the canonical read path
+  - `project_alias + task_short_id` is a convenience path that resolves or redirects to the canonical route
+
+### 5.5 Project Runtime Detail
+- Purpose:
+  - answer "what is happening in this runtime beyond the condensed board card?"
+- Sections:
+  - runtime readiness and sync health
+  - proposals and proposal pressure
+  - active task summary
+  - recent completed/blocked/rate-limited tasks
+  - provider pressure and repeat history
+  - runtime-scoped first action / next focus
+- Primary source reuse:
+  - `/offdesk prepare`
+  - `/offdesk review`
+  - `/monitor`
+- Phase:
+  - not required for Phase 1
+  - planned as the first structural expansion after read-only parity
 
 ## 6. Data Contract
 
@@ -154,7 +177,7 @@ then the dashboard should reuse that state/view contract rather than recomputing
 ### 7.1 MVP
 - Read-only pages first
 - Refresh by polling or manual reload
-- Links out to Telegram/operator command equivalents are enough
+- Links, command strings, or deep-link hints out to Telegram/operator command equivalents are enough
 - Phase 1 should prefer structured DTOs and local reload over rich interactivity.
 
 ### 7.2 Phase 2
@@ -167,6 +190,7 @@ then the dashboard should reuse that state/view contract rather than recomputing
   - `sync preview`
   - `sync bootstrap`
 - These must call existing handlers, not new logic
+- `Project Runtime Detail` is added here as the bridge between board cards and task detail
 
 ## 8. UX Rules
 - The dashboard is an operator board, not a marketing UI.
@@ -203,6 +227,7 @@ then the dashboard should reuse that state/view contract rather than recomputing
   - only state/view reuse
 
 ### 10.2 Step 2: Control actions
+- `Project Runtime Detail`
 - wire existing actions through thin HTTP handlers
 - confirm action parity with Telegram wording
 

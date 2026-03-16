@@ -132,7 +132,7 @@ Success for Phase 1 means:
 - `templates/dashboard/_task_rows.html`
 
 ### 5.5 Static
-- `templates/dashboard/static/dashboard.css`
+- `static/dashboard/dashboard.css`
   - keep minimal
   - operator-first, dense, readable
 
@@ -196,6 +196,7 @@ Success for Phase 1 means:
     - provider capacity loaders
     - preset hint/next focus helpers
   - avoid rebuilding offdesk priority semantics in dashboard code
+  - extract a shared `RuntimeCardDTO` assembler if current helper reuse still leaves dashboard-specific policy joins
 
 ### 7.5 Base Runtime Load
 - Reuse:
@@ -207,6 +208,11 @@ Success for Phase 1 means:
 - forbidden fallback:
   - using a loader that mutates runtime state during page read
   - duplicating manager state interpretation in a second hand-written loader
+
+### 7.6 DTO Ownership Rule
+- `scripts/dashboard/control_dashboard_state.py` may assemble dashboard DTOs, but it must not become a second policy layer.
+- If a DTO field requires non-trivial joins across runtime/offdesk/priority logic, the join should move into a shared side-effect-free gateway helper first.
+- The dashboard adapter may map and normalize; it must not invent new runtime semantics.
 
 ## 8. Source Mapping Contract
 
@@ -436,6 +442,11 @@ python3 scripts/dashboard/control_dashboard.py --control-root /path/to/control/r
   - rerun/followup targets
   - backend contract
 
+### 15.5 Explicit Non-Goals for Phase 1
+- no mutating HTTP actions
+- no runtime detail page yet
+- no project/runtime policy logic that does not already exist in gateway helpers
+
 ## 16. Test Contract
 
 ### 15.1 Route Smoke
@@ -464,10 +475,10 @@ python3 scripts/dashboard/control_dashboard.py --control-root /path/to/control/r
 - tests should assert stale sections are marked when one runtime file is unavailable
 
 ## 17. Build Order
-1. app shell + route registration
-2. loopback-only launch guard + control-root wiring
-3. side-effect-free state adapter for runtime files
-4. DTO assembly layer
+1. side-effect-free state adapter for runtime files
+2. DTO assembly layer
+3. app shell + route registration
+4. loopback-only launch guard + control-root wiring
 5. overview page
 6. offdesk page
 7. active task page
@@ -475,6 +486,7 @@ python3 scripts/dashboard/control_dashboard.py --control-root /path/to/control/r
 9. HTMX partial refresh polish if needed
 
 ## 18. Immediate Follow-up After Phase 1
+- Add `Project Runtime Detail` page
 - Add action buttons that call existing handlers:
   - `auto on/off`
   - `auto recover`

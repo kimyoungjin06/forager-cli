@@ -88,11 +88,12 @@
 - [x] stale PR 정리 완료
   - 목표: 오래 열린 PR(`#37`, `#16`)를 닫고 현재 기준선만 남긴다.
   - 이유: 이미 후속 merged change에 흡수된 이력이 남아 있어 review queue를 오염시킨다.
-- [ ] 용어 재정리
-  - `Mother-Orch` -> `Control`
+- [x] 문서 기준 canonical 용어 재정리
+  - `Mother-Orch` -> `Control Plane`
   - `Project Orch` / `Orch` -> `Project Runtime`
   - `TF` -> `Task Team`
   - 원칙: 문서/오퍼레이터 표기부터 바꾸고, 코드 identifier는 alias 호환을 유지하며 단계적으로 정리한다.
+  - 후속: operator surface와 code identifier는 단계적으로 수렴시킨다.
 
 ### 8.2 Control Dashboard MVP
 - [x] 대시보드 MVP spec 문서화
@@ -121,6 +122,15 @@
     - lane state
     - rerun/followup
     - backend contract
+- [ ] `Project Runtime Detail` 2단계 설계/구현
+  - 목적:
+    - condensed board card와 task detail 사이의 중간 관제면 추가
+  - 포함:
+    - runtime readiness / sync health
+    - proposal pressure
+    - recent blocked/completed tasks
+    - provider pressure / repeat memory
+    - runtime-scoped first action / next focus
 - [x] read-only MVP 1단계 설계 문서화
   - 라우트:
     - `Overview`
@@ -136,6 +146,9 @@
     - read-only only
     - dashboard 전용 상태/정책 금지
 - [ ] action wiring 2차 구현
+  - 전제:
+    - Phase 1 read-only parity 완료
+    - `Project Runtime Detail` page 추가 완료
   - `auto on/off`
   - `recover`
   - `retry`
