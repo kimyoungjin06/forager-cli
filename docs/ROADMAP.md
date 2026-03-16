@@ -67,6 +67,8 @@
 - [x] planning 시작 직후 provisional task에 `phase1_*` 메타와 candidate roles를 즉시 반영
 - [x] `planning_planner` / `planning_critic` 이벤트에 `project_key`, `request_id`, `task_short_id`를 항상 싣기
 - [x] writer/reporting 성격 평문을 `orch-monitor`가 아니라 Mother-Orch `dispatch_task`로 우선 분류
+- [x] explicit `phase1_role_preset` / `phase2_team_preset` 분류와 operator 노출
+- [x] `Phase2` lane template가 preset(`writer/analysis/build/data/review/mixed`)을 기준으로 planner drift를 보정
 
 ## 7. Current Provider Capacity Handling
 - [x] Claude rate limit 시 Codex fallback
