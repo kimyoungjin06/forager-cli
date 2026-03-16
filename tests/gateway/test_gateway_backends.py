@@ -218,6 +218,88 @@ def test_autogen_backend_reports_availability_and_stays_not_implemented(tmp_path
         assert "not installed" in availability.reason
 
 
+def test_autogen_backend_reviewer_includes_preset_quality_contract(tmp_path: Path) -> None:
+    if not tf_backend_autogen.autogen_core_backend().availability().available:
+        return
+    project_root = tmp_path / "autogen_quality_contract"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text(
+        "\n".join(
+            [
+                "# Quality TODO",
+                "",
+                "## Tasks",
+                "",
+                "- [ ] P1: Draft the operator-facing handoff for the sandbox contract check.",
+                "- [ ] P2: Confirm the first review focus and remaining evidence gaps.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = tf_backend_autogen.autogen_core_backend().run(
+        tf_backend.build_tf_backend_request(
+            args=argparse.Namespace(
+                project_root=str(project_root),
+                team_dir=str(team_dir),
+                _aoe_project_key="O4",
+            ),
+            prompt="Draft a sandbox handoff and keep the preset quality contract visible.",
+            chat_id="chat-1",
+            roles_override="Codex-Writer,Codex-Reviewer",
+            metadata={
+                "phase1_role_preset": "writer",
+                "phase2_team_preset": "writer",
+                "phase2_team_spec": {
+                    "execution_groups": [
+                        {"role": "Codex-Writer"},
+                        {"role": "Claude-Writer"},
+                    ],
+                    "review_groups": [
+                        {"role": "Codex-Reviewer"},
+                        {"role": "Claude-Reviewer"},
+                    ],
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Writer",
+                },
+                "phase2_execution_plan": {
+                    "execution_lanes": [
+                        {"lane_id": "L1", "role": "Codex-Writer"},
+                        {"lane_id": "L2", "role": "Claude-Writer"},
+                    ],
+                    "review_lanes": [
+                        {"lane_id": "R1", "role": "Codex-Reviewer"},
+                        {"lane_id": "R2", "role": "Claude-Reviewer"},
+                    ],
+                },
+                "evidence_required": [
+                    "Draft or handoff artifact is produced.",
+                    "Output is readable from the operator perspective.",
+                ],
+            },
+        ),
+        tf_backend.build_tf_backend_deps(
+            default_tf_exec_mode="local",
+            default_tf_work_root_name=".aoe-tf",
+            default_tf_exec_map_file="tf_exec_map.json",
+            default_tf_worker_startup_grace_sec=45,
+            now_iso=lambda: "2026-03-11T00:00:00+0000",
+            run_command=lambda *args, **kwargs: None,
+        ),
+    )
+
+    reviewer_body = result["replies"][1]["body"]
+    assert "- team preset: phase1=writer phase2=writer" in reviewer_body
+    assert "- quality contract: critic=Codex-Reviewer integration=Codex-Writer" in reviewer_body
+    assert "- execution roles: Codex-Writer, Claude-Writer" in reviewer_body
+    assert "- review roles: Codex-Reviewer, Claude-Reviewer" in reviewer_body
+    assert "- execution lanes: L1:Codex-Writer | L2:Claude-Writer" in reviewer_body
+    assert "- review lanes: R1:Codex-Reviewer | R2:Claude-Reviewer" in reviewer_body
+    assert "- evidence required: Draft or handoff artifact is produced. | Output is readable from the operator perspective." in reviewer_body
+    assert "- sandbox note: quality contract is advisory here; live TF still owns final evidence." in reviewer_body
+
+
 def test_gateway_run_aoe_orch_executes_real_autogen_backend_when_available(tmp_path: Path) -> None:
     if not tf_backend_autogen.autogen_core_backend().availability().available:
         return

@@ -1891,6 +1891,12 @@ def handle_run_or_unknown_command(
                 phase2_team_spec = current_plan_meta.get("phase2_team_spec")
                 if isinstance(phase2_team_spec, dict) and phase2_team_spec:
                     dispatch_metadata["phase2_team_spec"] = phase2_team_spec
+                    phase2_critic_role = str(phase2_team_spec.get("critic_role", "")).strip()
+                    if phase2_critic_role:
+                        dispatch_metadata["phase2_critic_role"] = phase2_critic_role
+                    phase2_integration_role = str(phase2_team_spec.get("integration_role", "")).strip()
+                    if phase2_integration_role:
+                        dispatch_metadata["phase2_integration_role"] = phase2_integration_role
                 phase2_execution_plan = current_plan_meta.get("phase2_execution_plan")
                 if isinstance(phase2_execution_plan, dict) and phase2_execution_plan:
                     dispatch_metadata["phase2_execution_plan"] = phase2_execution_plan
@@ -1914,6 +1920,11 @@ def handle_run_or_unknown_command(
                 plan_phase2_team_preset = str(current_plan_meta.get("phase2_team_preset", "")).strip().lower()
                 if plan_phase2_team_preset:
                     dispatch_metadata["phase2_team_preset"] = plan_phase2_team_preset
+                plan_evidence_required = plan_data.get("evidence_required")
+                if isinstance(plan_evidence_required, list) and plan_evidence_required:
+                    dispatch_metadata["evidence_required"] = [
+                        str(item).strip() for item in plan_evidence_required if str(item).strip()
+                    ]
             if provisional_req_id:
                 dispatch_metadata["request_id"] = provisional_req_id
 

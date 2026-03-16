@@ -232,6 +232,93 @@ def _format_item_lines(items: Sequence[Dict[str, Any]], *, limit: int = 3) -> Li
     return lines
 
 
+def _normalize_text_list(values: Any, *, limit: int = 6) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    rows: List[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in rows:
+            continue
+        rows.append(text)
+        if len(rows) >= max(1, int(limit or 1)):
+            break
+    return rows
+
+
+def _roles_from_rows(rows: Any, *, limit: int = 6) -> List[str]:
+    if not isinstance(rows, list):
+        return []
+    roles: List[str] = []
+    for item in rows:
+        row = item if isinstance(item, dict) else {}
+        role = str(row.get("role", "") or "").strip()
+        if not role or role in roles:
+            continue
+        roles.append(role)
+        if len(roles) >= max(1, int(limit or 1)):
+            break
+    return roles
+
+
+def _lane_summaries(rows: Any, *, default_prefix: str, limit: int = 6) -> List[str]:
+    if not isinstance(rows, list):
+        return []
+    lanes: List[str] = []
+    for idx, item in enumerate(rows, start=1):
+        row = item if isinstance(item, dict) else {}
+        role = str(row.get("role", "") or "").strip()
+        if not role:
+            continue
+        lane_id = str(row.get("lane_id", "") or "").strip() or f"{default_prefix}{idx}"
+        summary = f"{lane_id}:{role}"
+        if summary in lanes:
+            continue
+        lanes.append(summary)
+        if len(lanes) >= max(1, int(limit or 1)):
+            break
+    return lanes
+
+
+def _extract_quality_contract(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    meta = metadata if isinstance(metadata, dict) else {}
+    team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
+    exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
+    execution_group_rows = team_spec.get("execution_groups") if isinstance(team_spec.get("execution_groups"), list) else []
+    review_group_rows = team_spec.get("review_groups") if isinstance(team_spec.get("review_groups"), list) else []
+    execution_lane_rows = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else execution_group_rows
+    review_lane_rows = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else review_group_rows
+    return {
+        "phase1_role_preset": str(meta.get("phase1_role_preset", "") or "").strip(),
+        "phase2_team_preset": str(meta.get("phase2_team_preset", "") or "").strip(),
+        "phase2_critic_role": str(
+            meta.get("phase2_critic_role", "") or team_spec.get("critic_role", "") or ""
+        ).strip(),
+        "phase2_integration_role": str(
+            meta.get("phase2_integration_role", "") or team_spec.get("integration_role", "") or ""
+        ).strip(),
+        "phase2_execution_roles": _normalize_text_list(
+            meta.get("phase2_execution_roles"), limit=8
+        )
+        or _roles_from_rows(execution_group_rows, limit=8)
+        or _roles_from_rows(execution_lane_rows, limit=8),
+        "phase2_review_roles": _normalize_text_list(
+            meta.get("phase2_review_roles"), limit=8
+        )
+        or _roles_from_rows(review_group_rows, limit=8)
+        or _roles_from_rows(review_lane_rows, limit=8),
+        "phase2_execution_lanes": _normalize_text_list(
+            meta.get("phase2_execution_lanes"), limit=8
+        )
+        or _lane_summaries(execution_lane_rows, default_prefix="L", limit=8),
+        "phase2_review_lanes": _normalize_text_list(
+            meta.get("phase2_review_lanes"), limit=8
+        )
+        or _lane_summaries(review_lane_rows, default_prefix="R", limit=8),
+        "evidence_required": _normalize_text_list(meta.get("evidence_required"), limit=8),
+    }
+
+
 @dataclass
 class TFRunMessage:
     request_id: str
@@ -244,6 +331,15 @@ class TFRunMessage:
     executed_roles: List[str]
     dropped_roles: List[str]
     todo_items: List[Dict[str, Any]]
+    phase1_role_preset: str
+    phase2_team_preset: str
+    phase2_critic_role: str
+    phase2_integration_role: str
+    phase2_execution_roles: List[str]
+    phase2_review_roles: List[str]
+    phase2_execution_lanes: List[str]
+    phase2_review_lanes: List[str]
+    evidence_required: List[str]
 
 
 @dataclass
@@ -278,6 +374,15 @@ class ReviewRequest:
     analysis_body: str
     top_items: List[str]
     item_count: int
+    phase1_role_preset: str
+    phase2_team_preset: str
+    phase2_critic_role: str
+    phase2_integration_role: str
+    phase2_execution_roles: List[str]
+    phase2_review_roles: List[str]
+    phase2_execution_lanes: List[str]
+    phase2_review_lanes: List[str]
+    evidence_required: List[str]
 
 
 @dataclass
@@ -396,6 +501,7 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
     source_kind = str(load_result.get("source_kind", "") or "missing")
     todo_items = list(load_result.get("items") or [])
     source_todo_id = str(request.metadata.get("source_todo_id", "") or "").strip()
+    quality_contract = _extract_quality_contract(request.metadata)
     recorder = _RuntimeEventRecorder(deps.now_iso)
     recorder.add(
         source="tf_orchestrator",
@@ -522,18 +628,51 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                 f"- requested roles: {', '.join(message.requested_roles) if message.requested_roles else '(default)'}",
                 f"- executed sandbox roles: {', '.join(message.executed_roles)}",
             ]
+            phase1_role_preset = str(message.phase1_role_preset or "").strip()
+            phase2_team_preset = str(message.phase2_team_preset or "").strip()
+            if phase1_role_preset or phase2_team_preset:
+                lines.append(
+                    "- team preset: phase1={phase1} phase2={phase2}".format(
+                        phase1=phase1_role_preset or "-",
+                        phase2=phase2_team_preset or phase1_role_preset or "-",
+                    )
+                )
+            quality_parts: List[str] = []
+            if message.phase2_critic_role:
+                quality_parts.append(f"critic={message.phase2_critic_role}")
+            if message.phase2_integration_role:
+                quality_parts.append(f"integration={message.phase2_integration_role}")
+            if quality_parts:
+                lines.append("- quality contract: " + " ".join(quality_parts))
+            if message.phase2_execution_roles:
+                lines.append("- execution roles: " + ", ".join(message.phase2_execution_roles[:4]))
+            if message.phase2_review_roles:
+                lines.append("- review roles: " + ", ".join(message.phase2_review_roles[:4]))
+            if message.phase2_execution_lanes:
+                lines.append("- execution lanes: " + " | ".join(message.phase2_execution_lanes[:4]))
+            if message.phase2_review_lanes:
+                lines.append("- review lanes: " + " | ".join(message.phase2_review_lanes[:4]))
+            if message.evidence_required:
+                lines.append("- evidence required: " + " | ".join(message.evidence_required[:3]))
             if message.top_items:
                 lines.append(f"- usable backlog candidates: {len(message.top_items)}")
                 lines.append(f"- recommended first focus: {message.top_items[0]}")
             else:
                 lines.append("- operator follow-up: inspect canonical TODO source before enabling broader pilot scope.")
+            if quality_parts or message.evidence_required:
+                lines.append("- sandbox note: quality contract is advisory here; live TF still owns final evidence.")
             recorder.add(
                 source="reviewer",
                 stage="verdict.emitted",
                 kind="verdict",
                 status="success" if success else "warning",
                 summary="reviewer emitted sandbox verdict",
-                payload={"verdict": verdict, "item_count": message.item_count},
+                payload={
+                    "verdict": verdict,
+                    "item_count": message.item_count,
+                    "phase2_team_preset": phase2_team_preset,
+                    "evidence_required_count": len(message.evidence_required),
+                },
             )
             return ReviewResponse(
                 role=READONLY_REVIEWER_ROLE,
@@ -573,6 +712,15 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                     analysis_body=analysis.body,
                     top_items=analysis.top_items,
                     item_count=analysis.item_count,
+                    phase1_role_preset=message.phase1_role_preset,
+                    phase2_team_preset=message.phase2_team_preset,
+                    phase2_critic_role=message.phase2_critic_role,
+                    phase2_integration_role=message.phase2_integration_role,
+                    phase2_execution_roles=list(message.phase2_execution_roles),
+                    phase2_review_roles=list(message.phase2_review_roles),
+                    phase2_execution_lanes=list(message.phase2_execution_lanes),
+                    phase2_review_lanes=list(message.phase2_review_lanes),
+                    evidence_required=list(message.evidence_required),
                 ),
                 AgentId("reviewer", "default"),
             )
@@ -654,6 +802,15 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                 executed_roles=roles["executed"],
                 dropped_roles=roles["dropped"],
                 todo_items=todo_items,
+                phase1_role_preset=str(quality_contract.get("phase1_role_preset", "") or ""),
+                phase2_team_preset=str(quality_contract.get("phase2_team_preset", "") or ""),
+                phase2_critic_role=str(quality_contract.get("phase2_critic_role", "") or ""),
+                phase2_integration_role=str(quality_contract.get("phase2_integration_role", "") or ""),
+                phase2_execution_roles=list(quality_contract.get("phase2_execution_roles") or []),
+                phase2_review_roles=list(quality_contract.get("phase2_review_roles") or []),
+                phase2_execution_lanes=list(quality_contract.get("phase2_execution_lanes") or []),
+                phase2_review_lanes=list(quality_contract.get("phase2_review_lanes") or []),
+                evidence_required=list(quality_contract.get("evidence_required") or []),
             ),
             AgentId("tf_orchestrator", "default"),
         )
