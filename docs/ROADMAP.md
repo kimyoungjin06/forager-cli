@@ -82,3 +82,68 @@
 - [x] operator override history(`/auto off`) 기록
 - [x] planning / worker runtime이 active provider cooldown memory를 보고 선제 fallback
 - [ ] provider별 backoff level 세분화 정책 고도화
+
+## 8. Current Priority Plan
+### 8.1 Cleanup and Naming
+- [x] stale PR 정리 완료
+  - 목표: 오래 열린 PR(`#37`, `#16`)를 닫고 현재 기준선만 남긴다.
+  - 이유: 이미 후속 merged change에 흡수된 이력이 남아 있어 review queue를 오염시킨다.
+- [ ] 용어 재정리
+  - `Mother-Orch` -> `Control`
+  - `Project Orch` / `Orch` -> `Project Runtime`
+  - `TF` -> `Task Team`
+  - 원칙: 문서/오퍼레이터 표기부터 바꾸고, 코드 identifier는 alias 호환을 유지하며 단계적으로 정리한다.
+
+### 8.2 Control Dashboard MVP
+- [ ] 대시보드 MVP spec 문서화
+  - 화면:
+    - `Overview`
+    - `Offdesk Prep`
+    - `Active Tasks`
+    - `Task Detail`
+  - 데이터 원천:
+    - 기존 `/task`, `/monitor`, `/offdesk`, `/auto status` state/view를 재사용
+  - 금지:
+    - dashboard 전용 상태계
+    - dashboard 전용 business logic
+- [ ] read-only MVP 구현
+  - 기술 방향: `FastAPI + Jinja/HTMX`
+  - 우선 노출:
+    - provider capacity
+    - offdesk readiness
+    - active task preset
+    - phase1/phase2
+    - lane state
+    - rerun/followup
+    - backend contract
+- [ ] action wiring 2차 구현
+  - `auto on/off`
+  - `recover`
+  - `retry`
+  - `followup`
+
+### 8.3 Live Runtime Verification
+- [ ] preset별 실제 `Phase2` 완료 흐름 검증
+  - 대상:
+    - `build`
+    - `data`
+    - `review`
+    - `mixed`
+  - 확인 범위:
+    - planning
+    - execution/review lanes
+    - critic verdict
+    - rerun/manual followup
+    - `/task`
+    - `/monitor`
+    - `/offdesk review`
+
+### 8.4 Structural Debt
+- [ ] 다음 분해 타깃 선정
+  - 후보:
+    - `scripts/gateway/aoe-telegram-gateway.py`
+    - `scripts/gateway/aoe_tg_run_handlers.py`
+    - `scripts/gateway/aoe_tg_scheduler_handlers.py`
+  - 원칙:
+    - 새 기능보다 운영 병목이 큰 곳부터 자른다.
+    - 대시보드 MVP 후에 착수한다.
