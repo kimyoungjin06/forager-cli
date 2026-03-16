@@ -1945,6 +1945,11 @@ def build_planned_dispatch_prompt(
     summary = str(plan.get("summary", "")).strip()
     meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
     team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
+    phase1_role_preset = str(meta.get("phase1_role_preset", "")).strip()
+    phase2_team_preset = str(meta.get("phase2_team_preset", "")).strip()
+    critic_role = str(team_spec.get("critic_role", "")).strip()
+    integration_role = str(team_spec.get("integration_role", "")).strip()
+    evidence_required = [str(item).strip() for item in (plan.get("evidence_required") or []) if str(item).strip()]
 
     lines: List[str] = []
     lines.append("원사용자 요청:")
@@ -1998,6 +2003,23 @@ def build_planned_dispatch_prompt(
             dep_txt = f" after {', '.join(depends_on)}" if depends_on else ""
             lines.append(f"- review {gid} [{role}/{kind}]{dep_txt}")
 
+    if phase1_role_preset or phase2_team_preset or critic_role or integration_role or evidence_required:
+        lines.append("")
+        lines.append("Phase2 quality contract:")
+        if phase1_role_preset or phase2_team_preset:
+            lines.append(
+                "- preset: phase1={phase1} phase2={phase2}".format(
+                    phase1=phase1_role_preset or "-",
+                    phase2=phase2_team_preset or phase1_role_preset or "-",
+                )
+            )
+        if critic_role:
+            lines.append(f"- critic role: {critic_role}")
+        if integration_role:
+            lines.append(f"- integration role: {integration_role}")
+        for item in evidence_required[:4]:
+            lines.append(f"- evidence: {item}")
+
     issues = critic.get("issues") or []
     recs = critic.get("recommendations") or []
     approved = not critic_has_blockers(critic)
@@ -2016,6 +2038,7 @@ def build_planned_dispatch_prompt(
     lines.append("Phase2 실행 규칙:")
     lines.append("- 가능한 역할은 병렬로 동시에 진행한다.")
     lines.append("- critic/verifier 역할은 핵심 산출물에 대해 병렬로 비판 검토한다.")
+    lines.append("- quality contract의 preset/critic/integration/evidence를 기본 완료 기준으로 따른다.")
     lines.append("- 실행 결과는 역할별 산출물 + 검증 근거 + 남은 리스크를 명확히 남긴다.")
     lines.append("")
     lines.append("위 계획과 체크사항을 반영해 역할별 실행/검증 결과를 산출해라.")
