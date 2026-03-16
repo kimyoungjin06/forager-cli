@@ -43,6 +43,32 @@ PRESET_EXEC_ROLE_ORDER = {
     "build": ["Codex-Dev"],
     "data": ["DataEngineer"],
 }
+PRESET_EVIDENCE_DEFAULTS = {
+    "writer": [
+        "Draft or handoff artifact is produced.",
+        "Output is readable from the operator perspective.",
+    ],
+    "analysis": [
+        "Findings are summarized with concrete evidence.",
+        "Open questions or weak spots are called out explicitly.",
+    ],
+    "build": [
+        "Code change or implementation delta is summarized.",
+        "Test or regression evidence is captured.",
+    ],
+    "data": [
+        "Schema/null evidence is captured.",
+        "Transformed output sample or validation result is recorded.",
+    ],
+    "review": [
+        "Risks are enumerated clearly.",
+        "Regression or verifier findings are captured.",
+    ],
+    "mixed": [
+        "Work artifact is produced for the execution lane.",
+        "Review, handoff, or risk evidence is captured.",
+    ],
+}
 
 
 def _is_review_role(role: str) -> bool:
@@ -90,6 +116,66 @@ def _normalize_choice(raw: Any, allowed: tuple[str, ...], default: str) -> str:
 
 def _normalize_role_preset(raw: Any, default: str = "general") -> str:
     return _normalize_choice(raw, TEAM_ROLE_PRESETS, default)
+
+
+def _default_acceptance_criteria(title: str) -> List[str]:
+    return [f"{title} has a user-visible result and a reviewer-readable explanation."]
+
+
+def _role_work_preset(role: str) -> str:
+    token = str(role or "").strip().lower()
+    if not token or _is_review_role(role):
+        return ""
+    if "dataengineer" in token or "data engineer" in token or "data" in token:
+        return "data"
+    if any(key in token for key in ("writer", "doc", "scribe")):
+        return "writer"
+    if any(key in token for key in ("analyst", "analysis", "research")):
+        return "analysis"
+    if any(key in token for key in ("dev", "engineer", "builder", "implement")):
+        return "build"
+    return ""
+
+
+def _infer_role_preset_from_roles(roles: List[str]) -> str:
+    current_roles = _dedupe_roles(roles, limit=12)
+    if current_roles and all(_is_review_role(role) for role in current_roles):
+        return "review"
+
+    work_presets = [preset for preset in [_role_work_preset(role) for role in current_roles] if preset]
+    unique_presets = _dedupe_roles(work_presets, limit=6)
+    if len(unique_presets) >= 2:
+        return "mixed"
+    if len(unique_presets) == 1:
+        return _normalize_role_preset(unique_presets[0])
+    if any(_is_review_role(role) for role in current_roles):
+        return "review"
+    return "general"
+
+
+def _merge_preset_evidence_defaults(
+    raw: Any,
+    *,
+    preset: str,
+    title: str,
+    acceptance_criteria: List[str],
+) -> List[str]:
+    explicit = _normalize_text_list(raw, limit=6, item_limit=240)
+    if explicit:
+        return explicit
+
+    normalized_preset = _normalize_role_preset(preset)
+    acceptance = _normalize_text_list(acceptance_criteria, limit=6, item_limit=240)
+    default_acceptance = _default_acceptance_criteria(title)
+    if acceptance == default_acceptance:
+        acceptance = []
+
+    merged: List[str] = []
+    for row in PRESET_EVIDENCE_DEFAULTS.get(normalized_preset, []) + acceptance:
+        token = _trim_text(row, 240)
+        if token and token not in merged:
+            merged.append(token)
+    return merged or acceptance or default_acceptance
 
 
 def normalize_tf_phase(raw: Any, default: str = "queued") -> str:
@@ -270,7 +356,7 @@ def normalize_orch_task_spec(
         item_limit=240,
     )
     if not acceptance:
-        acceptance = [f"{title} has a user-visible result and a reviewer-readable explanation."]
+        acceptance = _default_acceptance_criteria(title)
     constraints = _normalize_text_list(data.get("constraints", []), limit=8, item_limit=240)
 
     retry_in = data.get("retry_budget")
@@ -566,6 +652,25 @@ def _review_roles(
     return []
 
 
+def _default_phase2_roles_for_preset(
+    *,
+    preset: str,
+    execution_groups: List[Dict[str, Any]],
+    review_groups: List[Dict[str, Any]],
+    team_roles: List[str],
+) -> tuple[str, str]:
+    normalized_preset = _normalize_role_preset(preset)
+    default_critic = review_groups[0]["role"] if review_groups else (team_roles[-1] if team_roles else "Codex-Reviewer")
+    default_integration = review_groups[0]["role"] if review_groups else (execution_groups[-1]["role"] if execution_groups else default_critic)
+
+    if normalized_preset in {"writer", "analysis", "build", "data", "mixed"}:
+        default_integration = execution_groups[0]["role"] if execution_groups else default_critic
+    elif normalized_preset == "review":
+        default_integration = default_critic
+
+    return default_critic, default_integration
+
+
 def _expand_execution_groups_with_companions(
     rows: List[Dict[str, Any]],
     *,
@@ -691,8 +796,14 @@ def normalize_phase2_team_spec(
         [row.get("role", "") for row in execution_groups] + [row.get("role", "") for row in review_groups],
         limit=16,
     )
-    critic_role = _trim_text(data.get("critic_role", ""), 64) or (review_groups[0]["role"] if review_groups else (team_roles[-1] if team_roles else "Codex-Reviewer"))
-    integration_role = _trim_text(data.get("integration_role", ""), 64) or (review_groups[0]["role"] if review_groups else (execution_groups[-1]["role"] if execution_groups else critic_role))
+    default_critic_role, default_integration_role = _default_phase2_roles_for_preset(
+        preset=phase2_team_preset,
+        execution_groups=execution_groups,
+        review_groups=review_groups,
+        team_roles=team_roles,
+    )
+    critic_role = _trim_text(data.get("critic_role", ""), 64) or default_critic_role
+    integration_role = _trim_text(data.get("integration_role", ""), 64) or default_integration_role
 
     return {
         "execution_mode": execution_mode,
@@ -810,10 +921,16 @@ def normalize_tf_plan(
 ) -> Dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     spec = normalize_orch_task_spec(task_spec or {})
+    meta_in = data.get("meta")
+    meta = dict(meta_in or {}) if isinstance(meta_in, dict) else {}
+    requested_roles = list(spec.get("requested_roles") or [])
+    inferred_role_preset = _infer_role_preset_from_roles(requested_roles)
+    phase1_role_preset = _normalize_role_preset(meta.get("phase1_role_preset") or inferred_role_preset)
+    phase2_team_preset = _normalize_role_preset(meta.get("phase2_team_preset") or phase1_role_preset)
     assignment_rows = data.get("assignments", data.get("subtasks", []))
     assignments = normalize_tf_role_assignments(
         assignment_rows,
-        fallback_roles=list(spec.get("requested_roles") or []),
+        fallback_roles=requested_roles,
     )[: max(1, int(max_assignments or 1))]
     execution_order = _normalize_text_list(data.get("execution_order", []), limit=len(assignments), item_limit=64)
     if not execution_order:
@@ -821,9 +938,10 @@ def normalize_tf_plan(
 
     critic_in = data.get("critic")
     critic_data = critic_in if isinstance(critic_in, dict) else {}
+    review_roles = [role for role in requested_roles if _is_review_role(role)]
     critic_role = (
         _trim_text(critic_data.get("role", ""), 64)
-        or ("Codex-Reviewer" if "Codex-Reviewer" in execution_order else execution_order[-1])
+        or (review_roles[0] if review_roles else ("Codex-Reviewer" if "Codex-Reviewer" in execution_order else execution_order[-1]))
     )
     status = _normalize_choice(data.get("status"), PLAN_STATUSES, "ready")
     blocking_issues = _normalize_text_list(
@@ -844,13 +962,23 @@ def normalize_tf_plan(
             "role": critic_role,
             "exit_on_fail": _normalize_bool(critic_data.get("exit_on_fail", False), False),
         },
-        "evidence_required": _normalize_text_list(data.get("evidence_required", spec.get("acceptance_criteria", [])), limit=6, item_limit=240),
+        "evidence_required": _merge_preset_evidence_defaults(
+            data.get("evidence_required"),
+            preset=phase2_team_preset,
+            title=str(spec.get("title", "")),
+            acceptance_criteria=list(spec.get("acceptance_criteria") or []),
+        ),
         "blocking_issues": blocking_issues,
+        "meta": {
+            **meta,
+            "phase1_role_preset": phase1_role_preset,
+            "phase2_team_preset": phase2_team_preset,
+        },
     }
     return attach_phase2_team_spec(
         normalized,
-        roles=list(spec.get("requested_roles") or []),
-        verifier_roles=["Codex-Reviewer"] if normalized["critic"]["required"] else [],
+        roles=requested_roles,
+        verifier_roles=review_roles if normalized["critic"]["required"] else [],
         require_verifier=bool(normalized["critic"]["required"]),
     )
 

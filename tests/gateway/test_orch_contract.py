@@ -71,10 +71,47 @@ def test_normalize_tf_plan_uses_requested_roles_and_block_reasons() -> None:
     assert plan["status"] == "blocked"
     assert plan["assignments"][0]["role"] == "Codex-Writer"
     assert plan["execution_order"] == ["Codex-Writer"]
-    assert plan["critic"]["role"] == "Codex-Writer"
+    assert plan["critic"]["role"] == "Codex-Reviewer"
     assert plan["blocking_issues"] == ["planner did not provide an executable route"]
+    assert plan["meta"]["phase1_role_preset"] == "writer"
+    assert plan["meta"]["phase2_team_preset"] == "writer"
+    assert plan["evidence_required"] == [
+        "Draft or handoff artifact is produced.",
+        "Output is readable from the operator perspective.",
+    ]
     assert plan["meta"]["phase2_team_spec"]["execution_mode"] == "single"
     assert plan["meta"]["phase2_team_spec"]["execution_groups"][0]["role"] == "Codex-Writer"
+    assert plan["meta"]["phase2_team_spec"]["critic_role"] == "Codex-Reviewer"
+    assert plan["meta"]["phase2_team_spec"]["integration_role"] == "Codex-Writer"
+
+
+def test_normalize_tf_plan_applies_build_quality_defaults() -> None:
+    spec = mod.normalize_orch_task_spec(
+        {
+            "title": "Implement regression-safe login fix",
+            "objective": "Patch login flow and leave regression evidence",
+            "requested_roles": ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+        },
+        task_id="TASK-202",
+        project_key="O2",
+    )
+    plan = mod.normalize_tf_plan(
+        {
+            "summary": "Implement the login fix and capture test evidence",
+            "subtasks": [{"goal": "Patch the login flow"}],
+        },
+        task_spec=spec,
+    )
+
+    assert plan["meta"]["phase1_role_preset"] == "build"
+    assert plan["meta"]["phase2_team_preset"] == "build"
+    assert plan["evidence_required"] == [
+        "Code change or implementation delta is summarized.",
+        "Test or regression evidence is captured.",
+    ]
+    assert plan["critic"]["role"] == "Codex-Reviewer"
+    assert plan["meta"]["phase2_team_spec"]["critic_role"] == "Codex-Reviewer"
+    assert plan["meta"]["phase2_team_spec"]["integration_role"] == "Codex-Dev"
 
 
 def test_normalize_phase2_team_spec_builds_parallel_execution_and_review_groups() -> None:

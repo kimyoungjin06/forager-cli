@@ -732,6 +732,79 @@ def test_orch_responses_module_matches_gateway_wrappers() -> None:
         gw.run_codex_exec = original
 
 
+def test_critique_task_execution_result_prompt_includes_phase2_quality_contract() -> None:
+    captured: list[str] = []
+
+    def _fake_run_codex_exec(_args, prompt, timeout_sec=0):
+        captured.append(prompt)
+        return json.dumps(
+            {
+                "verdict": "retry",
+                "action": "retry",
+                "reason": "writer lane needs another pass",
+                "fix": "tighten handoff output",
+                "rerun_execution_lane_ids": ["L1"],
+                "rerun_review_lane_ids": ["R1"],
+            },
+            ensure_ascii=False,
+        )
+
+    args = argparse.Namespace(orch_command_timeout_sec=120)
+    state = {"replies": [{"role": "Codex-Writer", "body": "drafted handoff but validation note is missing"}]}
+    task = {
+        "plan": {
+            "summary": "writer preset task",
+            "subtasks": [{"title": "Draft handoff"}],
+            "evidence_required": [
+                "Draft or handoff artifact is produced.",
+                "Output is readable from the operator perspective.",
+            ],
+            "meta": {
+                "phase1_role_preset": "writer",
+                "phase2_team_preset": "writer",
+                "phase2_team_spec": {
+                    "execution_groups": [{"group_id": "E1", "role": "Codex-Writer"}],
+                    "review_groups": [{"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier"}],
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Writer",
+                },
+                "phase2_execution_plan": {
+                    "execution_lanes": [{"lane_id": "L1", "role": "Codex-Writer", "subtask_ids": ["S1"]}],
+                    "review_lanes": [{"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L1"]}],
+                },
+            },
+        }
+    }
+
+    result = orch_responses.critique_task_execution_result(
+        args,
+        "문서 handoff를 정리해줘",
+        state,
+        task=task,
+        attempt_no=1,
+        max_attempts=3,
+        reply_lang="ko",
+        default_reply_lang=gw.DEFAULT_REPLY_LANG,
+        normalize_chat_lang_token=gw.normalize_chat_lang_token,
+        mask_sensitive_text=gw.mask_sensitive_text,
+        run_codex_exec=_fake_run_codex_exec,
+        parse_json_object_from_text=gw.parse_json_object_from_text,
+        normalize_exec_critic_payload=gw.normalize_exec_critic_payload,
+        now_iso=lambda: "2026-03-16T12:00:00+0900",
+    )
+
+    assert result["rerun_execution_lane_ids"] == ["L1"]
+    assert result["rerun_review_lane_ids"] == ["R1"]
+    assert captured
+    prompt = captured[-1]
+    assert "phase2_team_preset: writer" in prompt
+    assert "phase2_critic_role: Codex-Reviewer" in prompt
+    assert "phase2_integration_role: Codex-Writer" in prompt
+    assert "evidence_required: Draft or handoff artifact is produced. | Output is readable from the operator perspective." in prompt
+    assert "\"rerun_execution_lane_ids\": [\"L#\", ...]" in prompt
+    assert "\"manual_followup_execution_lane_ids\": [\"L#\", ...]" in prompt
+
+
 def test_ensure_tf_exec_workspace_records_project_envelope(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AOE_TF_EXEC_MODE", "inplace")
 
@@ -871,7 +944,16 @@ def test_schema_normalizes_plan_and_exec_critic_payloads() -> None:
         max_items=5,
     )
     exec_critic = schema.normalize_exec_critic_payload(
-        {"verdict": "재시도", "action": "", "reason": "증거 부족", "fix": "evidence 추가"},
+        {
+            "verdict": "재시도",
+            "action": "",
+            "reason": "증거 부족",
+            "fix": "evidence 추가",
+            "rerun_execution_lane_ids": ["L1"],
+            "rerun_review_lane_ids": ["R1"],
+            "manual_followup_execution_lane_ids": ["L2"],
+            "manual_followup_review_lane_ids": ["R2"],
+        },
         attempt_no=2,
         max_attempts=3,
         at="2026-03-10T10:00:00+0900",
@@ -885,6 +967,10 @@ def test_schema_normalizes_plan_and_exec_critic_payloads() -> None:
     assert exec_critic["verdict"] == "retry"
     assert exec_critic["action"] == "retry"
     assert exec_critic["reason"] == "증거 부족"
+    assert exec_critic["rerun_execution_lane_ids"] == ["L1"]
+    assert exec_critic["rerun_review_lane_ids"] == ["R1"]
+    assert exec_critic["manual_followup_execution_lane_ids"] == ["L2"]
+    assert exec_critic["manual_followup_review_lane_ids"] == ["R2"]
 
 
 def test_sanitize_task_record_normalizes_nested_schema_fields() -> None:
@@ -1012,6 +1098,22 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
             "phase1_current_total_rounds": 3,
             "phase1_current_provider": "codex",
             "stages": {"planning": "running"},
+            "plan": {
+                "evidence_required": [
+                    "Findings are summarized with concrete evidence.",
+                    "Open questions or weak spots are called out explicitly.",
+                ],
+                "meta": {
+                    "phase2_team_spec": {
+                        "execution_mode": "parallel",
+                        "execution_groups": [{"group_id": "E1", "role": "Codex-Analyst"}],
+                        "review_mode": "single",
+                        "review_groups": [{"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier"}],
+                        "critic_role": "Codex-Reviewer",
+                        "integration_role": "Codex-Analyst",
+                    }
+                },
+            },
         },
     )
 
@@ -1019,6 +1121,8 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
     assert "phase1_progress: planner 1/3 provider=codex" in summary
     assert "phase1_candidate_roles: Codex-Analyst, Claude-Analyst, Codex-Reviewer" in summary
     assert "team_preset: phase1=analysis phase2=analysis" in summary
+    assert "phase2_quality: critic=Codex-Reviewer integration=Codex-Analyst" in summary
+    assert "phase2_evidence: Findings are summarized with concrete evidence. | Open questions or weak spots are called out explicitly." in summary
 
 
 def test_task_lifecycle_summary_omits_empty_phase1_actor_placeholder() -> None:
@@ -1211,6 +1315,98 @@ def test_apply_exec_critic_lifecycle_marks_manual_followup_lane_targets() -> Non
     assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
     summary = gw.summarize_task_lifecycle("Demo", task)
     assert "exec_manual_followup_targets: execution=L1, L2 review=R1" in summary
+
+
+def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets() -> None:
+    task = {
+        "status": "running",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "staffing": "done",
+            "execution": "done",
+            "verification": "done",
+            "integration": "running",
+            "close": "running",
+        },
+        "plan": {
+            "meta": {
+                "phase2_team_spec": {
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Dev",
+                }
+            }
+        },
+        "lane_states": {
+            "execution": [
+                {"lane_id": "L1", "role": "Codex-Dev", "status": "done"},
+                {"lane_id": "L2", "role": "Codex-Writer", "status": "done"},
+            ],
+            "review": [
+                {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+                {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+            ],
+            "summary": {
+                "execution": {"done": 2},
+                "review": {"done": 2},
+            },
+        },
+    }
+
+    task_state.apply_exec_critic_lifecycle(
+        task,
+        {"verdict": "retry", "action": "retry", "reason": "recheck build lane first"},
+        lifecycle_set_stage=gw.lifecycle_set_stage,
+    )
+
+    assert task["exec_critic"]["rerun_execution_lane_ids"] == ["L1"]
+    assert task["exec_critic"]["rerun_review_lane_ids"] == ["R1"]
+
+
+def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_manual_followup_targets() -> None:
+    task = {
+        "status": "running",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "staffing": "done",
+            "execution": "done",
+            "verification": "done",
+            "integration": "running",
+            "close": "running",
+        },
+        "plan": {
+            "meta": {
+                "phase2_team_spec": {
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Dev",
+                }
+            }
+        },
+        "lane_states": {
+            "execution": [
+                {"lane_id": "L1", "role": "Codex-Dev", "status": "done"},
+                {"lane_id": "L2", "role": "Codex-Writer", "status": "done"},
+            ],
+            "review": [
+                {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+                {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "status": "done", "depends_on": ["L1", "L2"]},
+            ],
+            "summary": {
+                "execution": {"done": 2},
+                "review": {"done": 2},
+            },
+        },
+    }
+
+    task_state.apply_exec_critic_lifecycle(
+        task,
+        {"verdict": "intervention", "action": "escalate", "reason": "manual follow-up should start from the primary build lane"},
+        lifecycle_set_stage=gw.lifecycle_set_stage,
+    )
+
+    assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L1"]
+    assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
 
 
 def test_blocked_state_helpers_render_manual_followup_summary() -> None:

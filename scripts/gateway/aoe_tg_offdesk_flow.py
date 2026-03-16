@@ -374,6 +374,9 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
         "phase2_review_roles": _dedupe_role_tokens(review_groups),
+        "phase2_critic_role": str(team_spec.get("critic_role", "")).strip(),
+        "phase2_integration_role": str(team_spec.get("integration_role", "")).strip(),
+        "phase2_evidence_required": [str(x).strip() for x in (plan.get("evidence_required") or []) if str(x).strip()],
         "execution_lane_count": len(execution_lanes),
         "review_lane_count": len(review_lanes),
         "execution_summary": dict(exec_summary),
@@ -887,6 +890,18 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                     review_roles=",".join(review_roles) if review_roles else "-",
                 )
             )
+        quality_parts = []
+        critic_role = str(latest_task.get("phase2_critic_role", "")).strip()
+        integration_role = str(latest_task.get("phase2_integration_role", "")).strip()
+        evidence_required = [str(x).strip() for x in (latest_task.get("phase2_evidence_required") or []) if str(x).strip()]
+        if critic_role:
+            quality_parts.append(f"critic={critic_role}")
+        if integration_role:
+            quality_parts.append(f"integration={integration_role}")
+        if evidence_required:
+            quality_parts.append("evidence=" + " / ".join(evidence_required[:2]))
+        if quality_parts:
+            lines.append("  active_task_phase2_quality: " + " | ".join(quality_parts))
         if latest_task.get("requested_roles") or latest_task.get("executed_roles"):
             lines.append(
                 "  active_task_roles: requested={requested} | executed={executed}".format(

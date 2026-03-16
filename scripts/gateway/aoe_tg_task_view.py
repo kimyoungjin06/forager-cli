@@ -356,6 +356,20 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                 role = str(row.get("role", "")).strip() or "Codex-Reviewer"
                 kind = str(row.get("kind", "")).strip() or "verifier"
                 lines.append(f"- review {gid} [{role}/{kind}]")
+        if team_spec:
+            lines.append(
+                "phase2_quality: critic={critic} integration={integration}".format(
+                    critic=str(team_spec.get("critic_role", "")).strip() or "-",
+                    integration=str(team_spec.get("integration_role", "")).strip() or "-",
+                )
+            )
+        evidence_required = [
+            str(item).strip()
+            for item in (plan.get("evidence_required") or [])
+            if str(item).strip()
+        ]
+        if evidence_required:
+            lines.append("phase2_evidence: " + " | ".join(evidence_required[:3]))
 
         execution_lanes = execution_plan.get("execution_lanes") if isinstance(execution_plan.get("execution_lanes"), list) else []
         review_lanes = execution_plan.get("review_lanes") if isinstance(execution_plan.get("review_lanes"), list) else []
