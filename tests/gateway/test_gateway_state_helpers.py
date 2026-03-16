@@ -1125,6 +1125,33 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
     assert "phase2_evidence: Findings are summarized with concrete evidence. | Open questions or weak spots are called out explicitly." in summary
 
 
+def test_task_lifecycle_summary_includes_backend_contract_snapshot() -> None:
+    summary = gw.summarize_task_lifecycle(
+        "Demo",
+        {
+            "request_id": "REQ-AUTO",
+            "short_id": "T-401",
+            "prompt": "Sandbox review",
+            "status": "completed",
+            "mode": "dispatch",
+            "roles": ["Codex-Writer", "Codex-Reviewer"],
+            "result": {
+                "assignments": 2,
+                "replies": 2,
+                "complete": True,
+                "backend": "autogen_core",
+                "backend_profile": "sandbox",
+                "backend_verdict": "fail",
+                "backend_contract": "drift",
+                "backend_contract_note": "contract gaps: expected work execution role for preset",
+            },
+        },
+    )
+
+    assert "backend: autogen_core | sandbox | verdict=fail | contract=drift" in summary
+    assert "backend_contract_note: contract gaps: expected work execution role for preset" in summary
+
+
 def test_task_lifecycle_summary_omits_empty_phase1_actor_placeholder() -> None:
     summary = gw.summarize_task_lifecycle(
         "Demo",

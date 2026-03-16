@@ -200,6 +200,59 @@ def _phase2_quality_roles(task: Dict[str, Any]) -> Tuple[str, str]:
     return critic_role, integration_role
 
 
+def _latest_backend_verdict_event(runtime_events: Any) -> Dict[str, Any]:
+    if not isinstance(runtime_events, list):
+        return {}
+    rows: List[Dict[str, Any]] = []
+    for row in runtime_events:
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("kind", "")).strip().lower()
+        stage = str(row.get("stage", "")).strip().lower()
+        if kind != "verdict" and stage != "verdict.emitted":
+            continue
+        rows.append(row)
+    return rows[-1] if rows else {}
+
+
+def derive_backend_snapshot(request_data: Dict[str, Any]) -> Dict[str, Any]:
+    backend = str(request_data.get("backend", "")).strip()
+    profile = str(request_data.get("backend_profile", "")).strip()
+    selection_reason = str(request_data.get("backend_selection_reason", "")).strip()
+    verdict = str(request_data.get("verdict", "")).strip().lower()
+    verdict_event = _latest_backend_verdict_event(request_data.get("runtime_events"))
+    payload = verdict_event.get("payload") if isinstance(verdict_event.get("payload"), dict) else {}
+    contract_ok = payload.get("contract_ok")
+    contract = ""
+    if contract_ok is not None:
+        contract = "pass" if bool(contract_ok) else "drift"
+    note = ""
+    replies = request_data.get("replies") if isinstance(request_data.get("replies"), list) else []
+    for item in replies:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role", "")).strip() != "Codex-Reviewer":
+            continue
+        body = str(item.get("body", "")).strip()
+        if not body:
+            continue
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- contract gaps:") or stripped.startswith("- contract check:"):
+                note = stripped.removeprefix("- ").strip()
+                break
+        if note:
+            break
+    return {
+        "backend": backend,
+        "backend_profile": profile,
+        "backend_selection_reason": selection_reason,
+        "backend_verdict": verdict,
+        "backend_contract": contract,
+        "backend_contract_note": note[:240],
+    }
+
+
 def _derive_exec_critic_lane_targets(task: Dict[str, Any], critic: Dict[str, Any]) -> Dict[str, List[str]]:
     lane_states = task.get("lane_states") if isinstance(task.get("lane_states"), dict) else {}
     review_rows = lane_states.get("review") if isinstance(lane_states.get("review"), list) else []
@@ -1579,6 +1632,15 @@ def sync_task_lifecycle(
             dedupe_roles=dedupe_roles,
         )
     )
+    backend_snapshot = derive_backend_snapshot(request_data)
+    if backend_snapshot.get("backend"):
+        for key, value in backend_snapshot.items():
+            if value in ("", None):
+                task["result"].pop(key, None)
+                task.pop(key, None)
+                continue
+            task["result"][key] = value
+            task[key] = value
     linked_request_ids = request_data.get("linked_request_ids")
     if isinstance(linked_request_ids, list) and linked_request_ids:
         task["result"]["linked_request_ids"] = [

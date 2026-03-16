@@ -365,6 +365,11 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
     added_roles = [str(x).strip() for x in (result.get("added_roles") or []) if str(x).strip()]
     degraded_by = [str(x).strip() for x in (result.get("degraded_by") or []) if str(x).strip()]
     rate_limit = best_task.get("rate_limit") if isinstance(best_task.get("rate_limit"), dict) else {}
+    backend = str(best_task.get("backend", "") or result.get("backend", "")).strip()
+    backend_profile = str(best_task.get("backend_profile", "") or result.get("backend_profile", "")).strip()
+    backend_verdict = str(best_task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip()
+    backend_contract = str(best_task.get("backend_contract", "") or result.get("backend_contract", "")).strip()
+    backend_contract_note = str(best_task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip()
     return {
         "request_id": best_req,
         "label": label,
@@ -394,6 +399,11 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "role_mismatch": bool(result.get("role_mismatch", False)),
         "degraded_by": degraded_by,
         "rate_limit": dict(rate_limit),
+        "backend": backend,
+        "backend_profile": backend_profile,
+        "backend_verdict": backend_verdict,
+        "backend_contract": backend_contract,
+        "backend_contract_note": backend_contract_note,
         "phase2_execution_request_count": _request_bucket_count(phase2_request_ids.get("execution")),
         "phase2_review_request_count": _request_bucket_count(phase2_request_ids.get("review")),
         "linked_request_count": len([str(item).strip() for item in linked_request_ids if str(item).strip()]),
@@ -902,6 +912,22 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             quality_parts.append("evidence=" + " / ".join(evidence_required[:2]))
         if quality_parts:
             lines.append("  active_task_phase2_quality: " + " | ".join(quality_parts))
+        backend = str(latest_task.get("backend", "")).strip()
+        if backend:
+            backend_parts = [backend]
+            profile = str(latest_task.get("backend_profile", "")).strip()
+            if profile:
+                backend_parts.append(profile)
+            verdict = str(latest_task.get("backend_verdict", "")).strip()
+            if verdict:
+                backend_parts.append("verdict=" + verdict)
+            contract = str(latest_task.get("backend_contract", "")).strip()
+            if contract:
+                backend_parts.append("contract=" + contract)
+            lines.append("  active_task_backend: " + " | ".join(backend_parts))
+            contract_note = str(latest_task.get("backend_contract_note", "")).strip()
+            if contract_note:
+                lines.append("  active_task_backend_note: " + contract_note[:240])
         if latest_task.get("requested_roles") or latest_task.get("executed_roles"):
             lines.append(
                 "  active_task_roles: requested={requested} | executed={executed}".format(

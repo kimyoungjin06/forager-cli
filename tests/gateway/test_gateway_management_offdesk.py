@@ -1447,6 +1447,11 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
                 "status": "running",
                 "phase1_role_preset": "analysis",
                 "phase2_team_preset": "analysis",
+                "backend": "autogen_core",
+                "backend_profile": "sandbox",
+                "backend_verdict": "fail",
+                "backend_contract": "drift",
+                "backend_contract_note": "contract gaps: expected work execution role for preset",
                 "updated_at": "2026-03-12T21:00:00+0900",
                 "created_at": "2026-03-12T20:55:00+0900",
                 "exec_critic": {
@@ -1507,6 +1512,8 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
     assert "active_task_preset: phase1=analysis phase2=analysis" in text
     assert "active_task_phase2_shape: exec=Codex-Analyst,Claude-Analyst | review=Codex-Reviewer,Claude-Reviewer" in text
     assert "active_task_phase2_quality: critic=Codex-Reviewer | integration=Codex-Analyst | evidence=Findings are summarized with concrete evidence. / Open questions or weak spots are called out explicitly." in text
+    assert "active_task_backend: autogen_core | sandbox | verdict=fail | contract=drift" in text
+    assert "active_task_backend_note: contract gaps: expected work execution role for preset" in text
     assert "active_task_lanes: lanes E2/R1 | exec done=1, running=1 | review waiting_on_dependencies=1 | review_verdict retry=1" in text
     assert "active_task_requests: execution=2 review=1 linked=3 parallel=yes" in text
     assert "active_task_rerun: execution=L2 review=R1" in text
