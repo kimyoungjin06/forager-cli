@@ -123,6 +123,22 @@ def _sync_counter_summary(raw: Any) -> str:
     return ", ".join(f"{key}={count}" for key, count in counts.items())
 
 
+def _dedupe_role_tokens(items: Any) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    if not isinstance(items, list):
+        return out
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        token = str(row.get("role", "")).strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
 def _sync_quality_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
     mode = str(entry.get("last_sync_mode", "")).strip() or "never"
     classes = _sync_counter_map(entry.get("last_sync_candidate_classes"))
@@ -300,8 +316,11 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
     plan = best_task.get("plan") if isinstance(best_task.get("plan"), dict) else {}
     meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
     exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
+    team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
     execution_lanes = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else []
     review_lanes = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else []
+    execution_groups = team_spec.get("execution_groups") if isinstance(team_spec.get("execution_groups"), list) else []
+    review_groups = team_spec.get("review_groups") if isinstance(team_spec.get("review_groups"), list) else []
     lane_states = best_task.get("lane_states") if isinstance(best_task.get("lane_states"), dict) else {}
     lane_summary = lane_states.get("summary") if isinstance(lane_states.get("summary"), dict) else {}
     exec_summary = lane_summary.get("execution") if isinstance(lane_summary.get("execution"), dict) else {}
@@ -336,6 +355,8 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "tf_phase": tf_phase,
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
+        "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
+        "phase2_review_roles": _dedupe_role_tokens(review_groups),
         "execution_lane_count": len(execution_lanes),
         "review_lane_count": len(review_lanes),
         "execution_summary": dict(exec_summary),
@@ -837,6 +858,15 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             preset_hint = _preset_operator_hint(phase1_role_preset, phase2_team_preset)
             if preset_hint:
                 lines.append("  active_task_preset_hint: " + preset_hint)
+        exec_roles = list(latest_task.get("phase2_execution_roles") or [])
+        review_roles = list(latest_task.get("phase2_review_roles") or [])
+        if exec_roles or review_roles:
+            lines.append(
+                "  active_task_phase2_shape: exec={exec_roles} | review={review_roles}".format(
+                    exec_roles=",".join(exec_roles) if exec_roles else "-",
+                    review_roles=",".join(review_roles) if review_roles else "-",
+                )
+            )
         if latest_task.get("requested_roles") or latest_task.get("executed_roles"):
             lines.append(
                 "  active_task_roles: requested={requested} | executed={executed}".format(

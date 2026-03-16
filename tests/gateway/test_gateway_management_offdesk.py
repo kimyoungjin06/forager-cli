@@ -1466,6 +1466,16 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
                 },
                 "plan": {
                     "meta": {
+                        "phase2_team_spec": {
+                            "execution_groups": [
+                                {"group_id": "E1", "role": "Codex-Analyst"},
+                                {"group_id": "E2", "role": "Claude-Analyst"},
+                            ],
+                            "review_groups": [
+                                {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier"},
+                                {"group_id": "R2", "role": "Claude-Reviewer", "kind": "verifier"},
+                            ],
+                        },
                         "phase2_execution_plan": {
                             "execution_lanes": [{"id": "L1"}, {"id": "L2"}],
                             "review_lanes": [{"id": "R1", "depends_on": ["L2"]}],
@@ -1489,6 +1499,7 @@ def test_offdesk_prepare_reports_active_task_lane_summary_and_targets(tmp_path: 
     assert "active task needs attention (needs_retry)" in text
     assert "active_task: T-101 | running/needs_retry" in text
     assert "active_task_preset: phase1=analysis phase2=analysis" in text
+    assert "active_task_phase2_shape: exec=Codex-Analyst,Claude-Analyst | review=Codex-Reviewer,Claude-Reviewer" in text
     assert "active_task_lanes: lanes E2/R1 | exec done=1, running=1 | review waiting_on_dependencies=1 | review_verdict retry=1" in text
     assert "active_task_requests: execution=2 review=1 linked=3 parallel=yes" in text
     assert "active_task_rerun: execution=L2 review=R1" in text
