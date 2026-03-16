@@ -126,6 +126,9 @@ def critique_task_execution_result(
     plan_hint = ""
     if isinstance(task, dict) and isinstance(task.get("plan"), dict):
         plan = task.get("plan") or {}
+        meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+        team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
+        exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
         summary = str(plan.get("summary", "")).strip()
         subtasks = plan.get("subtasks") or []
         titles: List[str] = []
@@ -136,12 +139,59 @@ def critique_task_execution_result(
                 title = str(row.get("title", "")).strip() or str(row.get("goal", "")).strip()
                 if title:
                     titles.append(title)
-        if summary or titles:
-            plan_hint = "plan_summary: {s}\nplan_subtasks: {n}\nplan_titles: {t}".format(
-                s=summary or "-",
-                n=len(subtasks) if isinstance(subtasks, list) else 0,
-                t=" | ".join(titles) if titles else "-",
+        execution_groups = team_spec.get("execution_groups") if isinstance(team_spec.get("execution_groups"), list) else []
+        review_groups = team_spec.get("review_groups") if isinstance(team_spec.get("review_groups"), list) else []
+        execution_lanes = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else []
+        review_lanes = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else []
+        exec_group_roles = [str(row.get("role", "")).strip() for row in execution_groups if isinstance(row, dict) and str(row.get("role", "")).strip()]
+        review_group_roles = [str(row.get("role", "")).strip() for row in review_groups if isinstance(row, dict) and str(row.get("role", "")).strip()]
+        exec_lane_hint = [
+            "{lane}:{role}".format(
+                lane=str(row.get("lane_id", row.get("group_id", ""))).strip() or "-",
+                role=str(row.get("role", "")).strip() or "-",
             )
+            for row in execution_lanes[:6]
+            if isinstance(row, dict)
+        ]
+        review_lane_hint = [
+            "{lane}:{role}->{deps}".format(
+                lane=str(row.get("lane_id", row.get("group_id", ""))).strip() or "-",
+                role=str(row.get("role", "")).strip() or "-",
+                deps=",".join(str(item).strip() for item in (row.get("depends_on") or []) if str(item).strip()) or "-",
+            )
+            for row in review_lanes[:6]
+            if isinstance(row, dict)
+        ]
+        evidence_required = [str(item).strip() for item in (plan.get("evidence_required") or []) if str(item).strip()]
+        if summary or titles:
+            parts = [
+                "plan_summary: {s}".format(s=summary or "-"),
+                "plan_subtasks: {n}".format(n=len(subtasks) if isinstance(subtasks, list) else 0),
+                "plan_titles: {t}".format(t=" | ".join(titles) if titles else "-"),
+            ]
+            phase1_role_preset = str(meta.get("phase1_role_preset", "")).strip()
+            phase2_team_preset = str(meta.get("phase2_team_preset", "")).strip()
+            if phase1_role_preset:
+                parts.append(f"phase1_role_preset: {phase1_role_preset}")
+            if phase2_team_preset:
+                parts.append(f"phase2_team_preset: {phase2_team_preset}")
+            if exec_group_roles:
+                parts.append("phase2_execution_roles: " + " | ".join(exec_group_roles))
+            if review_group_roles:
+                parts.append("phase2_review_roles: " + " | ".join(review_group_roles))
+            critic_role = str(team_spec.get("critic_role", "")).strip()
+            integration_role = str(team_spec.get("integration_role", "")).strip()
+            if critic_role:
+                parts.append(f"phase2_critic_role: {critic_role}")
+            if integration_role:
+                parts.append(f"phase2_integration_role: {integration_role}")
+            if evidence_required:
+                parts.append("evidence_required: " + " | ".join(evidence_required[:4]))
+            if exec_lane_hint:
+                parts.append("phase2_execution_lanes: " + " | ".join(exec_lane_hint))
+            if review_lane_hint:
+                parts.append("phase2_review_lanes: " + " | ".join(review_lane_hint))
+            plan_hint = "\n".join(parts)
 
     lang = normalize_chat_lang_token(reply_lang, default_reply_lang) or default_reply_lang
     if lang == "en":
@@ -154,12 +204,18 @@ def critique_task_execution_result(
             "  \"verdict\": \"success\"|\"retry\"|\"fail\",\n"
             "  \"action\": \"none\"|\"retry\"|\"replan\"|\"escalate\",\n"
             "  \"reason\": \"short reason\",\n"
-            "  \"fix\": \"short guidance for next attempt (optional)\"\n"
+            "  \"fix\": \"short guidance for next attempt (optional)\",\n"
+            "  \"rerun_execution_lane_ids\": [\"L#\", ...],\n"
+            "  \"rerun_review_lane_ids\": [\"R#\", ...],\n"
+            "  \"manual_followup_execution_lane_ids\": [\"L#\", ...],\n"
+            "  \"manual_followup_review_lane_ids\": [\"R#\", ...]\n"
             "}\n"
             "Rules:\n"
             "- success: requirements are met with correct/usable output.\n"
             "- retry: missing/weak parts can be fixed automatically.\n"
             "- fail: needs operator decision or requirements are ambiguous.\n"
+            "- When retry/fail is lane-specific, fill the relevant lane id arrays.\n"
+            "- Use the phase2 preset, critic/integration role, and evidence_required lines as the default quality contract.\n"
             "- If attempt is near max, prefer fail/escalate over endless retries.\n\n"
             f"attempt: {attempt_no}/{max_attempts}\n"
             f"User request:\n{user_prompt.strip()}\n\n"
@@ -176,12 +232,18 @@ def critique_task_execution_result(
             "  \"verdict\": \"success\"|\"retry\"|\"fail\",\n"
             "  \"action\": \"none\"|\"retry\"|\"replan\"|\"escalate\",\n"
             "  \"reason\": \"짧은 이유(200자 이내)\",\n"
-            "  \"fix\": \"다음 시도에서 바꿀 점(선택, 600자 이내)\"\n"
+            "  \"fix\": \"다음 시도에서 바꿀 점(선택, 600자 이내)\",\n"
+            "  \"rerun_execution_lane_ids\": [\"L#\", ...],\n"
+            "  \"rerun_review_lane_ids\": [\"R#\", ...],\n"
+            "  \"manual_followup_execution_lane_ids\": [\"L#\", ...],\n"
+            "  \"manual_followup_review_lane_ids\": [\"R#\", ...]\n"
             "}\n"
             "규칙:\n"
             "- success: 요구사항 충족, 결과가 실무적으로 사용 가능.\n"
             "- retry: 일부 미흡/누락이 있으나 자동 재시도로 개선 가능.\n"
             "- fail: 요구 불명확/환경 제약/결정 필요 등으로 운영자 개입이 필요.\n"
+            "- retry/fail 원인이 특정 lane에 국한되면 해당 lane id 배열을 채운다.\n"
+            "- phase2 preset, critic/integration role, evidence_required를 기본 품질 계약으로 간주한다.\n"
             "- attempt가 max에 가까우면 무한 재시도 대신 fail/escalate를 우선.\n\n"
             f"attempt: {attempt_no}/{max_attempts}\n"
             f"사용자 요청:\n{user_prompt.strip()}\n\n"
