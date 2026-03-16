@@ -96,6 +96,9 @@ The dashboard must read existing runtime state first and only later trigger exis
   - provider capacity note if blocked
 - Primary source reuse:
   - `/task`
+- Canonical route rule:
+  - `project_alias + task_short_id` is the default read path
+  - `request_id` may be used as a stable deep-link path
 
 ## 6. Data Contract
 
@@ -112,6 +115,7 @@ The dashboard must read existing runtime state first and only later trigger exis
   - `aoe_tg_offdesk_flow.py`
   - `aoe_tg_scheduler_control_handlers.py`
 then the dashboard should reuse that state/view contract rather than recomputing logic independently.
+- Telegram-only summary strings are reference output, not the primary dashboard data contract.
 
 ### 6.3 Initial View Model
 - `control_summary`
@@ -151,6 +155,7 @@ then the dashboard should reuse that state/view contract rather than recomputing
 - Read-only pages first
 - Refresh by polling or manual reload
 - Links out to Telegram/operator command equivalents are enough
+- Phase 1 should prefer structured DTOs and local reload over rich interactivity.
 
 ### 7.2 Phase 2
 - Existing actions exposed as buttons:
@@ -180,6 +185,7 @@ then the dashboard should reuse that state/view contract rather than recomputing
   - reuse gateway state/view helpers directly where feasible
 - Authentication:
   - local/private environment only for MVP
+  - bind to `127.0.0.1` only by default
 - Deployment:
   - same repo, same runtime boundary, no new external service dependency
 
@@ -192,6 +198,8 @@ then the dashboard should reuse that state/view contract rather than recomputing
 - `Task Detail`
 - Hard requirement:
   - no new business logic
+  - side-effect-free state adapter first
+  - structured DTO reuse first
   - only state/view reuse
 
 ### 10.2 Step 2: Control actions
@@ -216,6 +224,7 @@ then the dashboard should reuse that state/view contract rather than recomputing
 
 ## 12. Risks
 - Rebuilding view logic independently would fork the control model.
+- Reusing only Telegram summary strings would force parsing and create drift.
 - A frontend-heavy approach would slow delivery and increase maintenance cost.
 - Mixing dashboard and Telegram action semantics would confuse recovery behavior.
 
