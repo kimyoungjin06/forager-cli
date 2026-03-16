@@ -88,6 +88,10 @@ worker runtime 권한 정책:
   - `AOE_CLAUDE_FALLBACK_TO_CODEX=1`
 - Codex fallback env:
   - `AOE_CODEX_FALLBACK_TO_CLAUDE=1`
+- Control Plane provider order:
+  - `AOE_CONTROL_PROVIDERS=codex,claude`
+  - 예: `AOE_CONTROL_PROVIDERS=claude,codex`
+  - 적용 대상: orchestrator direct/synth, legacy planner/critic/repair, follow-up proposal extraction
 - `full` 계열은 worker runtime에서 사실상 YOLO/full-access로 해석된다.
   - Codex: `--dangerously-bypass-approvals-and-sandbox`
   - Claude: `--dangerously-skip-permissions --permission-mode bypassPermissions`

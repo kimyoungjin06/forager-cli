@@ -115,6 +115,12 @@ from aoe_tg_investigations_sync import sync_investigations_docs
 from aoe_tg_ops_policy import (
     visible_ops_project_keys,
 )
+from aoe_tg_provider_fallback import (
+    fallback_provider_for,
+    is_rate_limit_error,
+    load_provider_capacity_state,
+    proactive_fallback_provider,
+)
 from aoe_tg_package_paths import templates_root, worker_handler_script
 import aoe_tg_project_state as project_state_mod
 from aoe_tg_project_runtime import project_runtime_label
@@ -1735,6 +1741,119 @@ def run_claude_exec(args: argparse.Namespace, prompt: str, timeout_sec: int = 48
     if not body:
         raise RuntimeError("claude exec returned empty output")
     return body
+
+
+def configured_control_providers(args: argparse.Namespace) -> List[str]:
+    raw = (
+        str(getattr(args, "control_providers", "") or "").strip()
+        or os.environ.get("AOE_CONTROL_PROVIDERS", "").strip()
+        or str(getattr(args, "plan_phase1_providers", "") or "").strip()
+        or os.environ.get("AOE_PLAN_PHASE1_PROVIDERS", "").strip()
+        or "codex,claude"
+    )
+    providers: List[str] = []
+    for token in raw.split(","):
+        item = str(token or "").strip().lower()
+        if item and item not in providers:
+            providers.append(item)
+    return providers or ["codex", "claude"]
+
+
+def available_control_provider_execs(
+    args: argparse.Namespace,
+) -> tuple[List[str], Dict[str, Callable[[str, int], str]], List[str], List[str]]:
+    requested = configured_control_providers(args)
+    runner_catalog: Dict[str, tuple[str, Callable[[str, int], str]]] = {
+        "codex": ("codex", lambda prompt, timeout_sec: run_codex_exec(args, prompt, timeout_sec=timeout_sec)),
+        "claude": ("claude", lambda prompt, timeout_sec: run_claude_exec(args, prompt, timeout_sec=timeout_sec)),
+    }
+
+    available_execs: Dict[str, Callable[[str, int], str]] = {}
+    unsupported: List[str] = []
+    missing: List[str] = []
+    for name in requested:
+        catalog_row = runner_catalog.get(name)
+        if catalog_row is None:
+            unsupported.append(name)
+            continue
+        binary, runner = catalog_row
+        if shutil.which(binary):
+            available_execs[name] = runner
+        else:
+            missing.append(binary)
+    return requested, available_execs, unsupported, missing
+
+
+def run_control_plane_exec(
+    args: argparse.Namespace,
+    prompt: str,
+    *,
+    timeout_sec: int = 480,
+    stage: str = "control",
+) -> str:
+    requested, available_execs, unsupported, missing = available_control_provider_execs(args)
+    if not available_execs:
+        detail_parts: List[str] = []
+        if unsupported:
+            detail_parts.append(f"unsupported={','.join(unsupported)}")
+        if missing:
+            detail_parts.append(f"missing={','.join(missing)}")
+        detail = " ".join(detail_parts) if detail_parts else "no available providers"
+        raise RuntimeError(f"control plane exec unavailable for stage={stage}: {detail}")
+
+    memory_state = load_provider_capacity_state(getattr(args, "team_dir", ""))
+    attempted: List[str] = []
+    errors: List[str] = []
+
+    ordered: List[str] = []
+    for provider in requested:
+        if provider in available_execs and provider not in ordered:
+            preferred = proactive_fallback_provider(
+                provider,
+                memory_state=memory_state,
+                available_providers=available_execs.keys(),
+            ) or provider
+            if preferred in available_execs and preferred not in ordered:
+                ordered.append(preferred)
+            if preferred == provider and provider not in ordered:
+                ordered.append(provider)
+
+    for provider in available_execs:
+        if provider not in ordered:
+            ordered.append(provider)
+
+    for provider in ordered:
+        if provider in attempted:
+            continue
+        attempted.append(provider)
+        runner = available_execs.get(provider)
+        if not callable(runner):
+            continue
+        try:
+            return runner(prompt, timeout_sec)
+        except Exception as exc:
+            detail = str(exc or "").strip()
+            errors.append(f"{provider}:{detail[:240]}")
+            if is_rate_limit_error(detail):
+                fallback = fallback_provider_for(provider)
+                if fallback and fallback in available_execs and fallback not in attempted:
+                    attempted.append(fallback)
+                    try:
+                        return available_execs[fallback](prompt, timeout_sec)
+                    except Exception as fb_exc:
+                        errors.append(f"{fallback}:{str(fb_exc or '').strip()[:240]}")
+            continue
+
+    raise RuntimeError(
+        "control plane exec failed stage={stage} providers={providers} attempted={attempted} errors={errors}".format(
+            stage=str(stage or "").strip() or "control",
+            providers=",".join(requested),
+            attempted=",".join(attempted) or "none",
+            errors=" | ".join(errors[-4:]) or "unknown",
+        )
+    )
+
+
 def parse_json_object_from_text(text: str) -> Optional[Dict[str, Any]]:
     src = (text or "").strip()
     if not src:
@@ -1848,7 +1967,12 @@ def build_task_execution_plan(
         f"사용자 요청:\n{user_prompt.strip()}\n"
     )
 
-    raw = run_codex_exec(args, planner_prompt, timeout_sec=planning_stage_timeout_sec(args, "planner"))
+    raw = run_control_plane_exec(
+        args,
+        planner_prompt,
+        timeout_sec=planning_stage_timeout_sec(args, "planner"),
+        stage="planner",
+    )
     parsed = parse_json_object_from_text(raw)
     return normalize_task_plan_payload(parsed, user_prompt=user_prompt, workers=workers, max_subtasks=max_subtasks)
 
@@ -1876,7 +2000,12 @@ def critique_task_execution_plan(
     )
 
     try:
-        raw = run_codex_exec(args, critic_prompt, timeout_sec=planning_stage_timeout_sec(args, "critic"))
+        raw = run_control_plane_exec(
+            args,
+            critic_prompt,
+            timeout_sec=planning_stage_timeout_sec(args, "critic"),
+            stage="critic",
+        )
         parsed = parse_json_object_from_text(raw)
     except Exception:
         parsed = None
@@ -1918,7 +2047,12 @@ def repair_task_execution_plan(
         f"critic:\n{critic_payload}\n"
     )
 
-    raw = run_codex_exec(args, repair_prompt, timeout_sec=planning_stage_timeout_sec(args, "repair"))
+    raw = run_control_plane_exec(
+        args,
+        repair_prompt,
+        timeout_sec=planning_stage_timeout_sec(args, "repair"),
+        stage="repair",
+    )
     parsed = parse_json_object_from_text(raw)
     return normalize_task_plan_payload(parsed, user_prompt=user_prompt, workers=workers, max_subtasks=max_subtasks)
 
@@ -2132,7 +2266,7 @@ def run_orchestrator_direct(args: argparse.Namespace, user_prompt: str, reply_la
         reply_lang=reply_lang,
         default_reply_lang=DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=normalize_chat_lang_token,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
     )
 
 def synthesize_orchestrator_response(
@@ -2148,7 +2282,7 @@ def synthesize_orchestrator_response(
         reply_lang=reply_lang,
         default_reply_lang=DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=normalize_chat_lang_token,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
     )
 
 
@@ -2172,7 +2306,7 @@ def critique_task_execution_result(
         default_reply_lang=DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=normalize_chat_lang_token,
         mask_sensitive_text=mask_sensitive_text,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
         parse_json_object_from_text=parse_json_object_from_text,
         normalize_exec_critic_payload=normalize_exec_critic_payload,
         now_iso=now_iso,
@@ -2196,7 +2330,7 @@ def extract_followup_todo_proposals(
         default_orch_command_timeout_sec=DEFAULT_ORCH_COMMAND_TIMEOUT_SEC,
         normalize_chat_lang_token=normalize_chat_lang_token,
         mask_sensitive_text=mask_sensitive_text,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
         parse_json_object_from_text=parse_json_object_from_text,
     )
 

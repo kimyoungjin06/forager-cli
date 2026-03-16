@@ -633,7 +633,7 @@ def test_extract_followup_todo_proposals_normalizes_json_payload() -> None:
 
 
 def test_orch_responses_module_matches_gateway_wrappers() -> None:
-    def _fake_run_codex_exec(args, prompt, timeout_sec=0):
+    def _fake_run_control_exec(args, prompt, timeout_sec=0, stage=""):
         if "proposals" in prompt:
             return json.dumps(
                 {
@@ -665,8 +665,8 @@ def test_orch_responses_module_matches_gateway_wrappers() -> None:
     state = {"replies": [{"role": "Codex-Reviewer", "body": "need one more validation step"}]}
     task = {"todo_id": "TODO-001", "plan": {"summary": "release prep", "subtasks": [{"title": "draft"}]}}
 
-    original = gw.run_codex_exec
-    gw.run_codex_exec = _fake_run_codex_exec
+    original = gw.run_control_plane_exec
+    gw.run_control_plane_exec = _fake_run_control_exec
     try:
         assert gw.run_orchestrator_direct(args, "hello", reply_lang="ko") == orch_responses.run_orchestrator_direct(
             args,
@@ -674,7 +674,7 @@ def test_orch_responses_module_matches_gateway_wrappers() -> None:
             reply_lang="ko",
             default_reply_lang=gw.DEFAULT_REPLY_LANG,
             normalize_chat_lang_token=gw.normalize_chat_lang_token,
-            run_codex_exec=_fake_run_codex_exec,
+            run_control_exec=_fake_run_control_exec,
         )
         assert gw.synthesize_orchestrator_response(args, "hello", state, reply_lang="ko") == orch_responses.synthesize_orchestrator_response(
             args,
@@ -683,7 +683,7 @@ def test_orch_responses_module_matches_gateway_wrappers() -> None:
             reply_lang="ko",
             default_reply_lang=gw.DEFAULT_REPLY_LANG,
             normalize_chat_lang_token=gw.normalize_chat_lang_token,
-            run_codex_exec=_fake_run_codex_exec,
+            run_control_exec=_fake_run_control_exec,
         )
         assert gw.critique_task_execution_result(
             args,
@@ -704,7 +704,7 @@ def test_orch_responses_module_matches_gateway_wrappers() -> None:
             default_reply_lang=gw.DEFAULT_REPLY_LANG,
             normalize_chat_lang_token=gw.normalize_chat_lang_token,
             mask_sensitive_text=gw.mask_sensitive_text,
-            run_codex_exec=_fake_run_codex_exec,
+            run_control_exec=_fake_run_control_exec,
             parse_json_object_from_text=gw.parse_json_object_from_text,
             normalize_exec_critic_payload=gw.normalize_exec_critic_payload,
             now_iso=gw.now_iso,
@@ -725,17 +725,17 @@ def test_orch_responses_module_matches_gateway_wrappers() -> None:
             default_orch_command_timeout_sec=gw.DEFAULT_ORCH_COMMAND_TIMEOUT_SEC,
             normalize_chat_lang_token=gw.normalize_chat_lang_token,
             mask_sensitive_text=gw.mask_sensitive_text,
-            run_codex_exec=_fake_run_codex_exec,
+            run_control_exec=_fake_run_control_exec,
             parse_json_object_from_text=gw.parse_json_object_from_text,
         )
     finally:
-        gw.run_codex_exec = original
+        gw.run_control_plane_exec = original
 
 
 def test_critique_task_execution_result_prompt_includes_phase2_quality_contract() -> None:
     captured: list[str] = []
 
-    def _fake_run_codex_exec(_args, prompt, timeout_sec=0):
+    def _fake_run_control_exec(_args, prompt, timeout_sec=0, stage=""):
         captured.append(prompt)
         return json.dumps(
             {
@@ -787,7 +787,7 @@ def test_critique_task_execution_result_prompt_includes_phase2_quality_contract(
         default_reply_lang=gw.DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=gw.normalize_chat_lang_token,
         mask_sensitive_text=gw.mask_sensitive_text,
-        run_codex_exec=_fake_run_codex_exec,
+        run_control_exec=_fake_run_control_exec,
         parse_json_object_from_text=gw.parse_json_object_from_text,
         normalize_exec_critic_payload=gw.normalize_exec_critic_payload,
         now_iso=lambda: "2026-03-16T12:00:00+0900",
@@ -803,6 +803,57 @@ def test_critique_task_execution_result_prompt_includes_phase2_quality_contract(
     assert "evidence_required: Draft or handoff artifact is produced. | Output is readable from the operator perspective." in prompt
     assert "\"rerun_execution_lane_ids\": [\"L#\", ...]" in prompt
     assert "\"manual_followup_execution_lane_ids\": [\"L#\", ...]" in prompt
+
+
+def test_run_control_plane_exec_prefers_configured_primary_provider(tmp_path: Path, monkeypatch) -> None:
+    args = argparse.Namespace(
+        project_root=tmp_path,
+        team_dir=tmp_path / ".aoe-team",
+        orch_command_timeout_sec=120,
+        control_providers="claude,codex",
+    )
+    args.team_dir.mkdir(parents=True, exist_ok=True)
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(gw.shutil, "which", lambda binary: f"/usr/bin/{binary}")
+    monkeypatch.setattr(gw, "run_claude_exec", lambda _args, prompt, timeout_sec=0: calls.append("claude") or "claude-ok")
+    monkeypatch.setattr(gw, "run_codex_exec", lambda _args, prompt, timeout_sec=0: calls.append("codex") or "codex-ok")
+
+    result = gw.run_control_plane_exec(args, "hello", timeout_sec=60, stage="planner")
+
+    assert result == "claude-ok"
+    assert calls == ["claude"]
+
+
+def test_run_control_plane_exec_falls_back_on_rate_limit(tmp_path: Path, monkeypatch) -> None:
+    args = argparse.Namespace(
+        project_root=tmp_path,
+        team_dir=tmp_path / ".aoe-team",
+        orch_command_timeout_sec=120,
+        control_providers="claude,codex",
+    )
+    args.team_dir.mkdir(parents=True, exist_ok=True)
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(gw.shutil, "which", lambda binary: f"/usr/bin/{binary}")
+
+    def _claude(_args, prompt, timeout_sec=0):
+        calls.append("claude")
+        raise RuntimeError("429 rate limit")
+
+    def _codex(_args, prompt, timeout_sec=0):
+        calls.append("codex")
+        return "codex-ok"
+
+    monkeypatch.setattr(gw, "run_claude_exec", _claude)
+    monkeypatch.setattr(gw, "run_codex_exec", _codex)
+
+    result = gw.run_control_plane_exec(args, "hello", timeout_sec=60, stage="planner")
+
+    assert result == "codex-ok"
+    assert calls == ["claude", "codex"]
 
 
 def test_ensure_tf_exec_workspace_records_project_envelope(tmp_path: Path, monkeypatch) -> None:
