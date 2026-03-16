@@ -301,6 +301,22 @@ def test_resolve_dispatch_mode_defaults_to_tf_dispatch_when_not_forced_direct() 
     assert result.dispatch_roles == "Codex-Reviewer"
 
 
+def test_resolve_dispatch_mode_uses_auto_roles_for_forced_dispatch_even_when_auto_dispatch_disabled() -> None:
+    result = pipeline_mod.resolve_dispatch_mode_and_roles(
+        run_force_mode="dispatch",
+        run_roles_override=None,
+        project_roles_csv="",
+        auto_dispatch_enabled=False,
+        prompt="로그인 버그를 수정하고 회귀 리스크를 검토해줘",
+        choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+        available_roles=["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+        team_dir=None,
+    )
+
+    assert result.dispatch_mode is True
+    assert result.dispatch_roles == "Codex-Dev,Codex-Reviewer,Claude-Reviewer"
+
+
 def test_compute_dispatch_plan_uses_phase1_plan_roles_for_phase2_execution() -> None:
     args = SimpleNamespace(
         task_planning=True,

@@ -2543,6 +2543,9 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     assert task["request_id"] == "REQ-DETACHED"
     assert task["status"] == "running"
     assert task["tf_phase"] == "planning"
+    assert task["roles"] == ["Codex-Dev"]
+    assert task["phase1_role_preset"] == "build"
+    assert task["phase2_team_preset"] == "build"
     assert task["phase1_current_phase"] == "planner"
     assert task["phase1_current_round"] == 1
     assert task["phase1_current_total_rounds"] == 3
