@@ -552,3 +552,49 @@ def test_normalize_task_plan_payload_with_companion_workers_derives_parallel_cla
         "Claude-Analyst",
     ]
     assert [row["role"] for row in execution_plan["review_lanes"]] == ["Codex-Reviewer", "Claude-Reviewer"]
+
+
+def test_build_planned_dispatch_prompt_includes_phase2_quality_contract() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "writer execution plan",
+            "subtasks": [
+                {"id": "S1", "title": "Draft handoff", "goal": "write operator handoff", "owner_role": "Codex-Writer", "acceptance": ["done"]},
+            ],
+            "evidence_required": [
+                "Draft or handoff artifact is produced.",
+                "Output is readable from the operator perspective.",
+            ],
+            "meta": {
+                "phase1_role_preset": "writer",
+                "phase2_team_preset": "writer",
+            },
+        },
+        user_prompt="문서형 실행 계획을 준비해라",
+        workers=["Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=3,
+    )
+    plan = gw.attach_phase2_team_spec(
+        plan,
+        roles=["Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        verifier_roles=["Codex-Reviewer", "Claude-Reviewer"],
+        require_verifier=True,
+    )
+    plan["evidence_required"] = [
+        "Draft or handoff artifact is produced.",
+        "Output is readable from the operator perspective.",
+    ]
+
+    prompt = gw.build_planned_dispatch_prompt(
+        "원 요청",
+        plan,
+        {"approved": True, "issues": [], "recommendations": []},
+    )
+
+    assert "Phase2 quality contract:" in prompt
+    assert "- preset: phase1=writer phase2=writer" in prompt
+    assert "- critic role: Codex-Reviewer" in prompt
+    assert "- integration role: Codex-Writer" in prompt
+    assert "- evidence: Draft or handoff artifact is produced." in prompt
+    assert "- evidence: Output is readable from the operator perspective." in prompt
+    assert "- quality contract의 preset/critic/integration/evidence를 기본 완료 기준으로 따른다." in prompt
