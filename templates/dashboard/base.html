@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }}</title>
+    <link rel="stylesheet" href="/static/dashboard/dashboard.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>{{ page_title }}</h1>
+        {% if snapshot is defined %}
+        <p class="muted">snapshot {{ snapshot.snapshot_taken_at }} | control_root {{ snapshot.control_root }}</p>
+        {% endif %}
+      </div>
+      <nav class="nav">
+        <a class="{% if current_path == '/control' %}active{% endif %}" href="/control">Overview</a>
+        <a class="{% if current_path == '/control/offdesk' %}active{% endif %}" href="/control/offdesk">Offdesk Prep</a>
+        <a class="{% if current_path == '/control/tasks' %}active{% endif %}" href="/control/tasks">Active Tasks</a>
+      </nav>
+    </header>
+
+    {% if snapshot is defined %}
+    <section class="source-strip">
+      {% for source in snapshot.source_files %}
+      <div class="source-card {% if source.stale %}warn{% endif %} {% if not source.exists %}muted-card{% endif %}">
+        <strong>{{ source.name }}</strong>
+        <span>{{ source.updated_at or 'missing' }}</span>
+        {% if source.stale and source.error %}<span>stale: {{ source.error }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Offdesk Prep</h2>
+  <p class="muted">read-only parity with /offdesk prepare and /offdesk review</p>
+  <div class="runtime-list single">
+    {% for card in snapshot.runtime_cards %}
+    <div class="runtime-card {{ card.status }}">
+      <h3>{{ card.project_alias }} {{ card.project_label }}</h3>
+      <p><strong>runtime</strong> {{ card.readiness }}</p>
+      <p><strong>attention</strong> {{ card.attention_summary }}</p>
+      <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>
+      {% if card.active_task_label %}
+      <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
+      <p><strong>preset</strong> {{ card.active_task_preset }}</p>
+      <p><strong>shape</strong> {{ card.active_task_phase2_shape }}</p>
+      <p><strong>quality</strong> {{ card.active_task_phase2_quality }}</p>
+      <p><strong>backend</strong> {{ card.active_task_backend }}</p>
+      {% if card.next_focus %}<p><strong>next_focus</strong> {{ card.next_focus }}</p>{% endif %}
+      {% endif %}
+      {% if card.notes %}
+      <ul class="notes">
+        {% for note in card.notes[:4] %}
+        <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="grid two">
+  <article class="panel">
+    <h2>Control Summary</h2>
+    <ul class="kv-list">
+      <li><span>auto_mode</span><strong>{{ snapshot.control_summary.auto_mode }}</strong></li>
+      <li><span>offdesk_mode</span><strong>{{ snapshot.control_summary.offdesk_mode }}</strong></li>
+      <li><span>provider_capacity</span><strong>{{ snapshot.control_summary.provider_capacity_summary }}</strong></li>
+      <li><span>next_retry_at</span><strong>{{ snapshot.control_summary.next_retry_at }}</strong></li>
+      <li><span>next_retry_target</span><strong>{{ snapshot.control_summary.next_retry_target }}</strong></li>
+      <li><span>repeat_memory</span><strong>{{ snapshot.control_summary.repeat_memory_summary }}</strong></li>
+      <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
+      <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
+    </ul>
+  </article>
+  <article class="panel">
+    <h2>Attention Runtimes</h2>
+    {% if snapshot.attention_runtime_cards %}
+      {% for card in snapshot.attention_runtime_cards %}
+      <div class="runtime-card {{ card.status }}">
+        <h3>{{ card.project_alias }} {{ card.project_label }}</h3>
+        <p class="muted">{{ card.attention_summary }}</p>
+        <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>
+        {% if card.active_task_label %}
+        <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
+        <p><strong>preset</strong> {{ card.active_task_preset }}</p>
+        <p><strong>shape</strong> {{ card.active_task_phase2_shape }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">no attention runtimes</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <h2>Runtime Board</h2>
+  <div class="runtime-list">
+    {% for card in snapshot.runtime_cards[:12] %}
+    <div class="runtime-card {{ card.status }}">
+      <h3>{{ card.project_alias }} {{ card.project_label }}</h3>
+      <p><strong>runtime</strong> {{ card.readiness }}</p>
+      <p><strong>attention</strong> {{ card.attention_summary }}</p>
+      <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>
+      {% if card.active_task_label %}
+      <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

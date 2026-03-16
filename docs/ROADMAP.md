@@ -111,8 +111,11 @@
   - 금지:
     - dashboard 전용 상태계
     - dashboard 전용 business logic
-- [ ] read-only MVP 구현
-  - 기술 방향: `FastAPI + Jinja/HTMX`
+- [x] read-only MVP 구현
+  - 현재 구현: `http.server.ThreadingHTTPServer + Jinja2`
+  - note:
+    - current repo baseline에 `FastAPI`/`uvicorn` dependency가 없으므로 Phase 1은 stdlib server로 고정
+    - route/action contract는 유지하고, 필요 시 이후 ASGI shell로 교체 가능
   - 우선 노출:
     - provider capacity
     - offdesk readiness
@@ -121,13 +124,13 @@
     - lane state
     - rerun/followup
     - backend contract
-- [ ] shared read-only state adapter 구현
+- [x] shared read-only state adapter 구현
   - 요구:
     - side-effect-free runtime file reads
     - no mutating loader reuse
     - control-root/team-dir canonical wiring
     - per-file freshness and stale fallback metadata
-- [ ] dashboard DTO contract 구현
+- [x] dashboard DTO contract 구현
   - 요구:
     - `ControlSummaryDTO`
     - `RuntimeCardDTO`

@@ -37,6 +37,11 @@ Ultimate direction:
 - Phase 1: read-only visual operations surface
 - Phase 2: action-capable operations surface that calls existing handlers without introducing new policy logic
 
+Current implementation note:
+- Phase 1 currently uses `http.server.ThreadingHTTPServer + Jinja2`.
+- This is an implementation baseline choice, not a product constraint.
+- The route contract and DTO contract are the stable parts; the serving shell may later move to ASGI without changing operator-visible paths.
+
 ## 4. Primary Users
 - Owner/operator preparing the system before leaving
 - Owner/operator checking status during off-hours
@@ -201,10 +206,11 @@ then the dashboard should reuse that state/view contract rather than recomputing
 
 ## 9. Technical Direction
 - Server:
-  - `FastAPI`
+  - Phase 1 current shell: `http.server.ThreadingHTTPServer`
+  - Future option: ASGI shell (`FastAPI`/`Starlette`) without route or DTO contract change
 - Rendering:
   - `Jinja2`
-  - `HTMX` for small partial refreshes if needed
+  - `HTMX` for small partial refreshes if needed in later phases
 - State access:
   - reuse gateway state/view helpers directly where feasible
 - Authentication:

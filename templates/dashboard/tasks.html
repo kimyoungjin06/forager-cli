@@ -1,0 +1,34 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Active Tasks</h2>
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Runtime</th>
+        <th>Task</th>
+        <th>Status</th>
+        <th>Preset</th>
+        <th>Phase2 Shape</th>
+        <th>Lanes</th>
+        <th>Backend</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in snapshot.active_task_rows %}
+      <tr>
+        <td>{{ row.project_alias }} {{ row.project_label }}</td>
+        <td><a href="{{ row.detail_path }}">{{ row.label }}</a><br><span class="muted">{{ row.request_id }}</span></td>
+        <td>{{ row.status }}/{{ row.tf_phase }}</td>
+        <td>{{ row.preset }}</td>
+        <td>{{ row.phase2_shape }}</td>
+        <td>{{ row.lane_summary }}</td>
+        <td>{{ row.backend_summary }}</td>
+        <td>{{ row.updated_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

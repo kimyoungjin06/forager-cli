@@ -94,6 +94,7 @@ import aoe_tg_tf_exec as tf_exec_mod
 import aoe_tg_tf_backend_selection as tf_backend_selection_mod
 import aoe_tg_tf_backend_local as tf_backend_local_mod
 import aoe_tg_tf_backend_autogen as tf_backend_autogen_mod
+import aoe_tg_runtime_read as runtime_read_mod
 from aoe_tg_message_flow import (
     RunTransitionState,
     apply_confirm_transition_to_resolved,
@@ -781,46 +782,15 @@ def is_path_within(target: Path, root: Optional[Path]) -> bool:
 
 
 def default_manager_state(project_root: Path, team_dir: Path) -> Dict[str, Any]:
-    return runtime_default_manager_state(project_root, team_dir, now_iso=now_iso)
+    return runtime_read_mod.default_manager_state(project_root, team_dir)
 
 
 def sanitize_task_record(raw_task: Dict[str, Any], req_id: str) -> Dict[str, Any]:
-    return sanitize_task_record_state(
-        raw_task,
-        req_id,
-        dedupe_roles=dedupe_roles,
-        lifecycle_stages=LIFECYCLE_STAGES,
-        normalize_stage_status=normalize_stage_status,
-        normalize_task_status=normalize_task_status,
-        now_iso=now_iso,
-        history_limit=DEFAULT_TASK_HISTORY_LIMIT,
-        normalize_task_plan_schema=normalize_task_plan_schema,
-        normalize_plan_critic_payload=normalize_plan_critic_payload,
-        normalize_plan_replans_payload=normalize_plan_replans_payload,
-        plan_critic_primary_issue=plan_critic_primary_issue,
-        normalize_exec_critic_payload=normalize_exec_critic_payload,
-        build_task_context=build_task_context,
-    )
+    return runtime_read_mod.sanitize_task_record(raw_task, req_id)
 
 
 def load_manager_state(path: Path, project_root: Path, team_dir: Path) -> Dict[str, Any]:
-    return runtime_load_manager_state(
-        path,
-        project_root,
-        team_dir,
-        default_manager_state=default_manager_state,
-        now_iso=now_iso,
-        normalize_project_name=normalize_project_name,
-        sanitize_task_record=sanitize_task_record,
-        trim_project_tasks=trim_project_tasks,
-        normalize_task_alias_key=normalize_task_alias_key,
-        bool_from_json=bool_from_json,
-        normalize_project_alias=normalize_project_alias,
-        backfill_task_aliases=backfill_task_aliases,
-        ensure_project_aliases=ensure_project_aliases,
-        sanitize_project_lock_row=sanitize_project_lock_row,
-        sanitize_chat_session_row=sanitize_chat_session_row,
-    )
+    return runtime_read_mod.load_manager_state(path, project_root, team_dir)
 
 
 def save_manager_state(path: Path, state: Dict[str, Any]) -> None:

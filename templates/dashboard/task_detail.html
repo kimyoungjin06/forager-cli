@@ -1,0 +1,34 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>{{ detail.label }}</h2>
+  <ul class="kv-list">
+    <li><span>runtime</span><strong>{{ detail.project_alias }} {{ detail.project_label }}</strong></li>
+    <li><span>request_id</span><strong>{{ detail.request_id }}</strong></li>
+    <li><span>status</span><strong>{{ detail.status }}/{{ detail.tf_phase }}</strong></li>
+    <li><span>mode</span><strong>{{ detail.mode }}</strong></li>
+    <li><span>phase1</span><strong>{{ detail.phase1_summary }}</strong></li>
+    <li><span>phase1_progress</span><strong>{{ detail.phase1_progress }}</strong></li>
+    <li><span>preset</span><strong>phase1={{ detail.phase1_role_preset or '-' }} phase2={{ detail.phase2_team_preset or '-' }}</strong></li>
+    <li><span>phase2_shape</span><strong>{{ detail.phase2_shape }}</strong></li>
+    <li><span>phase2_quality</span><strong>{{ detail.phase2_quality }}</strong></li>
+    <li><span>lane_summary</span><strong>{{ detail.lane_summary }}</strong></li>
+    <li><span>rerun</span><strong>{{ detail.rerun_summary }}</strong></li>
+    <li><span>followup</span><strong>{{ detail.followup_summary }}</strong></li>
+    <li><span>backend</span><strong>{{ detail.backend_summary }}</strong></li>
+    {% if detail.backend_note %}<li><span>backend_note</span><strong>{{ detail.backend_note }}</strong></li>{% endif %}
+    <li><span>rate_limit</span><strong>{{ detail.rate_limit_summary }}</strong></li>
+    <li><span>updated_at</span><strong>{{ detail.updated_at }}</strong></li>
+  </ul>
+  <p><strong>prompt</strong></p>
+  <pre class="code-block">{{ detail.prompt }}</pre>
+  <p><strong>roles</strong> {{ detail.roles | join(', ') if detail.roles else '-' }}</p>
+  <p><strong>verifier_roles</strong> {{ detail.verifier_roles | join(', ') if detail.verifier_roles else '-' }}</p>
+  <p><strong>phase1_candidate_roles</strong> {{ detail.phase1_candidate_roles | join(', ') if detail.phase1_candidate_roles else '-' }}</p>
+</section>
+
+<section class="panel">
+  <h2>Telegram Parity Snapshot</h2>
+  <pre class="code-block">{{ detail.reference_lines | join('\n') }}</pre>
+</section>
+{% endblock %}

@@ -92,12 +92,13 @@ Success for Phase 1 means:
 
 ### 5.1 App Entry
 - `scripts/dashboard/control_dashboard.py`
-  - FastAPI app entrypoint
+  - read-only HTTP app entrypoint
   - route registration
   - template setup
   - runtime path wiring
   - validates loopback-only bind in Phase 1
   - resolves `control_root` / `team_dir`
+  - current Phase 1 implementation uses `http.server.ThreadingHTTPServer`
 
 ### 5.2 State Adapter Layer
 - `scripts/dashboard/control_dashboard_state.py`
@@ -128,8 +129,6 @@ Success for Phase 1 means:
 - `templates/dashboard/offdesk.html`
 - `templates/dashboard/tasks.html`
 - `templates/dashboard/task_detail.html`
-- `templates/dashboard/_cards.html`
-- `templates/dashboard/_task_rows.html`
 
 ### 5.5 Static
 - `static/dashboard/dashboard.css`

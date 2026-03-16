@@ -139,6 +139,14 @@ def _phase2_shape_roles(task: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     return exec_roles, review_roles
 
 
+def task_phase2_shape_snapshot(task: Dict[str, Any]) -> Dict[str, List[str]]:
+    exec_roles, review_roles = _phase2_shape_roles(task)
+    return {
+        "execution_roles": list(exec_roles),
+        "review_roles": list(review_roles),
+    }
+
+
 def derive_role_execution_snapshot(
     requested_roles: Iterable[str],
     executed_roles: Iterable[str],
@@ -250,6 +258,62 @@ def derive_backend_snapshot(request_data: Dict[str, Any]) -> Dict[str, Any]:
         "backend_verdict": verdict,
         "backend_contract": contract,
         "backend_contract_note": note[:240],
+    }
+
+
+def task_lane_summary_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    lane_states = task.get("lane_states") if isinstance(task.get("lane_states"), dict) else {}
+    lane_summary = lane_states.get("summary") if isinstance(lane_states.get("summary"), dict) else {}
+    execution = lane_summary.get("execution") if isinstance(lane_summary.get("execution"), dict) else {}
+    review = lane_summary.get("review") if isinstance(lane_summary.get("review"), dict) else {}
+    review_verdicts = lane_summary.get("review_verdicts") if isinstance(lane_summary.get("review_verdicts"), dict) else {}
+
+    plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
+    execution_lanes = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else []
+    review_lanes = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else []
+
+    return {
+        "execution_lane_count": len(execution_lanes),
+        "review_lane_count": len(review_lanes),
+        "execution": dict(execution),
+        "review": dict(review),
+        "review_verdicts": dict(review_verdicts),
+    }
+
+
+def task_monitor_row_snapshot(
+    task: Dict[str, Any],
+    request_id: str,
+    *,
+    normalize_task_status: Callable[[Any], str],
+    task_display_label: Callable[[Dict[str, Any], str], str],
+) -> Dict[str, Any]:
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    shape = task_phase2_shape_snapshot(task)
+    lane = task_lane_summary_snapshot(task)
+    return {
+        "request_id": str(request_id or "").strip(),
+        "label": task_display_label(task, str(request_id or "").strip()),
+        "status": normalize_task_status(task.get("status", "pending")),
+        "stage": str(task.get("stage", "pending")).strip().lower() or "pending",
+        "tf_phase": normalize_tf_phase(derive_tf_phase(task), "queued"),
+        "updated_at": str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
+        "phase1_role_preset": str(task.get("phase1_role_preset", "")).strip(),
+        "phase2_team_preset": str(task.get("phase2_team_preset", "")).strip(),
+        "phase2_execution_roles": shape["execution_roles"],
+        "phase2_review_roles": shape["review_roles"],
+        "execution_lane_count": int(lane.get("execution_lane_count", 0) or 0),
+        "review_lane_count": int(lane.get("review_lane_count", 0) or 0),
+        "execution_summary": dict(lane.get("execution") or {}),
+        "review_summary": dict(lane.get("review") or {}),
+        "review_verdicts": dict(lane.get("review_verdicts") or {}),
+        "backend": str(task.get("backend", "") or result.get("backend", "")).strip(),
+        "backend_profile": str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
+        "backend_verdict": str(task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip(),
+        "backend_contract": str(task.get("backend_contract", "") or result.get("backend_contract", "")).strip(),
+        "backend_contract_note": str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
     }
 
 
