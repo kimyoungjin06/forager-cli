@@ -1,12 +1,12 @@
 # CONSTITUTION
 
 ## 0. Status
-- Version: `v1.0.3`
+- Version: `v1.0.4`
 - Ratified: `2026-02-26`
-- Last amended: `2026-03-03`
+- Last amended: `2026-03-16`
 - This document is the highest-level product and operating constitution for `aoe_orch_control`.
 - Priority order: `CONSTITUTION` > `PROJECT_CHARTER` > `RUNBOOK` > implementation details.
-- Scope: 이 문서는 "Mother-Orch(컨트롤 플레인)"와 "Project Orch(프로젝트 단위 오케스트레이터)"를 포함한 전체 운영체계를 규정한다.
+- Scope: 이 문서는 `Control Plane`, `Project Runtime`, `Task Team`을 포함한 전체 운영체계를 규정한다.
 
 ## 1. Mission
 - 목표는 `로컬 멀티에이전트 운영 자동화`와 `원격 운영 제어`를 하나의 일관된 시스템으로 구현하는 것이다.
@@ -14,7 +14,7 @@
 
 ## 2. Core Principles (Immutable)
 - `Task-first`: 모든 실행 단위는 태스크 기준으로 정의하고 추적한다.
-- `TF isolation`: 실행 컨텍스트는 TF 단위로 격리하고 완료 시 반출/종료한다.
+- `Task Team isolation`: 실행 컨텍스트는 Task Team 단위로 격리하고 완료 시 반출/종료한다.
 - `Human-readable state`: 식별자는 사람 친화적 별칭(`O1`, `T-###`, role label)으로 우선 노출한다.
 - `Operator-minimal`: 운영자는 상위 오케스트레이터와만 상호작용하고 세부 fan-out은 자동화한다.
 - `Remote parity`: 로컬에서 가능한 핵심 제어/모니터링은 Telegram에서도 동등하게 가능해야 한다.
@@ -23,27 +23,27 @@
 - `Ephemeral vs Canonical`: 에이전트 간 잡담/중간 메모는 에페메럴 로그(예: room)로 분리하고, 장기 맥락은 TF `report.md`/registry 같은 canonical evidence로만 남긴다.
 
 ## 3. System Model
-- `Mother-Orch` (control plane):
-  - 다수 프로젝트 Orch를 관리하는 상위 스케줄러/감독자.
+- `Control Plane`:
+  - 다수 `Project Runtime`을 관리하는 상위 스케줄러/감독자.
   - 큐 선택, 우선순위 변경, 승인, 재시도 정책, 보고 정책을 관리.
-- `Project Orch` (project unit):
+- `Project Runtime`:
   - 하나의 프로젝트 컨텍스트와 Todo backlog를 소유.
-  - 태스크별 TF 생성/종료, 결과 수합, 다음 Todo 진행.
-- `TF (Task Force)` (task unit):
+  - 태스크별 `Task Team` 생성/종료, 결과 수합, 다음 Todo 진행.
+- `Task Team`:
   - 태스크 전용 임시 팀.
   - Planner/Worker/Critic/Integrator 등 역할 세션으로 구성.
   - 완료 시 자동 종료하고 결과/증거만 상위로 귀속.
 - (Non-normative) Runtime mapping (현재 구현 기준, 변경 가능):
-  - Mother-Orch = `aoe-team-stack`/tmux 스택(게이트웨이+워커+오퍼레이터 세션)
-  - Project Orch = Mother-Orch registry에 등록된 프로젝트 엔트리(`O1..`)
-  - TF = 프로젝트별 태스크(`T-###`)를 수행하기 위해 생성되는 임시 세션/프로세스 묶음
+  - `Control Plane` = `aoe-team-stack`/tmux 스택(게이트웨이+워커+오퍼레이터 세션)
+  - `Project Runtime` = Control Plane registry에 등록된 프로젝트 엔트리(`O1..`)
+  - `Task Team` = 프로젝트별 태스크(`T-###`)를 수행하기 위해 생성되는 임시 세션/프로세스 묶음
 
 ## 4. Required Execution Lifecycle
-- `Todo selected` -> `TF provisioned` -> `plan` -> `execute` -> `critic` -> `integrate` -> `close`.
-- Critic이 목표 미달 판정을 내리면 TF는 종료하지 않고 재실행 루프로 진입한다.
-- 기본 재실행 정책은 3회이며, Critic이 상향 에스컬레이션을 요청하면 Orch 또는 Mother-Orch가 개입한다.
+- `Todo selected` -> `Task Team provisioned` -> `plan` -> `execute` -> `critic` -> `integrate` -> `close`.
+- Critic이 목표 미달 판정을 내리면 `Task Team`은 종료하지 않고 재실행 루프로 진입한다.
+- 기본 재실행 정책은 3회이며, Critic이 상향 에스컬레이션을 요청하면 `Project Runtime` 또는 `Control Plane`이 개입한다.
 - 태스크 완료 후에만 다음 Todo를 자동 시작한다.
-- TF 종결 판정(verdict)은 최소 3종을 갖는다:
+- `Task Team` 종결 판정(verdict)은 최소 3종을 갖는다:
   - `success`: 목표 충족(완료)
   - `retry`: 목표 미달(재실행 필요)
   - `fail`: 운영자 개입이 필요한 실패(에스컬레이션)
@@ -62,7 +62,7 @@
 ## 6. Remote Control Contract (Telegram)
 - Telegram은 단순 알림 채널이 아니라 원격 운영 콘솔이다.
 - 최소 제공 기능:
-  - Orch/TF 상태 조회, 실행/중단/재시도/재계획, 승인/거부, 우선순위 조정, 큐 진행 확인.
+  - `Project Runtime` / `Task Team` 상태 조회, 실행/중단/재시도/재계획, 승인/거부, 우선순위 조정, 큐 진행 확인.
   - 예외/실패 입력에 대한 복구 경로(`/replay` 계열) 제공.
 - 보고는 이벤트 기반이 기본이며 정책에 따라 요약 레벨 변경 가능해야 한다.
 - 원격 제어는 혼동 방지를 위해 slash-first(예: `/status`)를 기본 UX로 삼되, 운영 편의상 평문 입력 라우팅도 지원한다.
@@ -99,7 +99,7 @@
 ## 10. Amendment History
 - `v1.0.0` (2026-02-26):
   - 최초 헌법 제정.
-  - 멀티에이전트 전환 UX, TF 단위 운영, Mother-Orch/Telegram 원격 제어, 안전/거버넌스 원칙을 상위 규범으로 고정.
+  - 멀티에이전트 전환 UX, `Task Team` 단위 운영, `Control Plane`/Telegram 원격 제어, 안전/거버넌스 원칙을 상위 규범으로 고정.
 - `v1.0.1` (2026-02-27):
   - 변경 이유: 용어(Orch/TF/tmux) 해석이 혼동될 여지가 있어 문서 가독성과 정의를 강화.
   - 기대 효과/트레이드오프: 운영/설계 논의가 빨라짐. 대신 "현재 구현 기준" 매핑은 향후 변경 시 갱신 필요.
@@ -112,3 +112,7 @@
   - 변경 이유: TF verdict `success`가 "형식/스모크 통과"로 오해되어, 파이프라인 통과(proof) 수준의 목표 달성 여부가 혼동될 수 있음.
   - 기대 효과/트레이드오프: 목표(DoD) 기반 success 판정 원칙을 명확히 해 false success를 줄임. 대신 proof 목표는 더 많은 evidence 요구로 실행 비용이 증가할 수 있음.
   - 검증 방법: proof 목표 예시(TwinPaper Module02 contract-ci + phase1-dedup 산출물 확인)를 수행했을 때, evidence가 없으면 retry/fail로 떨어지고 evidence가 있으면 success로 판정되는지 확인.
+- `v1.0.4` (2026-03-16):
+  - 변경 이유: `Mother-Orch` / `Orch` / `TF` 용어가 역사적 흔적 중심이라, 운영 모델과 대시보드 설계의 계층이 문서에서 충분히 드러나지 않음.
+  - 기대 효과/트레이드오프: `Control Plane` / `Project Runtime` / `Task Team` 기준으로 계층과 책임이 더 선명해짐. 대신 legacy 용어가 남아 있는 코드/로그와의 과도기적 이중 표기를 감수해야 함.
+  - 검증 방법: README, RUNBOOK, PROJECT_CHARTER, OPERATING_MODEL에서 같은 계층 용어가 일관되게 쓰이고 operator-facing 설명이 더 직접적으로 읽히는지 확인.

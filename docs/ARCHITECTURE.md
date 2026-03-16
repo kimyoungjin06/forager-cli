@@ -7,7 +7,7 @@
 The system has two planes:
 
 - control plane: Telegram + `aoe-team-stack` + tmux operator surface
-- execution plane: Orchestrator/worker sessions, TF workdirs, runtime queue/task state
+- execution plane: orchestrator/worker sessions, Task Team workdirs, runtime queue/task state
 
 The core design goal is:
 
@@ -218,10 +218,10 @@ This layer covers:
 - `/orch ...`
 - `/todo ...`
 
-### 5.5 Mother-Orch Action API
+### 5.5 Control Action API
 
 Before Telegram/CLI/plaintext requests are turned into concrete commands,
-Mother-Orch should reason in a normalized action seam:
+the `Control Plane` should reason in a normalized action seam:
 
 - `scripts/gateway/aoe_tg_orch_actions.py`
 - `docs/MOTHER_ORCH_ACTION_API.md`
@@ -267,19 +267,19 @@ Recent refactoring introduced explicit domain modules. These are the intended st
 
 ## 7. Execution Model
 
-### 7.1 Mother-Orch
+### 7.1 Control Plane
 
 The tmux stack is the operator runtime for the control plane.
 
 Core sessions:
 
 - gateway session
-- request-scoped TF worker sessions
+- request-scoped Task Team worker sessions
 - optional operator/overview surfaces
 
-### 7.2 Request-scoped TF execution
+### 7.2 Request-scoped Task Team execution
 
-TF execution is request-scoped, not permanent-role-scoped.
+Task Team execution is request-scoped, not permanent-role-scoped.
 
 Key runtime artifacts:
 

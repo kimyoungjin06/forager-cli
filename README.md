@@ -8,7 +8,7 @@ Telegram-controlled orchestration workspace for multi-project AOE operations.
 - This repository adds a Telegram control plane, runtime queue/proposal handling, offdesk automation, and tmux-oriented operator workflow.
 
 ## What This Repository Is
-- A `Python + shell/tmux` control plane for orchestrating project-level Orch sessions.
+- A `Python + shell/tmux` control plane for orchestrating project runtimes.
 - A runtime queue/task system with `todo`, `proposal`, `sync`, `salvage`, and `syncback` flows.
 - An operator-first workflow for:
   - `on-desk`: tmux/session switching and local orchestration
@@ -42,7 +42,7 @@ Project charter:
 Primary docs:
 - Architecture: `docs/ARCHITECTURE.md`
 - Operating model: `docs/OPERATING_MODEL.md`
-- Mother-Orch Action API: `docs/MOTHER_ORCH_ACTION_API.md`
+- Control Action API: `docs/MOTHER_ORCH_ACTION_API.md`
 - Command reference: `docs/COMMANDS.md`
 - Deployment: `docs/DEPLOYMENT.md`
 - Runbook: `docs/RUNBOOK.md`
