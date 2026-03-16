@@ -317,6 +317,8 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "label": label,
         "status": status,
         "tf_phase": tf_phase,
+        "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
+        "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "execution_lane_count": len(execution_lanes),
         "review_lane_count": len(review_lanes),
         "execution_summary": dict(exec_summary),
@@ -793,6 +795,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     if int(proposal_triage.get("open_count", 0) or 0) > 0:
         lines.append(f"  proposal_top: {proposal_triage.get('top_summary', '-')}")
     if latest_task:
+        phase1_role_preset = str(latest_task.get("phase1_role_preset", "")).strip()
+        phase2_team_preset = str(latest_task.get("phase2_team_preset", "")).strip()
         lane_parts = [f"lanes E{int(latest_task.get('execution_lane_count', 0) or 0)}/R{int(latest_task.get('review_lane_count', 0) or 0)}"]
         exec_summary_disp = _compact_counter_summary(latest_task.get("execution_summary"))
         review_summary_disp = _compact_counter_summary(latest_task.get("review_summary"))
@@ -806,6 +810,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append(
             f"  active_task: {latest_task.get('label', '-')} | {latest_task.get('status', '-')}/{latest_task.get('tf_phase', '-')}"
         )
+        if phase1_role_preset or phase2_team_preset:
+            lines.append(
+                "  active_task_preset: phase1={phase1} phase2={phase2}".format(
+                    phase1=phase1_role_preset or "-",
+                    phase2=phase2_team_preset or phase1_role_preset or "-",
+                )
+            )
         if latest_task.get("requested_roles") or latest_task.get("executed_roles"):
             lines.append(
                 "  active_task_roles: requested={requested} | executed={executed}".format(
@@ -903,6 +914,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "active_task_label": str(latest_task.get("label", "")).strip(),
         "active_task_tf_phase": str(latest_task.get("tf_phase", "")).strip(),
         "active_task_status": str(latest_task.get("status", "")).strip(),
+        "active_task_phase1_role_preset": str(latest_task.get("phase1_role_preset", "")).strip(),
+        "active_task_phase2_team_preset": str(latest_task.get("phase2_team_preset", "")).strip(),
         "active_task_degraded_by": list(degraded_by),
         "active_task_rate_limit": dict(active_rate_limit),
         "bootstrap_recommended": bootstrap_recommended,
