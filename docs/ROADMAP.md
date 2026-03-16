@@ -108,6 +108,11 @@
     - dashboard 전용 business logic
 - [ ] read-only MVP 구현
   - 기술 방향: `FastAPI + Jinja/HTMX`
+  - 선행 조건:
+    - side-effect-free state adapter
+    - structured DTO assembly
+    - canonical request-id task route
+    - loopback-only bind
   - 우선 노출:
     - provider capacity
     - offdesk readiness

@@ -56,10 +56,11 @@ Success for Phase 1 means:
 ### 4.3 Stable Route Identity
 - `task_short_id` is treated as project-scoped, not globally unique.
 - Phase 1 canonical task detail route:
-  - `GET /control/{project_alias}/tasks/{task_short_id}`
-- Optional canonical fallback route:
   - `GET /control/tasks/by-request/{request_id}`
-- `GET /control/tasks/{task_short_id}` must not be the only canonical route.
+- Convenience route:
+  - `GET /control/{project_alias}/tasks/{task_short_id}`
+  - this route may redirect to the canonical `request_id` route after lookup
+- `project_alias + task_short_id` is operator-friendly, but not the immutable canonical key.
 
 ### 4.4 Security Boundary
 - Phase 1 is loopback-only.
@@ -67,6 +68,7 @@ Success for Phase 1 means:
   - host binds to `127.0.0.1`
   - no public listen by default
   - no reverse-proxy/public deployment guidance in Phase 1
+- non-loopback bind should fail fast in Phase 1
 - Read-only does not mean low-sensitivity; runtime state remains operator-sensitive.
 
 ### 4.5 Snapshot Consistency
@@ -78,6 +80,14 @@ Success for Phase 1 means:
   - use last-known-good snapshot when available
   - render a stale/fallback note instead of failing the page
 
+### 4.6 Control Root Assumption
+- The dashboard is a board for one `Control Plane`, not one project.
+- Phase 1 runtime source must be rooted at the control repo/runtime root.
+- Canonical launch inputs:
+  - `--control-root`
+  - or `--team-dir`
+- `--project-root` must not be the canonical top-level input for the dashboard.
+
 ## 5. Proposed File Layout
 
 ### 5.1 App Entry
@@ -86,6 +96,8 @@ Success for Phase 1 means:
   - route registration
   - template setup
   - runtime path wiring
+  - validates loopback-only bind in Phase 1
+  - resolves `control_root` / `team_dir`
 
 ### 5.2 State Adapter Layer
 - `scripts/dashboard/control_dashboard_state.py`
@@ -99,6 +111,8 @@ Success for Phase 1 means:
     - `snapshot_taken_at`
     - file freshness metadata
     - dashboard DTOs only
+  - must be pure read only
+  - must not initialize, migrate, or mutate runtime files
 
 ### 5.3 View Layer
 - `scripts/dashboard/control_dashboard_views.py`
@@ -140,14 +154,14 @@ Success for Phase 1 means:
   - web version of `/monitor`
 
 ### 6.4 Task Detail
-- `GET /control/{project_alias}/tasks/{task_short_id}`
-- Purpose:
-  - web version of `/task T-###`
-
-### 6.5 Canonical Request Route
 - `GET /control/tasks/by-request/{request_id}`
 - Purpose:
-  - stable deep link for logs, evidence, and future cross-runtime references
+  - stable web version of `/task`
+
+### 6.5 Convenience Task Route
+- `GET /control/{project_alias}/tasks/{task_short_id}`
+- Purpose:
+  - operator-friendly shortcut that resolves to the canonical `request_id` route
 
 ### 6.6 Health
 - `GET /control/health`
@@ -187,15 +201,70 @@ Success for Phase 1 means:
 - Reuse:
   - `load_manager_state(...)`
     - `scripts/gateway/aoe-telegram-gateway.py`
-  - only if import cost is acceptable and the import path is side-effect-free
+  - only if import cost is acceptable and the import path is proven side-effect-free
 - preferred fallback:
   - extract a side-effect-free runtime loader helper and share it between gateway and dashboard
-- not allowed fallback:
+- forbidden fallback:
+  - using a loader that mutates runtime state during page read
   - duplicating manager state interpretation in a second hand-written loader
 
-## 8. Read-Only View Models
+## 8. Source Mapping Contract
 
 ### 8.1 ControlSummaryDTO
+- `auto_mode`
+  - source: `auto_scheduler.json`
+- `offdesk_mode`
+  - source: `auto_scheduler.json` and/or offdesk state helpers
+- `provider_capacity_summary`
+  - source: `provider_capacity.json` via offdesk/provider helpers
+- `next_retry_at`
+  - source: `provider_capacity.json`
+- `next_retry_target`
+  - source: `provider_capacity.json`
+- `repeat_memory_summary`
+  - source: `provider_capacity.json`
+- `active_runtime_count`
+  - source: `orch_manager_state.json`
+- `attention_runtime_cards`
+  - source: manager state + offdesk helper assembly
+
+### 8.2 RuntimeCardDTO
+- `project_alias`, `project_label`
+  - source: manager state registry
+- `readiness`, `sync_quality`, `proposal_pressure`
+  - source: offdesk helper assembly
+- `active_task_label`, `active_task_phase`, `active_task_preset`, `active_task_phase2_shape`
+  - source: project active task entry + task state helpers
+- `first_action_text`, `next_focus_text`
+  - source: offdesk priority/preset helpers
+- `provider_pressure`, `provider_repeat_count`
+  - source: provider capacity state + queue/offdesk helpers
+
+### 8.3 ActiveTaskRowDTO
+- `task_short_id`, `request_id`, `project_alias`, `status`, `tf_phase`
+  - source: task state / manager state
+- `preset`, `phase2_shape`, `backend_summary`, `lane_summary`
+  - source: task state helpers
+- `primary_link`
+  - source: canonical request-id route assembly
+
+### 8.4 TaskDetailDTO
+- core identity/state fields
+  - source: task record
+- `phase1_progress`, `phase1_providers`, `phase1_candidate_roles`
+  - source: task record
+- `phase2_shape`, `phase2_quality`, `phase2_evidence`
+  - source: task record + task view/task state helpers
+- `lane_states`, `rerun_targets`, `manual_followup_targets`
+  - source: task record + task state helpers
+- `backend_summary`, `backend_contract_note`
+  - source: task backend snapshot
+- `provider_capacity_note`
+  - source: provider capacity state joined by request/task/project linkage
+
+## 9. Read-Only View Models
+
+### 9.1 ControlSummaryDTO
 - `snapshot_taken_at`
 - `state_freshness`
 - `auto_mode`
@@ -207,7 +276,7 @@ Success for Phase 1 means:
 - `active_runtime_count`
 - `attention_runtime_cards`
 
-### 8.2 RuntimeCardDTO
+### 9.2 RuntimeCardDTO
 - `project_alias`
 - `project_label`
 - `readiness`
@@ -222,7 +291,7 @@ Success for Phase 1 means:
 - `provider_pressure`
 - `provider_repeat_count`
 
-### 8.3 ActiveTaskRowDTO
+### 9.3 ActiveTaskRowDTO
 - `task_short_id`
 - `request_id`
 - `project_alias`
@@ -234,7 +303,7 @@ Success for Phase 1 means:
 - `lane_summary`
 - `primary_link`
 
-### 8.4 TaskDetailDTO
+### 9.4 TaskDetailDTO
 - `snapshot_taken_at`
 - `task_short_id`
 - `request_id`
@@ -255,9 +324,9 @@ Success for Phase 1 means:
 - `backend_contract_note`
 - `provider_capacity_note`
 
-## 9. Rendering Rules
+## 10. Rendering Rules
 
-### 9.1 Density
+### 10.1 Density
 - Prefer compact operator tables/cards.
 - Avoid decorative UI.
 - Emphasize:
@@ -265,13 +334,13 @@ Success for Phase 1 means:
   - `what is active`
   - `what should be looked at next`
 
-### 9.2 Color Semantics
+### 10.2 Color Semantics
 - neutral: informational runtime state
 - yellow: warning / degraded / parked / waiting
 - red: blocked / critical / repeated capacity issue
 - green: ready / healthy / completed
 
-### 9.3 Refresh
+### 10.3 Refresh
 - Phase 1 default:
   - manual reload
   - optional HTMX poll every 15-30 seconds for:
@@ -280,7 +349,22 @@ Success for Phase 1 means:
 - no websocket requirement
 - initial implementation may ship with manual reload only; polling is optional
 
-## 10. Snapshot and Freshness Policy
+### 10.4 List Caps and Sorting
+- `/control/tasks`
+  - default sort:
+    - active/running first
+    - then warning/degraded
+    - then newest updated
+  - default cap: `50`
+- `Overview` attention cards
+  - default cap: `12`
+  - sort by existing offdesk/priority semantics
+- `Offdesk Prep` runtime cards
+  - default cap: `20` before explicit expansion
+  - sort by readiness severity, then provider pressure, then first-action urgency
+- list caps should be explicit in the adapter/view layer, not hidden in templates
+
+## 11. Snapshot and Freshness Policy
 - Every page render should record `snapshot_taken_at`.
 - When possible, expose freshness for:
   - manager state
@@ -291,7 +375,7 @@ Success for Phase 1 means:
   - mark stale sections explicitly
   - avoid mixing healthy styling with stale data
 
-## 11. Error Handling
+## 12. Error Handling
 - Missing state files should render a partial board, not 500 the whole page.
 - If `provider_capacity.json` is absent:
   - show `provider capacity: unavailable`
@@ -300,35 +384,36 @@ Success for Phase 1 means:
 - If gateway state schema drifts:
   - show raw fallback section only in development mode
 
-## 12. Security and Binding
+## 13. Security and Binding
 
 ### 12.1 Binding
 - Phase 1 must bind to `127.0.0.1` only by default.
 - Any non-loopback bind must be treated as out of scope for Phase 1.
+- Passing `0.0.0.0` or a non-loopback host should hard-fail at startup.
 
 ### 12.2 Exposure
 - No auth scheme is added in Phase 1 because the board is local-only.
 - If public exposure is needed later, it must be treated as a new phase with explicit auth and deployment design.
 
-## 13. Bootstrap and Run
+## 14. Bootstrap and Run
 
-### 13.1 Launch
+### 14.1 Launch
 - Local command candidate:
 ```bash
-python3 scripts/dashboard/control_dashboard.py --project-root /path/to/project --host 127.0.0.1 --port 8765
+python3 scripts/dashboard/control_dashboard.py --control-root /path/to/control/repo --host 127.0.0.1 --port 8765
 ```
 
-### 13.2 Runtime Paths
+### 14.2 Runtime Paths
 - default source:
-  - same `project_root/.aoe-team`
+  - same `control_root/.aoe-team`
 - no separate dashboard state dir
 
-## 14. Acceptance Criteria
+## 15. Acceptance Criteria
 
-### 14.1 Overview
+### 15.1 Overview
 - Can show provider capacity, next retry, repeat summary, and top attention runtimes.
 
-### 14.2 Offdesk
+### 15.2 Offdesk
 - Can show readiness cards with:
   - sync quality
   - active preset
@@ -336,14 +421,14 @@ python3 scripts/dashboard/control_dashboard.py --project-root /path/to/project -
   - first action
   - next focus
 
-### 14.3 Tasks
+### 15.3 Tasks
 - Can show active tasks with:
   - phase
   - preset
   - backend contract summary
   - lane summary
 
-### 14.4 Task Detail
+### 15.4 Task Detail
 - Can show the same core information currently visible in `/task` without dropping:
   - preset
   - quality contract
@@ -351,13 +436,14 @@ python3 scripts/dashboard/control_dashboard.py --project-root /path/to/project -
   - rerun/followup targets
   - backend contract
 
-## 15. Test Contract
+## 16. Test Contract
 
 ### 15.1 Route Smoke
 - HTML smoke tests for:
   - `/control`
   - `/control/offdesk`
   - `/control/tasks`
+  - `/control/tasks/by-request/{request_id}`
   - `/control/{project_alias}/tasks/{task_short_id}`
 
 ### 15.2 Parity Checks
@@ -365,6 +451,7 @@ python3 scripts/dashboard/control_dashboard.py --project-root /path/to/project -
 - `Active Tasks` retains the same critical fields visible in `/monitor`
 - `Task Detail` retains the same critical fields visible in `/task`
 - `Offdesk Prep` retains the same critical fields visible in `/offdesk prepare`
+- convenience route resolves to the same canonical task detail as the request-id route
 
 ### 15.3 Failure Cases
 - missing `provider_capacity.json`
@@ -376,17 +463,18 @@ python3 scripts/dashboard/control_dashboard.py --project-root /path/to/project -
 - tests should assert `snapshot_taken_at` is rendered
 - tests should assert stale sections are marked when one runtime file is unavailable
 
-## 16. Build Order
+## 17. Build Order
 1. app shell + route registration
-2. side-effect-free state adapter for runtime files
-3. DTO assembly layer
-4. overview page
-5. offdesk page
-6. active task page
-7. task detail page
-8. HTMX partial refresh polish if needed
+2. loopback-only launch guard + control-root wiring
+3. side-effect-free state adapter for runtime files
+4. DTO assembly layer
+5. overview page
+6. offdesk page
+7. active task page
+8. task detail page
+9. HTMX partial refresh polish if needed
 
-## 17. Immediate Follow-up After Phase 1
+## 18. Immediate Follow-up After Phase 1
 - Add action buttons that call existing handlers:
   - `auto on/off`
   - `auto recover`
