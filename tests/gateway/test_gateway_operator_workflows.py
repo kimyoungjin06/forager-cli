@@ -2564,6 +2564,194 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     assert any(evt.get("event") == "dispatch_detached" for evt in logged)
 
 
+@pytest.mark.parametrize(
+    ("alias", "display_name", "prompt", "available_roles", "expected_roles", "expected_preset"),
+    [
+        (
+            "O2",
+            "BuildProject",
+            "로그인 버그를 수정하고 회귀 리스크도 같이 검토해줘.",
+            ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+            ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+            "build",
+        ),
+        (
+            "O3",
+            "DataProject",
+            "CSV 적재 흐름의 null/스키마 문제를 점검하고 정리해줘.",
+            ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
+            ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
+            "data",
+        ),
+        (
+            "O4",
+            "ReviewProject",
+            "현재 변경사항을 검토하고 각각 교차검증해서 리스크를 짚어줘.",
+            ["Codex-Reviewer", "Claude-Reviewer"],
+            ["Codex-Reviewer", "Claude-Reviewer"],
+            "review",
+        ),
+        (
+            "O5",
+            "MixedProject",
+            "로그인 수정안과 handoff 문서를 함께 준비하고 회귀 리스크도 검토해줘.",
+            ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "mixed",
+        ),
+    ],
+)
+def test_handle_run_or_unknown_command_no_wait_keeps_forced_dispatch_presets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alias: str,
+    display_name: str,
+    prompt: str,
+    available_roles: list[str],
+    expected_roles: list[str],
+    expected_preset: str,
+) -> None:
+    project_root = tmp_path / display_name
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            display_name.lower(): {
+                "name": display_name.lower(),
+                "display_name": display_name,
+                "project_alias": alias,
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "todos": [],
+            }
+        }
+    }
+    sent: list[tuple[str, str, dict | None]] = []
+
+    monkeypatch.setattr(run_handlers, "_start_background_dispatch_flow", lambda **kwargs: object())
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text=prompt,
+        rest=prompt,
+        orch_target=alias,
+        run_prompt=prompt,
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default-intent",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: None,
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda path, manager_state: None,
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=orch_roles.choose_auto_dispatch_roles,
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir, roles=available_roles: roles,
+            parse_roles_csv=lambda csv: [token.strip() for token in str(csv or "").split(",") if token.strip()],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                display_name.lower(),
+                manager_state["projects"][display_name.lower()],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: f"REQ-{alias}",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-16T10:05:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    entry = manager_state["projects"][display_name.lower()]
+    task = entry["tasks"][entry["last_request_id"]]
+    assert task["tf_phase"] == "planning"
+    assert task["roles"] == expected_roles
+    assert task["phase1_role_preset"] == expected_preset
+    assert task["phase2_team_preset"] == expected_preset
+    assert sent
+    context, body, markup = sent[-1]
+    assert context == "planning-accepted"
+    assert "/offdesk review " + alias in body
+    buttons = [btn["text"] for row in (markup or {}).get("keyboard", []) for btn in row]
+    assert "/offdesk review " + alias in buttons
+
+
 def test_filter_phase2_retry_scope_limits_plan_to_target_lanes() -> None:
     plan_data = {
         "summary": "ready",
