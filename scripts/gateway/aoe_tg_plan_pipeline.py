@@ -113,7 +113,12 @@ def resolve_dispatch_mode_and_roles(
 ) -> DispatchModeResult:
     explicit_roles = (run_roles_override if run_roles_override is not None else (project_roles_csv or "")).strip()
     auto_roles: List[str] = []
-    if auto_dispatch_enabled:
+    should_probe_auto_roles = bool(
+        auto_dispatch_enabled
+        or (run_force_mode == "dispatch" and not explicit_roles)
+        or (str(prompt or "").strip() and not explicit_roles)
+    )
+    if should_probe_auto_roles:
         try:
             auto_roles = choose_auto_dispatch_roles(prompt, available_roles=available_roles, team_dir=team_dir)
         except TypeError:
