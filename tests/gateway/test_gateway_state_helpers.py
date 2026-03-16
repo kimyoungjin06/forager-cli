@@ -1748,7 +1748,7 @@ def test_task_monitor_includes_lane_state_summary() -> None:
         task_display_label=gw.task_display_label,
         lifecycle_stages=gw.LIFECYCLE_STAGES,
     )
-    assert "lanes E1/R1 [exec running=1 | review waiting_on_dependencies=1]" in summary
+    assert "lanes E1/R1 [exec running=1 | review waiting_on_dependencies=1 | shape E:Codex-Dev R:Codex-Reviewer]" in summary
 
 
 def test_task_monitor_includes_review_verdict_summary() -> None:
@@ -1796,7 +1796,7 @@ def test_task_monitor_includes_review_verdict_summary() -> None:
         task_display_label=gw.task_display_label,
         lifecycle_stages=gw.LIFECYCLE_STAGES,
     )
-    assert "lanes E1/R1 [exec done=1 | review done=1 | review_verdict retry=1]" in summary
+    assert "lanes E1/R1 [exec done=1 | review done=1 | review_verdict retry=1 | shape E:Codex-Dev R:Codex-Reviewer]" in summary
 
 
 def test_task_monitor_includes_lane_rerun_and_followup_targets() -> None:
