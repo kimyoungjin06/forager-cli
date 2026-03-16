@@ -442,6 +442,32 @@ def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
     assert execution_plan["review_mode"] == "parallel"
 
 
+def test_phase2_mixed_preset_keeps_work_roles_out_of_reviewer_drift() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed execution",
+            "subtasks": [
+                {"id": "S1", "title": "Do work", "goal": "fix and document", "owner_role": "Codex-Reviewer", "acceptance": ["done"]},
+            ],
+        },
+        user_prompt="로그인 수정안과 handoff 문서를 함께 준비하고 회귀 리스크도 검토해줘.",
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    execution_roles = [row["role"] for row in spec["execution_groups"]]
+    review_roles = [row["role"] for row in spec["review_groups"]]
+
+    assert execution_roles == ["Codex-Dev", "Codex-Writer", "Claude-Writer"]
+    assert review_roles == ["Codex-Reviewer", "Claude-Reviewer"]
+
+
 def test_build_planned_dispatch_prompt_includes_phase2_team_lanes() -> None:
     plan = gw.normalize_task_plan_payload(
         {

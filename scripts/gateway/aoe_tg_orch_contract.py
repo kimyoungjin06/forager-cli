@@ -45,6 +45,11 @@ PRESET_EXEC_ROLE_ORDER = {
 }
 
 
+def _is_review_role(role: str) -> bool:
+    token = str(role or "").strip().lower()
+    return any(key in token for key in ("review", "critic", "verif", "qa"))
+
+
 def _trim_text(raw: Any, limit: int) -> str:
     return str(raw or "").strip()[: max(0, int(limit or 0))]
 
@@ -475,10 +480,36 @@ def _apply_execution_preset(
     preset: str,
 ) -> List[Dict[str, Any]]:
     normalized_preset = _normalize_role_preset(preset)
-    if normalized_preset in {"general", "mixed"}:
+    if normalized_preset == "general":
         return rows
 
     preset_roles = _preset_execution_roles(normalized_preset, available_roles)
+    if normalized_preset == "mixed":
+        payloads = _plan_subtask_payloads(plan)
+        worklike_roles = [role for role in _dedupe_roles(available_roles, limit=16) if not _is_review_role(role)]
+        if not worklike_roles:
+            return rows
+
+        row_map = {
+            str(row.get("role", "")).strip(): dict(row)
+            for row in rows
+            if isinstance(row, dict) and str(row.get("role", "")).strip()
+        }
+        mixed_rows = [row_map[role] for role in worklike_roles if role in row_map]
+        if mixed_rows:
+            return mixed_rows
+
+        return [
+            {
+                "group_id": f"E{idx}",
+                "role": role,
+                "subtask_ids": [row["id"] for row in payloads],
+                "subtask_titles": [row["title"] for row in payloads],
+                "goals": [row["goal"] for row in payloads],
+            }
+            for idx, role in enumerate(worklike_roles, start=1)
+        ]
+
     if not preset_roles:
         return rows
 
