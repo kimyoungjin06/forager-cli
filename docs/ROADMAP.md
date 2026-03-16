@@ -95,7 +95,7 @@
   - 원칙: 문서/오퍼레이터 표기부터 바꾸고, 코드 identifier는 alias 호환을 유지하며 단계적으로 정리한다.
 
 ### 8.2 Control Dashboard MVP
-- [ ] 대시보드 MVP spec 문서화
+- [x] 대시보드 MVP spec 문서화
   - 화면:
     - `Overview`
     - `Offdesk Prep`
