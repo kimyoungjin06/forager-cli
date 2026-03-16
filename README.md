@@ -43,6 +43,7 @@ Primary docs:
 - Architecture: `docs/ARCHITECTURE.md`
 - Operating model: `docs/OPERATING_MODEL.md`
 - Control dashboard MVP: `docs/CONTROL_DASHBOARD_MVP.md`
+- Control dashboard read-only design: `docs/CONTROL_DASHBOARD_READONLY_DESIGN.md`
 - Control Action API: `docs/MOTHER_ORCH_ACTION_API.md`
 - Command reference: `docs/COMMANDS.md`
 - Deployment: `docs/DEPLOYMENT.md`

@@ -116,6 +116,20 @@
     - lane state
     - rerun/followup
     - backend contract
+- [x] read-only MVP 1단계 설계 문서화
+  - 라우트:
+    - `Overview`
+    - `Offdesk Prep`
+    - `Active Tasks`
+    - `Task Detail`
+  - 재사용 원칙:
+    - `aoe_tg_task_state.py`
+    - `aoe_tg_task_view.py`
+    - `aoe_tg_offdesk_flow.py`
+    - `aoe_tg_scheduler_control_handlers.py`
+  - 구현 범위:
+    - read-only only
+    - dashboard 전용 상태/정책 금지
 - [ ] action wiring 2차 구현
   - `auto on/off`
   - `recover`
