@@ -1257,6 +1257,10 @@ def summarize_task_monitor(
         added_roles = [str(x).strip() for x in (result.get("added_roles") or []) if str(x).strip()]
         degraded_by = [str(x).strip() for x in (result.get("degraded_by") or []) if str(x).strip()]
         rate_limit = task.get("rate_limit") if isinstance(task.get("rate_limit"), dict) else {}
+        backend = str(result.get("backend", "") or task.get("backend", "")).strip()
+        backend_profile = str(result.get("backend_profile", "") or task.get("backend_profile", "")).strip()
+        backend_verdict = str(result.get("backend_verdict", "") or task.get("backend_verdict", "")).strip()
+        backend_contract = str(result.get("backend_contract", "") or task.get("backend_contract", "")).strip()
         if exec_request_count or review_request_count or linked_request_count or bool(result.get("phase2_parallelized", False)):
             request_parts = [f"reqs E{exec_request_count}/R{review_request_count}"]
             if linked_request_count:
@@ -1264,6 +1268,15 @@ def summarize_task_monitor(
             if bool(result.get("phase2_parallelized", False)):
                 request_parts.append("parallel=yes")
             lane_parts.append(" ".join(request_parts))
+        if backend:
+            backend_parts = [backend]
+            if backend_profile:
+                backend_parts.append(backend_profile)
+            if backend_verdict:
+                backend_parts.append(backend_verdict)
+            if backend_contract:
+                backend_parts.append(backend_contract)
+            lane_parts.append("backend " + "/".join(backend_parts))
         if lane_parts:
             lane_text += " [" + " | ".join(lane_parts) + "]"
         if phase1_parts:
