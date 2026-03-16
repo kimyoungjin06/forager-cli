@@ -30,10 +30,18 @@ VERDICT_STATUSES = ("success", "retry", "fail", "intervention")
 VERDICT_ACTIONS = ("none", "retry", "replan", "escalate", "abort")
 TEAM_EXECUTION_MODES = ("single", "parallel")
 TEAM_REVIEW_MODES = ("skip", "single", "parallel")
+TEAM_ROLE_PRESETS = ("general", "review", "writer", "analysis", "build", "data", "mixed")
 COMPANION_ROLE_MAP = {
     "Codex-Reviewer": "Claude-Reviewer",
     "Codex-Writer": "Claude-Writer",
     "Codex-Analyst": "Claude-Analyst",
+}
+PRESET_EXEC_ROLE_ORDER = {
+    "review": ["Codex-Reviewer", "Claude-Reviewer"],
+    "writer": ["Codex-Writer", "Claude-Writer"],
+    "analysis": ["Codex-Analyst", "Claude-Analyst"],
+    "build": ["Codex-Dev"],
+    "data": ["DataEngineer"],
 }
 
 
@@ -73,6 +81,10 @@ def _normalize_choice(raw: Any, allowed: tuple[str, ...], default: str) -> str:
         if token == item.lower():
             return item
     return default
+
+
+def _normalize_role_preset(raw: Any, default: str = "general") -> str:
+    return _normalize_choice(raw, TEAM_ROLE_PRESETS, default)
 
 
 def normalize_tf_phase(raw: Any, default: str = "queued") -> str:
@@ -430,6 +442,67 @@ def _execution_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
+def _plan_subtask_payloads(plan: Dict[str, Any]) -> List[Dict[str, str]]:
+    rows = plan.get("subtasks")
+    if not isinstance(rows, list) or not rows:
+        rows = plan.get("assignments")
+    if not isinstance(rows, list):
+        rows = []
+    payloads: List[Dict[str, str]] = []
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            continue
+        sid = _trim_text(row.get("id", f"S{idx}"), 32) or f"S{idx}"
+        title = _trim_text(row.get("title", row.get("goal", sid)), 160) or sid
+        goal = _trim_text(row.get("goal", title), 240) or title
+        payloads.append({"id": sid, "title": title, "goal": goal})
+    if payloads:
+        return payloads
+    return [{"id": "S1", "title": "Execute task", "goal": "Execute the requested task with verifiable evidence."}]
+
+
+def _preset_execution_roles(preset: str, available_roles: List[str]) -> List[str]:
+    ordered = PRESET_EXEC_ROLE_ORDER.get(_normalize_role_preset(preset), [])
+    available = set(_dedupe_roles(available_roles, limit=16))
+    return [role for role in ordered if role in available]
+
+
+def _apply_execution_preset(
+    rows: List[Dict[str, Any]],
+    *,
+    plan: Dict[str, Any],
+    available_roles: List[str],
+    preset: str,
+) -> List[Dict[str, Any]]:
+    normalized_preset = _normalize_role_preset(preset)
+    if normalized_preset in {"general", "mixed"}:
+        return rows
+
+    preset_roles = _preset_execution_roles(normalized_preset, available_roles)
+    if not preset_roles:
+        return rows
+
+    row_map = {
+        str(row.get("role", "")).strip(): dict(row)
+        for row in rows
+        if isinstance(row, dict) and str(row.get("role", "")).strip()
+    }
+    ordered_matches = [row_map[role] for role in preset_roles if role in row_map]
+    if ordered_matches:
+        return ordered_matches
+
+    payloads = _plan_subtask_payloads(plan)
+    return [
+        {
+            "group_id": "E1",
+            "role": preset_roles[0],
+            "subtask_ids": [row["id"] for row in payloads],
+            "subtask_titles": [row["title"] for row in payloads],
+            "goals": [row["goal"] for row in payloads],
+        }
+    ]
+
+
 def _review_roles(
     *,
     roles: List[str],
@@ -503,8 +576,11 @@ def normalize_phase2_team_spec(
     plan_data = plan if isinstance(plan, dict) else {}
     default_exec_groups = _execution_groups_from_plan(plan_data)
     all_exec_roles = [str(row.get("role", "")).strip() for row in default_exec_groups if str(row.get("role", "")).strip()]
+    meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
+    phase2_team_preset = _normalize_role_preset(meta.get("phase2_team_preset"))
+    available_roles = _dedupe_roles((roles or []) + all_exec_roles, limit=16)
     review_roles = _review_roles(
-        roles=_dedupe_roles((roles or []) + all_exec_roles, limit=16),
+        roles=available_roles,
         verifier_roles=list(verifier_roles or []),
         require_verifier=require_verifier,
     )
@@ -514,6 +590,12 @@ def normalize_phase2_team_spec(
     exec_rows = data.get("execution_groups")
     if not isinstance(exec_rows, list) or not exec_rows:
         exec_rows = default_exec_groups
+    exec_rows = _apply_execution_preset(
+        list(exec_rows),
+        plan=plan_data,
+        available_roles=available_roles,
+        preset=phase2_team_preset,
+    )
 
     execution_groups: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
@@ -538,7 +620,7 @@ def normalize_phase2_team_spec(
         )
     execution_groups = _expand_execution_groups_with_companions(
         execution_groups,
-        available_roles=_dedupe_roles((roles or []) + all_exec_roles, limit=16),
+        available_roles=available_roles,
     )
     execution_mode = "parallel" if len(execution_groups) > 1 else "single"
 

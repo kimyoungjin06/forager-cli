@@ -409,6 +409,37 @@ def test_normalize_task_plan_payload_preserves_explicit_role_preset_overrides() 
     assert plan["meta"]["worker_roles"] == ["Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"]
     assert plan["meta"]["phase1_role_preset"] == "writer"
     assert plan["meta"]["phase2_team_preset"] == "writer"
+    spec = plan["meta"]["phase2_team_spec"]
+    execution_plan = plan["meta"]["phase2_execution_plan"]
+    assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Writer", "Claude-Writer"]
+    assert [row["role"] for row in spec["review_groups"]] == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert [row["role"] for row in execution_plan["execution_lanes"]] == ["Codex-Writer", "Claude-Writer"]
+
+
+def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "reporting",
+            "subtasks": [
+                {"id": "S1", "title": "Draft", "goal": "write report", "owner_role": "Codex-Reviewer", "acceptance": ["done"]},
+            ],
+        },
+        user_prompt="결과를 요약하고 보고서를 작성해라",
+        workers=["Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=3,
+        meta_overrides={
+            "worker_roles": ["Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "writer",
+            "phase2_team_preset": "writer",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    execution_plan = plan["meta"]["phase2_execution_plan"]
+    assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Writer", "Claude-Writer"]
+    assert [row["role"] for row in spec["review_groups"]] == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert [row["role"] for row in execution_plan["execution_lanes"]] == ["Codex-Writer", "Claude-Writer"]
+    assert execution_plan["review_mode"] == "parallel"
 
 
 def test_build_planned_dispatch_prompt_includes_phase2_team_lanes() -> None:
