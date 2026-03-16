@@ -2022,6 +2022,41 @@ def test_task_monitor_includes_review_verdict_summary() -> None:
     assert "lanes E1/R1 [exec done=1 | review done=1 | review_verdict retry=1 | shape E:Codex-Dev R:Codex-Reviewer]" in summary
 
 
+def test_task_monitor_includes_backend_contract_summary() -> None:
+    entry = {
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "prompt": "sandbox contract check",
+                "status": "running",
+                "stage": "integration",
+                "roles": ["Codex-Writer", "Codex-Reviewer"],
+                "result": {
+                    "backend": "autogen_core",
+                    "backend_profile": "sandbox",
+                    "backend_verdict": "fail",
+                    "backend_contract": "drift",
+                },
+                "updated_at": "2026-03-10T10:00:00+0900",
+                "created_at": "2026-03-10T09:00:00+0900",
+            }
+        },
+        "task_alias_index": {},
+        "task_seq": 0,
+    }
+
+    summary = task_state.summarize_task_monitor(
+        "Demo",
+        entry,
+        limit=5,
+        normalize_task_status=gw.normalize_task_status,
+        dedupe_roles=gw.dedupe_roles,
+        task_display_label=gw.task_display_label,
+        lifecycle_stages=gw.LIFECYCLE_STAGES,
+    )
+    assert "backend autogen_core/sandbox/fail/drift" in summary
+
+
 def test_task_monitor_includes_lane_rerun_and_followup_targets() -> None:
     entry = {
         "tasks": {
