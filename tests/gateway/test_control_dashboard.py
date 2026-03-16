@@ -271,3 +271,48 @@ def test_control_dashboard_state_resolves_alias_route_via_request_id(tmp_path: P
     )
 
     assert resolved == "REQ-1"
+
+
+def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    control_root.mkdir(parents=True, exist_ok=True)
+    custom_team_dir = tmp_path / "custom" / ".aoe-team"
+    custom_team_dir.mkdir(parents=True, exist_ok=True)
+    manager_state_file = custom_team_dir / "orch_manager_state.json"
+
+    paths = dashboard_state.resolve_control_paths(
+        control_root=control_root,
+        manager_state_file=manager_state_file,
+    )
+
+    assert paths.team_dir == custom_team_dir.resolve()
+    assert paths.manager_state_file == manager_state_file.resolve()
+    assert paths.auto_state_file == (custom_team_dir / "auto_scheduler.json").resolve()
+    assert paths.provider_capacity_file == (custom_team_dir / "provider_capacity.json").resolve()
+
+
+def test_dashboard_task_page_uses_single_manager_snapshot(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+
+    call_count = 0
+    original = dashboard_state._load_manager_state
+
+    def counting_loader(paths):
+        nonlocal call_count
+        call_count += 1
+        return original(paths)
+
+    monkeypatch.setattr(dashboard_state, "_load_manager_state", counting_loader)
+
+    snapshot, detail = dashboard_state.load_dashboard_task_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        request_id="REQ-1",
+    )
+
+    assert call_count == 1
+    assert snapshot.control_summary.active_runtime_count == 1
+    assert detail is not None
+    assert detail.request_id == "REQ-1"

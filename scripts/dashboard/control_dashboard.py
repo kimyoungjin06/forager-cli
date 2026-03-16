@@ -13,13 +13,18 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts" / "dashboard") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts" / "dashboard"))
 
-from control_dashboard_state import load_dashboard_snapshot, load_task_detail, resolve_task_request_for_alias_route
+from control_dashboard_state import (
+    load_dashboard_snapshot,
+    load_dashboard_task_page,
+    load_task_detail,
+    resolve_task_request_for_alias_route,
+)
 from control_dashboard_views import render_template
 
 
@@ -148,12 +153,7 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
         request_id = unquote(path[len(prefix) :]).strip()
         if not request_id:
             return _not_found("missing request id")
-        snapshot = load_dashboard_snapshot(
-            control_root=config.control_root,
-            team_dir=config.team_dir,
-            manager_state_file=config.manager_state_file,
-        )
-        detail = load_task_detail(
+        snapshot, detail = load_dashboard_task_page(
             control_root=config.control_root,
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
@@ -192,7 +192,7 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             if detail is None or detail.project_alias != project_alias.upper():
                 return _not_found(f"task not found: {project_alias}/{task_short_id}")
             request_id = detail.request_id
-        return _redirect(f"/control/tasks/by-request/{request_id}")
+        return _redirect(f"/control/tasks/by-request/{quote(request_id, safe='')}")
 
     return _not_found(f"unknown route: {path}")
 

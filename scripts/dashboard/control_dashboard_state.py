@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
 GW_DIR = ROOT / "scripts" / "gateway"
@@ -141,6 +142,12 @@ class DashboardSnapshotDTO:
 
 
 @dataclass(frozen=True)
+class DashboardSnapshotLoadResult:
+    snapshot: DashboardSnapshotDTO
+    manager_state: Dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ControlPaths:
     control_root: Path
     team_dir: Path
@@ -173,10 +180,15 @@ def resolve_control_paths(
     manager_state_file: Path | str | None = None,
 ) -> ControlPaths:
     root = Path(control_root).expanduser().resolve()
-    resolved_team_dir = Path(team_dir).expanduser().resolve() if team_dir else (root / ".aoe-team").resolve()
-    resolved_manager = (
-        Path(manager_state_file).expanduser().resolve() if manager_state_file else (resolved_team_dir / MANAGER_STATE_FILENAME)
-    )
+    resolved_manager = Path(manager_state_file).expanduser().resolve() if manager_state_file else None
+    if team_dir:
+        resolved_team_dir = Path(team_dir).expanduser().resolve()
+    elif resolved_manager is not None:
+        resolved_team_dir = resolved_manager.parent.resolve()
+    else:
+        resolved_team_dir = (root / ".aoe-team").resolve()
+    if resolved_manager is None:
+        resolved_manager = (resolved_team_dir / MANAGER_STATE_FILENAME).resolve()
     return ControlPaths(
         control_root=root,
         team_dir=resolved_team_dir,
@@ -439,7 +451,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 attention_summary=str(row.get("attention_summary", "-")).strip() or "-",
                 priority_action=str(row.get("priority_action", "")).strip() or "-",
                 priority_reason=str(row.get("priority_reason", "")).strip() or "-",
-                next_focus=offdesk_flow._preset_next_focus(phase1_preset, phase2_preset),
+                next_focus=offdesk_flow.preset_next_focus(phase1_preset, phase2_preset),
                 severity_score=int(row.get("severity_score", 0) or 0),
                 provider_pressure_score=int(row.get("capacity_pressure_score", 0) or 0),
                 provider_repeat_count=int(row.get("capacity_repeat_count", 0) or 0),
@@ -506,7 +518,7 @@ def _build_active_task_rows(manager_state: Dict[str, Any], *, cap: int = 60) -> 
                         str(snap.get("backend_contract", "")).strip(),
                     ),
                     updated_at=str(snap.get("updated_at", "")).strip(),
-                    detail_path=f"/control/tasks/by-request/{request_id}",
+                    detail_path=f"/control/tasks/by-request/{quote(str(request_id or '').strip(), safe='')}",
                 )
             )
     rows.sort(key=lambda row: (row.updated_at, row.project_alias, row.request_id), reverse=True)
@@ -600,6 +612,19 @@ def load_dashboard_snapshot(
     team_dir: Path | str | None = None,
     manager_state_file: Path | str | None = None,
 ) -> DashboardSnapshotDTO:
+    return load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    ).snapshot
+
+
+def load_dashboard_snapshot_result(
+    *,
+    control_root: Path | str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+) -> DashboardSnapshotLoadResult:
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     snapshot_taken_at = now_iso()
 
@@ -628,16 +653,19 @@ def load_dashboard_snapshot(
         snapshot_taken_at=snapshot_taken_at,
     )
 
-    return DashboardSnapshotDTO(
-        control_root=str(paths.control_root),
-        team_dir=str(paths.team_dir),
-        manager_state_file=str(paths.manager_state_file),
-        snapshot_taken_at=snapshot_taken_at,
-        source_files=[manager_loaded.freshness, auto_freshness, provider_freshness],
-        control_summary=summary,
-        runtime_cards=runtime_cards,
-        attention_runtime_cards=attention_cards,
-        active_task_rows=active_rows,
+    return DashboardSnapshotLoadResult(
+        snapshot=DashboardSnapshotDTO(
+            control_root=str(paths.control_root),
+            team_dir=str(paths.team_dir),
+            manager_state_file=str(paths.manager_state_file),
+            snapshot_taken_at=snapshot_taken_at,
+            source_files=[manager_loaded.freshness, auto_freshness, provider_freshness],
+            control_summary=summary,
+            runtime_cards=runtime_cards,
+            attention_runtime_cards=attention_cards,
+            active_task_rows=active_rows,
+        ),
+        manager_state=manager_loaded.state,
     )
 
 
@@ -651,3 +679,18 @@ def load_task_detail(
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     manager_loaded = _load_manager_state(paths)
     return _build_task_detail(manager_loaded.state, request_id)
+
+
+def load_dashboard_task_page(
+    *,
+    control_root: Path | str,
+    request_id: str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+) -> Tuple[DashboardSnapshotDTO, Optional[TaskDetailDTO]]:
+    loaded = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    return loaded.snapshot, _build_task_detail(loaded.manager_state, request_id)

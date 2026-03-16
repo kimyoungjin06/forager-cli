@@ -97,7 +97,7 @@ def _preset_operator_hint(phase1_preset: str, phase2_preset: str) -> str:
     return ""
 
 
-def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
+def preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
     preset = str(phase2_preset or phase1_preset or "").strip().lower()
     if preset == "writer":
         return "check draft completeness, artifacts, and handoff readiness"
@@ -112,6 +112,10 @@ def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
     if preset == "mixed":
         return "check work lanes first, then review handoff"
     return ""
+
+
+def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
+    return preset_next_focus(phase1_preset, phase2_preset)
 
 
 def _sync_counter_map(raw: Any) -> Dict[str, int]:
