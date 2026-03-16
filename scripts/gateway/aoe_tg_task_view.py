@@ -567,6 +567,22 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     added=", ".join(added_roles) if added_roles else "-",
                 )
             )
+        backend = str(result.get("backend", "")).strip()
+        if backend:
+            backend_parts = [backend]
+            profile = str(result.get("backend_profile", "")).strip()
+            if profile:
+                backend_parts.append(profile)
+            verdict = str(result.get("backend_verdict", "")).strip()
+            if verdict:
+                backend_parts.append("verdict=" + verdict)
+            contract = str(result.get("backend_contract", "")).strip()
+            if contract:
+                backend_parts.append("contract=" + contract)
+            lines.append("backend: " + " | ".join(backend_parts))
+            contract_note = str(result.get("backend_contract_note", "")).strip()
+            if contract_note:
+                lines.append("backend_contract_note: " + contract_note[:240])
         if failed:
             lines.append("failed_roles: " + ", ".join(str(x) for x in failed))
         if pending:

@@ -319,6 +319,91 @@ def _extract_quality_contract(metadata: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _preset_contract_expectations(preset: str) -> Dict[str, Any]:
+    token = str(preset or "").strip().lower()
+    if token == "writer":
+        return {
+            "label": "writer preset expects handoff-capable execution lanes",
+            "requires_work_role": True,
+            "execution_tokens": ("writer",),
+            "requires_review_role": True,
+        }
+    if token == "analysis":
+        return {
+            "label": "analysis preset expects analyst execution lanes",
+            "requires_work_role": True,
+            "execution_tokens": ("analyst",),
+            "requires_review_role": True,
+        }
+    if token == "build":
+        return {
+            "label": "build preset expects implementation execution lanes",
+            "requires_work_role": True,
+            "execution_tokens": ("dev", "engineer"),
+            "requires_review_role": True,
+        }
+    if token == "data":
+        return {
+            "label": "data preset expects data/schema execution lanes",
+            "requires_work_role": True,
+            "execution_tokens": ("dataengineer", "data-engineer", "analyst"),
+            "requires_review_role": True,
+        }
+    if token == "review":
+        return {
+            "label": "review preset expects reviewer-led lanes",
+            "requires_work_role": False,
+            "execution_tokens": (),
+            "requires_review_role": True,
+        }
+    if token == "mixed":
+        return {
+            "label": "mixed preset expects both work lanes and review lanes",
+            "requires_work_role": True,
+            "execution_tokens": ("dev", "writer", "analyst", "dataengineer", "data-engineer"),
+            "requires_review_role": True,
+        }
+    return {
+        "label": "",
+        "requires_work_role": False,
+        "execution_tokens": (),
+        "requires_review_role": False,
+    }
+
+
+def _evaluate_quality_contract(message: "ReviewRequest") -> Dict[str, Any]:
+    preset = str(message.phase2_team_preset or message.phase1_role_preset or "").strip().lower()
+    expectations = _preset_contract_expectations(preset)
+    execution_roles = [str(role).strip() for role in message.phase2_execution_roles if str(role).strip()]
+    review_roles = [str(role).strip() for role in message.phase2_review_roles if str(role).strip()]
+    execution_tokens = tuple(
+        str(item).strip().lower() for item in expectations.get("execution_tokens", ()) if str(item).strip()
+    )
+    missing: List[str] = []
+    execution_ok = True
+    review_ok = True
+    if expectations.get("requires_work_role"):
+        execution_ok = any(
+            any(token in role.replace(" ", "").lower() for token in execution_tokens)
+            for role in execution_roles
+        )
+        if not execution_ok:
+            missing.append("expected work execution role for preset" if execution_roles else "missing execution roles for preset")
+    if expectations.get("requires_review_role"):
+        expected_critic = str(message.phase2_critic_role or "").strip()
+        review_ok = bool(review_roles)
+        if expected_critic:
+            review_ok = review_ok and expected_critic in review_roles
+        if not review_ok:
+            missing.append(f"missing critic review role {expected_critic}" if expected_critic else "missing review roles for preset")
+    return {
+        "preset": preset,
+        "label": str(expectations.get("label", "") or "").strip(),
+        "success": execution_ok and review_ok,
+        "missing": missing,
+    }
+
+
 @dataclass
 class TFRunMessage:
     request_id: str
@@ -620,7 +705,9 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
 
         @rpc
         async def handle_review(self, message: ReviewRequest, ctx: MessageContext) -> ReviewResponse:
-            success = bool(message.item_count > 0 and message.top_items)
+            backlog_success = bool(message.item_count > 0 and message.top_items)
+            contract_eval = _evaluate_quality_contract(message)
+            success = backlog_success and bool(contract_eval.get("success", True))
             verdict = "success" if success else "fail"
             lines = [
                 f"{READONLY_REVIEWER_ROLE} verdict: {verdict}",
@@ -644,6 +731,8 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                 quality_parts.append(f"integration={message.phase2_integration_role}")
             if quality_parts:
                 lines.append("- quality contract: " + " ".join(quality_parts))
+            if contract_eval.get("label"):
+                lines.append("- preset gate: " + str(contract_eval["label"]))
             if message.phase2_execution_roles:
                 lines.append("- execution roles: " + ", ".join(message.phase2_execution_roles[:4]))
             if message.phase2_review_roles:
@@ -659,6 +748,11 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                 lines.append(f"- recommended first focus: {message.top_items[0]}")
             else:
                 lines.append("- operator follow-up: inspect canonical TODO source before enabling broader pilot scope.")
+            missing_contract_bits = [str(item).strip() for item in (contract_eval.get("missing") or []) if str(item).strip()]
+            if missing_contract_bits:
+                lines.append("- contract gaps: " + " | ".join(missing_contract_bits[:3]))
+            elif contract_eval.get("label"):
+                lines.append("- contract check: pass")
             if quality_parts or message.evidence_required:
                 lines.append("- sandbox note: quality contract is advisory here; live TF still owns final evidence.")
             recorder.add(
@@ -672,6 +766,7 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                     "item_count": message.item_count,
                     "phase2_team_preset": phase2_team_preset,
                     "evidence_required_count": len(message.evidence_required),
+                    "contract_ok": bool(contract_eval.get("success", True)),
                 },
             )
             return ReviewResponse(
