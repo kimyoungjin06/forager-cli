@@ -44,6 +44,9 @@ Primary docs:
 - Operating model: `docs/OPERATING_MODEL.md`
 - Control dashboard MVP: `docs/CONTROL_DASHBOARD_MVP.md`
 - Control dashboard read-only design: `docs/CONTROL_DASHBOARD_READONLY_DESIGN.md`
+- Preset completion matrix: `docs/PRESET_COMPLETION_MATRIX.md`
+- Nightly session summary: `docs/NIGHTLY_SESSION_SUMMARY.md`
+- Storage retention policy: `docs/STORAGE_RETENTION_POLICY.md`
 - Control Action API: `docs/MOTHER_ORCH_ACTION_API.md`
 - Command reference: `docs/COMMANDS.md`
 - Deployment: `docs/DEPLOYMENT.md`

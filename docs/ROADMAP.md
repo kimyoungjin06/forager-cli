@@ -94,6 +94,10 @@
   - `TF` -> `Task Team`
   - 원칙: 문서/오퍼레이터 표기부터 바꾸고, 코드 identifier는 alias 호환을 유지하며 단계적으로 정리한다.
   - 후속: operator surface와 code identifier는 단계적으로 수렴시킨다.
+- [ ] 용어 전환 2단계
+  - operator surface 문구 치환
+  - code alias convergence
+  - legacy term deprecation checkpoint
 
 ### 8.2 Control Dashboard MVP
 - [x] 대시보드 MVP spec 문서화
@@ -109,11 +113,6 @@
     - dashboard 전용 business logic
 - [ ] read-only MVP 구현
   - 기술 방향: `FastAPI + Jinja/HTMX`
-  - 선행 조건:
-    - side-effect-free state adapter
-    - structured DTO assembly
-    - canonical request-id task route
-    - loopback-only bind
   - 우선 노출:
     - provider capacity
     - offdesk readiness
@@ -122,6 +121,19 @@
     - lane state
     - rerun/followup
     - backend contract
+- [ ] shared read-only state adapter 구현
+  - 요구:
+    - side-effect-free runtime file reads
+    - no mutating loader reuse
+    - control-root/team-dir canonical wiring
+    - per-file freshness and stale fallback metadata
+- [ ] dashboard DTO contract 구현
+  - 요구:
+    - `ControlSummaryDTO`
+    - `RuntimeCardDTO`
+    - `ActiveTaskRowDTO`
+    - `TaskDetailDTO`
+    - dashboard adapter가 policy layer가 되지 않도록 shared helper ownership 정리
 - [ ] `Project Runtime Detail` 2단계 설계/구현
   - 목적:
     - condensed board card와 task detail 사이의 중간 관제면 추가
@@ -148,13 +160,25 @@
 - [ ] action wiring 2차 구현
   - 전제:
     - Phase 1 read-only parity 완료
+    - shared read-only state adapter / DTO contract 안정화
     - `Project Runtime Detail` page 추가 완료
   - `auto on/off`
   - `recover`
   - `retry`
   - `followup`
 
-### 8.3 Live Runtime Verification
+### 8.3 Preset Completion Contract
+- [x] preset 분류/shape/quality defaults 연결
+- [x] preset completion matrix 문서화/고정
+  - 문서:
+    - `docs/PRESET_COMPLETION_MATRIX.md`
+  - 포함:
+    - required evidence
+    - expected execution/review shape
+    - done/rerun/manual followup 기준
+- [ ] completion matrix를 operator/recovery surface wording에 연결
+
+### 8.4 Live Runtime Verification
 - [ ] preset별 실제 `Phase2` 완료 흐름 검증
   - 대상:
     - `build`
@@ -170,7 +194,30 @@
     - `/monitor`
     - `/offdesk review`
 
-### 8.4 Structural Debt
+### 8.5 Recovery Summary
+- [x] nightly session summary spec 고정
+  - 문서:
+    - `docs/NIGHTLY_SESSION_SUMMARY.md`
+  - 목적:
+    - morning recovery용 overnight artifact 정의
+- [ ] nightly session summary 생성 경로 설계
+  - 전제:
+    - dashboard/read-only parity 이후
+    - structured runtime state reuse
+
+### 8.6 Retention and Storage
+- [x] storage retention policy 고정
+  - 문서:
+    - `docs/STORAGE_RETENTION_POLICY.md`
+  - 범위:
+    - canonical runtime state
+    - evidence/artifacts
+    - ephemeral runtime artifacts
+    - logs/rooms
+- [ ] disk hygiene와 retention policy 연결
+  - TTL/cleanup 설정값과 실제 운영 저장소 전략 연결
+
+### 8.7 Structural Debt
 - [ ] 다음 분해 타깃 선정
   - 후보:
     - `scripts/gateway/aoe-telegram-gateway.py`

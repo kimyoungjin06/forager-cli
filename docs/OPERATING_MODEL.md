@@ -69,8 +69,10 @@ Legacy names may remain in implementation details and historical logs until the 
   - inspect `/auto status`
   - inspect `/offdesk review`
   - inspect `/monitor` and `/task`
+  - inspect the nightly session summary artifact
   - decide whether to recover, retry, follow up, or pause automation
 - Main outputs:
+  - nightly session summary
   - next operator action
   - resumed or paused automation state
   - clarified blocked/repeat/rate-limited situations
@@ -146,6 +148,8 @@ Legacy names may remain in implementation details and historical logs until the 
   - the required evidence exists,
   - critic/reviewer expectations are satisfied,
   - unresolved risk is either cleared or surfaced to operator review.
+- The preset-specific completion matrix must be defined explicitly and versioned separately from implementation.
+- Live validation is not a substitute for the matrix; validation exists to prove the matrix is implementable.
 
 ### 7.3 Recovery Contract
 - Provider capacity failures are treated as operational state, not generic task failure.
@@ -173,16 +177,27 @@ Legacy names may remain in implementation details and historical logs until the 
 - Read-only first
 - Existing state/view logic reused first
 - New action buttons only after the read-only board is stable
+- The first implementation gate is the shared read-only state adapter and DTO contract, not page templates.
 
 ## 9. Current Strategic Priorities
 1. terminology sweep for operator-facing documents and surfaces
-2. control dashboard MVP spec
+2. dashboard shared read-only adapter and DTO contract
 3. control dashboard MVP implementation
-4. live Phase2 completion validation by preset
-5. structural decomposition of remaining gateway hot spots
+4. preset completion matrix and live Phase2 completion validation
+5. nightly session summary for Recovery Loop
+6. retention/storage policy for evidence and runtime artifacts
+7. structural decomposition of remaining gateway hot spots
 
 ## 10. Non-Goals For The Next Phase
 - building a separate dashboard-only backend
 - promoting AutoGen sandbox into the primary execution engine
 - large-scale identifier rename before document and surface terminology stabilizes
 - adding more fallback complexity before operator visibility is complete
+
+## 11. Immediate Planning Artifacts
+- `docs/PRESET_COMPLETION_MATRIX.md`
+  - explicit preset-specific done criteria, evidence, and reviewer expectations
+- `docs/NIGHTLY_SESSION_SUMMARY.md`
+  - Recovery Loop summary artifact contract
+- `docs/STORAGE_RETENTION_POLICY.md`
+  - runtime artifact retention and storage boundaries
