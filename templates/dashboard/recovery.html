@@ -43,6 +43,10 @@
       <p><strong>preset</strong> {{ runtime.active_task_preset }}</p>
       <p><strong>shape</strong> {{ runtime.active_task_phase2_shape }}</p>
       <p><strong>quality</strong> {{ runtime.active_task_phase2_quality }}</p>
+      <p><strong>completion_focus</strong> {{ runtime.active_task_completion_focus }}</p>
+      <p><strong>done_when</strong> {{ runtime.active_task_completion_done }}</p>
+      <p><strong>rerun_when</strong> {{ runtime.active_task_completion_rerun }}</p>
+      <p><strong>manual_followup_when</strong> {{ runtime.active_task_completion_followup }}</p>
       <p><strong>backend</strong> {{ runtime.active_task_backend }}</p>
       {% if runtime.active_task_backend_note %}<p><strong>backend_note</strong> {{ runtime.active_task_backend_note }}</p>{% endif %}
       <p><strong>rate_limit</strong> {{ runtime.active_task_rate_limit }}</p>
@@ -64,7 +68,7 @@
             <td><a href="{{ task.detail_path }}">{{ task.label }}</a><br><span class="muted">{{ task.request_id }}</span></td>
             <td>{{ task.status }}/{{ task.tf_phase }}</td>
             <td>{{ task.preset }}</td>
-            <td>{{ task.phase2_shape }}</td>
+            <td>{{ task.phase2_shape }}<br><span class="muted">{{ task.completion_focus }}</span></td>
             <td>{{ task.backend_summary }}</td>
           </tr>
           {% endfor %}

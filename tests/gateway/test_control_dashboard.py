@@ -305,6 +305,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "phase1=analysis phase2=analysis" in text
     assert "exec=Codex-Analyst,Claude-Analyst | review=Codex-Reviewer,Claude-Reviewer" in text
     assert "critic=Codex-Reviewer | integration=Codex-Analyst" in text
+    assert "evidence quality, reasoning coherence, missing caveats" in text
+    assert "conclusion is supported by inspectable evidence and explicit caveats" in text
     assert "execution=L1 | review=R1" in text
 
 
@@ -343,6 +345,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "open=0 running=1 blocked=0 followup=0 pending=no" in text
     assert "open=0 | priorities=- | kinds=-" in text
     assert "score=0 | providers=0 | retry_wait=-" in text
+    assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "analysis-check" in text
     assert "analysis-followup" in text
 
@@ -368,6 +371,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "auto_active (fanout)" in text
     assert "O2 Alpha" in text
     assert "analysis-check" in text
+    assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "/control/tasks/by-request/REQ-1" in text
 
 

@@ -40,6 +40,8 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["completed_task_count"] == 1
     assert runtimes[0]["active_task_label"] == "T-001 | analysis-check"
     assert runtimes[0]["task_teams"][0]["request_id"] == "REQ-1"
+    assert runtimes[0]["active_task_completion_contract"]["focus"] == "evidence quality, reasoning coherence, missing caveats"
+    assert runtimes[0]["task_teams"][0]["completion_contract"]["done_when"] == "conclusion is supported by inspectable evidence and explicit caveats"
 
 
 def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_path: Path) -> None:
@@ -70,4 +72,5 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "# Nightly Session Summary" in markdown
     assert "## O2 Alpha" in markdown
     assert "analysis-check (REQ-1)" in markdown
+    assert "completion_focus: evidence quality, reasoning coherence, missing caveats" in markdown
     assert payload["runtimes"][0]["project_alias"] == "O2"

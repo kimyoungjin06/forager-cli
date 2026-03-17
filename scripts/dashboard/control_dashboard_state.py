@@ -18,6 +18,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
+import aoe_tg_orch_contract as orch_contract
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 import aoe_tg_task_view as task_view
@@ -125,6 +126,10 @@ class TaskDetailDTO:
     lane_summary: str = ""
     rerun_summary: str = ""
     followup_summary: str = ""
+    completion_focus: str = ""
+    completion_done_when: str = ""
+    completion_rerun_when: str = ""
+    completion_followup_when: str = ""
     backend_summary: str = ""
     backend_note: str = ""
     rate_limit_summary: str = ""
@@ -160,6 +165,10 @@ class RuntimeDetailDTO:
     active_task_preset: str
     active_task_phase2_shape: str
     active_task_phase2_quality: str
+    active_task_completion_focus: str
+    active_task_completion_done: str
+    active_task_completion_rerun: str
+    active_task_completion_followup: str
     active_task_backend: str
     active_task_backend_note: str
     active_task_rate_limit: str
@@ -181,6 +190,10 @@ class RecoveryTaskDTO:
     lane_summary: str
     rerun_summary: str
     followup_summary: str
+    completion_focus: str
+    completion_done_when: str
+    completion_rerun_when: str
+    completion_followup_when: str
     backend_summary: str
     backend_note: str
     rate_limit_summary: str
@@ -213,6 +226,10 @@ class RecoveryRuntimeDTO:
     active_task_preset: str
     active_task_phase2_shape: str
     active_task_phase2_quality: str
+    active_task_completion_focus: str
+    active_task_completion_done: str
+    active_task_completion_rerun: str
+    active_task_completion_followup: str
     active_task_backend: str
     active_task_backend_note: str
     active_task_rate_limit: str
@@ -529,6 +546,10 @@ def _task_rate_limit_summary(task: Dict[str, Any]) -> str:
     )
 
 
+def _completion_contract_for_preset(raw: Any) -> Dict[str, str]:
+    return orch_contract.preset_completion_contract(raw)
+
+
 def _runtime_path(project_alias: str) -> str:
     return f"/control/runtimes/{quote(str(project_alias or '').strip(), safe='')}"
 
@@ -726,6 +747,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         shape = task_state.task_phase2_shape_snapshot(task)
         lane = task_state.task_lane_summary_snapshot(task)
         result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        contract = _completion_contract_for_preset(str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip())
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),
             str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
@@ -754,6 +776,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             lane_summary=_compose_lane_summary(lane),
             rerun_summary=_task_rerun_summary(task),
             followup_summary=_task_followup_summary(task),
+            completion_focus=str(contract.get("focus", "")).strip() or "-",
+            completion_done_when=str(contract.get("done_when", "")).strip() or "-",
+            completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",
+            completion_followup_when=str(contract.get("manual_followup_when", "")).strip() or "-",
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=_task_rate_limit_summary(task),
@@ -861,6 +887,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     display = str(row.get("display", "")).strip() or target_alias
     phase1_preset = str(row.get("active_task_phase1_role_preset", "")).strip()
     phase2_preset = str(row.get("active_task_phase2_team_preset", "")).strip()
+    active_contract = _completion_contract_for_preset(phase2_preset or phase1_preset)
     runtime_path = _runtime_path(target_alias)
     active_request_id = str(row.get("active_task_request_id", "")).strip()
     return RuntimeDetailDTO(
@@ -896,6 +923,10 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             row.get("active_task_phase2_review_roles") or [],
         ),
         active_task_phase2_quality=_compose_phase2_quality(row),
+        active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",
+        active_task_completion_done=str(active_contract.get("done_when", "")).strip() or "-",
+        active_task_completion_rerun=str(active_contract.get("rerun_when", "")).strip() or "-",
+        active_task_completion_followup=str(active_contract.get("manual_followup_when", "")).strip() or "-",
         active_task_backend=_compose_backend_summary(
             str(row.get("active_task_backend", "")).strip(),
             str(row.get("active_task_backend_profile", "")).strip(),
@@ -921,6 +952,7 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryTa
         if not isinstance(row, dict):
             continue
         preset = row.get("preset") if isinstance(row.get("preset"), dict) else {}
+        contract = row.get("completion_contract") if isinstance(row.get("completion_contract"), dict) else {}
         built.append(
             RecoveryTaskDTO(
                 request_id=str(row.get("request_id", "")).strip(),
@@ -937,6 +969,10 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryTa
                 lane_summary=str(row.get("lane_summary", "")).strip() or "-",
                 rerun_summary=str(row.get("rerun_summary", "")).strip() or "-",
                 followup_summary=str(row.get("followup_summary", "")).strip() or "-",
+                completion_focus=str(contract.get("focus", "")).strip() or "-",
+                completion_done_when=str(contract.get("done_when", "")).strip() or "-",
+                completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",
+                completion_followup_when=str(contract.get("manual_followup_when", "")).strip() or "-",
                 backend_summary=str(row.get("backend_summary", "")).strip() or "-",
                 backend_note=str(row.get("backend_note", "")).strip(),
                 rate_limit_summary=str(row.get("rate_limit_summary", "")).strip() or "-",
@@ -953,6 +989,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
         alias = str(row.get("project_alias", "")).strip().upper()
         label = str(row.get("project_label", "")).strip() or alias or "-"
         active_request_id = str(row.get("active_task_request_id", "")).strip()
+        active_contract = row.get("active_task_completion_contract") if isinstance(row.get("active_task_completion_contract"), dict) else {}
         built.append(
             RecoveryRuntimeDTO(
                 project_key=str(row.get("project_key", "")).strip() or alias,
@@ -980,6 +1017,10 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_preset=str(row.get("active_task_preset", "")).strip() or "-",
                 active_task_phase2_shape=str(row.get("active_task_phase2_shape", "")).strip() or "-",
                 active_task_phase2_quality=str(row.get("active_task_phase2_quality", "")).strip() or "-",
+                active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",
+                active_task_completion_done=str(active_contract.get("done_when", "")).strip() or "-",
+                active_task_completion_rerun=str(active_contract.get("rerun_when", "")).strip() or "-",
+                active_task_completion_followup=str(active_contract.get("manual_followup_when", "")).strip() or "-",
                 active_task_backend=str(row.get("active_task_backend", "")).strip() or "-",
                 active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
                 active_task_rate_limit=str(row.get("active_task_rate_limit", "")).strip() or "-",

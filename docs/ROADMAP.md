@@ -183,7 +183,7 @@
     - required evidence
     - expected execution/review shape
     - done/rerun/manual followup 기준
-- [ ] completion matrix를 operator/recovery surface wording에 연결
+- [x] completion matrix를 operator/recovery surface wording에 연결
 
 ### 8.4 Live Runtime Verification
 - [ ] preset별 실제 `Phase2` 완료 흐름 검증

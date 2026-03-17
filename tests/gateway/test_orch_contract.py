@@ -114,6 +114,16 @@ def test_normalize_tf_plan_applies_build_quality_defaults() -> None:
     assert plan["meta"]["phase2_team_spec"]["integration_role"] == "Codex-Dev"
 
 
+def test_preset_completion_contract_returns_matrix_defaults() -> None:
+    contract = mod.preset_completion_contract("mixed")
+
+    assert contract["preset"] == "mixed"
+    assert "execution/review split integrity" in contract["focus"]
+    assert "work artifact and handoff/review evidence" in contract["done_when"]
+    assert "work lane is incomplete" in contract["rerun_when"]
+    assert "operator must arbitrate" in contract["manual_followup_when"]
+
+
 def test_normalize_phase2_team_spec_builds_parallel_execution_and_review_groups() -> None:
     spec = mod.normalize_phase2_team_spec(
         None,

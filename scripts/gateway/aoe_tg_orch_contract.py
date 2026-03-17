@@ -69,6 +69,57 @@ PRESET_EVIDENCE_DEFAULTS = {
         "Review, handoff, or risk evidence is captured.",
     ],
 }
+PRESET_COMPLETION_CONTRACTS = {
+    "writer": {
+        "primary_output": "draft/report/handoff/spec text",
+        "focus": "clarity, completeness, source grounding, unresolved claims",
+        "done_when": "deliverable is readable end-to-end, grounded in sources, and open issues are surfaced",
+        "rerun_when": "sections are missing, grounding is weak, or the deliverable is malformed",
+        "manual_followup_when": "audience, policy wording, or source-of-truth ambiguity needs operator judgment",
+    },
+    "analysis": {
+        "primary_output": "analytical conclusion or ranked findings",
+        "focus": "evidence quality, reasoning coherence, missing caveats",
+        "done_when": "conclusion is supported by inspectable evidence and explicit caveats",
+        "rerun_when": "conclusion is unsupported, evidence joins are weak, or caveats are missing",
+        "manual_followup_when": "operator preference or external interpretation decides the conclusion",
+    },
+    "build": {
+        "primary_output": "code/config/integration change",
+        "focus": "implementation delta, tests, integration risk",
+        "done_when": "implementation delta is clear and verification evidence covers the risky path",
+        "rerun_when": "tests fail, patch is incomplete, or integration edges are broken",
+        "manual_followup_when": "env/deploy/secret dependency or risky mutation approval blocks closure",
+    },
+    "data": {
+        "primary_output": "transformed dataset/query/report output",
+        "focus": "schema correctness, null handling, transform integrity",
+        "done_when": "schema/null evidence and sample output or validation result are present",
+        "rerun_when": "schema drifts, output is null-heavy, or a pipeline step is broken",
+        "manual_followup_when": "business-rule ambiguity or source data quality requires operator judgment",
+    },
+    "review": {
+        "primary_output": "review verdict, critique, or regression assessment",
+        "focus": "risk detection, regression coverage, missing evidence",
+        "done_when": "review artifact is complete even if the verdict is no change required",
+        "rerun_when": "review is shallow, unsupported, or misses required scope",
+        "manual_followup_when": "acceptance threshold or risk tradeoff must be decided by the operator",
+    },
+    "mixed": {
+        "primary_output": "work result plus handoff/review output",
+        "focus": "execution/review split integrity, handoff quality, unresolved coupling",
+        "done_when": "work artifact and handoff/review evidence both exist without lane drift",
+        "rerun_when": "work lane is incomplete, handoff drifts, or review lane mismatches the preset",
+        "manual_followup_when": "operator must arbitrate packaging, scope, or competing outputs",
+    },
+    "general": {
+        "primary_output": "fallback mixed work result",
+        "focus": "basic completion, evidence minimum, risk surfacing",
+        "done_when": "task-specific minimum evidence exists and the result is understandable",
+        "rerun_when": "result is partial, inconsistent, or unclear",
+        "manual_followup_when": "scope remains unclear or the task framing is insufficient",
+    },
+}
 
 
 def _is_review_role(role: str) -> bool:
@@ -176,6 +227,19 @@ def _merge_preset_evidence_defaults(
         if token and token not in merged:
             merged.append(token)
     return merged or acceptance or default_acceptance
+
+
+def preset_completion_contract(raw: Any) -> Dict[str, str]:
+    preset = _normalize_role_preset(raw)
+    contract = PRESET_COMPLETION_CONTRACTS.get(preset, PRESET_COMPLETION_CONTRACTS["general"])
+    return {
+        "preset": preset,
+        "primary_output": str(contract.get("primary_output", "")).strip() or "-",
+        "focus": str(contract.get("focus", "")).strip() or "-",
+        "done_when": str(contract.get("done_when", "")).strip() or "-",
+        "rerun_when": str(contract.get("rerun_when", "")).strip() or "-",
+        "manual_followup_when": str(contract.get("manual_followup_when", "")).strip() or "-",
+    }
 
 
 def normalize_tf_phase(raw: Any, default: str = "queued") -> str:
