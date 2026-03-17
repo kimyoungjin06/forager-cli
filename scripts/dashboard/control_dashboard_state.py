@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -134,6 +135,7 @@ class TaskDetailDTO:
     backend_note: str = ""
     rate_limit_summary: str = ""
     updated_at: str = ""
+    command_hints: List[str] = field(default_factory=list)
     reference_lines: List[str] = field(default_factory=list)
 
 
@@ -172,6 +174,8 @@ class RuntimeDetailDTO:
     active_task_backend: str
     active_task_backend_note: str
     active_task_rate_limit: str
+    runtime_command_hints: List[str] = field(default_factory=list)
+    active_task_command_hints: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
     recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
@@ -197,6 +201,7 @@ class RecoveryTaskDTO:
     backend_summary: str
     backend_note: str
     rate_limit_summary: str
+    command_hints: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -233,6 +238,8 @@ class RecoveryRuntimeDTO:
     active_task_backend: str
     active_task_backend_note: str
     active_task_rate_limit: str
+    runtime_command_hints: List[str] = field(default_factory=list)
+    active_task_command_hints: List[str] = field(default_factory=list)
     task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
 
 
@@ -550,6 +557,73 @@ def _completion_contract_for_preset(raw: Any) -> Dict[str, str]:
     return orch_contract.preset_completion_contract(raw)
 
 
+def _dedupe_hints(rows: Iterable[str], *, limit: int = 6) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for row in rows:
+        token = str(row or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+        if len(out) >= max(1, int(limit)):
+            break
+    return out
+
+
+def _task_command_ref(label: str, request_id: str) -> str:
+    match = re.search(r"\bT-\d+\b", str(label or ""))
+    if match:
+        return match.group(0)
+    return str(request_id or "").strip() or "-"
+
+
+def _task_command_hints(
+    *,
+    project_alias: str,
+    label: str,
+    request_id: str,
+    tf_phase: str = "",
+    rerun_summary: str = "",
+    followup_summary: str = "",
+    rate_limit_summary: str = "",
+) -> List[str]:
+    ref = _task_command_ref(label, request_id)
+    hints = [
+        f"/task {ref}",
+        f"/request {request_id}",
+        f"/monitor {project_alias}",
+    ]
+    phase = str(tf_phase or "").strip().lower()
+    if phase in {"planning", "running", "critic_review", "blocked", "manual_intervention", "rate_limited", "needs_retry"}:
+        hints.append("/offdesk review")
+    if rate_limit_summary and rate_limit_summary != "-":
+        hints.append("/auto status")
+    if rerun_summary and rerun_summary != "-":
+        hints.append(f"/retry {ref}")
+    if followup_summary and followup_summary != "-":
+        hints.append(f"/followup {ref}")
+        hints.append(f"/todo {project_alias} followup")
+    return _dedupe_hints(hints)
+
+
+def _runtime_command_hints(
+    *,
+    project_alias: str,
+    priority_action: str = "",
+    has_active_task: bool = False,
+    has_rate_limit: bool = False,
+) -> List[str]:
+    hints = [
+        str(priority_action or "").strip(),
+        f"/monitor {project_alias}",
+        f"/todo {project_alias}",
+        "/offdesk review" if has_active_task else "",
+        "/auto status" if has_rate_limit else "",
+    ]
+    return _dedupe_hints(hints)
+
+
 def _runtime_path(project_alias: str) -> str:
     return f"/control/runtimes/{quote(str(project_alias or '').strip(), safe='')}"
 
@@ -748,6 +822,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         lane = task_state.task_lane_summary_snapshot(task)
         result = task.get("result") if isinstance(task.get("result"), dict) else {}
         contract = _completion_contract_for_preset(str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip())
+        rerun_summary = _task_rerun_summary(task)
+        followup_summary = _task_followup_summary(task)
+        rate_limit_summary = _task_rate_limit_summary(task)
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),
             str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
@@ -774,16 +851,25 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             phase2_shape=_compose_phase2_shape(shape["execution_roles"], shape["review_roles"]),
             phase2_quality=_compose_task_quality(task),
             lane_summary=_compose_lane_summary(lane),
-            rerun_summary=_task_rerun_summary(task),
-            followup_summary=_task_followup_summary(task),
+            rerun_summary=rerun_summary,
+            followup_summary=followup_summary,
             completion_focus=str(contract.get("focus", "")).strip() or "-",
             completion_done_when=str(contract.get("done_when", "")).strip() or "-",
             completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",
             completion_followup_when=str(contract.get("manual_followup_when", "")).strip() or "-",
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
-            rate_limit_summary=_task_rate_limit_summary(task),
+            rate_limit_summary=rate_limit_summary,
             updated_at=str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
+            command_hints=_task_command_hints(
+                project_alias=alias,
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
+                tf_phase=str(task.get("tf_phase", "")).strip() or task_view.normalize_tf_phase(task_view.derive_tf_phase(task), "queued"),
+                rerun_summary=rerun_summary,
+                followup_summary=followup_summary,
+                rate_limit_summary=rate_limit_summary,
+            ),
             reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
         )
     return None
@@ -890,6 +976,10 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     active_contract = _completion_contract_for_preset(phase2_preset or phase1_preset)
     runtime_path = _runtime_path(target_alias)
     active_request_id = str(row.get("active_task_request_id", "")).strip()
+    active_task = task_state.get_task_record(entry, active_request_id) if active_request_id else None
+    active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
+    active_followup_summary = _task_followup_summary(active_task) if isinstance(active_task, dict) else "-"
+    active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
     return RuntimeDetailDTO(
         project_key=key,
         project_alias=target_alias,
@@ -934,7 +1024,22 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             str(row.get("active_task_backend_contract", "")).strip(),
         ),
         active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
-        active_task_rate_limit=_runtime_active_task_rate_limit_summary(row),
+        active_task_rate_limit=active_rate_limit_summary,
+        runtime_command_hints=_runtime_command_hints(
+            project_alias=target_alias,
+            priority_action=str(row.get("priority_action", "")).strip(),
+            has_active_task=bool(active_request_id),
+            has_rate_limit=active_rate_limit_summary != "-",
+        ),
+        active_task_command_hints=_task_command_hints(
+            project_alias=target_alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            tf_phase=str(row.get("active_task_tf_phase", "")).strip(),
+            rerun_summary=active_rerun_summary,
+            followup_summary=active_followup_summary,
+            rate_limit_summary=active_rate_limit_summary,
+        ) if active_request_id else [],
         notes=list(row.get("notes") or []),
         lines=list(row.get("lines") or []),
         recent_tasks=_build_runtime_recent_task_rows(
@@ -946,18 +1051,23 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     )
 
 
-def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryTaskDTO]:
+def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: str) -> List[RecoveryTaskDTO]:
     built: List[RecoveryTaskDTO] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
         preset = row.get("preset") if isinstance(row.get("preset"), dict) else {}
+        request_id = str(row.get("request_id", "")).strip()
+        label = str(row.get("label", "")).strip() or "-"
+        rerun_summary = str(row.get("rerun_summary", "")).strip() or "-"
+        followup_summary = str(row.get("followup_summary", "")).strip() or "-"
+        rate_limit_summary = str(row.get("rate_limit_summary", "")).strip() or "-"
         contract = row.get("completion_contract") if isinstance(row.get("completion_contract"), dict) else {}
         built.append(
             RecoveryTaskDTO(
-                request_id=str(row.get("request_id", "")).strip(),
-                label=str(row.get("label", "")).strip() or "-",
-                detail_path=_detail_path(str(row.get("request_id", "")).strip()),
+                request_id=request_id,
+                label=label,
+                detail_path=_detail_path(request_id),
                 status=str(row.get("status", "")).strip() or "-",
                 tf_phase=str(row.get("tf_phase", "")).strip() or "-",
                 preset="phase1={phase1} phase2={phase2}".format(
@@ -967,15 +1077,24 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryTa
                 phase2_shape=str(row.get("phase2_shape", "")).strip() or "-",
                 phase2_quality=str(row.get("phase2_quality", "")).strip() or "-",
                 lane_summary=str(row.get("lane_summary", "")).strip() or "-",
-                rerun_summary=str(row.get("rerun_summary", "")).strip() or "-",
-                followup_summary=str(row.get("followup_summary", "")).strip() or "-",
+                rerun_summary=rerun_summary,
+                followup_summary=followup_summary,
                 completion_focus=str(contract.get("focus", "")).strip() or "-",
                 completion_done_when=str(contract.get("done_when", "")).strip() or "-",
                 completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",
                 completion_followup_when=str(contract.get("manual_followup_when", "")).strip() or "-",
                 backend_summary=str(row.get("backend_summary", "")).strip() or "-",
                 backend_note=str(row.get("backend_note", "")).strip(),
-                rate_limit_summary=str(row.get("rate_limit_summary", "")).strip() or "-",
+                rate_limit_summary=rate_limit_summary,
+                command_hints=_task_command_hints(
+                    project_alias=project_alias,
+                    label=label,
+                    request_id=request_id,
+                    tf_phase=str(row.get("tf_phase", "")).strip(),
+                    rerun_summary=rerun_summary,
+                    followup_summary=followup_summary,
+                    rate_limit_summary=rate_limit_summary,
+                ),
             )
         )
     return built
@@ -990,6 +1109,16 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
         label = str(row.get("project_label", "")).strip() or alias or "-"
         active_request_id = str(row.get("active_task_request_id", "")).strip()
         active_contract = row.get("active_task_completion_contract") if isinstance(row.get("active_task_completion_contract"), dict) else {}
+        active_rate_limit = str(row.get("active_task_rate_limit", "")).strip() or "-"
+        task_rows = row.get("task_teams") or []
+        active_task_row = next(
+            (
+                item
+                for item in task_rows
+                if isinstance(item, dict) and str(item.get("request_id", "")).strip() == active_request_id
+            ),
+            {},
+        )
         built.append(
             RecoveryRuntimeDTO(
                 project_key=str(row.get("project_key", "")).strip() or alias,
@@ -1023,8 +1152,23 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_completion_followup=str(active_contract.get("manual_followup_when", "")).strip() or "-",
                 active_task_backend=str(row.get("active_task_backend", "")).strip() or "-",
                 active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
-                active_task_rate_limit=str(row.get("active_task_rate_limit", "")).strip() or "-",
-                task_teams=_build_recovery_task_rows(row.get("task_teams") or []),
+                active_task_rate_limit=active_rate_limit,
+                runtime_command_hints=_runtime_command_hints(
+                    project_alias=alias,
+                    priority_action=str(row.get("priority_action", "")).strip(),
+                    has_active_task=bool(active_request_id),
+                    has_rate_limit=active_rate_limit != "-",
+                ),
+                active_task_command_hints=_task_command_hints(
+                    project_alias=alias,
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    tf_phase=str(row.get("active_task_phase", "")).strip(),
+                    rerun_summary=str(active_task_row.get("rerun_summary", "")).strip() or "-",
+                    followup_summary=str(active_task_row.get("followup_summary", "")).strip() or "-",
+                    rate_limit_summary=active_rate_limit,
+                ) if active_request_id else [],
+                task_teams=_build_recovery_task_rows(row.get("task_teams") or [], project_alias=alias),
             )
         )
     return built

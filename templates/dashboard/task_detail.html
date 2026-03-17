@@ -29,6 +29,14 @@
   <p><strong>roles</strong> {{ detail.roles | join(', ') if detail.roles else '-' }}</p>
   <p><strong>verifier_roles</strong> {{ detail.verifier_roles | join(', ') if detail.verifier_roles else '-' }}</p>
   <p><strong>phase1_candidate_roles</strong> {{ detail.phase1_candidate_roles | join(', ') if detail.phase1_candidate_roles else '-' }}</p>
+  {% if detail.command_hints %}
+  <p><strong>operator_hints</strong></p>
+  <ul class="command-list">
+    {% for hint in detail.command_hints %}
+    <li><code>{{ hint }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 </section>
 
 <section class="panel">

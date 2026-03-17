@@ -55,6 +55,25 @@ body {
 .kv-list span { color: var(--muted); }
 .muted { color: var(--muted); }
 .notes { margin: 0.75rem 0 0; padding-left: 1rem; }
+.command-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.25rem;
+}
+.command-list.compact {
+  margin: 0;
+  padding-left: 1rem;
+  gap: 0.15rem;
+}
+.command-list code {
+  font-family: "IBM Plex Mono", "Fira Code", monospace;
+  font-size: 0.88rem;
+  background: #f5f0e3;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.08rem 0.32rem;
+}
 .task-table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
 .task-table th, .task-table td { text-align: left; padding: 0.75rem; border-top: 1px solid var(--line); vertical-align: top; }
 .task-table th { color: var(--muted); font-weight: 600; }

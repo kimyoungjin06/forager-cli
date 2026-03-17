@@ -38,6 +38,14 @@
       <p><strong>queue</strong> {{ runtime.queue_summary }}</p>
       <p><strong>provider_pressure</strong> {{ runtime.provider_pressure_summary }}</p>
       <p><strong>repeat</strong> {{ runtime.repeat_summary }}</p>
+      {% if runtime.runtime_command_hints %}
+      <p><strong>operator_hints</strong></p>
+      <ul class="command-list">
+        {% for hint in runtime.runtime_command_hints %}
+        <li><code>{{ hint }}</code></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
       {% if runtime.active_task_label %}
       <p><strong>active_task</strong> <a href="{{ runtime.active_task_path }}">{{ runtime.active_task_label }}</a> | {{ runtime.active_task_status }}/{{ runtime.active_task_phase }}</p>
       <p><strong>preset</strong> {{ runtime.active_task_preset }}</p>
@@ -50,6 +58,14 @@
       <p><strong>backend</strong> {{ runtime.active_task_backend }}</p>
       {% if runtime.active_task_backend_note %}<p><strong>backend_note</strong> {{ runtime.active_task_backend_note }}</p>{% endif %}
       <p><strong>rate_limit</strong> {{ runtime.active_task_rate_limit }}</p>
+      {% if runtime.active_task_command_hints %}
+      <p><strong>active_task_hints</strong></p>
+      <ul class="command-list">
+        {% for hint in runtime.active_task_command_hints %}
+        <li><code>{{ hint }}</code></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
       {% endif %}
       {% if runtime.task_teams %}
       <table class="task-table">
@@ -60,6 +76,7 @@
             <th>Preset</th>
             <th>Phase2 Shape</th>
             <th>Backend</th>
+            <th>Hints</th>
           </tr>
         </thead>
         <tbody>
@@ -70,6 +87,17 @@
             <td>{{ task.preset }}</td>
             <td>{{ task.phase2_shape }}<br><span class="muted">{{ task.completion_focus }}</span></td>
             <td>{{ task.backend_summary }}</td>
+            <td>
+              {% if task.command_hints %}
+              <ul class="command-list compact">
+                {% for hint in task.command_hints %}
+                <li><code>{{ hint }}</code></li>
+                {% endfor %}
+              </ul>
+              {% else %}
+              <span class="muted">-</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>

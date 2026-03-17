@@ -308,6 +308,11 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "conclusion is supported by inspectable evidence and explicit caveats" in text
     assert "execution=L1 | review=R1" in text
+    assert "/task T-001" in text
+    assert "/request REQ-1" in text
+    assert "/monitor O2" in text
+    assert "/retry T-001" in text
+    assert "/offdesk review" in text
 
 
 def test_control_dashboard_state_resolves_alias_route_via_request_id(tmp_path: Path) -> None:
@@ -348,6 +353,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "analysis-check" in text
     assert "analysis-followup" in text
+    assert "/monitor O2" in text
+    assert "/todo O2" in text
+    assert "/task T-001" in text
+    assert "/request REQ-1" in text
 
 
 def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_path: Path) -> None:
@@ -373,6 +382,10 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "analysis-check" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "/control/tasks/by-request/REQ-1" in text
+    assert "/monitor O2" in text
+    assert "/task T-001" in text
+    assert "/request REQ-1" in text
+    assert "/retry T-001" in text
 
 
 def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:
