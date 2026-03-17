@@ -585,7 +585,7 @@ def _handle_focus_command(
             "- /focus O2\n"
             "- /focus off\n"
             "rules:\n"
-            "- /next, /queue, plain text, TF run are pinned to the locked project\n"
+            "- /next, /queue, plain text, Task Team run are pinned to the locked project\n"
             "- /fanout and /auto on fanout stay blocked while lock is enabled",
             context="focus-status",
             with_menu=True,
@@ -638,7 +638,7 @@ def _handle_focus_command(
         "project focus lock updated\n"
         "- enabled: yes\n"
         f"- locked_project: {alias} ({key})\n"
-        "- effect: /next, /queue, plain text, TF run -> this project by default\n"
+        "- effect: /next, /queue, plain text, Task Team run -> this project by default\n"
         "- blocked: /fanout, /auto on fanout\n"
         "next:\n"
         f"- /sync {alias} 1h\n"

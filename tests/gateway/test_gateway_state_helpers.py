@@ -227,7 +227,7 @@ def test_emit_planning_progress_logs_and_sends_chat_message() -> None:
     assert "attempt=1/2" in logged[-1]["detail"]
     assert sent
     assert "planning: auto-replan" in sent[-1][0]
-    assert "- orch: local_map_analysis" in sent[-1][0]
+    assert "- runtime: local_map_analysis" in sent[-1][0]
     assert "- progress: 1/2" in sent[-1][0]
     assert sent[-1][1]["context"] == "planning-progress"
 
@@ -1112,7 +1112,7 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
 
     assert "plan_gate: blocked" in summary
     assert "plan_gate_reason: missing acceptance criteria" in summary
-    assert "tf_phase: blocked" in summary
+    assert "team_phase: blocked" in summary
     assert "phase2_execution: single lanes=1" in summary
     assert "phase2_review: single lanes=1" in summary
     assert "phase2_exec_plan: single workers_parallel=no reviews_parallel=no readonly=yes" in summary
@@ -4028,7 +4028,7 @@ def test_task_lifecycle_and_monitor_show_rate_limit_and_degraded_state() -> None
         lifecycle_stages=gw.LIFECYCLE_STAGES,
     )
 
-    assert "tf_phase: rate_limited" in lifecycle
+    assert "team_phase: rate_limited" in lifecycle
     assert "rate_limit: mode=blocked providers=codex, claude retry_after=180s retry_at=2026-03-14T01:23:00+09:00" in lifecycle
     assert "degraded_by: claude_rate_limit->codex" in lifecycle
     assert "rate_limit providers=codex,claude retry=180s retry_at=2026-03-14T01:23:00+09:00" in monitor

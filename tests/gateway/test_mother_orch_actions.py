@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for Mother-Orch Action API helpers."""
+"""Regression tests for Control Action API helpers."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def test_unknown_action_raises_runtime_error() -> None:
     try:
         mod.normalize_mother_orch_action_call({"action": "invent_new_magic"})
     except RuntimeError as exc:
-        assert "unknown Mother-Orch action" in str(exc)
+        assert "unknown Control Plane action" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 

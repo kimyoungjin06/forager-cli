@@ -21,7 +21,7 @@ def tutorial_text(*, lang: str, cmd_prefix: str) -> str:
             "3) Lock the active project (recommended before work)\n"
             f"- {p}use O2\n"
             f"- {p}focus O2   # hard lock (recommended)\n"
-            "- after /use, plain text and TF commands target that project by default\n"
+            "- after /use, plain text and Task Team commands target that project by default\n"
             "- after /focus, global wave commands are blocked or narrowed to that project\n"
             "- if /map shows [UNREADY], run /orch repair O2 before sync/next\n"
             "\n"
@@ -33,7 +33,7 @@ def tutorial_text(*, lang: str, cmd_prefix: str) -> str:
             "5) Run\n"
             f"- {p}next     # run one in the active project\n"
             f"- {p}fanout   # global one-per-project wave\n"
-            f"- {p}todo proposals   # TF-generated follow-up inbox\n"
+            f"- {p}todo proposals   # Task Team-generated follow-up inbox\n"
             f"- {p}todo accept PROP-001 | {p}todo reject PROP-001\n"
             "\n"
             "6) After-work mode\n"
@@ -63,7 +63,7 @@ def tutorial_text(*, lang: str, cmd_prefix: str) -> str:
         "3) 작업할 프로젝트 고정(권장)\n"
         f"- {p}use O2\n"
         f"- {p}focus O2   # hard lock (권장)\n"
-        "- /use 이후 평문/TF 명령은 해당 프로젝트를 기본 타겟으로 사용\n"
+        "- /use 이후 평문/Task Team 명령은 해당 프로젝트를 기본 타겟으로 사용\n"
         "- /focus 이후 전역 wave 명령은 차단되거나 해당 프로젝트로 축소됨\n"
         "- /map 에 [UNREADY]가 보이면 /orch repair O2 후에 sync/next 진행\n"
         "\n"
@@ -75,7 +75,7 @@ def tutorial_text(*, lang: str, cmd_prefix: str) -> str:
         "5) 실행\n"
         f"- {p}next     # active 프로젝트에서 하나 실행\n"
         f"- {p}fanout   # 프로젝트별 1개씩 global wave\n"
-        f"- {p}todo proposals   # TF가 만든 follow-up inbox 확인\n"
+        f"- {p}todo proposals   # Task Team이 만든 follow-up inbox 확인\n"
         f"- {p}todo accept PROP-001 | {p}todo reject PROP-001\n"
         "\n"
         "6) 퇴근 모드(off-desk)\n"
@@ -138,8 +138,8 @@ def handle_chat_management_command(
                 f"- one_shot_pending: {current_pending_mode or 'none'}\n"
                 "- set: /mode on | /mode direct | /mode off\n"
                 "- shortcut: /on | /off\n"
-                "- tip: /mode on = 자동 라우팅(질문은 direct, 작업은 TF)\n"
-                "- tip: /mode direct = direct 우선, 하지만 강한 작업 요청은 TF로 승격됩니다.",
+                "- tip: /mode on = 자동 라우팅(질문은 direct, 작업은 Task Team)\n"
+                "- tip: /mode direct = direct 우선, 하지만 강한 작업 요청은 Task Team으로 승격됩니다.",
                 context="mode-status",
                 with_menu=True,
             )
@@ -180,7 +180,7 @@ def handle_chat_management_command(
             f"- one_shot_pending: {current_pending_mode or 'none'}\n"
         )
         if requested_mode == "dispatch":
-            body += "- input_behavior: plain text -> auto routing (question=direct, work=TF)\n"
+            body += "- input_behavior: plain text -> auto routing (question=direct, work=Task Team)\n"
         else:
             body += "- input_behavior: plain text -> direct-biased auto routing\n"
         body += "- disable: /mode off (or /off)"

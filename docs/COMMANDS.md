@@ -13,7 +13,7 @@
 
 ## 1) Upstream: `aoe-orch` (실행 엔진)
 
-의미: 실제로 TF/Orch 작업을 “실행”하는 엔진이다. Telegram 게이트웨이/스케줄러는 최종적으로 `aoe-orch`를 호출한다.
+의미: 실제로 Task Team/Project Runtime 작업을 “실행”하는 엔진이다. Telegram 게이트웨이/스케줄러는 최종적으로 `aoe-orch`를 호출한다.
 
 이 레포에서 최소 전제로 사용하는 서브커맨드(대표):
 
@@ -48,9 +48,9 @@
 
 ---
 
-## 3) 이 레포: `aoe-team-stack` (Mother-Orch tmux 스택 제어)
+## 3) 이 레포: `aoe-team-stack` (Control Plane tmux 스택 제어)
 
-의미: Mother-Orch(게이트웨이 + 워커 + UI + 스케줄러)를 tmux 세션들로 띄우고, **세션 전환 UX(Alt+1..9 / 페이지)**까지 포함해 관리한다. (세션 힌트는 tmux status bar 상단 라인으로 표시)
+의미: Control Plane(게이트웨이 + 워커 + UI + 스케줄러)를 tmux 세션들로 띄우고, **세션 전환 UX(Alt+1..9 / 페이지)**까지 포함해 관리한다. (세션 힌트는 tmux status bar 상단 라인으로 표시)
 
 설치:
 
@@ -110,7 +110,7 @@ worker runtime 권한 정책:
 
 ## 4) 이 레포: Telegram 원격 콘솔(슬래시 명령)
 
-의미: 원격에서 Mother-Orch를 운영하기 위한 “콘솔”이다.
+의미: 원격에서 Control Plane을 운영하기 위한 “콘솔”이다.
 
 권장 입력:
 
@@ -142,7 +142,7 @@ worker runtime 권한 정책:
 
 ### C. 모니터링(상태/태스크)
 
-- `/status`: 게이트웨이/큐/TF 개수 등 상태 요약
+- `/status`: 게이트웨이/큐/Task Team 개수 등 상태 요약
 - `/map`: 프로젝트(O1..) 매핑
   - 옵션: `AOE_ORCH_AUTO_DISCOVER=1`이면 `aoe list --json --all`을 스캔해(Workspace root 하위) 미등록 프로젝트를 자동 등록한다. (추가로 `AOE_ORCH_AUTO_INIT=1`이면 `<project_root>/.aoe-team/AOE_TODO.md` 템플릿도 자동 생성)
 - `/use <O#|name>`: active 프로젝트(Orch) 전환
@@ -157,7 +157,7 @@ worker runtime 권한 정책:
 - `/kpi [hours]`: 최근 KPI/이벤트 요약
 - `/request <T-###|request_id>`: request 원문/상태 조회(선택 태스크도 갱신)
 
-### C2. TF Recipes(증거 기반 점검)
+### C2. `/tf` Recipes(증거 기반 점검)
 
 목적: “스모크/추정”이 아니라 **기존 산출물(JSON/YAML 등)을 실제로 읽어** proof 수준의 상태를 빠르게 확인한다.
 
@@ -173,10 +173,10 @@ worker runtime 권한 정책:
     - proof 기준에 따라 `proof_success|proof_retry|proof_fail` verdict 산출
     - 결과를 보고서로 저장: `docs/investigations_mo/projects/<O#>/tfs/TF-M2PROOF-<tag>/report.md`
 
-### D. Todo/스케줄링(Mother-Orch)
+### D. Todo/스케줄링(Control Plane)
 
 - `/todo`: 프로젝트 todo 조회(서브명령 포함)
-- `/todo proposals`: TF 실행 결과에서 올라온 후속 todo proposal inbox 조회
+- `/todo proposals`: Task Team 실행 결과에서 올라온 후속 todo proposal inbox 조회
 - `/todo accept <PROP-xxx|number>`: proposal을 main todo queue로 승격
 - `/todo reject <PROP-xxx|number> [reason]`: proposal 폐기
 - `/todo syncback [preview]`: runtime todo 상태를 canonical `TODO.md`에 반영한다. `done`은 체크박스 완료로 표시하고, runtime에서 새로 생긴 accepted proposal/manual todo는 append하며, blocked/manual_followup은 문서 하단 notes block으로 남긴다. `preview`를 붙이면 파일을 바꾸지 않고 계획만 보여준다.
@@ -305,7 +305,7 @@ pause/resume 동작 규칙:
 
 - `aoe orch add ...` 실행 시 대상 프로젝트의 `<project_root>/.aoe-team/AOE_TODO.md`가 없으면 자동으로 생성한다.
 - `/todo followup`: 현재 프로젝트의 `manual_followup` backlog만 표시
-- `/todo proposals`: 현재 프로젝트의 TF follow-up proposal inbox 표시
+- `/todo proposals`: 현재 프로젝트의 Task Team follow-up proposal inbox 표시
 - `/todo accept <PROP-xxx|number>`: proposal을 backlog에 승격하고 lineage(`proposal_id`, `created_from_request_id`, `created_from_todo_id`)를 남긴다.
 - `/todo reject <PROP-xxx|number> [reason]`: proposal을 거절하고 inbox에서 닫는다.
 - `/todo ack <TODO-xxx|number>`: blocked todo를 사람이 확인한 뒤 다시 `open`으로 되돌린다. `manual_followup`/blocked 메타도 함께 정리된다.

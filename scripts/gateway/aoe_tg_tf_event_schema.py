@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalized runtime event schema for experimental TF backends."""
+"""Normalized runtime event schema for experimental Task Team backends."""
 
 from __future__ import annotations
 

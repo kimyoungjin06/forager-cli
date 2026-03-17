@@ -14,7 +14,7 @@ _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
 
-This file is imported into the Mother-Orch todo queue via `/sync`.
+This file is imported into the Control Plane todo queue via `/sync`.
 Only task lines are parsed; everything else is ignored.
 
 ## Tasks
@@ -250,7 +250,7 @@ def _orch_task_reply_markup(key: str, entry: Dict[str, Any], request_id: str, ta
 def ensure_scenario_file(*, template_root: Path, team_dir: Path, dry_run: bool) -> str:
     """Ensure `.aoe-team/AOE_TODO.md` exists for a project.
 
-    The scheduler (`/sync`) imports this file into the Mother-Orch todo queue.
+    The scheduler (`/sync`) imports this file into the Control Plane todo queue.
     """
 
     dst = (team_dir / _SCENARIO_FILENAME).resolve()
@@ -477,13 +477,13 @@ def handle_orch_task_command(
                 now_iso=now_iso,
             )
         except Exception as exc:
-            send(f"orch repair failed\n- orch: {key}\n- error: {exc}", context="orch-repair failed", with_menu=True)
+            send(f"orch repair failed\n- runtime: {key}\n- error: {exc}", context="orch-repair failed", with_menu=True)
             return True
         if not args.dry_run:
             save_manager_state(args.manager_state_file, manager_state)
         lines = [
             "orch repair finished",
-            f"- orch: {result.get('key')} ({result.get('alias')})",
+            f"- runtime: {result.get('key')} ({result.get('alias')})",
             f"- root: {result.get('project_root')}",
             f"- team: {result.get('team_dir')}",
             f"- before: {result.get('before')}",
@@ -559,7 +559,7 @@ def handle_orch_task_command(
             cfg = (team_dir / "orchestrator.json").resolve() if str(team_dir) else None
             if cfg and not cfg.exists():
                 status = (
-                    "[WARN] orch config missing (orchestrator.json)\n"
+                    "[WARN] runtime config missing (orchestrator.json)\n"
                     f"missing: {cfg}\n"
                     f"fix: /orch repair {str(entry.get('project_alias', '')).strip() or key}"
                 )
@@ -568,8 +568,8 @@ def handle_orch_task_command(
         except Exception as exc:
             status = f"[WARN] status unavailable: {exc}"
         send(
-            f"orch: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
-            f"active_tf_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n\n{status}",
+            f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
+            f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
@@ -600,7 +600,7 @@ def handle_orch_task_command(
         set_chat_selected_task_ref(manager_state, chat_id, key, req_id)
         if not args.dry_run:
             save_manager_state(args.manager_state_file, manager_state)
-        send(f"orch: {key}\n" + summarize_request_state(data, task=task), context="request")
+        send(f"runtime: {key}\n" + summarize_request_state(data, task=task), context="request")
         return True
 
     if cmd == "orch-check":
@@ -781,7 +781,7 @@ def handle_orch_task_command(
         label = task_display_label(task or {}, fallback_request_id=req_id)
         reason = str(exec_critic.get("reason", "")).strip() or str(exec_critic.get("note", "")).strip() or "-"
         lines = [
-            f"orch: {key}",
+            f"runtime: {key}",
             "manual follow-up",
             f"task: {label}",
             f"request_id: {req_id}",
@@ -821,7 +821,7 @@ def handle_orch_task_command(
 
             if not recent_refs:
                 send(
-                    f"orch: {key}\n"
+                    f"runtime: {key}\n"
                     "최근 작업이 없습니다.\n\n"
                     "start: /dispatch <요청>",
                     context="orch-pick empty",
@@ -830,7 +830,7 @@ def handle_orch_task_command(
                 return True
 
             lines = [
-                f"orch: {key}",
+                f"runtime: {key}",
                 "pick: 최근 작업 선택",
                 "",
                 "recent:",
@@ -882,7 +882,7 @@ def handle_orch_task_command(
         label = task_display_label(task or {}, fallback_request_id=req_id)
         send(
             "selected task updated\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- task: {label}\n"
             f"- request_id: {req_id}\n"
             "next: /check, /task, /retry, /replan, /cancel",

@@ -1195,7 +1195,7 @@ def summarize_task_monitor(
 ) -> str:
     tasks = ensure_project_tasks(entry)
     if not tasks:
-        return f"orch: {project_name}\n작업이 없습니다."
+        return f"runtime: {project_name}\n작업이 없습니다."
 
     backfill_task_aliases(entry)
     rows = sorted(tasks.items(), key=lambda kv: str((kv[1] or {}).get("updated_at", "")), reverse=True)
@@ -1214,7 +1214,7 @@ def summarize_task_monitor(
             invalid_stage_rows += 1
 
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"task monitor: latest {cap}",
         "format: label | status/stage | roles | updated",
         "summary: total={total} running={running} completed={completed} failed={failed} pending={pending}".format(

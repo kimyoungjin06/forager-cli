@@ -1131,7 +1131,7 @@ def normalize_orch_followup_proposals(
 def orch_runtime_event_schema() -> Dict[str, Any]:
     schema = dict(tf_runtime_event_schema())
     notes = list(schema.get("notes") or [])
-    notes.append("runtime event contract is shared by local and experimental TF backends")
+    notes.append("runtime event contract is shared by local and experimental Task Team backends")
     schema["notes"] = notes
     schema["contract"] = "orch.runtime_event.v1"
     return schema

@@ -537,7 +537,7 @@ def test_todo_syncback_preview_reports_done_append_and_blocked_notes(tmp_path: P
     assert sent
     text = sent[-1]
     assert "todo syncback preview" in text
-    assert "- orch: twinpaper (O2)" in text
+    assert "- runtime: twinpaper (O2)" in text
     assert "- mark_done: 1" in text
     assert "- append_new: 1" in text
     assert "- blocked_notes: 1" in text

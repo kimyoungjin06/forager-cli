@@ -124,7 +124,7 @@ def summarize_gateway_metrics(
     poll_summary = summarize_gateway_poll_state(poll_state_path, project_name=project_name)
     path = team_dir / "logs" / "gateway_events.jsonl"
     if not path.exists():
-        return f"orch: {project_name}\nmetrics: no data file\nwindow_hours: {cap_hours}\n{poll_summary}"
+        return f"runtime: {project_name}\nmetrics: no data file\nwindow_hours: {cap_hours}\n{poll_summary}"
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=cap_hours)
     total = 0
@@ -220,7 +220,7 @@ def summarize_gateway_metrics(
                 if latency > 0:
                     latencies.append(latency)
     except Exception:
-        return f"orch: {project_name}\nmetrics: failed to read log\nwindow_hours: {cap_hours}\n{poll_summary}"
+        return f"runtime: {project_name}\nmetrics: failed to read log\nwindow_hours: {cap_hours}\n{poll_summary}"
 
     send_total = sent_ok + sent_fail
     send_success_rate = (100.0 * sent_ok / send_total) if send_total > 0 else 0.0
@@ -244,7 +244,7 @@ def summarize_gateway_metrics(
     p95 = percentile(latencies, 0.95)
 
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"window_hours: {cap_hours}",
         f"events: total={total} incoming={incoming} accepted={accepted} rejected={rejected}",
         f"commands: success={cmd_success} failed={cmd_failed} pending={cmd_pending} success_rate={cmd_success_rate:.1f}%",

@@ -1473,7 +1473,7 @@ def summarize_three_stage_request(
         stage3 = "대기"
 
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"task: {task_display_label(task or {}, fallback_request_id=request_id)}",
         f"request_id: {request_id}",
         "3단계 진행확인",
@@ -2817,7 +2817,7 @@ def help_text(ui_lang: str = DEFAULT_UI_LANG) -> str:
         "- /panic  (emergency stop: auto/offdesk off + clear pending/confirm + routing off)\n"
         "- /clear  (clear pending/routing/room/queue; safe defaults)\n"
         "- /todo   (project backlog)\n"
-        "- /todo proposals   (TF follow-up proposal inbox)\n"
+        "- /todo proposals   (Task Team follow-up proposal inbox)\n"
         "- /todo followup   (manual follow-up backlog only)\n"
         "- /todo add [P1|P2|P3] <summary>\n"
         "- /todo accept <PROP-xxx|number>   (promote proposal into main todo queue)\n"
@@ -2830,7 +2830,7 @@ def help_text(ui_lang: str = DEFAULT_UI_LANG) -> str:
         "- /room   (ephemeral board: /room post|tail|list|use)\n"
         "- /gc     (cleanup room logs + tf exec cache)\n"
         "- /tf     (proof checks, local; writes report under docs/investigations_mo; ex: /tf mod2-proof tags | /tf mod2-proof latest)\n"
-        "- /use <O1|name> (active orch switch; soft focus)\n"
+        "- /use <O1|name> (active runtime switch; soft focus)\n"
         "- /focus [O1|name|off] (hard project lock / unlock)\n"
         "- /orch pause <O#|name> [reason]\n"
         "- /orch resume <O#|name>\n"
@@ -2977,7 +2977,7 @@ def help_text(ui_lang: str = DEFAULT_UI_LANG) -> str:
         "\n"
         "Routing\n"
         "- default: prefix-only (plain text ignored unless pending/default mode)\n"
-        "- soft focus: /use <O#|name> sets the default project used by plain text and TF commands\n"
+        "- soft focus: /use <O#|name> sets the default project used by plain text and Task Team commands\n"
         "- hard lock: /focus <O#|name> narrows /queue, /next, /sync all, /offdesk to one project and blocks /fanout\n"
         "- unlock: /focus off (or /unlock)\n"
         "- default access: deny-by-default (allowlist required)\n"

@@ -108,7 +108,7 @@ def send_dispatch_exception(
     alias = project_alias(entry, key)
     lines = [
         "dispatch failed before request start",
-        f"- orch: {key} ({alias})",
+        f"- runtime: {key} ({alias})",
         f"- reason: {reason or 'dispatch_failed'}",
     ]
     token = str(todo_id or "").strip()

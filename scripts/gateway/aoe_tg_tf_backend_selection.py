@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project-local sandbox TF backend selection helpers."""
+"""Project-local sandbox Task Team backend selection helpers."""
 
 from __future__ import annotations
 
@@ -92,4 +92,3 @@ def resolve_effective_tf_backend(team_dir: Path, explicit: Optional[str] = None)
     out = dict(row)
     out["effective_backend"] = normalize_tf_backend_name(effective)
     return out
-

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Mother-Orch Action API contract helpers.
+"""Control Action API contract helpers.
 
-This module defines the stable action surface Mother-Orch may use when it
+This module defines the stable action surface Control Plane may use when it
 decides whether a plaintext request should become:
 
 - a status lookup
@@ -119,7 +119,7 @@ ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "requires_project": True,
         "operator_surface": ["/monitor", "/orch monitor O#"],
         "required_args": [],
-        "notes": ["Return active task and TF lifecycle detail for operator monitoring."],
+        "notes": ["Return active task and Task Team lifecycle detail for operator monitoring."],
     },
     "get_queue": {
         "family": "backlog",
@@ -300,7 +300,7 @@ def infer_mother_orch_action_call(
     text = _trim_text(prompt, 2000)
     low = text.lower()
     if not text:
-        raise RuntimeError("missing plaintext prompt for Mother-Orch action inference")
+        raise RuntimeError("missing plaintext prompt for Control Plane action inference")
 
     offdesk_prepare_markers = ("offdesk prepare", "오프데스크 준비", "퇴근 준비", "야간 준비")
     offdesk_review_markers = ("offdesk review", "오프데스크 검토", "퇴근 검토", "야간 검토")
@@ -511,7 +511,7 @@ def action_call_to_resolved_command(call: Any) -> Dict[str, Any]:
         return {"cmd": "offdesk", "rest": "on"}
     if action == "offdesk_status":
         return {"cmd": "offdesk", "rest": "status"}
-    raise RuntimeError(f"unsupported Mother-Orch action mapping: {action}")
+    raise RuntimeError(f"unsupported Control Plane action mapping: {action}")
 
 
 def _trim_text(raw: Any, limit: int) -> str:
@@ -532,10 +532,10 @@ def _normalize_bool(raw: Any, default: bool) -> bool:
 def _canonical_action_name(raw: Any) -> str:
     token = _trim_text(raw, 64).lower().replace(" ", "_")
     if not token:
-        raise RuntimeError("missing Mother-Orch action name")
+        raise RuntimeError("missing Control Plane action name")
     canonical = ACTION_ALIASES.get(token, token)
     if canonical not in ACTION_CATALOG:
-        raise RuntimeError(f"unknown Mother-Orch action: {raw}")
+        raise RuntimeError(f"unknown Control Plane action: {raw}")
     return canonical
 
 
@@ -562,7 +562,7 @@ def mother_orch_action_api_schema() -> Dict[str, Any]:
         "risk_levels": list(RISK_LEVELS),
         "actions": actions,
         "notes": [
-            "This is the stable control-plane seam Mother-Orch should use before any MCP adapter is added.",
+            "This is the stable control-plane seam Control Plane should use before any MCP adapter is added.",
             "Adapters may convert Telegram/CLI/MCP requests into this call envelope, but must not bypass it.",
             "Action API owns intent and mutation boundaries; execution backends stay downstream.",
         ],

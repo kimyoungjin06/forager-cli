@@ -183,18 +183,18 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     stages = task.get("stages") or {}
 
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"task: {label}",
         f"request_id: {request_id}",
         f"status: {status}",
-        f"tf_phase: {normalize_tf_phase(derive_tf_phase(task), 'queued')}",
+        f"team_phase: {normalize_tf_phase(derive_tf_phase(task), 'queued')}",
         f"mode: {mode}",
         f"roles: {', '.join(roles) if roles else '-'}",
         f"verifier_roles: {', '.join(verifiers) if verifiers else '-'}",
     ]
     tf_phase_reason = str(task.get("tf_phase_reason", "")).strip() or derive_tf_phase_reason(task)
     if tf_phase_reason:
-        lines.append(f"tf_phase_reason: {tf_phase_reason}")
+        lines.append(f"team_phase_reason: {tf_phase_reason}")
     phase1_mode = str(task.get("phase1_mode", "")).strip()
     phase1_rounds = max(0, int(task.get("phase1_rounds", 0) or 0))
     phase1_providers = dedupe_roles(task.get("phase1_providers") or [])

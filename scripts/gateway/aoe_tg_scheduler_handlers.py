@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scheduler command handlers for Telegram gateway.
 
-This module implements a minimal "Mother-Orch" scheduler:
+This module implements a minimal "Control Plane" scheduler:
 - /next : pick the next runnable todo across all registered orch projects
 - /queue : summarize todo queue across all registered orch projects
 
@@ -619,7 +619,7 @@ def handle_scheduler_command(
     save_manager_state: Callable[..., None],
     now_iso: Callable[[], str],
 ) -> Optional[Dict[str, Any]]:
-    """Handle /next (Mother-Orch global todo scheduler).
+    """Handle /next (Control Plane global todo scheduler).
 
     Returns:
       - {"terminal": True} when handled and no run is needed
@@ -1941,7 +1941,7 @@ def handle_scheduler_command(
         if isinstance(entry, dict) and _has_task_linked_to_todo(entry, p_todo_id):
             send(
                 "next blocked: pending todo already has an active task\n"
-                f"- orch: {key} ({alias})\n"
+                f"- runtime: {key} ({alias})\n"
                 f"- pending: {p_todo_id}\n"
                 "next:\n"
                 "- /todo (list)\n"
@@ -1956,7 +1956,7 @@ def handle_scheduler_command(
         if not summary:
             send(
                 "next blocked: pending todo exists but summary was not found\n"
-                f"- orch: {key} ({alias})\n"
+                f"- runtime: {key} ({alias})\n"
                 f"- pending: {p_todo_id}\n"
                 "next:\n"
                 f"- /todo {key}\n"
@@ -1971,7 +1971,7 @@ def handle_scheduler_command(
             summary_preview = summary_preview[:217] + "..."
         send(
             "next resumed: pending todo\n"
-            f"- orch: {key} ({alias})\n"
+            f"- runtime: {key} ({alias})\n"
             f"- id: {p_todo_id}\n"
             f"- summary: {summary_preview or '-'}\n"
             "dispatch starting...",
@@ -2019,7 +2019,7 @@ def handle_scheduler_command(
     if not summary:
         send(
             "next blocked: selected todo has empty summary\n"
-            f"- orch: {key} ({alias})\n"
+            f"- runtime: {key} ({alias})\n"
             f"- id: {todo_id}\n"
             "next:\n"
             f"- /todo {key}\n"
@@ -2043,7 +2043,7 @@ def handle_scheduler_command(
         summary_preview = summary_preview[:217] + "..."
     lines = [
         "next resumed (global)" if selection_kind == "resume" else "next selected (global)",
-        f"- orch: {key} ({alias})",
+        f"- runtime: {key} ({alias})",
         f"- id: {todo_id}",
         f"- priority: {pr}",
         f"- summary: {summary_preview or '-'}",

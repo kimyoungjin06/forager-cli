@@ -35,7 +35,7 @@ Project charter:
   - `aoe-team-stack`
   - tmux operator surface
 - Execution plane:
-  - request-scoped TF workdirs
+  - request-scoped Task Team workdirs
   - role worker sessions
   - runtime queue/task state
 
@@ -156,9 +156,9 @@ bash scripts/gateway_error_test.sh
 - CI workflow:
   - `.github/workflows/gateway-tests.yml`
 
-## Experimental TF Backends
+## Experimental Task Team Backends
 Current production path:
-- local TF backend based on `aoe-orch` + tmux/request-scoped workers
+- local Task Team backend based on `aoe-orch` + tmux/request-scoped workers
 
 Planned experimental seam:
 - `scripts/gateway/aoe_tg_tf_backend.py`
@@ -167,7 +167,7 @@ Planned experimental seam:
 - `scripts/experiments/autogen_core_tf_spike.py`
 
 Important rule:
-- external frameworks may be used inside one TF execution backend
+- external frameworks may be used inside one Task Team execution backend
 - backlog ownership, syncback, Telegram control, and offdesk scheduling remain in this repository
 
 ## Current Status

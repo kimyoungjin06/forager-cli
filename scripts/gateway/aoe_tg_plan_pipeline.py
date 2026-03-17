@@ -375,7 +375,7 @@ def emit_planning_progress(
         "blocked": "planning: blocked",
     }
     lines = [heading_map.get(phase_token, f"planning: {phase_token}")]
-    lines.append(f"- orch: {key}")
+    lines.append(f"- runtime: {key}")
     if detail_text:
         lines.append(f"- detail: {detail_text}")
     if suffix:

@@ -239,7 +239,7 @@ def test_orch_runtime_event_schema_wraps_backend_neutral_contract() -> None:
     schema = mod.orch_runtime_event_schema()
     assert schema["contract"] == "orch.runtime_event.v1"
     assert "required_fields" in schema
-    assert "runtime event contract is shared by local and experimental TF backends" in schema["notes"]
+    assert "runtime event contract is shared by local and experimental Task Team backends" in schema["notes"]
 
 
 def test_derive_tf_phase_prefers_planning_block_then_retry_then_completed() -> None:

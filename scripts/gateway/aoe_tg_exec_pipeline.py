@@ -137,7 +137,7 @@ def maybe_send_manual_followup_alert(
     item["updated_at"] = now_iso()
     lines = [
         "manual follow-up needed",
-        f"- orch: {project_key} ({alias})",
+        f"- runtime: {project_key} ({alias})",
         f"- id: {token}",
         f"- blocked_count: {blocked_count}",
     ]
@@ -296,7 +296,7 @@ def maybe_capture_todo_proposals(
     alias = project_alias(entry, key)
     lines = [
         "new todo proposals",
-        f"- orch: {key} ({alias})",
+        f"- runtime: {key} ({alias})",
         f"- source_request: {req_id}",
         f"- created: {created_count}",
     ]
