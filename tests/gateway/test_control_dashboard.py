@@ -18,6 +18,7 @@ from _gateway_test_support import gw  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
+import nightly_session_summary as nightly_summary  # noqa: E402
 
 
 def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
@@ -219,6 +220,16 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         ) + "\n",
         encoding="utf-8",
     )
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
     return team_dir, manager_state_file, project_root
 
 
@@ -334,6 +345,30 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "score=0 | providers=0 | retry_wait=-" in text
     assert "analysis-check" in text
     assert "analysis-followup" in text
+
+
+def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Nightly Session Summary" in text
+    assert "automation_posture" in text
+    assert "auto_active (fanout)" in text
+    assert "O2 Alpha" in text
+    assert "analysis-check" in text
+    assert "/control/tasks/by-request/REQ-1" in text
 
 
 def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:

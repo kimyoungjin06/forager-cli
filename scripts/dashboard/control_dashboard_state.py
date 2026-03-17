@@ -26,6 +26,8 @@ import aoe_tg_task_view as task_view
 MANAGER_STATE_FILENAME = "orch_manager_state.json"
 AUTO_STATE_FILENAME = "auto_scheduler.json"
 PROVIDER_CAPACITY_FILENAME = "provider_capacity.json"
+RECOVERY_SUMMARY_DIRNAME = "nightly-session-summary"
+RECOVERY_SUMMARY_FILENAME = "latest.json"
 
 _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
@@ -164,6 +166,76 @@ class RuntimeDetailDTO:
     notes: List[str] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
     recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RecoveryTaskDTO:
+    request_id: str
+    label: str
+    detail_path: str
+    status: str
+    tf_phase: str
+    preset: str
+    phase2_shape: str
+    phase2_quality: str
+    lane_summary: str
+    rerun_summary: str
+    followup_summary: str
+    backend_summary: str
+    backend_note: str
+    rate_limit_summary: str
+
+
+@dataclass(frozen=True)
+class RecoveryRuntimeDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    runtime_path: str
+    status: str
+    readiness: str
+    attention_summary: str
+    priority_action: str
+    priority_reason: str
+    next_focus: str
+    queue_summary: str
+    proposal_summary: str
+    sync_summary: str
+    provider_pressure_summary: str
+    repeat_summary: str
+    completed_task_count: int
+    blocked_task_count: int
+    parked_task_count: int
+    active_task_label: str
+    active_task_path: str
+    active_task_status: str
+    active_task_phase: str
+    active_task_preset: str
+    active_task_phase2_shape: str
+    active_task_phase2_quality: str
+    active_task_backend: str
+    active_task_backend_note: str
+    active_task_rate_limit: str
+    task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RecoverySummaryDTO:
+    exists: bool
+    artifact_path: str
+    updated_at: str
+    stale: bool
+    error: str
+    generated_at: str
+    snapshot_taken_at: str
+    automation_posture: str
+    auto_mode: str
+    offdesk_mode: str
+    provider_capacity_summary: str
+    next_retry_at: str
+    next_retry_target: str
+    repeat_memory_summary: str
+    runtimes: List[RecoveryRuntimeDTO] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -463,6 +535,10 @@ def _runtime_path(project_alias: str) -> str:
 
 def _detail_path(request_id: str) -> str:
     return f"/control/tasks/by-request/{quote(str(request_id or '').strip(), safe='')}"
+
+
+def _recovery_summary_path(team_dir: Path) -> Path:
+    return team_dir / "recovery" / RECOVERY_SUMMARY_DIRNAME / RECOVERY_SUMMARY_FILENAME
 
 
 def _provider_repeat_counts(provider_state: Dict[str, Any]) -> Dict[str, int]:
@@ -839,6 +915,101 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     )
 
 
+def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryTaskDTO]:
+    built: List[RecoveryTaskDTO] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        preset = row.get("preset") if isinstance(row.get("preset"), dict) else {}
+        built.append(
+            RecoveryTaskDTO(
+                request_id=str(row.get("request_id", "")).strip(),
+                label=str(row.get("label", "")).strip() or "-",
+                detail_path=_detail_path(str(row.get("request_id", "")).strip()),
+                status=str(row.get("status", "")).strip() or "-",
+                tf_phase=str(row.get("tf_phase", "")).strip() or "-",
+                preset="phase1={phase1} phase2={phase2}".format(
+                    phase1=str(preset.get("phase1", "")).strip() or "-",
+                    phase2=str(preset.get("phase2", "")).strip() or "-",
+                ),
+                phase2_shape=str(row.get("phase2_shape", "")).strip() or "-",
+                phase2_quality=str(row.get("phase2_quality", "")).strip() or "-",
+                lane_summary=str(row.get("lane_summary", "")).strip() or "-",
+                rerun_summary=str(row.get("rerun_summary", "")).strip() or "-",
+                followup_summary=str(row.get("followup_summary", "")).strip() or "-",
+                backend_summary=str(row.get("backend_summary", "")).strip() or "-",
+                backend_note=str(row.get("backend_note", "")).strip(),
+                rate_limit_summary=str(row.get("rate_limit_summary", "")).strip() or "-",
+            )
+        )
+    return built
+
+
+def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryRuntimeDTO]:
+    built: List[RecoveryRuntimeDTO] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        alias = str(row.get("project_alias", "")).strip().upper()
+        label = str(row.get("project_label", "")).strip() or alias or "-"
+        active_request_id = str(row.get("active_task_request_id", "")).strip()
+        built.append(
+            RecoveryRuntimeDTO(
+                project_key=str(row.get("project_key", "")).strip() or alias,
+                project_alias=alias or "-",
+                project_label=label,
+                runtime_path=_runtime_path(alias),
+                status=str(row.get("status", "")).strip() or "-",
+                readiness=str(row.get("readiness", "")).strip() or "-",
+                attention_summary=str(row.get("attention_summary", "")).strip() or "-",
+                priority_action=str(row.get("priority_action", "")).strip() or "-",
+                priority_reason=str(row.get("priority_reason", "")).strip() or "-",
+                next_focus=str(row.get("next_focus", "")).strip() or "-",
+                queue_summary=str(row.get("queue_summary", "")).strip() or "-",
+                proposal_summary=str(row.get("proposal_summary", "")).strip() or "-",
+                sync_summary=str(row.get("sync_summary", "")).strip() or "-",
+                provider_pressure_summary=str(row.get("provider_pressure_summary", "")).strip() or "-",
+                repeat_summary=str(row.get("repeat_summary", "")).strip() or "-",
+                completed_task_count=int(row.get("completed_task_count", 0) or 0),
+                blocked_task_count=int(row.get("blocked_task_count", 0) or 0),
+                parked_task_count=int(row.get("parked_task_count", 0) or 0),
+                active_task_label=str(row.get("active_task_label", "")).strip(),
+                active_task_path=_detail_path(active_request_id) if active_request_id else "",
+                active_task_status=str(row.get("active_task_status", "")).strip() or "-",
+                active_task_phase=str(row.get("active_task_phase", "")).strip() or "-",
+                active_task_preset=str(row.get("active_task_preset", "")).strip() or "-",
+                active_task_phase2_shape=str(row.get("active_task_phase2_shape", "")).strip() or "-",
+                active_task_phase2_quality=str(row.get("active_task_phase2_quality", "")).strip() or "-",
+                active_task_backend=str(row.get("active_task_backend", "")).strip() or "-",
+                active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
+                active_task_rate_limit=str(row.get("active_task_rate_limit", "")).strip() or "-",
+                task_teams=_build_recovery_task_rows(row.get("task_teams") or []),
+            )
+        )
+    return built
+
+
+def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshnessDTO) -> RecoverySummaryDTO:
+    control = summary_state.get("control_summary") if isinstance(summary_state.get("control_summary"), dict) else {}
+    return RecoverySummaryDTO(
+        exists=bool(freshness.exists and summary_state),
+        artifact_path=freshness.path,
+        updated_at=freshness.updated_at,
+        stale=bool(freshness.stale),
+        error=str(freshness.error or "").strip(),
+        generated_at=str(summary_state.get("generated_at", "")).strip() or "-",
+        snapshot_taken_at=str(summary_state.get("snapshot_taken_at", "")).strip() or "-",
+        automation_posture=str(control.get("automation_posture", "")).strip() or "-",
+        auto_mode=str(control.get("auto_mode", "")).strip() or "-",
+        offdesk_mode=str(control.get("offdesk_mode", "")).strip() or "-",
+        provider_capacity_summary=str(control.get("provider_capacity_summary", "")).strip() or "-",
+        next_retry_at=str(control.get("next_retry_at", "")).strip() or "-",
+        next_retry_target=str(control.get("next_retry_target", "")).strip() or "-",
+        repeat_memory_summary=str(control.get("repeat_memory_summary", "")).strip() or "-",
+        runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
+    )
+
+
 def resolve_task_request_for_alias(manager_state: Dict[str, Any], project_alias: str, task_short_id: str) -> str:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     alias_token = str(project_alias or "").strip().upper()
@@ -1008,3 +1179,19 @@ def load_dashboard_runtime_details(
         if detail is not None:
             details.append(detail)
     return loaded.snapshot, details, loaded.manager_state
+
+
+def load_dashboard_recovery_page(
+    *,
+    control_root: Path | str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+) -> Tuple[DashboardSnapshotDTO, RecoverySummaryDTO]:
+    loaded = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
+    summary_state, freshness = _load_json_file(_recovery_summary_path(paths.team_dir), name="nightly_summary")
+    return loaded.snapshot, _build_recovery_summary(summary_state, freshness)

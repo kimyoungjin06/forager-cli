@@ -1,0 +1,79 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Nightly Session Summary</h2>
+  {% if recovery.exists %}
+  <ul class="kv-list">
+    <li><span>artifact</span><strong>{{ recovery.artifact_path }}</strong></li>
+    <li><span>updated_at</span><strong>{{ recovery.updated_at or '-' }}</strong></li>
+    <li><span>generated_at</span><strong>{{ recovery.generated_at }}</strong></li>
+    <li><span>snapshot_taken_at</span><strong>{{ recovery.snapshot_taken_at }}</strong></li>
+    <li><span>automation_posture</span><strong>{{ recovery.automation_posture }}</strong></li>
+    <li><span>auto_mode</span><strong>{{ recovery.auto_mode }}</strong></li>
+    <li><span>offdesk_mode</span><strong>{{ recovery.offdesk_mode }}</strong></li>
+    <li><span>provider_capacity</span><strong>{{ recovery.provider_capacity_summary }}</strong></li>
+    <li><span>next_retry_at</span><strong>{{ recovery.next_retry_at }}</strong></li>
+    <li><span>next_retry_target</span><strong>{{ recovery.next_retry_target }}</strong></li>
+    <li><span>repeat_memory</span><strong>{{ recovery.repeat_memory_summary }}</strong></li>
+    {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
+    {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
+  </ul>
+  {% else %}
+  <p class="muted">nightly summary artifact not found</p>
+  <pre class="code-block">python3 scripts/dashboard/nightly_session_summary.py --control-root {{ snapshot.control_root }}</pre>
+  {% endif %}
+</section>
+
+{% if recovery.runtimes %}
+<section class="panel">
+  <h2>Recovered Runtimes</h2>
+  <div class="runtime-list">
+    {% for runtime in recovery.runtimes %}
+    <div class="runtime-card {{ runtime.status }}">
+      <h3><a href="{{ runtime.runtime_path }}">{{ runtime.project_alias }} {{ runtime.project_label }}</a></h3>
+      <p><strong>runtime</strong> {{ runtime.readiness }}</p>
+      <p><strong>attention</strong> {{ runtime.attention_summary }}</p>
+      <p><strong>first</strong> {{ runtime.priority_action }} | {{ runtime.priority_reason }}</p>
+      <p><strong>next_focus</strong> {{ runtime.next_focus }}</p>
+      <p><strong>queue</strong> {{ runtime.queue_summary }}</p>
+      <p><strong>provider_pressure</strong> {{ runtime.provider_pressure_summary }}</p>
+      <p><strong>repeat</strong> {{ runtime.repeat_summary }}</p>
+      {% if runtime.active_task_label %}
+      <p><strong>active_task</strong> <a href="{{ runtime.active_task_path }}">{{ runtime.active_task_label }}</a> | {{ runtime.active_task_status }}/{{ runtime.active_task_phase }}</p>
+      <p><strong>preset</strong> {{ runtime.active_task_preset }}</p>
+      <p><strong>shape</strong> {{ runtime.active_task_phase2_shape }}</p>
+      <p><strong>quality</strong> {{ runtime.active_task_phase2_quality }}</p>
+      <p><strong>backend</strong> {{ runtime.active_task_backend }}</p>
+      {% if runtime.active_task_backend_note %}<p><strong>backend_note</strong> {{ runtime.active_task_backend_note }}</p>{% endif %}
+      <p><strong>rate_limit</strong> {{ runtime.active_task_rate_limit }}</p>
+      {% endif %}
+      {% if runtime.task_teams %}
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th>Task Team</th>
+            <th>Status</th>
+            <th>Preset</th>
+            <th>Phase2 Shape</th>
+            <th>Backend</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in runtime.task_teams %}
+          <tr>
+            <td><a href="{{ task.detail_path }}">{{ task.label }}</a><br><span class="muted">{{ task.request_id }}</span></td>
+            <td>{{ task.status }}/{{ task.tf_phase }}</td>
+            <td>{{ task.preset }}</td>
+            <td>{{ task.phase2_shape }}</td>
+            <td>{{ task.backend_summary }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

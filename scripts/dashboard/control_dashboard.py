@@ -20,6 +20,7 @@ if str(ROOT / "scripts" / "dashboard") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts" / "dashboard"))
 
 from control_dashboard_state import (
+    load_dashboard_recovery_page,
     load_dashboard_snapshot,
     load_dashboard_runtime_page,
     load_dashboard_task_page,
@@ -130,6 +131,22 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                 "dashboard/offdesk.html",
                 page_title="Offdesk Prep",
                 snapshot=snapshot,
+                current_path=path,
+            )
+        )
+
+    if path == "/control/recovery":
+        snapshot, recovery = load_dashboard_recovery_page(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+        )
+        return _html(
+            render_template(
+                "dashboard/recovery.html",
+                page_title="Recovery",
+                snapshot=snapshot,
+                recovery=recovery,
                 current_path=path,
             )
         )

@@ -94,7 +94,7 @@
   - `TF` -> `Task Team`
   - 원칙: 문서/오퍼레이터 표기부터 바꾸고, 코드 identifier는 alias 호환을 유지하며 단계적으로 정리한다.
   - 후속: operator surface와 code identifier는 단계적으로 수렴시킨다.
-- [ ] 용어 전환 2단계
+- [x] 용어 전환 2단계
   - operator surface 문구 치환
   - code alias convergence
   - legacy term deprecation checkpoint
@@ -146,6 +146,10 @@
     - recent blocked/completed tasks
     - provider pressure / repeat memory
     - runtime-scoped first action / next focus
+- [x] `Recovery` read-only view 구현
+  - `nightly-session-summary/latest.json` artifact 재사용
+  - current snapshot + last nightly artifact를 함께 표시
+  - runtime/task drill-down 링크 유지
 - [x] read-only MVP 1단계 설계 문서화
   - 라우트:
     - `Overview`
@@ -207,6 +211,13 @@
   - 전제:
     - dashboard/read-only parity 이후
     - structured runtime state reuse
+- [x] nightly session summary dashboard recovery view 연결
+  - route:
+    - `/control/recovery`
+  - 범위:
+    - latest artifact metadata
+    - recovered runtime summaries
+    - task detail/runtime detail drill-down
 
 ### 8.6 Retention and Storage
 - [x] storage retention policy 고정
