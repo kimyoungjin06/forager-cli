@@ -142,6 +142,9 @@ class RuntimeDetailDTO:
     priority_action: str
     priority_reason: str
     next_focus: str
+    completed_task_count: int
+    blocked_task_count: int
+    parked_task_count: int
     queue_summary: str
     proposal_summary: str
     sync_summary: str
@@ -771,6 +774,14 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     row = next((report for report in reports if str(report.get("alias", "")).strip().upper() == target_alias), None)
     if row is None:
         return None
+    queue_snapshot = ops_policy.project_queue_snapshot(entry)
+    completed_task_count = 0
+    tasks = task_state.ensure_project_tasks(entry)
+    for task in tasks.values():
+        if not isinstance(task, dict):
+            continue
+        if runtime_read.normalize_task_status(task.get("status", "pending")) == "completed":
+            completed_task_count += 1
     display = str(row.get("display", "")).strip() or target_alias
     phase1_preset = str(row.get("active_task_phase1_role_preset", "")).strip()
     phase2_preset = str(row.get("active_task_phase2_team_preset", "")).strip()
@@ -787,6 +798,9 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         priority_action=str(row.get("priority_action", "-")).strip() or "-",
         priority_reason=str(row.get("priority_reason", "-")).strip() or "-",
         next_focus=offdesk_flow.preset_next_focus(phase1_preset, phase2_preset),
+        completed_task_count=completed_task_count,
+        blocked_task_count=int(queue_snapshot.get("blocked_count", 0) or 0),
+        parked_task_count=int(queue_snapshot.get("parked_count", 0) or 0),
         queue_summary=_runtime_detail_queue_summary(row),
         proposal_summary=_runtime_detail_proposal_summary(row),
         sync_summary=_runtime_detail_sync_summary(row),
@@ -930,6 +944,10 @@ def load_task_detail(
     return _build_task_detail(manager_loaded.state, request_id)
 
 
+def task_detail_from_state(manager_state: Dict[str, Any], request_id: str) -> Optional[TaskDetailDTO]:
+    return _build_task_detail(manager_state, request_id)
+
+
 def load_dashboard_task_page(
     *,
     control_root: Path | str,
@@ -971,3 +989,22 @@ def load_dashboard_runtime_page(
         manager_state_file=manager_state_file,
     )
     return loaded.snapshot, _build_runtime_detail(loaded.manager_state, loaded.provider_state, project_alias)
+
+
+def load_dashboard_runtime_details(
+    *,
+    control_root: Path | str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+) -> Tuple[DashboardSnapshotDTO, List[RuntimeDetailDTO], Dict[str, Any]]:
+    loaded = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    details: List[RuntimeDetailDTO] = []
+    for card in loaded.snapshot.runtime_cards:
+        detail = _build_runtime_detail(loaded.manager_state, loaded.provider_state, card.project_alias)
+        if detail is not None:
+            details.append(detail)
+    return loaded.snapshot, details, loaded.manager_state

@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Nightly session summary artifact regressions."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GW_DIR = ROOT / "scripts" / "gateway"
+DASH_DIR = ROOT / "scripts" / "dashboard"
+TEST_DIR = ROOT / "tests" / "gateway"
+for path in (GW_DIR, DASH_DIR, TEST_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+import nightly_session_summary as nightly_summary  # noqa: E402
+from test_control_dashboard import _build_runtime  # noqa: E402
+
+
+def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    control = summary["control_summary"]
+    runtimes = summary["runtimes"]
+
+    assert summary["team_dir"] == str(team_dir)
+    assert control["auto_mode"] == "fanout"
+    assert control["offdesk_mode"] == "on"
+    assert control["provider_capacity_summary"] == "tasks=1 projects=1 providers=claude=1"
+    assert runtimes[0]["project_alias"] == "O2"
+    assert runtimes[0]["completed_task_count"] == 1
+    assert runtimes[0]["active_task_label"] == "T-001 | analysis-check"
+    assert runtimes[0]["task_teams"][0]["request_id"] == "REQ-1"
+
+
+def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    output_dir = tmp_path / "summary-out"
+
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    latest_md, latest_json = nightly_summary.write_nightly_session_summary(summary=summary, output_dir=output_dir)
+
+    assert latest_md.exists()
+    assert latest_json.exists()
+    assert (output_dir / "latest.md").exists()
+    assert (output_dir / "latest.json").exists()
+
+    timestamped_md = sorted(path for path in output_dir.glob("*.md") if path.name != "latest.md")
+    timestamped_json = sorted(path for path in output_dir.glob("*.json") if path.name != "latest.json")
+    assert timestamped_md
+    assert timestamped_json
+
+    markdown = latest_md.read_text(encoding="utf-8")
+    payload = json.loads(latest_json.read_text(encoding="utf-8"))
+
+    assert "# Nightly Session Summary" in markdown
+    assert "## O2 Alpha" in markdown
+    assert "analysis-check (REQ-1)" in markdown
+    assert payload["runtimes"][0]["project_alias"] == "O2"

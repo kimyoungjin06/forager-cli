@@ -54,7 +54,20 @@
 - Preferred shape:
   - one global summary section
   - one section per active runtime that saw overnight activity
+- Phase 1 implementation path:
+  - generator: `scripts/dashboard/nightly_session_summary.py`
+  - default output dir: `.aoe-team/recovery/nightly-session-summary/`
+  - files:
+    - `latest.md`
+    - `latest.json`
+    - timestamped `*.md` / `*.json` copies unless `--latest-only` is used
 
-## 7. Immediate Follow-up
+## 7. Manual Generation
+```bash
+python3 scripts/dashboard/nightly_session_summary.py \
+  --control-root /path/to/aoe_orch_control
+```
+
+## 8. Immediate Follow-up
 - Define the generation trigger after dashboard read-only parity is stable.
 - Reuse this artifact in the future `Control Dashboard` recovery view.

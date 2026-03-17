@@ -203,7 +203,7 @@
     - `docs/NIGHTLY_SESSION_SUMMARY.md`
   - 목적:
     - morning recovery용 overnight artifact 정의
-- [ ] nightly session summary 생성 경로 설계
+- [x] nightly session summary 생성 경로 설계
   - 전제:
     - dashboard/read-only parity 이후
     - structured runtime state reuse
