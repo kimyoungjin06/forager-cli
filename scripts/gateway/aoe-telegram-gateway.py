@@ -1933,7 +1933,9 @@ def build_task_execution_plan(
         f"- owner_role은 다음 중 하나만 사용: {', '.join(workers)}\n"
         f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
         "- 각 subtask는 서로 다른 산출물을 갖도록 분해\n"
-        "- acceptance는 검증 가능한 문장 1~3개\n\n"
+        "- acceptance는 검증 가능한 문장 1~3개\n"
+        "- approval_mode는 기본적으로 policy다. 최종 승인/복귀 결정은 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
+        "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 남겨라\n\n"
         f"사용자 요청:\n{user_prompt.strip()}\n"
     )
 
@@ -1964,7 +1966,10 @@ def critique_task_execution_plan(
         "}\n"
         "규칙:\n"
         "- issues는 치명/중요 문제만\n"
-        "- recommendations는 실행 가능한 수정 제안만\n\n"
+        "- recommendations는 실행 가능한 수정 제안만\n"
+        "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
+        "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"
+        "- approval 필요성은 acceptance/evidence/manual follow-up으로 남겨라\n\n"
         f"사용자 요청:\n{user_prompt.strip()}\n\n"
         f"plan:\n{payload}\n"
     )
@@ -2010,7 +2015,9 @@ def repair_task_execution_plan(
         f"- owner_role은 다음 중 하나만 사용: {', '.join(workers)}\n"
         f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
         "- acceptance는 검증 가능한 문장 1~3개\n"
-        "- critic issues를 가능한 한 모두 해소\n\n"
+        "- critic issues를 가능한 한 모두 해소\n"
+        "- 최종 승인/복귀 판단은 Control Plane operator가 맡는다. Task Team 내부에 가짜 approver/DRI role을 만들지 마라\n"
+        "- 사람 승인 필요는 manual follow-up 또는 evidence 항목으로 남겨라\n\n"
         f"attempt: {int(attempt_no)}\n"
         f"사용자 요청:\n{user_prompt.strip()}\n\n"
         f"current_plan:\n{current_payload}\n\n"
@@ -2051,6 +2058,7 @@ def build_planned_dispatch_prompt(
     team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
     phase1_role_preset = str(meta.get("phase1_role_preset", "")).strip()
     phase2_team_preset = str(meta.get("phase2_team_preset", "")).strip()
+    approval_mode = str(meta.get("approval_mode", "")).strip() or "policy"
     critic_role = str(team_spec.get("critic_role", "")).strip()
     integration_role = str(team_spec.get("integration_role", "")).strip()
     evidence_required = [str(item).strip() for item in (plan.get("evidence_required") or []) if str(item).strip()]
@@ -2107,7 +2115,7 @@ def build_planned_dispatch_prompt(
             dep_txt = f" after {', '.join(depends_on)}" if depends_on else ""
             lines.append(f"- review {gid} [{role}/{kind}]{dep_txt}")
 
-    if phase1_role_preset or phase2_team_preset or critic_role or integration_role or evidence_required:
+    if phase1_role_preset or phase2_team_preset or approval_mode or critic_role or integration_role or evidence_required:
         lines.append("")
         lines.append("Phase2 quality contract:")
         if phase1_role_preset or phase2_team_preset:
@@ -2117,6 +2125,8 @@ def build_planned_dispatch_prompt(
                     phase2=phase2_team_preset or phase1_role_preset or "-",
                 )
             )
+        lines.append(f"- approval mode: {approval_mode}")
+        lines.append("- operator approval/recovery remains outside Task Team")
         if critic_role:
             lines.append(f"- critic role: {critic_role}")
         if integration_role:

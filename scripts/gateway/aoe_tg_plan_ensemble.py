@@ -67,6 +67,8 @@ def _planner_prompt(
         "- 각 subtask는 겹치지 않는 산출물과 검증 기준을 가져야 한다\n"
         "- 실행팀이 병렬로 일할 수 있도록 독립 가능한 단위로 분해한다\n"
         "- Codex-Reviewer/critic이 최종 검증할 수 있도록 acceptance를 구체적으로 쓴다\n"
+        "- approval_mode는 기본적으로 policy다. 최종 승인/복귀는 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
+        "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 표현하라\n"
         "- 계획이 덜 완성됐으면 범위를 줄이고, ambiguity를 드러내라\n"
         f"{feedback}\n"
         f"사용자 요청:\n{user_prompt.strip()}\n"
@@ -99,6 +101,9 @@ def _critic_prompt(
         "- execution gap, role mismatch, acceptance weakness, hidden dependency를 우선 지적한다\n"
         "- plans that are too broad or not parallelizable should not be approved\n"
         "- issues는 정말 dispatch를 막을 문제만 적는다\n\n"
+        "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
+        "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"
+        "- approval 필요성은 acceptance/evidence/manual follow-up으로 남겨라\n\n"
         f"사용자 요청:\n{user_prompt.strip()}\n\n"
         f"plan:\n{payload}\n"
     )

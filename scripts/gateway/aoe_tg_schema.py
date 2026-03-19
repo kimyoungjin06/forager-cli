@@ -13,6 +13,13 @@ def _trim_text(raw: Any, limit: int) -> str:
     return str(raw or "").strip()[: max(0, int(limit))]
 
 
+def _normalize_approval_mode(raw: Any) -> str:
+    token = str(raw or "").strip().lower()
+    if token in {"policy", "confirm", "none"}:
+        return token
+    return "policy"
+
+
 def default_plan_critic_payload() -> Dict[str, Any]:
     return {"approved": True, "issues": [], "recommendations": []}
 
@@ -139,6 +146,7 @@ def normalize_task_plan_payload(
         meta_in.get("phase1_role_preset") or classify_dispatch_role_preset(user_prompt, selected_roles=worker_roles)
     )
     phase2_team_preset = normalize_role_preset(meta_in.get("phase2_team_preset") or phase1_role_preset)
+    approval_mode = _normalize_approval_mode(meta_in.get("approval_mode", "policy"))
 
     plan_payload = {
         "summary": summary[:240],
@@ -148,6 +156,7 @@ def normalize_task_plan_payload(
             "worker_roles": worker_roles,
             "phase1_role_preset": phase1_role_preset,
             "phase2_team_preset": phase2_team_preset,
+            "approval_mode": approval_mode,
         },
     }
 

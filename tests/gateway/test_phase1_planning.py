@@ -593,8 +593,26 @@ def test_build_planned_dispatch_prompt_includes_phase2_quality_contract() -> Non
 
     assert "Phase2 quality contract:" in prompt
     assert "- preset: phase1=writer phase2=writer" in prompt
+    assert "- approval mode: policy" in prompt
+    assert "- operator approval/recovery remains outside Task Team" in prompt
     assert "- critic role: Codex-Reviewer" in prompt
     assert "- integration role: Codex-Writer" in prompt
     assert "- evidence: Draft or handoff artifact is produced." in prompt
     assert "- evidence: Output is readable from the operator perspective." in prompt
     assert "- quality contract의 preset/critic/integration/evidence를 기본 완료 기준으로 따른다." in prompt
+
+
+def test_normalize_task_plan_payload_defaults_approval_mode_to_policy() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "analysis plan",
+            "subtasks": [
+                {"id": "S1", "title": "Analyze", "goal": "review runtime issues", "owner_role": "Codex-Analyst", "acceptance": ["done"]},
+            ],
+        },
+        user_prompt="오프데스크 운영 문제를 검토해라",
+        workers=["Codex-Analyst", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=3,
+    )
+
+    assert plan["meta"]["approval_mode"] == "policy"

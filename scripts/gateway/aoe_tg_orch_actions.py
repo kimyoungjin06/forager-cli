@@ -306,6 +306,38 @@ def infer_mother_orch_action_call(
     offdesk_review_markers = ("offdesk review", "오프데스크 검토", "퇴근 검토", "야간 검토")
     offdesk_start_markers = ("offdesk on", "퇴근모드 시작", "오프데스크 시작", "야간 실행 시작")
     offdesk_status_markers = ("offdesk status", "auto status", "오프데스크 상태", "자동 상태")
+    offdesk_scope_markers = (
+        "offdesk",
+        "오프데스크",
+        "퇴근모드",
+        "퇴근 모드",
+        "야간",
+        "night run",
+        "nightly",
+    )
+    offdesk_prepare_scope_markers = (
+        "준비",
+        "세팅",
+        "setup",
+        "prepare",
+        "preflight",
+        "점검",
+    )
+    offdesk_review_scope_markers = (
+        "검토",
+        "리뷰",
+        "review",
+        "확인",
+        "정리",
+        "할일",
+        "todo",
+        "후속",
+        "followup",
+        "follow-up",
+        "리스크",
+        "경고",
+        "문제",
+    )
     map_markers = ("프로젝트 목록", "프로젝트들", "workspace", "워크스페이스", "map", "프로젝트 맵")
     queue_markers = ("queue", "대기열", "todo", "할일", "백로그")
     followup_markers = ("followup", "follow-up", "후속", "수동개입", "manual followup")
@@ -372,6 +404,12 @@ def infer_mother_orch_action_call(
     if _contains_any(low, offdesk_start_markers):
         return normalize_mother_orch_action_call({"action": "offdesk_start"})
     if _contains_any(low, offdesk_status_markers):
+        return normalize_mother_orch_action_call({"action": "offdesk_status"})
+    if _contains_any(low, offdesk_scope_markers):
+        if _contains_any(low, offdesk_review_scope_markers):
+            return normalize_mother_orch_action_call({"action": "offdesk_review"})
+        if _contains_any(low, offdesk_prepare_scope_markers):
+            return normalize_mother_orch_action_call({"action": "offdesk_prepare"})
         return normalize_mother_orch_action_call({"action": "offdesk_status"})
 
     if _contains_any(low, followup_markers):
