@@ -385,6 +385,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "open=0 running=1 blocked=0 followup=0 pending=no" in text
     assert "open=0 | priorities=- | kinds=-" in text
     assert "score=0 | providers=0 | retry_wait=-" in text
+    assert "control_intent_action" in text
+    assert "offdesk_prepare" in text
+    assert "control_intent_focus" in text
+    assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "analysis-check" in text
     assert "analysis-followup" in text

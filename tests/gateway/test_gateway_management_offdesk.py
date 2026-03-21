@@ -128,6 +128,26 @@ def _call_management_status_with_markup(
     return sent[-1]
 
 
+def _write_gateway_events_log(tmp_path: Path, *details: str) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    logs_dir = team_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for idx, detail in enumerate(details, start=1):
+        rows.append(
+            {
+                "timestamp": f"2026-03-21T02:4{idx}:00+09:00",
+                "event": "command_resolved",
+                "status": "accepted",
+                "detail": detail,
+            }
+        )
+    (logs_dir / "gateway_events.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _management_control_kwargs(
     *,
     tmp_path: Path,
@@ -1052,6 +1072,22 @@ def test_auto_status_shows_replace_sync_prefetch_mode(tmp_path: Path) -> None:
     assert "- prefetch: sync_recent+replace (full-scope; since ignored)" in text
 
 
+def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_review class=status trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+    )
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="auto", rest="status")
+
+    assert "- latest_intent: offdesk | offdesk_review" in text
+    assert "- latest_intent_focus: execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in text
+    assert "- latest_intent_trace: selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch" in text
+
+
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
@@ -1676,6 +1712,24 @@ def test_offdesk_review_surfaces_flagged_projects_and_next_actions(tmp_path: Pat
     assert "- O3 Nano [warn]" in text
     assert "do: /todo O3 syncback preview" in text
     assert "- resolve flagged items, then /offdesk on" in text
+
+
+def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+    )
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review")
+
+    assert "offdesk review" in text
+    assert "- no orch projects registered" in text
+    assert "- latest_intent: offdesk | offdesk_prepare" in text
+    assert "- latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
