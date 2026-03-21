@@ -717,6 +717,93 @@ def test_message_handler_module_handles_slash_only_hint(tmp_path: Path) -> None:
     assert "입력 형식" in sent[0]["text"]
 
 
+def test_message_handler_logs_intent_trace_with_command_resolution(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    logged = []
+    args = argparse.Namespace(
+        slash_only=False,
+        manager_state_file=tmp_path / "orch_manager_state.json",
+        project_root=tmp_path,
+        team_dir=team_dir,
+        owner_bootstrap_mode="",
+        dry_run=False,
+        default_lang="ko",
+        default_reply_lang="ko",
+        default_report_level="normal",
+        max_text_chars=4000,
+        http_timeout_sec=1,
+        verbose=False,
+    )
+
+    deps = {
+        "mask_sensitive_text": lambda s: s,
+        "ResolvedCommand": gw.ResolvedCommand,
+        "RunTransitionState": gw.RunTransitionState,
+        "load_manager_state": lambda *_a, **_k: _empty_state(),
+        "ensure_default_project_registered": lambda *_a, **_k: None,
+        "is_owner_chat": lambda *_a, **_k: False,
+        "get_default_mode": lambda *_a, **_k: "",
+        "set_default_mode": lambda *_a, **_k: None,
+        "save_manager_state": lambda *_a, **_k: None,
+        "get_manager_project": lambda *_a, **_k: (
+            "default",
+            {"team_dir": str(team_dir), "project_root": str(tmp_path)},
+        ),
+        "make_project_args": lambda base_args, entry, key="": argparse.Namespace(
+            **vars(base_args),
+            team_dir=Path(str(entry["team_dir"])),
+            project_root=Path(str(entry["project_root"])),
+            _aoe_project_key=key or "default",
+        ),
+        "log_gateway_event": lambda **kwargs: logged.append(kwargs),
+        "room_autopublish_event": lambda **_k: None,
+        "int_from_env": gw.int_from_env,
+        "build_quick_reply_keyboard": lambda: {"keyboard": []},
+        "safe_tg_send_text": lambda **_k: True,
+        "ERROR_TELEGRAM": gw.ERROR_TELEGRAM,
+        "resolve_message_command": lambda **_k: gw.ResolvedCommand(
+            cmd="offdesk",
+            rest="review",
+            intent_action="offdesk_review",
+            intent_class="status",
+            intent_trace="selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+        ),
+        "resolve_chat_role": lambda *_a, **_k: "owner",
+        "enforce_command_auth": lambda **_k: True,
+        "ensure_chat_alias": lambda *_a, **_k: "1",
+        "normalize_chat_lang_token": lambda raw, default: raw or default,
+        "get_pending_mode": lambda *_a, **_k: "",
+        "clear_pending_mode": lambda *_a, **_k: None,
+        "get_chat_lang": lambda *_a, **_k: "ko",
+        "get_chat_report_level": lambda *_a, **_k: "normal",
+        "DEFAULT_REPORT_LEVEL": gw.DEFAULT_REPORT_LEVEL,
+        "preferred_command_prefix": lambda: "/",
+        "ERROR_COMMAND": gw.ERROR_COMMAND,
+        "resolve_trace_context": lambda *_a, **_k: {},
+        "resolve_run_transition": lambda *_a, **_k: {},
+        "apply_run_transition": lambda *_a, **_k: None,
+        "safe_send_transition_hint": lambda *_a, **_k: None,
+        "READONLY_ALLOWED_COMMANDS": gw.READONLY_ALLOWED_COMMANDS,
+        "ERROR_AUTH": gw.ERROR_AUTH,
+    }
+
+    message_handler.handle_text_message(
+        args,
+        "token-1",
+        "939062873",
+        "퇴근 전 오늘 밤 할일을 검토하고 실행 후보도 같이 봐줘",
+        deps=deps,
+    )
+
+    event = next(row for row in logged if row.get("event") == "command_resolved")
+    detail = str(event.get("detail", ""))
+    assert "cmd=offdesk" in detail
+    assert "action=offdesk_review" in detail
+    assert "class=status" in detail
+    assert "trace=selected=offdesk_review" in detail
+
+
 def test_room_runtime_module_matches_gateway_route_and_gc_helpers(tmp_path: Path) -> None:
     assert gw.normalize_room_autopublish_route("project_tf") == room_runtime.normalize_room_autopublish_route(
         "project_tf",

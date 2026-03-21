@@ -152,6 +152,20 @@ def test_infer_action_call_maps_offdesk_review_prompt_to_offdesk_review() -> Non
     assert row["action"] == "offdesk_review"
     assert row["intent_class"] == "status"
     assert row["readonly"] is True
+    assert "selected=offdesk_review" in row["intent_trace"]
+
+
+def test_infer_action_call_prefers_offdesk_review_for_ambiguous_timing_prompt() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "퇴근 전 오늘 밤 할일을 검토하고 실행 후보도 같이 봐줘",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "safe_mode=prefer_control_review_over_dispatch" in row["intent_trace"]
+    assert "why_not_dispatch=recovery/offdesk timing markers outrank work markers" in row["intent_trace"]
 
 
 def test_infer_action_call_maps_offdesk_prepare_prompt_to_offdesk_prepare() -> None:

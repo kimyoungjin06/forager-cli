@@ -108,3 +108,27 @@ def test_offdesk_plaintext_maps_to_control_command() -> None:
 
     assert resolved.cmd == "offdesk"
     assert resolved.rest == "prepare"
+
+
+def test_ambiguous_offdesk_timing_prompt_keeps_control_trace() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="퇴근 전 오늘 밤 할일을 검토하고 실행 후보도 같이 봐줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+    assert resolved.intent_class == "status"
+    assert "safe_mode=prefer_control_review_over_dispatch" in resolved.intent_trace

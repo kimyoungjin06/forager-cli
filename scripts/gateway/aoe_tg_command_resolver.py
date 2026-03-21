@@ -133,6 +133,9 @@ class ResolvedCommand:
     acl_revoke_chat_id: Optional[str] = None
 
     run_auto_source: str = ""
+    intent_action: str = ""
+    intent_class: str = ""
+    intent_trace: str = ""
 
 
 def _default_project_key_for_plaintext(manager_state: Dict[str, Any]) -> str:
@@ -570,6 +573,9 @@ def resolve_message_command(
                 str(mapped.get("run_auto_source", "")).strip()
                 or f"orch-action:{str(action_call.get('action', '')).strip()}"
             )
+            out.intent_action = str(action_call.get("action", "")).strip()
+            out.intent_class = str(action_call.get("intent_class", "")).strip()
+            out.intent_trace = str(action_call.get("intent_trace", "")).strip()
             out.orch_target = mapped.get("orch_target") or out.orch_target
             out.orch_task_request_id = mapped.get("orch_task_request_id") or out.orch_task_request_id
             out.orch_retry_request_id = mapped.get("orch_retry_request_id") or out.orch_retry_request_id

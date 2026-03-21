@@ -205,7 +205,19 @@ def handle_text_message(
                 cmd_key = "replay-read"
             else:
                 cmd_key = "replay-write"
-        log_event(event="command_resolved", stage="intake", status="accepted", detail=f"cmd={cmd_key}")
+        detail_parts = [f"cmd={cmd_key}"]
+        if str(resolved.intent_action or "").strip():
+            detail_parts.append(f"action={str(resolved.intent_action).strip()}")
+        if str(resolved.intent_class or "").strip():
+            detail_parts.append(f"class={str(resolved.intent_class).strip()}")
+        if str(resolved.intent_trace or "").strip():
+            detail_parts.append(f"trace={str(resolved.intent_trace).strip()[:240]}")
+        log_event(
+            event="command_resolved",
+            stage="intake",
+            status="accepted",
+            detail=" ".join(part for part in detail_parts if part),
+        )
 
         chat_role = deps["resolve_chat_role"](chat_id, args)
         if deps["enforce_command_auth"](
