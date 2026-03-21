@@ -473,6 +473,17 @@ def infer_mother_orch_action_call(
             safe_mode=safe_mode,
             why_not_dispatch=why_not_dispatch,
         )
+    if offdesk_timing_hits and reporting_hits and work_hits:
+        return _return(
+            {
+                "action": "dispatch_task",
+                "project_key": default_project_key,
+                "objective": text,
+                "readonly": False,
+            },
+            matched={"timing": offdesk_timing_hits, "reporting": reporting_hits, "work": work_hits},
+            safe_mode="prefer_dispatch_for_reporting_work",
+        )
     if offdesk_timing_hits and (offdesk_review_hits or offdesk_prepare_hits):
         safe_mode = "prefer_control_review_over_dispatch" if work_hits else "prefer_control_review"
         why_not_dispatch = "recovery/offdesk timing markers outrank work markers" if work_hits else ""

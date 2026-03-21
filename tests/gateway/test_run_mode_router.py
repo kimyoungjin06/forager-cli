@@ -175,3 +175,47 @@ def test_offdesk_prepare_prompt_with_check_only_maps_to_prepare() -> None:
 
     assert resolved.cmd == "offdesk"
     assert resolved.rest == "prepare"
+
+
+def test_recovery_warning_prompt_prefers_offdesk_review_over_dispatch() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="내일 아침 복귀 전에 경고 프로젝트부터 먼저 보자",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+
+
+def test_explicit_review_only_prompt_stays_in_control_plane() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="실행 말고 오프데스크 검토만 먼저 해줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"

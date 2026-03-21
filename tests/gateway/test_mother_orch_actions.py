@@ -179,6 +179,29 @@ def test_infer_action_call_maps_offdesk_prepare_prompt_to_offdesk_prepare() -> N
     assert row["intent_class"] == "status"
 
 
+def test_infer_action_call_maps_recovery_warning_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "내일 아침 복귀 전에 경고 프로젝트부터 먼저 보자",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "selected=offdesk_review" in row["intent_trace"]
+
+
+def test_infer_action_call_keeps_review_only_prompt_out_of_dispatch() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "실행 말고 오프데스크 검토만 먼저 해줘",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+
+
 def test_action_call_to_resolved_command_maps_monitor_and_offdesk() -> None:
     monitor = mod.action_call_to_resolved_command(
         mod.normalize_mother_orch_action_call({"action": "monitor_project", "project_key": "O3"})

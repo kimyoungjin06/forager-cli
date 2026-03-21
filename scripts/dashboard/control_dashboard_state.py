@@ -59,6 +59,7 @@ class ControlSummaryDTO:
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str
+    latest_intent_focus: str
     active_runtime_count: int
     attention_runtime_count: int
     snapshot_taken_at: str
@@ -268,6 +269,7 @@ class RecoverySummaryDTO:
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str
+    latest_intent_focus: str
     runtimes: List[RecoveryRuntimeDTO] = field(default_factory=list)
 
 
@@ -429,6 +431,24 @@ def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFre
             stale=True,
             error=str(exc),
         )
+
+
+def _latest_intent_focus(action: str, trace: str) -> str:
+    action_token = str(action or "").strip().lower()
+    trace_text = str(trace or "").strip().lower()
+    if action_token == "offdesk_review":
+        if "safe_mode=prefer_control_review_over_dispatch" in trace_text:
+            return "execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인"
+        return "active runtime/task를 먼저 검토하고 blocked·followup·warning을 정리"
+    if action_token == "offdesk_prepare":
+        return "오늘 밤 scope, provider capacity, auto posture를 먼저 점검"
+    if action_token in {"monitor_project", "status", "orch-monitor"}:
+        return "재시도보다 먼저 현재 runtime/task 상태와 latest warnings를 확인"
+    if action_token == "dispatch_task":
+        return "runtime으로 넘기기 전에 preset, approval mode, quality contract를 다시 확인"
+    if action_token in {"recover_auto", "auto_recover"}:
+        return "recover 전에 retry_at, blocked provider, repeat memory를 먼저 확인"
+    return "-"
 
 
 def _load_manager_state(paths: ControlPaths) -> ManagerStateLoadResult:
@@ -1273,6 +1293,10 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
         latest_intent_command=str(control.get("latest_intent_command", "")).strip() or "-",
         latest_intent_action=str(control.get("latest_intent_action", "")).strip() or "-",
         latest_intent_trace=str(control.get("latest_intent_trace", "")).strip() or "-",
+        latest_intent_focus=str(control.get("latest_intent_focus", "")).strip() or _latest_intent_focus(
+            str(control.get("latest_intent_action", "")).strip(),
+            str(control.get("latest_intent_trace", "")).strip(),
+        ),
         runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
     )
 
@@ -1352,6 +1376,10 @@ def load_dashboard_snapshot_result(
         latest_intent_command=str(latest_intent.get("command", "")).strip() or "-",
         latest_intent_action=str(latest_intent.get("action", "")).strip() or "-",
         latest_intent_trace=str(latest_intent.get("trace", "")).strip() or "-",
+        latest_intent_focus=_latest_intent_focus(
+            str(latest_intent.get("action", "")).strip(),
+            str(latest_intent.get("trace", "")).strip(),
+        ),
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
         snapshot_taken_at=snapshot_taken_at,
