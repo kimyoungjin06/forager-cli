@@ -7,8 +7,7 @@
     <li><span>status</span><strong>{{ detail.status }}</strong></li>
     <li><span>attention</span><strong>{{ detail.attention_summary }}</strong></li>
     <li><span>control_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
-    <li><span>control_intent_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }}</strong></li>
-    <li><span>first</span><strong>{{ detail.priority_action }} | {{ detail.priority_reason }}</strong></li>
+    <li><span>first_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }} | next={{ detail.priority_action }}{% if detail.priority_reason and detail.priority_reason != '-' %} | {{ detail.priority_reason }}{% endif %}</strong></li>
     {% if detail.next_focus %}<li><span>next_focus</span><strong>{{ detail.next_focus }}</strong></li>{% endif %}
     <li><span>queue</span><strong>{{ detail.queue_summary }}</strong></li>
     <li><span>proposals</span><strong>{{ detail.proposal_summary }}</strong></li>

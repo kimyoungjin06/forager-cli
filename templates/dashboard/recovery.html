@@ -18,7 +18,7 @@
     <li><span>latest_intent_command</span><strong>{{ recovery.latest_intent_command }}</strong></li>
     <li><span>latest_intent_action</span><strong>{{ recovery.latest_intent_action }}</strong></li>
     <li><span>latest_intent_trace</span><strong>{{ recovery.latest_intent_trace }}</strong></li>
-    <li><span>latest_intent_focus</span><strong>{{ recovery.latest_intent_focus }}</strong></li>
+    <li><span>first_focus</span><strong>{{ recovery.latest_intent_focus }}</strong></li>
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
@@ -37,7 +37,7 @@
       <h3><a href="{{ runtime.runtime_path }}">{{ runtime.project_alias }} {{ runtime.project_label }}</a></h3>
       <p><strong>runtime</strong> {{ runtime.readiness }}</p>
       <p><strong>attention</strong> {{ runtime.attention_summary }}</p>
-      <p><strong>first</strong> {{ runtime.priority_action }} | {{ runtime.priority_reason }}</p>
+      <p><strong>first_focus</strong> {{ recovery.latest_intent_focus }} | next={{ runtime.priority_action }}</p>
       <p><strong>next_focus</strong> {{ runtime.next_focus }}</p>
       <p><strong>queue</strong> {{ runtime.queue_summary }}</p>
       <p><strong>provider_pressure</strong> {{ runtime.provider_pressure_summary }}</p>

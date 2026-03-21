@@ -1084,7 +1084,7 @@ def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="auto", rest="status")
 
     assert "- latest_intent: offdesk | offdesk_review" in text
-    assert "- latest_intent_focus: execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in text
+    assert "- first_focus: execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in text
     assert "- latest_intent_trace: selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch" in text
 
 
@@ -1101,7 +1101,7 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
 
     assert "offdesk mode" in text
     assert "- latest_intent: offdesk | offdesk_prepare" in text
-    assert "- latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
 
 
@@ -1203,7 +1203,7 @@ def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_p
     assert "- last_reason: no_runnable_open_todo" in text
     assert "- next_retry_at: 2026-03-14T03:10:00+09:00" in text
     assert "- provider_capacity: tasks=2 projects=2 providers=claude=2, codex=1" in text
-    assert "- capacity_policy: critical | both primary providers are blocked across multiple tasks/projects" in text
+    assert "- capacity_policy: critical | both primary providers are blocked with recent repeat history count=2 latest=O1" in text
     assert "- capacity_operator_action: /auto off" in text
     assert "- capacity_recovery_repeat_summary: count=2 latest=O1 last=2026-03-14T03:29:00+09:00" in text
     assert "- capacity_memory_updated_at: 2026-03-14T03:00:30+09:00" in text
@@ -1384,7 +1384,7 @@ def test_offdesk_prepare_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "offdesk prepare" in text
     assert "- no orch projects registered" in text
     assert "- latest_intent: offdesk | offdesk_prepare" in text
-    assert "- latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
 
 
@@ -1743,9 +1743,9 @@ def test_offdesk_review_surfaces_flagged_projects_and_next_actions(tmp_path: Pat
     assert "- O2 TwinPaper [warn]" in text
     assert "proposal_triage: priorities=P2=1 | kinds=followup=1" in text
     assert "proposal_top: PROP-001[P2 followup 0.00] shadow gate follow-up" in text
-    assert "do: /todo O2 syncback preview, /todo O2 proposals, /todo O2 followup" in text
+    assert "do: /todo O2 syncback preview, /todo O2 proposals, /todo O2 followup, /sync bootstrap O2 24h, /sync preview O2 24h" in text
     assert "- O3 Nano [warn]" in text
-    assert "do: /todo O3 syncback preview" in text
+    assert "do: /todo O3 syncback preview, /sync bootstrap O3 24h" in text
     assert "- resolve flagged items, then /offdesk on" in text
 
 
@@ -1763,7 +1763,7 @@ def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> 
     assert "offdesk review" in text
     assert "- no orch projects registered" in text
     assert "- latest_intent: offdesk | offdesk_prepare" in text
-    assert "- latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
 
 
@@ -1963,10 +1963,11 @@ def test_offdesk_review_reply_markup_includes_clean_actions(tmp_path: Path) -> N
     )
 
     assert "offdesk review" in body
-    assert "- status: clean" in body
+    assert "- flagged: 1" in body
+    assert "- O3 Nano [warn]" in body
     buttons = _button_texts(markup)
-    assert "/offdesk on" in buttons
-    assert "/auto status" in buttons
+    assert "/sync bootstrap O3 24h" in buttons
+    assert "/orch status O3" in buttons
     assert "/offdesk prepare" in buttons
     assert "/map" in buttons
     assert "/help" in buttons

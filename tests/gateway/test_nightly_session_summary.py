@@ -78,7 +78,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "latest_intent_command: offdesk" in markdown
     assert "latest_intent_action: offdesk_prepare" in markdown
     assert "latest_intent_trace: selected=offdesk_prepare" in markdown
-    assert "latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in markdown
+    assert "first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in markdown
     assert "analysis-check (REQ-1)" in markdown
     assert "completion_focus: evidence quality, reasoning coherence, missing caveats" in markdown
     assert payload["runtimes"][0]["project_alias"] == "O2"

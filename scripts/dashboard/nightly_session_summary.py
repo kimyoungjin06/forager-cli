@@ -205,7 +205,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         f"- latest_intent_command: {control.get('latest_intent_command', '-')}",
         f"- latest_intent_action: {control.get('latest_intent_action', '-')}",
         f"- latest_intent_trace: {control.get('latest_intent_trace', '-')}",
-        f"- latest_intent_focus: {control.get('latest_intent_focus', '-')}",
+        f"- first_focus: {control.get('latest_intent_focus', '-')}",
         "",
     ]
     for runtime in runtimes:
@@ -220,7 +220,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- completed_tasks: {runtime.get('completed_task_count', 0)}",
                 f"- blocked_tasks: {runtime.get('blocked_task_count', 0)}",
                 f"- parked_tasks: {runtime.get('parked_task_count', 0)}",
-                f"- first: {runtime.get('priority_action', '-')} | {runtime.get('priority_reason', '-')}",
+                f"- first_focus: {control.get('latest_intent_focus', '-')} | next={runtime.get('priority_action', '-')}",
                 f"- next_focus: {runtime.get('next_focus', '-') or '-'}",
                 f"- queue: {runtime.get('queue_summary', '-')}",
                 f"- proposals: {runtime.get('proposal_summary', '-')}",

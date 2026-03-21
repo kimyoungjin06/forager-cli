@@ -9,7 +9,7 @@
       <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
       <p><strong>runtime</strong> {{ card.readiness }}</p>
       <p><strong>attention</strong> {{ card.attention_summary }}</p>
-      <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>
+      <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
       {% if card.active_task_label %}
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
       <p><strong>preset</strong> {{ card.active_task_preset }}</p>

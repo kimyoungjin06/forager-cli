@@ -117,7 +117,7 @@ def _append_latest_intent_lines(
     if command != "-" or action != "-":
         lines.append(f"- latest_intent: {command} | {action}")
     if focus != "-":
-        lines.append(f"- latest_intent_focus: {focus}")
+        lines.append(f"- first_focus: {focus}")
     if trace != "-":
         formatter = compact_reason if callable(compact_reason) else _compact_text
         lines.append(f"- latest_intent_trace: {formatter(trace, 160)}")
@@ -1283,7 +1283,15 @@ def _handle_offdesk_command(
                 top_summary = str(proposal_triage.get("top_summary", "")).strip()
                 if top_summary:
                     lines.append(f"  proposal_top: {top_summary}")
-            lines.append(f"  do: {', '.join(actions)}")
+            dedup_actions: List[str] = []
+            seen_actions: set[str] = set()
+            for action in actions:
+                text = str(action or "").strip()
+                if not text or text in seen_actions:
+                    continue
+                seen_actions.add(text)
+                dedup_actions.append(text)
+            lines.append(f"  do: {', '.join(dedup_actions)}")
 
         lines.extend(["", "next:", "- resolve flagged items, then /offdesk on", "- /offdesk prepare"])
         send(

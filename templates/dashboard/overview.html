@@ -13,6 +13,7 @@
       <li><span>latest_intent_command</span><strong>{{ snapshot.control_summary.latest_intent_command }}</strong></li>
       <li><span>latest_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
       <li><span>latest_intent_trace</span><strong>{{ snapshot.control_summary.latest_intent_trace }}</strong></li>
+      <li><span>first_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }}</strong></li>
       <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
       <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
     </ul>
@@ -24,7 +25,7 @@
       <div class="runtime-card {{ card.status }}">
         <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
         <p class="muted">{{ card.attention_summary }}</p>
-        <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>
+        <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
         {% if card.active_task_label %}
         <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
         <p><strong>preset</strong> {{ card.active_task_preset }}</p>
@@ -46,7 +47,7 @@
       <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
       <p><strong>runtime</strong> {{ card.readiness }}</p>
       <p><strong>attention</strong> {{ card.attention_summary }}</p>
-      <p><strong>first</strong> {{ card.priority_action }} | {{ card.priority_reason }}</p>
+      <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
       {% if card.active_task_label %}
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
       {% endif %}

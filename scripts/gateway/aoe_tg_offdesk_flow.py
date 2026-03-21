@@ -1254,9 +1254,9 @@ def offdesk_prepare_reply_markup(
     if blocked_count == 0:
         footer.append({"text": "/offdesk on"})
     footer.append({"text": "/offdesk review"})
-    footer.append({"text": "/help"})
+    footer.append({"text": "/auto status"})
     keyboard.append(footer[:3])
-    keyboard.append([{"text": "/map"}, {"text": "/queue"}])
+    keyboard.append([{"text": "/map"}, {"text": "/queue"}, {"text": "/help"}])
     return {
         "keyboard": keyboard,
         "resize_keyboard": True,

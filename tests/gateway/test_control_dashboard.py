@@ -340,7 +340,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "conclusion is supported by inspectable evidence and explicit caveats" in text
     assert "control_intent_action" in text
     assert "offdesk_prepare" in text
-    assert "control_intent_focus" in text
+    assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "execution=L1 | review=R1" in text
     assert "/task T-001" in text
@@ -387,7 +387,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "score=0 | providers=0 | retry_wait=-" in text
     assert "control_intent_action" in text
     assert "offdesk_prepare" in text
-    assert "control_intent_focus" in text
+    assert "first_focus" in text
+    assert "next=/retry T-001" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "analysis-check" in text
@@ -424,7 +425,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "offdesk" in text
     assert "offdesk_prepare" in text
     assert "selected=offdesk_prepare" in text
-    assert "latest_intent_focus" in text
+    assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "/control/tasks/by-request/REQ-1" in text
     assert "/monitor O2" in text
