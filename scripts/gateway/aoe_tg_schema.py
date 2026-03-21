@@ -214,6 +214,73 @@ def normalize_plan_critic_payload(parsed: Any, *, max_items: int = 5) -> Dict[st
     }
 
 
+def plan_payload_approval_mode(plan: Any) -> str:
+    if isinstance(plan, dict):
+        meta = plan.get("meta")
+        if isinstance(meta, dict):
+            return _normalize_approval_mode(meta.get("approval_mode", "policy"))
+    return "policy"
+
+
+def _is_policy_approval_issue(issue: str) -> bool:
+    low = str(issue or "").strip().lower()
+    if not low:
+        return False
+    approval_markers = (
+        "dri",
+        "approver",
+        "approval",
+        "final approval",
+        "human approval",
+        "operator approval",
+        "sign-off",
+        "signoff",
+        "승인자",
+        "최종 승인",
+        "사람 승인",
+        "인간 승인",
+        "결정권자",
+    )
+    return any(marker in low for marker in approval_markers)
+
+
+def apply_plan_critic_approval_mode(
+    parsed: Any,
+    *,
+    approval_mode: str,
+    max_items: int = 5,
+) -> Dict[str, Any]:
+    payload = normalize_plan_critic_payload(parsed, max_items=max_items)
+    mode = _normalize_approval_mode(approval_mode)
+    if mode != "policy":
+        return payload
+
+    moved: List[str] = []
+    kept_issues: List[str] = []
+    for issue in payload.get("issues") or []:
+        token = _trim_text(issue, 240)
+        if token and _is_policy_approval_issue(token):
+            moved.append(token)
+        elif token:
+            kept_issues.append(token)
+
+    recommendations = [str(item).strip()[:240] for item in (payload.get("recommendations") or []) if str(item).strip()]
+    for issue in moved:
+        note = _trim_text(f"approval_policy_note: {issue}", 240)
+        if note and note not in recommendations:
+            recommendations.append(note)
+
+    approved = bool(payload.get("approved", True))
+    if moved and not kept_issues:
+        approved = True
+
+    return {
+        "approved": approved,
+        "issues": kept_issues[: max(1, int(max_items or 1))],
+        "recommendations": recommendations[: max(1, int(max_items or 1))],
+    }
+
+
 def plan_critic_primary_issue(parsed: Any, *, limit: int = 240) -> str:
     payload = normalize_plan_critic_payload(parsed, max_items=1)
     issues = payload.get("issues") or []

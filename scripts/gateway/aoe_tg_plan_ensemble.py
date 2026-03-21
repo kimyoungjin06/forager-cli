@@ -21,7 +21,13 @@ from aoe_tg_provider_fallback import (
     load_provider_capacity_state,
     proactive_fallback_provider,
 )
-from aoe_tg_schema import default_plan_critic_payload, normalize_plan_critic_payload, plan_critic_primary_issue
+from aoe_tg_schema import (
+    apply_plan_critic_approval_mode,
+    default_plan_critic_payload,
+    normalize_plan_critic_payload,
+    plan_critic_primary_issue,
+    plan_payload_approval_mode,
+)
 
 
 def _trim_text(raw: Any, limit: int) -> str:
@@ -350,7 +356,11 @@ def run_phase1_ensemble_planning(
                         provider_capacity_state=provider_capacity_state,
                     )
                     parsed_critic = parse_json_object_from_text(raw_critic)
-                    normalized = normalize_plan_critic_payload(parsed_critic, max_items=5)
+                    normalized = apply_plan_critic_approval_mode(
+                        parsed_critic,
+                        approval_mode=plan_payload_approval_mode(plan),
+                        max_items=5,
+                    )
                     if used_fallback:
                         normalized = dict(normalized)
                         normalized["executed_provider"] = executed_critic_provider

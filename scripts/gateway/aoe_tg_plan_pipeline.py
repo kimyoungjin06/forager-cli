@@ -9,7 +9,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_orch_roles import classify_dispatch_role_preset, normalize_role_preset
-from aoe_tg_schema import default_plan_critic_payload, normalize_plan_critic_payload, plan_critic_primary_issue
+from aoe_tg_schema import (
+    apply_plan_critic_approval_mode,
+    default_plan_critic_payload,
+    normalize_plan_critic_payload,
+    plan_critic_primary_issue,
+    plan_payload_approval_mode,
+)
 
 
 @dataclass
@@ -206,7 +212,11 @@ def compute_dispatch_plan(
                     },
                 )
                 raw_critic = run_source_task.get("plan_critic")
-                plan_critic = normalize_plan_critic_payload(raw_critic, max_items=8)
+                plan_critic = apply_plan_critic_approval_mode(
+                    raw_critic,
+                    approval_mode=plan_payload_approval_mode(plan_data),
+                    max_items=8,
+                )
 
             if (plan_data is None) and planning_enabled:
                 if bool(getattr(args, "plan_phase1_ensemble", True)) and callable(phase1_ensemble_planning):
@@ -248,7 +258,11 @@ def compute_dispatch_plan(
                         plan_data["meta"] = meta
                     if callable(report_progress):
                         report_progress(phase="critic", detail="reviewing generated plan")
-                    plan_critic = critique_task_execution_plan(p_args, prompt, plan_data)
+                    plan_critic = apply_plan_critic_approval_mode(
+                        critique_task_execution_plan(p_args, prompt, plan_data),
+                        approval_mode=plan_payload_approval_mode(plan_data),
+                        max_items=8,
+                    )
 
                     if bool(args.plan_auto_replan):
                         max_replans = max(0, int(args.plan_replan_attempts))
@@ -278,7 +292,11 @@ def compute_dispatch_plan(
                                     attempt=attempt,
                                     total=max_replans,
                                 )
-                            plan_critic = critique_task_execution_plan(p_args, prompt, plan_data)
+                            plan_critic = apply_plan_critic_approval_mode(
+                                critique_task_execution_plan(p_args, prompt, plan_data),
+                                approval_mode=plan_payload_approval_mode(plan_data),
+                                max_items=8,
+                            )
                             plan_replans.append(
                                 {
                                     "attempt": attempt,
