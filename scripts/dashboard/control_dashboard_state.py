@@ -28,11 +28,14 @@ import aoe_tg_task_view as task_view
 MANAGER_STATE_FILENAME = "orch_manager_state.json"
 AUTO_STATE_FILENAME = "auto_scheduler.json"
 PROVIDER_CAPACITY_FILENAME = "provider_capacity.json"
+GATEWAY_EVENTS_FILENAME = "gateway_events.jsonl"
 RECOVERY_SUMMARY_DIRNAME = "nightly-session-summary"
 RECOVERY_SUMMARY_FILENAME = "latest.json"
 
 _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
+_LAST_GOOD_COMMAND_RESOLUTION: Dict[str, Dict[str, str]] = {}
+_COMMAND_RESOLVED_DETAIL_RE = re.compile(r"(?:^| )(?P<key>cmd|action|class|trace)=(?P<value>.*?)(?= (?:cmd|action|class|trace)=|$)")
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,9 @@ class ControlSummaryDTO:
     next_retry_at: str
     next_retry_target: str
     repeat_memory_summary: str
+    latest_intent_command: str
+    latest_intent_action: str
+    latest_intent_trace: str
     active_runtime_count: int
     attention_runtime_count: int
     snapshot_taken_at: str
@@ -259,6 +265,9 @@ class RecoverySummaryDTO:
     next_retry_at: str
     next_retry_target: str
     repeat_memory_summary: str
+    latest_intent_command: str
+    latest_intent_action: str
+    latest_intent_trace: str
     runtimes: List[RecoveryRuntimeDTO] = field(default_factory=list)
 
 
@@ -289,6 +298,7 @@ class ControlPaths:
     manager_state_file: Path
     auto_state_file: Path
     provider_capacity_file: Path
+    gateway_events_file: Path
 
 
 @dataclass(frozen=True)
@@ -330,6 +340,7 @@ def resolve_control_paths(
         manager_state_file=resolved_manager,
         auto_state_file=(resolved_team_dir / AUTO_STATE_FILENAME).resolve(),
         provider_capacity_file=(resolved_team_dir / PROVIDER_CAPACITY_FILENAME).resolve(),
+        gateway_events_file=(resolved_team_dir / "logs" / GATEWAY_EVENTS_FILENAME).resolve(),
     )
 
 
@@ -350,6 +361,74 @@ def _load_json_file(path: Path, *, name: str) -> Tuple[Dict[str, Any], FileFresh
         if isinstance(cached, dict):
             return cached, FileFreshnessDTO(name=name, path=key, exists=True, updated_at=updated_at, stale=True, error=str(exc))
         return {}, FileFreshnessDTO(name=name, path=key, exists=True, updated_at=updated_at, stale=True, error=str(exc))
+
+
+def _parse_command_resolved_detail(detail: str) -> Dict[str, str]:
+    parsed: Dict[str, str] = {}
+    for match in _COMMAND_RESOLVED_DETAIL_RE.finditer(str(detail or "").strip()):
+        key = str(match.group("key") or "").strip()
+        value = str(match.group("value") or "").strip()
+        if key and value:
+            parsed[key] = value
+    return {
+        "command": parsed.get("cmd", "").strip() or "-",
+        "action": parsed.get("action", "").strip() or "-",
+        "trace": parsed.get("trace", "").strip() or "-",
+    }
+
+
+def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFreshnessDTO]:
+    key = str(path)
+    exists = path.exists()
+    updated_at = _iso_from_mtime(path) if exists else ""
+    if not exists:
+        empty = {"command": "-", "action": "-", "trace": "-"}
+        return empty, FileFreshnessDTO(name="gateway_events", path=key, exists=False, updated_at="")
+    try:
+        latest: Dict[str, str] | None = None
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = str(line or "").strip()
+                if not raw:
+                    continue
+                try:
+                    row = json.loads(raw)
+                except Exception:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("event", "")).strip() != "command_resolved":
+                    continue
+                if str(row.get("status", "")).strip() != "accepted":
+                    continue
+                latest = _parse_command_resolved_detail(str(row.get("detail", "")))
+        resolution = latest or {"command": "-", "action": "-", "trace": "-"}
+        _LAST_GOOD_COMMAND_RESOLUTION[key] = dict(resolution)
+        return resolution, FileFreshnessDTO(name="gateway_events", path=key, exists=True, updated_at=updated_at)
+    except Exception as exc:
+        cached = _LAST_GOOD_COMMAND_RESOLUTION.get(key)
+        if isinstance(cached, dict):
+            resolution = {
+                "command": str(cached.get("command", "-")).strip() or "-",
+                "action": str(cached.get("action", "-")).strip() or "-",
+                "trace": str(cached.get("trace", "-")).strip() or "-",
+            }
+            return resolution, FileFreshnessDTO(
+                name="gateway_events",
+                path=key,
+                exists=True,
+                updated_at=updated_at,
+                stale=True,
+                error=str(exc),
+            )
+        return {"command": "-", "action": "-", "trace": "-"}, FileFreshnessDTO(
+            name="gateway_events",
+            path=key,
+            exists=True,
+            updated_at=updated_at,
+            stale=True,
+            error=str(exc),
+        )
 
 
 def _load_manager_state(paths: ControlPaths) -> ManagerStateLoadResult:
@@ -1191,6 +1270,9 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
         next_retry_at=str(control.get("next_retry_at", "")).strip() or "-",
         next_retry_target=str(control.get("next_retry_target", "")).strip() or "-",
         repeat_memory_summary=str(control.get("repeat_memory_summary", "")).strip() or "-",
+        latest_intent_command=str(control.get("latest_intent_command", "")).strip() or "-",
+        latest_intent_action=str(control.get("latest_intent_action", "")).strip() or "-",
+        latest_intent_trace=str(control.get("latest_intent_trace", "")).strip() or "-",
         runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
     )
 
@@ -1249,6 +1331,7 @@ def load_dashboard_snapshot_result(
     manager_loaded = _load_manager_state(paths)
     auto_state, auto_freshness = _load_json_file(paths.auto_state_file, name="auto_state")
     provider_state, provider_freshness = _load_json_file(paths.provider_capacity_file, name="provider_capacity")
+    latest_intent, gateway_events_freshness = _load_latest_command_resolution(paths.gateway_events_file)
 
     runtime_cards = _build_runtime_cards(manager_loaded.state, provider_state)
     active_rows = _build_active_task_rows(manager_loaded.state)
@@ -1266,6 +1349,9 @@ def load_dashboard_snapshot_result(
         next_retry_at=str(provider_state.get("next_retry_at", "")).strip() or "-",
         next_retry_target=_next_retry_target_text(provider_state),
         repeat_memory_summary=_repeat_summary_text(provider_state),
+        latest_intent_command=str(latest_intent.get("command", "")).strip() or "-",
+        latest_intent_action=str(latest_intent.get("action", "")).strip() or "-",
+        latest_intent_trace=str(latest_intent.get("trace", "")).strip() or "-",
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
         snapshot_taken_at=snapshot_taken_at,
@@ -1277,7 +1363,7 @@ def load_dashboard_snapshot_result(
             team_dir=str(paths.team_dir),
             manager_state_file=str(paths.manager_state_file),
             snapshot_taken_at=snapshot_taken_at,
-            source_files=[manager_loaded.freshness, auto_freshness, provider_freshness],
+            source_files=[manager_loaded.freshness, auto_freshness, provider_freshness, gateway_events_freshness],
             control_summary=summary,
             runtime_cards=runtime_cards,
             attention_runtime_cards=attention_cards,

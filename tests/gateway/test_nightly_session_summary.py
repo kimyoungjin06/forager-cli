@@ -36,6 +36,9 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert control["auto_mode"] == "fanout"
     assert control["offdesk_mode"] == "on"
     assert control["provider_capacity_summary"] == "tasks=1 projects=1 providers=claude=1"
+    assert control["latest_intent_command"] == "offdesk"
+    assert control["latest_intent_action"] == "offdesk_prepare"
+    assert "selected=offdesk_prepare" in control["latest_intent_trace"]
     assert runtimes[0]["project_alias"] == "O2"
     assert runtimes[0]["completed_task_count"] == 1
     assert runtimes[0]["active_task_label"] == "T-001 | analysis-check"
@@ -71,6 +74,9 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
 
     assert "# Nightly Session Summary" in markdown
     assert "## O2 Alpha" in markdown
+    assert "latest_intent_command: offdesk" in markdown
+    assert "latest_intent_action: offdesk_prepare" in markdown
+    assert "latest_intent_trace: selected=offdesk_prepare" in markdown
     assert "analysis-check (REQ-1)" in markdown
     assert "completion_focus: evidence quality, reasoning coherence, missing caveats" in markdown
     assert payload["runtimes"][0]["project_alias"] == "O2"

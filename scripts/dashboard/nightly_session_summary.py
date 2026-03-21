@@ -174,6 +174,9 @@ def build_nightly_session_summary(
             "next_retry_at": snapshot.control_summary.next_retry_at,
             "next_retry_target": snapshot.control_summary.next_retry_target,
             "repeat_memory_summary": snapshot.control_summary.repeat_memory_summary,
+            "latest_intent_command": snapshot.control_summary.latest_intent_command,
+            "latest_intent_action": snapshot.control_summary.latest_intent_action,
+            "latest_intent_trace": snapshot.control_summary.latest_intent_trace,
             "active_runtime_count": snapshot.control_summary.active_runtime_count,
             "attention_runtime_count": snapshot.control_summary.attention_runtime_count,
         },
@@ -198,6 +201,9 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         f"- next_retry_at: {control.get('next_retry_at', '-')}",
         f"- next_retry_target: {control.get('next_retry_target', '-')}",
         f"- repeat_memory: {control.get('repeat_memory_summary', '-')}",
+        f"- latest_intent_command: {control.get('latest_intent_command', '-')}",
+        f"- latest_intent_action: {control.get('latest_intent_action', '-')}",
+        f"- latest_intent_trace: {control.get('latest_intent_trace', '-')}",
         "",
     ]
     for runtime in runtimes:

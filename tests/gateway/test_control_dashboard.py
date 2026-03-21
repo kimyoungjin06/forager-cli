@@ -220,6 +220,34 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         ) + "\n",
         encoding="utf-8",
     )
+    logs_dir = team_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "gateway_events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-16T09:58:00+09:00",
+                        "event": "command_resolved",
+                        "status": "accepted",
+                        "detail": "cmd=offdesk action=offdesk_review class=status trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-16T09:59:00+09:00",
+                        "event": "command_resolved",
+                        "status": "accepted",
+                        "detail": "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
         team_dir=team_dir,
@@ -268,6 +296,9 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "Control Summary" in overview_text
     assert "O2 Alpha" in overview_text
     assert "next_retry_target" in overview_text
+    assert "latest_intent_command" in overview_text
+    assert "offdesk_prepare" in overview_text
+    assert "selected=offdesk_prepare" in overview_text
     assert tasks_status == 200
     assert tasks_headers["Content-Type"].startswith("text/html")
     assert "Active Tasks" in tasks_text
@@ -381,6 +412,10 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "O2 Alpha" in text
     assert "analysis-check" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
+    assert "latest_intent_command" in text
+    assert "offdesk" in text
+    assert "offdesk_prepare" in text
+    assert "selected=offdesk_prepare" in text
     assert "/control/tasks/by-request/REQ-1" in text
     assert "/monitor O2" in text
     assert "/task T-001" in text
@@ -404,6 +439,7 @@ def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_p
     assert paths.manager_state_file == manager_state_file.resolve()
     assert paths.auto_state_file == (custom_team_dir / "auto_scheduler.json").resolve()
     assert paths.provider_capacity_file == (custom_team_dir / "provider_capacity.json").resolve()
+    assert paths.gateway_events_file == (custom_team_dir / "logs" / "gateway_events.jsonl").resolve()
 
 
 def test_dashboard_task_page_uses_single_manager_snapshot(tmp_path: Path, monkeypatch) -> None:
