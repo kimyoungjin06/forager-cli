@@ -958,6 +958,7 @@ def _handle_offdesk_command(
     excluded_scope = ", ".join(scope_summary.get("excluded", [])[:6]) or "-"
 
     if sub == "status":
+        latest_intent = _latest_command_resolution(args)
         lines = [
             "offdesk mode",
             f"- enabled: {'yes' if off_enabled else 'no'}",
@@ -979,6 +980,7 @@ def _handle_offdesk_command(
             "- /offdesk off",
             "- /auto status",
         ]
+        _append_latest_intent_lines(lines, latest_intent)
         snapshot_lines = focused_project_snapshot_lines(manager_state)
         if status_level == "long" and snapshot_lines:
             lines.extend([""] + snapshot_lines)

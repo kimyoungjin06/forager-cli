@@ -1088,6 +1088,23 @@ def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent_trace: selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch" in text
 
 
+def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+    )
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status")
+
+    assert "offdesk mode" in text
+    assert "- latest_intent: offdesk | offdesk_prepare" in text
+    assert "- latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+
+
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
