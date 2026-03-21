@@ -1370,6 +1370,24 @@ def test_offdesk_prepare_reports_runtime_queue_and_next_actions(tmp_path: Path) 
     assert "- /todo O2 syncback preview" in text
 
 
+def test_offdesk_prepare_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+    )
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="prepare")
+
+    assert "offdesk prepare" in text
+    assert "- no orch projects registered" in text
+    assert "- latest_intent: offdesk | offdesk_prepare" in text
+    assert "- latest_intent_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+
+
 def test_offdesk_prepare_warns_when_syncback_drift_exists_without_other_issues(tmp_path: Path) -> None:
     state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
     project_root = tmp_path / "Nano"

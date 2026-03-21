@@ -991,6 +991,7 @@ def _handle_offdesk_command(
         return True
 
     if sub in {"prepare", "preflight", "check"}:
+        latest_intent = _latest_command_resolution(args)
         raw_target = ""
         for tok in tokens[1:]:
             low = str(tok or "").strip().lower()
@@ -1012,7 +1013,9 @@ def _handle_offdesk_command(
             send(str(exc).strip(), context="offdesk-prepare blocked", with_menu=True)
             return True
         if not targets:
-            send("offdesk prepare\n- no orch projects registered", context="offdesk-prepare empty", with_menu=True)
+            lines = ["offdesk prepare", "- no orch projects registered"]
+            _append_latest_intent_lines(lines, latest_intent)
+            send("\n".join(lines).strip(), context="offdesk-prepare empty", with_menu=True)
             return True
 
         reports = [offdesk_prepare_project_report(manager_state, key, entry) for key, entry in targets]
@@ -1035,6 +1038,7 @@ def _handle_offdesk_command(
             f"- warn: {warn_count}",
             f"- blocked: {blocked_count}",
         ]
+        _append_latest_intent_lines(lines, latest_intent)
         lines.extend(_provider_capacity_memory_lines(provider_state))
         lines.extend(["", "projects:"])
         for report in reports:
