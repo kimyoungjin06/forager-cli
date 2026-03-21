@@ -252,7 +252,7 @@ def apply_plan_critic_approval_mode(
 ) -> Dict[str, Any]:
     payload = normalize_plan_critic_payload(parsed, max_items=max_items)
     mode = _normalize_approval_mode(approval_mode)
-    if mode != "policy":
+    if mode == "confirm":
         return payload
 
     moved: List[str] = []
@@ -266,7 +266,10 @@ def apply_plan_critic_approval_mode(
 
     recommendations = [str(item).strip()[:240] for item in (payload.get("recommendations") or []) if str(item).strip()]
     for issue in moved:
-        note = _trim_text(f"approval_policy_note: {issue}", 240)
+        if mode == "none":
+            note = _trim_text(f"approval_not_required_note: {issue}", 240)
+        else:
+            note = _trim_text(f"approval_policy_note: {issue}", 240)
         if note and note not in recommendations:
             recommendations.append(note)
 

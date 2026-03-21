@@ -338,6 +338,113 @@ def test_phase1_ensemble_policy_approval_issue_does_not_block() -> None:
     assert any("approval_policy_note:" in row for row in result["plan_critic"]["recommendations"])
 
 
+def test_phase1_ensemble_none_approval_issue_does_not_block() -> None:
+    def _runner(name: str):
+        def _run(prompt: str, timeout_sec: int) -> str:
+            if "TF Phase1 critic" in prompt:
+                return json.dumps(
+                    {
+                        "approved": False,
+                        "issues": ["최종 승인자/approver가 지정되지 않았습니다."],
+                        "recommendations": [],
+                    },
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                {
+                    "summary": f"plan from {name}",
+                    "subtasks": [
+                        {
+                            "id": "S1",
+                            "title": "Draft",
+                            "goal": "Write the plan",
+                            "owner_role": "Codex-Writer",
+                            "acceptance": ["has a concise plan"],
+                        }
+                    ],
+                    "meta": {"approval_mode": "none"},
+                },
+                ensure_ascii=False,
+            )
+        return _run
+
+    args = SimpleNamespace(
+        plan_phase1_providers="codex,claude",
+        plan_phase1_rounds=3,
+        plan_max_subtasks=3,
+        orch_command_timeout_sec=120,
+        plan_block_on_critic=True,
+    )
+
+    result = ensemble_mod.run_phase1_ensemble_planning(
+        args=args,
+        user_prompt="검토 메모를 정리하되 승인 절차는 생략해도 된다",
+        available_roles=["Codex-Writer", "Codex-Reviewer"],
+        normalize_task_plan_payload=gw.normalize_task_plan_payload,
+        parse_json_object_from_text=gw.parse_json_object_from_text,
+        run_provider_execs={"codex": _runner("codex"), "claude": _runner("claude")},
+        plan_roles_from_subtasks=gw.plan_roles_from_subtasks,
+        report_progress=None,
+    )
+
+    assert result["plan_gate_blocked"] is False
+    assert result["plan_critic"]["issues"] == []
+    assert any("approval_not_required_note:" in row for row in result["plan_critic"]["recommendations"])
+
+
+def test_phase1_ensemble_confirm_approval_issue_still_blocks() -> None:
+    def _runner(name: str):
+        def _run(prompt: str, timeout_sec: int) -> str:
+            if "TF Phase1 critic" in prompt:
+                return json.dumps(
+                    {
+                        "approved": False,
+                        "issues": ["최종 승인자/DRI가 Task Team 내부에 명시되지 않았습니다."],
+                        "recommendations": [],
+                    },
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                {
+                    "summary": f"plan from {name}",
+                    "subtasks": [
+                        {
+                            "id": "S1",
+                            "title": "Draft",
+                            "goal": "Write the plan",
+                            "owner_role": "Codex-Writer",
+                            "acceptance": ["has a concise plan"],
+                        }
+                    ],
+                    "meta": {"approval_mode": "confirm"},
+                },
+                ensure_ascii=False,
+            )
+        return _run
+
+    args = SimpleNamespace(
+        plan_phase1_providers="codex,claude",
+        plan_phase1_rounds=3,
+        plan_max_subtasks=3,
+        orch_command_timeout_sec=120,
+        plan_block_on_critic=True,
+    )
+
+    result = ensemble_mod.run_phase1_ensemble_planning(
+        args=args,
+        user_prompt="최종 승인 확인이 필요한 실행 계획을 세워라",
+        available_roles=["Codex-Writer", "Codex-Reviewer"],
+        normalize_task_plan_payload=gw.normalize_task_plan_payload,
+        parse_json_object_from_text=gw.parse_json_object_from_text,
+        run_provider_execs={"codex": _runner("codex"), "claude": _runner("claude")},
+        plan_roles_from_subtasks=gw.plan_roles_from_subtasks,
+        report_progress=None,
+    )
+
+    assert result["plan_gate_blocked"] is True
+    assert result["plan_critic"]["issues"] == ["최종 승인자/DRI가 Task Team 내부에 명시되지 않았습니다."]
+
+
 def test_resolve_dispatch_mode_defaults_to_tf_dispatch_when_not_forced_direct() -> None:
     result = pipeline_mod.resolve_dispatch_mode_and_roles(
         run_force_mode=None,
@@ -479,6 +586,58 @@ def test_compute_dispatch_plan_policy_approval_issue_does_not_trigger_plan_gate(
     assert meta.plan_gate_blocked is False
     assert meta.plan_critic["issues"] == []
     assert any("approval_policy_note:" in row for row in meta.plan_critic["recommendations"])
+
+
+def test_compute_dispatch_plan_confirm_approval_issue_still_triggers_plan_gate() -> None:
+    args = SimpleNamespace(
+        task_planning=True,
+        dry_run=False,
+        plan_phase1_ensemble=False,
+        plan_max_subtasks=3,
+        plan_auto_replan=True,
+        plan_replan_attempts=1,
+        plan_block_on_critic=True,
+    )
+
+    base_plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "confirm review plan",
+            "subtasks": [
+                {"id": "S1", "title": "Review", "goal": "review work", "owner_role": "Codex-Writer", "acceptance": ["done"]},
+            ],
+            "meta": {"approval_mode": "confirm"},
+        },
+        user_prompt="최종 승인 확인이 필요한 계획을 세워라",
+        workers=["Codex-Writer", "Codex-Reviewer"],
+        max_subtasks=3,
+    )
+
+    meta = pipeline_mod.compute_dispatch_plan(
+        args=args,
+        p_args=args,
+        prompt="최종 승인 확인이 필요한 계획을 세워라",
+        dispatch_mode=True,
+        run_control_mode="normal",
+        run_source_task=None,
+        selected_roles=["Codex-Reviewer"],
+        available_roles=["Codex-Writer", "Codex-Reviewer"],
+        available_worker_roles=lambda roles: roles,
+        normalize_task_plan_payload=gw.normalize_task_plan_payload,
+        build_task_execution_plan=lambda *_args, **_kwargs: dict(base_plan),
+        critique_task_execution_plan=lambda *_args, **_kwargs: {
+            "approved": False,
+            "issues": ["최종 승인자/DRI가 Task Team 내부에 명시되지 않았습니다."],
+            "recommendations": [],
+        },
+        critic_has_blockers=lambda critic: (not bool(critic.get("approved", True))) or bool(critic.get("issues") or []),
+        repair_task_execution_plan=lambda *_args, **_kwargs: dict(base_plan),
+        plan_roles_from_subtasks=lambda plan: [row["owner_role"] for row in (plan.get("subtasks") or [])] if isinstance(plan, dict) else [],
+        phase1_ensemble_planning=None,
+        report_progress=None,
+    )
+
+    assert meta.plan_gate_blocked is True
+    assert meta.plan_gate_reason == "최종 승인자/DRI가 Task Team 내부에 명시되지 않았습니다."
 
 
 def test_normalize_task_plan_payload_derives_phase2_team_spec() -> None:

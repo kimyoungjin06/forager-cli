@@ -61,6 +61,10 @@ Important policy:
 - TF may read `source_ref`
 - TF must not rewrite queue state directly
 - TF should emit proposals instead of creating backlog rows
+- `approval_mode` semantics:
+  - `policy`: operator approval/recovery is outside the Task Team; missing human approver/DRI is not a planning gate blocker
+  - `confirm`: explicit operator confirmation is part of closure; approval-related critic issues may remain planning blockers
+  - `none`: no approval step is required; approval-related critic issues should not block planning
 
 ### 2.2 TFPlan
 
