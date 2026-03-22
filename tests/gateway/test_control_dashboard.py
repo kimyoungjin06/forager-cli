@@ -346,6 +346,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "/task T-001" in text
     assert "/request REQ-1" in text
     assert "/monitor O2" in text
+    assert "phase2_actions" in text
     assert "/retry T-001" in text
     assert "/offdesk review" in text
 
@@ -395,6 +396,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "analysis-followup" in text
     assert "/monitor O2" in text
     assert "/todo O2" in text
+    assert "phase2_actions" in text
     assert "/task T-001" in text
     assert "/request REQ-1" in text
 
@@ -427,6 +429,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "selected=offdesk_prepare" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "phase2_actions" in text
     assert "/control/tasks/by-request/REQ-1" in text
     assert "/monitor O2" in text
     assert "/task T-001" in text

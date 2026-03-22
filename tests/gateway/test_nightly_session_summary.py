@@ -42,6 +42,8 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert control["latest_intent_focus"] == "오늘 밤 scope, provider capacity, auto posture를 먼저 점검"
     assert runtimes[0]["project_alias"] == "O2"
     assert runtimes[0]["completed_task_count"] == 1
+    assert "/monitor O2" in runtimes[0]["operator_hints"]
+    assert "/retry T-001" in runtimes[0]["active_task_phase2_actions"]
     assert runtimes[0]["active_task_label"] == "T-001 | analysis-check"
     assert runtimes[0]["task_teams"][0]["request_id"] == "REQ-1"
     assert runtimes[0]["active_task_completion_contract"]["focus"] == "evidence quality, reasoning coherence, missing caveats"
@@ -79,6 +81,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "latest_intent_action: offdesk_prepare" in markdown
     assert "latest_intent_trace: selected=offdesk_prepare" in markdown
     assert "first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in markdown
+    assert "phase2_actions: /retry T-001" in markdown
     assert "analysis-check (REQ-1)" in markdown
     assert "completion_focus: evidence quality, reasoning coherence, missing caveats" in markdown
     assert payload["runtimes"][0]["project_alias"] == "O2"

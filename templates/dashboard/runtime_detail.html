@@ -23,6 +23,14 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% if detail.runtime_phase2_action_hints %}
+  <p><strong>phase2_actions</strong></p>
+  <ul class="command-list">
+    {% for hint in detail.runtime_phase2_action_hints %}
+    <li><code>{{ hint }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 </section>
 
 {% if detail.active_task_label %}
@@ -47,6 +55,14 @@
   <p><strong>active_task_hints</strong></p>
   <ul class="command-list">
     {% for hint in detail.active_task_command_hints %}
+    <li><code>{{ hint }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if detail.active_task_phase2_action_hints %}
+  <p><strong>active_task_phase2_actions</strong></p>
+  <ul class="command-list">
+    {% for hint in detail.active_task_phase2_action_hints %}
     <li><code>{{ hint }}</code></li>
     {% endfor %}
   </ul>

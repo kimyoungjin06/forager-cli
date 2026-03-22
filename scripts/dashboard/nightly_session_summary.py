@@ -96,6 +96,8 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
         "backend_summary": task.backend_summary,
         "backend_note": task.backend_note,
         "rate_limit_summary": task.rate_limit_summary,
+        "operator_hints": list(task.command_hints),
+        "phase2_actions": list(task.phase2_action_hints),
         "updated_at": task.updated_at,
     }
 
@@ -155,6 +157,10 @@ def build_nightly_session_summary(
                 "active_task_backend": detail.active_task_backend,
                 "active_task_backend_note": detail.active_task_backend_note,
                 "active_task_rate_limit": detail.active_task_rate_limit,
+                "operator_hints": list(detail.runtime_command_hints),
+                "phase2_actions": list(detail.runtime_phase2_action_hints),
+                "active_task_hints": list(detail.active_task_command_hints),
+                "active_task_phase2_actions": list(detail.active_task_phase2_action_hints),
                 "notes": list(detail.notes),
                 "task_teams": [_task_summary_dict(task) for task in task_rows],
             }
@@ -229,6 +235,12 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- repeat_memory: {runtime.get('repeat_summary', '-')}",
             ]
         )
+        operator_hints = runtime.get("operator_hints") if isinstance(runtime.get("operator_hints"), list) else []
+        phase2_actions = runtime.get("phase2_actions") if isinstance(runtime.get("phase2_actions"), list) else []
+        if operator_hints:
+            lines.append(f"- operator_hints: {', '.join(str(item).strip() for item in operator_hints if str(item).strip())}")
+        if phase2_actions:
+            lines.append(f"- phase2_actions: {', '.join(str(item).strip() for item in phase2_actions if str(item).strip())}")
         active_task_label = str(runtime.get("active_task_label", "")).strip()
         if active_task_label:
             lines.extend(
@@ -248,6 +260,18 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     f"  - rate_limit: {runtime.get('active_task_rate_limit', '-')}",
                 ]
             )
+            active_task_hints = runtime.get("active_task_hints") if isinstance(runtime.get("active_task_hints"), list) else []
+            active_task_phase2 = runtime.get("active_task_phase2_actions") if isinstance(runtime.get("active_task_phase2_actions"), list) else []
+            if active_task_hints:
+                lines.append(
+                    "  - operator_hints: "
+                    + ", ".join(str(item).strip() for item in active_task_hints if str(item).strip())
+                )
+            if active_task_phase2:
+                lines.append(
+                    "  - phase2_actions: "
+                    + ", ".join(str(item).strip() for item in active_task_phase2 if str(item).strip())
+                )
         task_teams = runtime.get("task_teams") if isinstance(runtime.get("task_teams"), list) else []
         if task_teams:
             lines.append("- task_teams:")
@@ -277,6 +301,12 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                         f"    - rate_limit: {task.get('rate_limit_summary', '-')}",
                     ]
                 )
+                task_hints = task.get("operator_hints") if isinstance(task.get("operator_hints"), list) else []
+                task_phase2 = task.get("phase2_actions") if isinstance(task.get("phase2_actions"), list) else []
+                if task_hints:
+                    lines.append("    - operator_hints: " + ", ".join(str(item).strip() for item in task_hints if str(item).strip()))
+                if task_phase2:
+                    lines.append("    - phase2_actions: " + ", ".join(str(item).strip() for item in task_phase2 if str(item).strip()))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

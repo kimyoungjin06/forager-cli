@@ -184,6 +184,12 @@ then the dashboard should reuse that state/view contract rather than recomputing
 - Refresh by polling or manual reload
 - Links, command strings, or deep-link hints out to Telegram/operator command equivalents are enough
 - Phase 1 should prefer structured DTOs and local reload over rich interactivity.
+- Read-only command hints must be assembled through a shared operator action contract.
+  - `safe`:
+    - read-only drill-down/status/preview commands
+  - `phase2`:
+    - mutation-capable commands that may later become buttons
+  - Phase 1 may display both, but must only execute neither through HTTP.
 
 ### 7.2 Phase 2
 - Existing actions exposed as buttons:
@@ -236,6 +242,9 @@ then the dashboard should reuse that state/view contract rather than recomputing
 - `Project Runtime Detail`
 - wire existing actions through thin HTTP handlers
 - confirm action parity with Telegram wording
+- hard requirement:
+  - only commands already classified as `phase2` in the shared operator action contract are eligible for button wiring
+  - `safe` commands remain read-only links/hints
 
 ### 10.3 Step 3: Recovery polish
 - morning summary

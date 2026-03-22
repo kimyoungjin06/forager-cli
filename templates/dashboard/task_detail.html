@@ -39,6 +39,14 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% if detail.phase2_action_hints %}
+  <p><strong>phase2_actions</strong></p>
+  <ul class="command-list">
+    {% for hint in detail.phase2_action_hints %}
+    <li><code>{{ hint }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
 </section>
 
 <section class="panel">
