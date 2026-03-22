@@ -170,6 +170,11 @@
     - shared read-only state adapter / DTO contract 안정화
     - `Project Runtime Detail` page 추가 완료
     - shared operator action contract에서 `safe` / `phase2` 분리 완료
+    - initial HTTP shortlist 고정
+      - `retry`
+      - `followup`
+      - `sync preview`
+      - `auto recover`
   - `auto on/off`
   - `recover`
   - `retry`

@@ -179,3 +179,75 @@ def partition_operator_commands(commands: Iterable[str], *, safe_limit: int = 6,
         "phase2": phase2_commands,
         "contracts": contracts,
     }
+
+
+def http_action_spec(command: str) -> Dict[str, Any] | None:
+    raw = _trim(command, 240)
+    low = raw.lower()
+    tokens = raw.split()
+    if not tokens:
+        return None
+
+    head = tokens[0].lower()
+    second = tokens[1].lower() if len(tokens) > 1 else ""
+    third = tokens[2] if len(tokens) > 2 else ""
+
+    lane_ids: List[str] = []
+    if "lane" in [token.lower() for token in tokens]:
+        idx = next((i for i, token in enumerate(tokens) if token.lower() == "lane"), -1)
+        if idx >= 0 and idx + 1 < len(tokens):
+            lane_ids = [item.strip() for item in tokens[idx + 1].split(",") if item.strip()]
+
+    if head == "/retry" and len(tokens) >= 2:
+        return {
+            "command": raw,
+            "mode": "phase2",
+            "method": "POST",
+            "path": "/control/actions/task/retry",
+            "payload": {
+                "task_ref": tokens[1],
+                "lane_ids": lane_ids,
+            },
+            "note": "rerun a task team using existing retry handlers",
+        }
+
+    if head == "/followup" and len(tokens) >= 2:
+        return {
+            "command": raw,
+            "mode": "safe",
+            "method": "POST",
+            "path": "/control/actions/task/followup",
+            "payload": {
+                "task_ref": tokens[1],
+                "lane_ids": lane_ids,
+            },
+            "note": "inspect manual follow-up targets using the existing followup handler",
+        }
+
+    if head == "/sync" and second == "preview" and len(tokens) >= 3:
+        return {
+            "command": raw,
+            "mode": "safe",
+            "method": "POST",
+            "path": "/control/actions/runtime/sync-preview",
+            "payload": {
+                "project_ref": third,
+                "window": tokens[3] if len(tokens) >= 4 else "24h",
+            },
+            "note": "inspect sync sources without mutating runtime state",
+        }
+
+    if head == "/auto" and second == "recover":
+        force = len(tokens) >= 3 and tokens[2].lower() == "force"
+        return {
+            "command": raw,
+            "mode": "phase2",
+            "method": "POST",
+            "path": "/control/actions/control/auto-recover",
+            "payload": {
+                "force": bool(force),
+            },
+            "note": "resume control automation through the existing auto recover path",
+        }
+
+    return None

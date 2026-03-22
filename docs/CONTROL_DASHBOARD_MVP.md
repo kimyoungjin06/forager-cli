@@ -202,6 +202,24 @@ then the dashboard should reuse that state/view contract rather than recomputing
   - `sync bootstrap`
 - These must call existing handlers, not new logic
 - `Project Runtime Detail` is added here as the bridge between board cards and task detail
+- Initial HTTP shortlist:
+  - `POST /control/actions/task/retry`
+    - source command: `/retry <task_ref> [lane <...>]`
+    - class: `phase2`
+  - `POST /control/actions/task/followup`
+    - source command: `/followup <task_ref> [lane <...>]`
+    - class: `safe`
+  - `POST /control/actions/runtime/sync-preview`
+    - source command: `/sync preview <project_ref> [window]`
+    - class: `safe`
+  - `POST /control/actions/control/auto-recover`
+    - source command: `/auto recover [force]`
+    - class: `phase2`
+- Deferred from the first HTTP shortlist:
+  - `/offdesk on`
+  - `/sync bootstrap`
+  - `/syncback apply`
+  - `/replan`
 
 ## 8. UX Rules
 - The dashboard is an operator board, not a marketing UI.
