@@ -202,6 +202,43 @@ def test_infer_action_call_keeps_review_only_prompt_out_of_dispatch() -> None:
     assert row["intent_class"] == "status"
 
 
+def test_infer_action_call_maps_recovery_result_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "복귀 후 밤새 결과부터 먼저 보자",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "selected=offdesk_review" in row["intent_trace"]
+
+
+def test_infer_action_call_prefers_offdesk_review_for_candidate_only_prompt() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "오늘 밤 후보만 추리고 실제 실행은 나중에 하자",
+        default_project_key="O3",
+        has_active_task=False,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "review:후보" in row["intent_trace"]
+    assert "why_not_dispatch=recovery/offdesk timing markers outrank work markers" in row["intent_trace"]
+
+
+def test_infer_action_call_maps_warning_project_review_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "경고 프로젝트만 먼저 모아서 검토해줘",
+        default_project_key="O3",
+        has_active_task=False,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "warning_scope:경고 프로젝트" in row["intent_trace"]
+
+
 def test_action_call_to_resolved_command_maps_monitor_and_offdesk() -> None:
     monitor = mod.action_call_to_resolved_command(
         mod.normalize_mother_orch_action_call({"action": "monitor_project", "project_key": "O3"})

@@ -339,6 +339,8 @@ def infer_mother_orch_action_call(
         "review",
         "확인",
         "정리",
+        "후보",
+        "candidate",
         "할일",
         "todo",
         "후속",
@@ -346,6 +348,8 @@ def infer_mother_orch_action_call(
         "follow-up",
         "리스크",
         "경고",
+        "경고 프로젝트",
+        "막힌 프로젝트",
         "문제",
     )
     map_markers = ("프로젝트 목록", "프로젝트들", "workspace", "워크스페이스", "map", "프로젝트 맵")
@@ -499,6 +503,18 @@ def infer_mother_orch_action_call(
             matched={"timing": offdesk_timing_hits, "prepare": offdesk_prepare_hits, "work": work_hits},
             safe_mode=safe_mode,
             why_not_dispatch=why_not_dispatch,
+        )
+    if offdesk_timing_hits and status_hits and not work_hits:
+        return _return(
+            {"action": "offdesk_review"},
+            matched={"timing": offdesk_timing_hits, "status": status_hits},
+            safe_mode="prefer_control_review",
+        )
+    if ("경고 프로젝트" in low or "막힌 프로젝트" in low) and (offdesk_review_hits or inspect_hits):
+        return _return(
+            {"action": "offdesk_review"},
+            matched={"review": offdesk_review_hits or inspect_hits, "warning_scope": ["경고 프로젝트" if "경고 프로젝트" in low else "막힌 프로젝트"]},
+            safe_mode="prefer_control_review",
         )
 
     if followup_hits:
