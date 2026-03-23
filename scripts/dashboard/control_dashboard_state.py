@@ -797,7 +797,7 @@ def _runtime_action_buttons(
 
 
 def _recovery_control_action_buttons() -> List[ActionButtonDTO]:
-    return _build_action_buttons(["/auto recover"])
+    return _build_action_buttons(["/auto recover", "/auto recover force"])
 
 
 def _runtime_path(project_alias: str) -> str:

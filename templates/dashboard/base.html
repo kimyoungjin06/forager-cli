@@ -42,6 +42,7 @@
         </div>
         <p id="action-result-summary" class="muted">No action has been run yet.</p>
         <ul id="action-result-rows" class="kv-list action-result-rows hidden"></ul>
+        <ul id="action-result-links" class="command-list compact hidden"></ul>
         <details id="action-result-details" class="action-result-details hidden">
           <summary>Raw Payload</summary>
           <pre id="action-result-body" class="code-block">-</pre>
@@ -54,15 +55,20 @@
         const panel = document.getElementById("action-result");
         const summary = document.getElementById("action-result-summary");
         const rows = document.getElementById("action-result-rows");
+        const links = document.getElementById("action-result-links");
         const details = document.getElementById("action-result-details");
         const body = document.getElementById("action-result-body");
         const clear = document.getElementById("action-result-clear");
-        if (!panel || !summary || !rows || !details || !body) {
+        if (!panel || !summary || !rows || !links || !details || !body) {
           return;
         }
         const clearRows = () => {
           rows.innerHTML = "";
           rows.classList.add("hidden");
+        };
+        const clearLinks = () => {
+          links.innerHTML = "";
+          links.classList.add("hidden");
         };
         const appendRow = (label, value) => {
           if (!value || value === "-") {
@@ -76,6 +82,17 @@
           item.appendChild(key);
           item.appendChild(val);
           rows.appendChild(item);
+        };
+        const appendLink = (label, href) => {
+          if (!href || href === "-") {
+            return;
+          }
+          const item = document.createElement("li");
+          const anchor = document.createElement("a");
+          anchor.href = href;
+          anchor.textContent = label;
+          item.appendChild(anchor);
+          links.appendChild(item);
         };
         const asText = (value) => {
           if (value === null || value === undefined) {
@@ -123,17 +140,26 @@
             ["auto_state", payload?.auto_state ? `${asText(payload.auto_state.command)} | grace=${asText(payload.auto_state.recovery_grace_until)}` : "-"],
             ["contexts", contexts.join(", ") || "-"],
           ];
-          return { headline, rowsData };
+          const linkRows = [
+            ["task detail", payload?.task?.detail_path || payload?.preview?.detail_path || "-"],
+            ["runtime detail", payload?.preview?.runtime_path || "-"],
+          ];
+          return { headline, rowsData, linkRows };
         };
         const setResult = (label, status, payload, error = false) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
-          const { headline, rowsData } = buildSummary(label, status, payload);
+          const { headline, rowsData, linkRows } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
+          clearLinks();
           rowsData.forEach(([key, value]) => appendRow(key, asText(value)));
           if (rows.children.length) {
             rows.classList.remove("hidden");
+          }
+          linkRows.forEach(([key, value]) => appendLink(key, value));
+          if (links.children.length) {
+            links.classList.remove("hidden");
           }
           body.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
           details.classList.remove("hidden");
@@ -145,6 +171,7 @@
           panel.classList.remove("error");
           summary.textContent = "No action has been run yet.";
           clearRows();
+          clearLinks();
           body.textContent = "-";
           details.classList.add("hidden");
           details.open = false;

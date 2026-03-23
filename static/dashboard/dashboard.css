@@ -112,6 +112,9 @@ body {
 .action-result-rows li {
   grid-template-columns: 120px 1fr;
 }
+.action-result .command-list {
+  margin-top: 0.75rem;
+}
 .action-result-details {
   margin-top: 0.85rem;
 }
