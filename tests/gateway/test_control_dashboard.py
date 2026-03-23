@@ -248,6 +248,25 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    action_audit_dir = team_dir / "dashboard"
+    action_audit_dir.mkdir(parents=True, exist_ok=True)
+    (action_audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-03-16T09:57:00+09:00",
+                "headline": "Sync Preview | preview",
+                "status": "preview",
+                "next_step": "/monitor O2",
+                "remediation": "inspect sync drift before executing any runtime mutation",
+                "link_label": "runtime detail",
+                "link_href": "/control/runtimes/O2",
+                "source_command": "/sync preview O2 24h",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
         team_dir=team_dir,
@@ -300,13 +319,15 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
     assert "Action Result" in overview_text
-    assert "Clear History" in overview_text
+    assert "Clear Local History" in overview_text
     assert "Raw Payload" in overview_text
     assert "action-result-rows" in overview_text
     assert "action-result-links" in overview_text
     assert "action-result-history" in overview_text
     assert "action-history-badge" in overview_text
     assert "remediation" in overview_text
+    assert "Sync Preview | preview" in overview_text
+    assert "/control/runtimes/O2" in overview_text
     assert tasks_status == 200
     assert tasks_headers["Content-Type"].startswith("text/html")
     assert "Active Tasks" in tasks_text
@@ -478,6 +499,7 @@ def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_p
     assert paths.auto_state_file == (custom_team_dir / "auto_scheduler.json").resolve()
     assert paths.provider_capacity_file == (custom_team_dir / "provider_capacity.json").resolve()
     assert paths.gateway_events_file == (custom_team_dir / "logs" / "gateway_events.jsonl").resolve()
+    assert paths.action_audit_file == (custom_team_dir / "dashboard" / "action-history.jsonl").resolve()
 
 
 def test_dashboard_task_page_uses_single_manager_snapshot(tmp_path: Path, monkeypatch) -> None:
@@ -700,6 +722,38 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert sync_payload["preview"]["kind"] == "runtime_sync_preview"
     assert sync_payload["preview"]["project_alias"] == "O2"
     assert "quality=" in sync_payload["preview"]["sync_summary"]
+
+
+def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["R1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    latest = rows[-1]
+
+    assert status == 200
+    assert payload["status"] == "preview"
+    assert latest["headline"] == "Follow-up Preview | preview"
+    assert latest["status"] == "preview"
+    assert latest["next_step"] == "/task T-001"
+    assert latest["link_label"] == "task detail"
+    assert latest["link_href"] == "/control/tasks/by-request/REQ-1"
+    assert latest["source_command"] == "/followup T-001 lane R1"
 
 
 def test_control_dashboard_post_auto_recover_executes_with_default_force_false(tmp_path: Path, monkeypatch) -> None:

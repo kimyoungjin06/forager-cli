@@ -30,12 +30,15 @@ MANAGER_STATE_FILENAME = "orch_manager_state.json"
 AUTO_STATE_FILENAME = "auto_scheduler.json"
 PROVIDER_CAPACITY_FILENAME = "provider_capacity.json"
 GATEWAY_EVENTS_FILENAME = "gateway_events.jsonl"
+ACTION_AUDIT_DIRNAME = "dashboard"
+ACTION_AUDIT_FILENAME = "action-history.jsonl"
 RECOVERY_SUMMARY_DIRNAME = "nightly-session-summary"
 RECOVERY_SUMMARY_FILENAME = "latest.json"
 
 _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_COMMAND_RESOLUTION: Dict[str, Dict[str, str]] = {}
+_LAST_GOOD_ACTION_AUDIT: Dict[str, List[Dict[str, str]]] = {}
 _COMMAND_RESOLVED_DETAIL_RE = re.compile(r"(?:^| )(?P<key>cmd|action|class|trace)=(?P<value>.*?)(?= (?:cmd|action|class|trace)=|$)")
 
 
@@ -58,6 +61,18 @@ class ActionButtonDTO:
     mode: str
     note: str
     payload_json: str
+
+
+@dataclass(frozen=True)
+class ActionAuditRowDTO:
+    at: str
+    headline: str
+    status: str
+    next_step: str
+    remediation: str
+    link_label: str
+    link_href: str
+    source_command: str
 
 
 @dataclass(frozen=True)
@@ -315,6 +330,7 @@ class DashboardSnapshotDTO:
     runtime_cards: List[RuntimeCardDTO]
     attention_runtime_cards: List[RuntimeCardDTO]
     active_task_rows: List[ActiveTaskRowDTO]
+    recent_action_audit_rows: List[ActionAuditRowDTO]
 
 
 @dataclass(frozen=True)
@@ -332,6 +348,7 @@ class ControlPaths:
     auto_state_file: Path
     provider_capacity_file: Path
     gateway_events_file: Path
+    action_audit_file: Path
 
 
 @dataclass(frozen=True)
@@ -374,6 +391,7 @@ def resolve_control_paths(
         auto_state_file=(resolved_team_dir / AUTO_STATE_FILENAME).resolve(),
         provider_capacity_file=(resolved_team_dir / PROVIDER_CAPACITY_FILENAME).resolve(),
         gateway_events_file=(resolved_team_dir / "logs" / GATEWAY_EVENTS_FILENAME).resolve(),
+        action_audit_file=(resolved_team_dir / ACTION_AUDIT_DIRNAME / ACTION_AUDIT_FILENAME).resolve(),
     )
 
 
@@ -456,6 +474,77 @@ def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFre
             )
         return {"command": "-", "action": "-", "trace": "-"}, FileFreshnessDTO(
             name="gateway_events",
+            path=key,
+            exists=True,
+            updated_at=updated_at,
+            stale=True,
+            error=str(exc),
+        )
+
+
+def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
+    return ActionAuditRowDTO(
+        at=str(raw.get("at", "")).strip() or "-",
+        headline=str(raw.get("headline", "")).strip() or "-",
+        status=str(raw.get("status", "")).strip() or "unknown",
+        next_step=str(raw.get("next_step", "")).strip() or "-",
+        remediation=str(raw.get("remediation", "")).strip() or "-",
+        link_label=str(raw.get("link_label", "")).strip() or "-",
+        link_href=str(raw.get("link_href", "")).strip() or "-",
+        source_command=str(raw.get("source_command", "")).strip() or "-",
+    )
+
+
+def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[ActionAuditRowDTO], FileFreshnessDTO]:
+    key = str(path)
+    exists = path.exists()
+    updated_at = _iso_from_mtime(path) if exists else ""
+    if not exists:
+        return [], FileFreshnessDTO(name="action_audit", path=key, exists=False, updated_at="")
+    try:
+        rows: List[ActionAuditRowDTO] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = str(line or "").strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    continue
+                if not isinstance(parsed, dict):
+                    continue
+                rows.append(_normalize_action_audit_row(parsed))
+        rows = rows[-limit:]
+        rows.reverse()
+        _LAST_GOOD_ACTION_AUDIT[key] = [
+            {
+                "at": row.at,
+                "headline": row.headline,
+                "status": row.status,
+                "next_step": row.next_step,
+                "remediation": row.remediation,
+                "link_label": row.link_label,
+                "link_href": row.link_href,
+                "source_command": row.source_command,
+            }
+            for row in rows
+        ]
+        return rows, FileFreshnessDTO(name="action_audit", path=key, exists=True, updated_at=updated_at)
+    except Exception as exc:
+        cached = _LAST_GOOD_ACTION_AUDIT.get(key)
+        if isinstance(cached, list):
+            rows = [_normalize_action_audit_row(row) for row in cached if isinstance(row, dict)]
+            return rows, FileFreshnessDTO(
+                name="action_audit",
+                path=key,
+                exists=True,
+                updated_at=updated_at,
+                stale=True,
+                error=str(exc),
+            )
+        return [], FileFreshnessDTO(
+            name="action_audit",
             path=key,
             exists=True,
             updated_at=updated_at,
@@ -1496,6 +1585,7 @@ def load_dashboard_snapshot_result(
     auto_state, auto_freshness = _load_json_file(paths.auto_state_file, name="auto_state")
     provider_state, provider_freshness = _load_json_file(paths.provider_capacity_file, name="provider_capacity")
     latest_intent, gateway_events_freshness = _load_latest_command_resolution(paths.gateway_events_file)
+    action_audit_rows, action_audit_freshness = _load_recent_action_audit(paths.action_audit_file)
 
     runtime_cards = _build_runtime_cards(manager_loaded.state, provider_state)
     active_rows = _build_active_task_rows(manager_loaded.state)
@@ -1531,11 +1621,12 @@ def load_dashboard_snapshot_result(
             team_dir=str(paths.team_dir),
             manager_state_file=str(paths.manager_state_file),
             snapshot_taken_at=snapshot_taken_at,
-            source_files=[manager_loaded.freshness, auto_freshness, provider_freshness, gateway_events_freshness],
+            source_files=[manager_loaded.freshness, auto_freshness, provider_freshness, gateway_events_freshness, action_audit_freshness],
             control_summary=summary,
             runtime_cards=runtime_cards,
             attention_runtime_cards=attention_cards,
             active_task_rows=active_rows,
+            recent_action_audit_rows=action_audit_rows,
         ),
         manager_state=manager_loaded.state,
         provider_state=provider_state,

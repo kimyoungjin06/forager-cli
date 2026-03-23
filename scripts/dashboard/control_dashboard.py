@@ -11,6 +11,7 @@ import mimetypes
 import shutil
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -207,6 +208,80 @@ def _dashboard_paths(config: DashboardAppConfig):
         team_dir=config.team_dir,
         manager_state_file=config.manager_state_file,
     )
+
+
+def _action_audit_now() -> str:
+    return datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def _action_audit_headline(payload: Dict[str, Any]) -> str:
+    path = str(payload.get("path", "")).strip()
+    status = str(payload.get("status", "")).strip() or "unknown"
+    source_command = str(payload.get("source_command", "")).strip() or "-"
+    if path == "/control/actions/task/followup":
+        return f"Follow-up Preview | {status}"
+    if path == "/control/actions/runtime/sync-preview":
+        return f"Sync Preview | {status}"
+    if path == "/control/actions/task/retry":
+        return f"Retry | {status}"
+    if path == "/control/actions/control/auto-recover":
+        force = bool((payload.get("payload") or {}).get("force"))
+        return f"Auto Recover{' Force' if force else ''} | {status}"
+    return f"{source_command} | {status}"
+
+
+def _action_audit_link(payload: Dict[str, Any]) -> Tuple[str, str]:
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    preview = payload.get("preview") if isinstance(payload.get("preview"), dict) else {}
+    task_href = str(task.get("detail_path", "")).strip() or str(preview.get("detail_path", "")).strip()
+    if task_href:
+        return "task detail", task_href
+    runtime_href = str(preview.get("runtime_path", "")).strip()
+    if runtime_href:
+        return "runtime detail", runtime_href
+    return "-", "-"
+
+
+def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, Any]) -> None:
+    source_command = str(payload.get("source_command", "")).strip()
+    if not source_command:
+        return
+    paths = _dashboard_paths(config)
+    link_label, link_href = _action_audit_link(payload)
+    row = {
+        "at": _action_audit_now(),
+        "headline": _action_audit_headline(payload),
+        "status": str(payload.get("status", "")).strip() or "unknown",
+        "next_step": str(payload.get("next_step", "")).strip() or "-",
+        "remediation": str(payload.get("remediation", "")).strip() or "-",
+        "link_label": link_label,
+        "link_href": link_href,
+        "source_command": source_command,
+    }
+    try:
+        paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)
+        with paths.action_audit_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+
+
+def _with_action_audit(
+    response: Tuple[int, Dict[str, str], bytes],
+    *,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    status, headers, body = response
+    if "application/json" not in str(headers.get("Content-Type", "")).lower():
+        return response
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except Exception:
+        return response
+    if not isinstance(payload, dict):
+        return response
+    _append_action_audit(config, payload)
+    return response
 
 
 def _dashboard_action_args(config: DashboardAppConfig) -> Any:
@@ -931,18 +1006,18 @@ def build_dashboard_action_response(
         return _bad_request(str(exc), path=path)
 
     if path == "/control/actions/task/followup":
-        return _preview_followup_action(spec, config=config)
+        return _with_action_audit(_preview_followup_action(spec, config=config), config=config)
 
     if path == "/control/actions/runtime/sync-preview":
-        return _preview_sync_action(spec, config=config)
+        return _with_action_audit(_preview_sync_action(spec, config=config), config=config)
 
     if path == "/control/actions/task/retry":
-        return _execute_retry_action(spec, config=config)
+        return _with_action_audit(_execute_retry_action(spec, config=config), config=config)
 
     if path == "/control/actions/control/auto-recover":
-        return _execute_auto_recover_action(spec, config=config)
+        return _with_action_audit(_execute_auto_recover_action(spec, config=config), config=config)
 
-    return _json(
+    return _with_action_audit(_json(
         {
             "ok": False,
             "implemented": False,
@@ -955,7 +1030,7 @@ def build_dashboard_action_response(
             "note": spec.get("note", "-"),
         },
         status=501,
-    )
+    ), config=config)
 
 
 def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:

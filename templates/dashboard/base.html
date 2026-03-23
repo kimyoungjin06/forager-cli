@@ -39,7 +39,7 @@
         <div class="action-result-header">
           <h2>Action Result</h2>
           <div class="action-result-controls">
-            <button type="button" id="action-result-clear-history" class="action-result-clear">Clear History</button>
+            <button type="button" id="action-result-clear-history" class="action-result-clear">Clear Local History</button>
             <button type="button" id="action-result-clear" class="action-result-clear">Clear</button>
           </div>
         </div>
@@ -51,7 +51,32 @@
             <strong>Recent Results</strong>
             <span class="muted">latest 5</span>
           </div>
-          <ul id="action-result-history" class="command-list compact"></ul>
+          <ul id="action-result-history" class="command-list compact">
+            {% if snapshot is defined and snapshot.recent_action_audit_rows %}
+            {% for row in snapshot.recent_action_audit_rows %}
+            <li
+              data-history-row="true"
+              data-at="{{ row.at }}"
+              data-headline="{{ row.headline }}"
+              data-next-step="{{ row.next_step }}"
+              data-link-label="{{ row.link_label }}"
+              data-link-href="{{ row.link_href }}"
+              data-status="{{ row.status }}"
+            >
+              <div class="action-history-head">
+                <span class="action-history-badge {{ row.status }}">{{ row.status }}</span>
+                <strong>{{ row.at }} | {{ row.headline }}</strong>
+              </div>
+              {% if row.next_step and row.next_step != '-' %}
+              <div class="muted">next: {{ row.next_step }}</div>
+              {% endif %}
+              {% if row.link_href and row.link_href != '-' %}
+              <a href="{{ row.link_href }}">{{ row.link_label or 'detail' }}</a>
+              {% endif %}
+            </li>
+            {% endfor %}
+            {% endif %}
+          </ul>
         </section>
         <details id="action-result-details" class="action-result-details hidden">
           <summary>Raw Payload</summary>
@@ -77,11 +102,29 @@
           return;
         }
         let history = [];
+        const seedHistory = () => {
+          const seeded = [];
+          historyList.querySelectorAll("[data-history-row='true']").forEach((item) => {
+            if (!(item instanceof HTMLElement)) {
+              return;
+            }
+            seeded.push({
+              at: item.dataset.at || "-",
+              headline: item.dataset.headline || "-",
+              nextStep: item.dataset.nextStep || "-",
+              linkLabel: item.dataset.linkLabel || "-",
+              linkHref: item.dataset.linkHref || "-",
+              status: item.dataset.status || "unknown",
+            });
+          });
+          return seeded;
+        };
         try {
           const raw = window.sessionStorage.getItem(historyStorageKey);
-          history = Array.isArray(JSON.parse(raw || "[]")) ? JSON.parse(raw || "[]") : [];
+          const parsed = Array.isArray(JSON.parse(raw || "[]")) ? JSON.parse(raw || "[]") : [];
+          history = parsed.length ? parsed : seedHistory();
         } catch (_error) {
-          history = [];
+          history = seedHistory();
         }
         const clearRows = () => {
           rows.innerHTML = "";
