@@ -132,6 +132,12 @@
               meta.textContent = `next: ${entry.nextStep}`;
               item.appendChild(meta);
             }
+            if (entry.linkHref && entry.linkHref !== "-") {
+              const link = document.createElement("a");
+              link.href = entry.linkHref;
+              link.textContent = entry.linkLabel || "detail";
+              item.appendChild(link);
+            }
             historyList.appendChild(item);
           });
           historyPanel.classList.remove("hidden");
@@ -143,11 +149,13 @@
             // Ignore storage failures; in-memory history still works for this page.
           }
         };
-        const pushHistory = (headline, nextStep) => {
+        const pushHistory = (headline, nextStep, linkLabel, linkHref) => {
           history.unshift({
             at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
             headline,
             nextStep: nextStep || "-",
+            linkLabel: linkLabel || "-",
+            linkHref: linkHref || "-",
           });
           history = history.slice(0, 5);
           persistHistory();
@@ -193,6 +201,7 @@
             ["task", taskLabel],
             ["runtime", runtimeLabel],
             ["next_step", asText(payload?.next_step)],
+            ["remediation", asText(payload?.remediation)],
             ["task_state", payload?.task ? `${asText(payload.task.status)}/${asText(payload.task.tf_phase)}` : "-"],
             ["followup", asText(payload?.preview?.followup_summary || payload?.preview?.completion_followup_when)],
             ["sync", asText(payload?.preview?.sync_summary)],
@@ -225,7 +234,11 @@
           details.classList.remove("hidden");
           details.open = Boolean(error);
           if (recordHistory) {
-            pushHistory(headline, asText(payload?.next_step));
+            const primaryTaskLink = payload?.task?.detail_path || payload?.preview?.detail_path || "-";
+            const primaryRuntimeLink = payload?.preview?.runtime_path || "-";
+            const linkHref = primaryTaskLink !== "-" ? primaryTaskLink : primaryRuntimeLink;
+            const linkLabel = primaryTaskLink !== "-" ? "task detail" : (primaryRuntimeLink !== "-" ? "runtime detail" : "-");
+            pushHistory(headline, asText(payload?.next_step), linkLabel, linkHref);
           }
           panel.scrollIntoView({ block: "start", behavior: "smooth" });
         };

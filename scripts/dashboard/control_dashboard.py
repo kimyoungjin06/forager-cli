@@ -461,6 +461,7 @@ def _execute_retry_run_transition(
                 "payload": payload,
                 "messages": messages,
                 "events": events,
+                "remediation": "inspect the runtime task detail and retry contract before attempting another retry bridge",
             },
             status=500,
         )
@@ -510,6 +511,11 @@ def _execute_retry_run_transition(
             "events": events,
             "task": task_payload,
             "next_step": next_step,
+            "remediation": (
+                "review the updated task detail and lane state before repeating another retry"
+                if not blocked
+                else "inspect planning or critic blockers in /offdesk review before re-running retry"
+            ),
         },
         status=409 if blocked else 200,
     )
@@ -602,6 +608,7 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
             "source_command": spec.get("command", "-"),
             "payload": payload,
             "next_step": (detail.command_hints[0] if detail.command_hints else f"/task {detail.label}"),
+            "remediation": "inspect the follow-up reason and choose the matching task or backlog drill-down before mutating anything",
             "preview": {
                 "kind": "task_followup",
                 "project_alias": detail.project_alias,
@@ -657,6 +664,7 @@ def _preview_sync_action(spec: Dict[str, object], *, config: DashboardAppConfig)
             "payload": payload,
             "snapshot_taken_at": snapshot.snapshot_taken_at,
             "next_step": (detail.runtime_command_hints[0] if detail.runtime_command_hints else f"/monitor {detail.project_alias}"),
+            "remediation": "inspect sync drift and provider pressure first, then decide whether runtime sync is worth executing",
             "preview": {
                 "kind": "runtime_sync_preview",
                 "project_alias": detail.project_alias,
@@ -714,6 +722,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "path": spec.get("path", "-"),
                 "source_command": spec.get("command", "-"),
                 "payload": payload,
+                "remediation": "inspect the task lifecycle first; retry transition could not be derived from the current runtime state",
             },
             status=500,
         )
@@ -732,6 +741,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "payload": payload,
                 "messages": messages,
                 "next_step": "/offdesk review",
+                "remediation": "review critic blockers and lane eligibility in /offdesk review or /task before retrying again",
             },
             status=409,
         )
@@ -822,6 +832,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
                 "path": spec.get("path", "-"),
                 "source_command": spec.get("command", "-"),
                 "payload": payload,
+                "remediation": "inspect /auto status and provider capacity state before retrying auto recover",
             },
             status=500,
         )
@@ -855,6 +866,11 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
             },
             "team_dir": str(paths.team_dir),
             "next_step": "/auto status" if not blocked else "/offdesk review",
+            "remediation": (
+                "verify recovery grace and next retry timing in /auto status before making the next control decision"
+                if not blocked
+                else "inspect provider capacity and blocked runtimes in /offdesk review before forcing another recover"
+            ),
         },
         status=409 if blocked else 200,
     )
