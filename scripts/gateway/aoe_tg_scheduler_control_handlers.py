@@ -3,19 +3,21 @@
 
 import json
 import os
-import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_action_audit import append_latest_action_lines, load_latest_action_audit
+from aoe_tg_operator_summary import (
+    append_latest_intent_lines,
+    load_latest_command_resolution,
+)
 
 
 _PROVIDER_RECOVERY_GRACE_SEC = max(
     60,
     int(str(os.environ.get("AOE_PROVIDER_RECOVERY_GRACE_SEC", "600") or "600").strip() or "600"),
 )
-_COMMAND_RESOLVED_DETAIL_RE = re.compile(r"(?:^| )(?P<key>cmd|action|class|trace)=(?P<value>.*?)(?= (?:cmd|action|class|trace)=|$)")
 
 
 def _parse_iso_datetime(raw: Any) -> Optional[datetime]:
@@ -32,97 +34,11 @@ def _parse_iso_datetime(raw: Any) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def _parse_command_resolved_detail(detail: Any) -> Dict[str, str]:
-    parsed: Dict[str, str] = {}
-    for match in _COMMAND_RESOLVED_DETAIL_RE.finditer(str(detail or "").strip()):
-        key = str(match.group("key") or "").strip()
-        value = str(match.group("value") or "").strip()
-        if key and value:
-            parsed[key] = value
-    return {
-        "command": parsed.get("cmd", "").strip() or "-",
-        "action": parsed.get("action", "").strip() or "-",
-        "trace": parsed.get("trace", "").strip() or "-",
-    }
-
-
-def _latest_intent_focus(action: Any, trace: Any) -> str:
-    action_token = str(action or "").strip().lower()
-    trace_text = str(trace or "").strip().lower()
-    if action_token == "offdesk_review":
-        if "safe_mode=prefer_control_review_over_dispatch" in trace_text:
-            return "execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인"
-        return "active runtime/task를 먼저 검토하고 blocked·followup·warning을 정리"
-    if action_token == "offdesk_prepare":
-        return "오늘 밤 scope, provider capacity, auto posture를 먼저 점검"
-    if action_token in {"monitor_project", "status", "orch-monitor"}:
-        return "재시도보다 먼저 현재 runtime/task 상태와 latest warnings를 확인"
-    if action_token == "dispatch_task":
-        return "runtime으로 넘기기 전에 preset, approval mode, quality contract를 다시 확인"
-    if action_token in {"recover_auto", "auto_recover"}:
-        return "recover 전에 retry_at, blocked provider, repeat memory를 먼저 확인"
-    return "-"
-
-
-def _latest_command_resolution(args: Any) -> Dict[str, str]:
-    team_dir = Path(getattr(args, "team_dir", "") or "")
-    if not team_dir:
-        return {}
-    path = team_dir / "logs" / "gateway_events.jsonl"
-    if not path.exists():
-        return {}
-    latest: Dict[str, str] = {}
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                raw = str(line or "").strip()
-                if not raw:
-                    continue
-                try:
-                    row = json.loads(raw)
-                except Exception:
-                    continue
-                if not isinstance(row, dict):
-                    continue
-                if str(row.get("event", "")).strip() != "command_resolved":
-                    continue
-                if str(row.get("status", "")).strip() != "accepted":
-                    continue
-                latest = _parse_command_resolved_detail(row.get("detail", ""))
-    except Exception:
-        return {}
-    if not latest:
-        return {}
-    latest["focus"] = _latest_intent_focus(latest.get("action", ""), latest.get("trace", ""))
-    return latest
-
-
 def _compact_text(raw: Any, limit: int = 160) -> str:
     text = " ".join(str(raw or "").strip().split())
     if len(text) > limit:
         return text[: max(0, limit - 3)].rstrip() + "..."
     return text
-
-
-def _append_latest_intent_lines(
-    lines: List[str],
-    intent: Dict[str, str],
-    *,
-    compact_reason: Optional[Callable[[Any, int], str]] = None,
-) -> None:
-    if not isinstance(intent, dict) or not intent:
-        return
-    command = str(intent.get("command", "")).strip() or "-"
-    action = str(intent.get("action", "")).strip() or "-"
-    trace = str(intent.get("trace", "")).strip() or "-"
-    focus = str(intent.get("focus", "")).strip() or _latest_intent_focus(action, trace)
-    if command != "-" or action != "-":
-        lines.append(f"- latest_intent: {command} | {action}")
-    if focus != "-":
-        lines.append(f"- first_focus: {focus}")
-    if trace != "-":
-        formatter = compact_reason if callable(compact_reason) else _compact_text
-        lines.append(f"- latest_intent_trace: {formatter(trace, 160)}")
 
 
 def _next_rate_limited_task_snapshot(manager_state: Dict[str, Any]) -> Dict[str, str]:
@@ -960,7 +876,7 @@ def _handle_offdesk_command(
     excluded_scope = ", ".join(scope_summary.get("excluded", [])[:6]) or "-"
 
     if sub == "status":
-        latest_intent = _latest_command_resolution(args)
+        latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
         lines = [
             "offdesk mode",
@@ -983,7 +899,7 @@ def _handle_offdesk_command(
             "- /offdesk off",
             "- /auto status",
         ]
-        _append_latest_intent_lines(lines, latest_intent)
+        append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
         append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
         snapshot_lines = focused_project_snapshot_lines(manager_state)
         if status_level == "long" and snapshot_lines:
@@ -995,7 +911,7 @@ def _handle_offdesk_command(
         return True
 
     if sub in {"prepare", "preflight", "check"}:
-        latest_intent = _latest_command_resolution(args)
+        latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
         raw_target = ""
         for tok in tokens[1:]:
@@ -1019,7 +935,7 @@ def _handle_offdesk_command(
             return True
         if not targets:
             lines = ["offdesk prepare", "- no orch projects registered"]
-            _append_latest_intent_lines(lines, latest_intent)
+            append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
             append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
             send("\n".join(lines).strip(), context="offdesk-prepare empty", with_menu=True)
             return True
@@ -1044,7 +960,7 @@ def _handle_offdesk_command(
             f"- warn: {warn_count}",
             f"- blocked: {blocked_count}",
         ]
-        _append_latest_intent_lines(lines, latest_intent)
+        append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
         append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
         lines.extend(_provider_capacity_memory_lines(provider_state))
         lines.extend(["", "projects:"])
@@ -1078,7 +994,7 @@ def _handle_offdesk_command(
         return True
 
     if sub == "review":
-        latest_intent = _latest_command_resolution(args)
+        latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
         raw_target = ""
         for tok in tokens[1:]:
@@ -1114,7 +1030,7 @@ def _handle_offdesk_command(
                 prefetch_display=prefetch_display,
             )
             lines = ["offdesk review", "- no orch projects registered"]
-            _append_latest_intent_lines(lines, latest_intent)
+            append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
             append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
             if capacity_summary:
                 lines.append(
@@ -1180,7 +1096,7 @@ def _handle_offdesk_command(
             f"- reviewed: {len(reports)}",
             f"- flagged: {len(flagged)}",
         ]
-        _append_latest_intent_lines(lines, latest_intent)
+        append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
         append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
         if capacity_summary:
             lines.append(
@@ -1602,7 +1518,7 @@ def _handle_auto_command(
     status_level = status_report_level(tokens, current_report_level)
 
     if sub == "status":
-        latest_intent = _latest_command_resolution(args)
+        latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
         recovery_action = _capacity_recovery_action(current, provider_state, manager_state)
         recovery_target = _capacity_recovery_target(
@@ -1663,7 +1579,7 @@ def _handle_auto_command(
             lines.append(f"- next_retry_at: {next_retry_at}")
         if recovery_grace_until:
             lines.append(f"- recovery_grace_until: {recovery_grace_until}")
-        _append_latest_intent_lines(lines, latest_intent, compact_reason=compact_reason)
+        append_latest_intent_lines(lines, latest_intent, compact_reason=compact_reason, line_prefix="- ")
         append_latest_action_lines(lines, latest_action, compact_reason=compact_reason, line_prefix="- ")
         if capacity_summary:
             lines.append(

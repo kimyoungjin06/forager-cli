@@ -4057,7 +4057,9 @@ def test_task_lifecycle_and_monitor_show_rate_limit_and_degraded_state() -> None
 def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     audit_dir = team_dir / "dashboard"
+    logs_dir = team_dir / "logs"
     audit_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "action-history.jsonl").write_text(
         json.dumps(
             {
@@ -4067,6 +4069,18 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
                 "next_step": "/offdesk review",
                 "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
                 "source_command": "/retry T-001",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (logs_dir / "gateway_events.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-03-21T02:48:00+09:00",
+                "event": "command_resolved",
+                "status": "accepted",
+                "detail": "cmd=offdesk action=offdesk_review class=control trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
             }
         )
         + "\n",
@@ -4089,6 +4103,7 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
 
     summary = task_view.summarize_task_lifecycle("Demo", task)
 
+    assert "latest_intent: offdesk | offdesk_review | execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in summary
     assert "latest_action: Retry | blocked | next=/offdesk review |" in summary
     assert "approval blockers in /task and /offdesk review bef..." in summary
 
@@ -4096,7 +4111,9 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
 def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     audit_dir = team_dir / "dashboard"
+    logs_dir = team_dir / "logs"
     audit_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "action-history.jsonl").write_text(
         json.dumps(
             {
@@ -4106,6 +4123,18 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
                 "next_step": "/offdesk review",
                 "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
                 "source_command": "/retry T-001",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (logs_dir / "gateway_events.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-03-21T02:48:00+09:00",
+                "event": "command_resolved",
+                "status": "accepted",
+                "detail": "cmd=offdesk action=offdesk_review class=control trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
             }
         )
         + "\n",
@@ -4137,5 +4166,6 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
         lifecycle_stages=gw.LIFECYCLE_STAGES,
     )
 
+    assert "latest_intent: offdesk | offdesk_review | execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in summary
     assert "latest_action: Retry | blocked | next=/offdesk review |" in summary
     assert "approval blockers in /task and /offdesk review bef..." in summary

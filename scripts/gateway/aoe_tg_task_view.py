@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from aoe_tg_action_audit import append_latest_action_summary_line, load_latest_action_audit
+from aoe_tg_operator_summary import append_latest_intent_summary_line, load_latest_command_resolution
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
 
@@ -277,6 +278,8 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     source=context.get("source_request_id"),
                 )
             )
+        latest_intent = load_latest_command_resolution(context.get("team_dir"))
+        append_latest_intent_summary_line(lines, latest_intent)
         latest_action = load_latest_action_audit(context.get("team_dir"))
         append_latest_action_summary_line(lines, latest_action)
 
