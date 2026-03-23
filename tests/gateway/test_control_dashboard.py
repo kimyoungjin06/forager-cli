@@ -503,7 +503,7 @@ def test_control_dashboard_get_action_route_returns_405(tmp_path: Path) -> None:
     assert payload["path"] == "/control/actions/task/retry"
 
 
-def test_control_dashboard_post_retry_route_returns_501_with_normalized_payload(tmp_path: Path) -> None:
+def test_control_dashboard_post_retry_route_returns_202_transition(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     config = dashboard_app.DashboardAppConfig(
@@ -522,12 +522,20 @@ def test_control_dashboard_post_retry_route_returns_501_with_normalized_payload(
     )
     payload = json.loads(body.decode("utf-8"))
 
-    assert status == 501
+    assert status == 202
     assert headers["Content-Type"].startswith("application/json")
-    assert payload["implemented"] is False
+    assert payload["implemented"] is True
+    assert payload["executed"] is False
+    assert payload["status"] == "accepted_transition"
     assert payload["mode"] == "phase2"
     assert payload["source_command"] == "/retry T-001 lane L1,R1"
     assert payload["payload"] == {"task_ref": "T-001", "lane_ids": ["L1", "R1"]}
+    assert payload["transition"]["cmd"] == "run"
+    assert payload["transition"]["run_control_mode"] == "retry"
+    assert payload["transition"]["run_source_request_id"] == "REQ-1"
+    assert payload["transition"]["execution_lane_ids"] == ["L1"]
+    assert payload["transition"]["review_lane_ids"] == ["R1"]
+    assert payload["transition"]["orch_target"] == "alpha"
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
@@ -579,7 +587,7 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert "quality=" in sync_payload["preview"]["sync_summary"]
 
 
-def test_control_dashboard_post_auto_recover_defaults_force_false(tmp_path: Path) -> None:
+def test_control_dashboard_post_auto_recover_executes_with_default_force_false(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     config = dashboard_app.DashboardAppConfig(
@@ -589,6 +597,7 @@ def test_control_dashboard_post_auto_recover_defaults_force_false(tmp_path: Path
         host="127.0.0.1",
         port=8765,
     )
+    monkeypatch.setattr(dashboard_app.management_handlers, "_tmux_auto_command", lambda args, action: (True, f"stub:{action}"))
 
     status, _headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/control/auto-recover",
@@ -598,9 +607,17 @@ def test_control_dashboard_post_auto_recover_defaults_force_false(tmp_path: Path
     )
     payload = json.loads(body.decode("utf-8"))
 
-    assert status == 501
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["implemented"] is True
+    assert payload["executed"] is True
+    assert payload["status"] == "executed"
     assert payload["source_command"] == "/auto recover"
     assert payload["payload"] == {"force": False}
+    assert payload["auto_state"]["enabled"] is True
+    assert payload["auto_state"]["command"] == "next"
+    assert payload["auto_state"]["recovery_grace_until"] != "-"
+    assert payload["messages"][-1]["context"] == "auto-recover"
 
 
 def test_control_dashboard_post_safe_action_route_returns_404_for_unknown_target(tmp_path: Path) -> None:
