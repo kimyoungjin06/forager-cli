@@ -481,3 +481,182 @@ def test_dashboard_task_page_uses_single_manager_snapshot(tmp_path: Path, monkey
     assert snapshot.control_summary.active_runtime_count == 1
     assert detail is not None
     assert detail.request_id == "REQ-1"
+
+
+def test_control_dashboard_get_action_route_returns_405(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/actions/task/retry", config)
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 405
+    assert headers["Allow"] == "POST"
+    assert payload["error"] == "method_not_allowed"
+    assert payload["path"] == "/control/actions/task/retry"
+
+
+def test_control_dashboard_post_retry_route_returns_501_with_normalized_payload(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1", "R1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 501
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["implemented"] is False
+    assert payload["mode"] == "phase2"
+    assert payload["source_command"] == "/retry T-001 lane L1,R1"
+    assert payload["payload"] == {"task_ref": "T-001", "lane_ids": ["L1", "R1"]}
+
+
+def test_control_dashboard_post_followup_and_sync_preview_routes_return_501(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    followup_status, _followup_headers, followup_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["R1"]}).encode("utf-8"),
+        content_type="application/json; charset=utf-8",
+        config=config,
+    )
+    sync_status, _sync_headers, sync_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/sync-preview",
+        body=json.dumps({"project_ref": "O2", "window": "48h"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+
+    followup_payload = json.loads(followup_body.decode("utf-8"))
+    sync_payload = json.loads(sync_body.decode("utf-8"))
+
+    assert followup_status == 501
+    assert followup_payload["mode"] == "safe"
+    assert followup_payload["source_command"] == "/followup T-001 lane R1"
+    assert followup_payload["payload"] == {"task_ref": "T-001", "lane_ids": ["R1"]}
+
+    assert sync_status == 501
+    assert sync_payload["mode"] == "safe"
+    assert sync_payload["source_command"] == "/sync preview O2 48h"
+    assert sync_payload["payload"] == {"project_ref": "O2", "window": "48h"}
+
+
+def test_control_dashboard_post_auto_recover_defaults_force_false(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/auto-recover",
+        body=b"{}",
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 501
+    assert payload["source_command"] == "/auto recover"
+    assert payload["payload"] == {"force": False}
+
+
+def test_control_dashboard_post_action_route_rejects_invalid_payload_and_content_type(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    bad_status, _bad_headers, bad_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=b'{"lane_ids":["L1"]}',
+        content_type="application/json",
+        config=config,
+    )
+    type_status, _type_headers, type_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=b"task_ref=T-001",
+        content_type="text/plain",
+        config=config,
+    )
+
+    bad_payload = json.loads(bad_body.decode("utf-8"))
+    type_payload = json.loads(type_body.decode("utf-8"))
+
+    assert bad_status == 400
+    assert bad_payload["error"] == "bad_request"
+    assert "task_ref is required" in bad_payload["message"]
+
+    assert type_status == 415
+    assert type_payload["error"] == "unsupported_media_type"
+
+
+def test_control_dashboard_post_non_action_routes_return_405_or_404(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    method_status, method_headers, method_body = dashboard_app.build_dashboard_action_response(
+        "/control",
+        body=b"{}",
+        content_type="application/json",
+        config=config,
+    )
+    missing_status, _missing_headers, missing_body = dashboard_app.build_dashboard_action_response(
+        "/control/missing",
+        body=b"{}",
+        content_type="application/json",
+        config=config,
+    )
+
+    method_payload = json.loads(method_body.decode("utf-8"))
+    missing_payload = json.loads(missing_body.decode("utf-8"))
+
+    assert method_status == 405
+    assert method_headers["Allow"] == "GET"
+    assert method_payload["error"] == "method_not_allowed"
+
+    assert missing_status == 404
+    assert missing_payload["error"] == "not_found"

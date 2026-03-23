@@ -18,6 +18,10 @@ from urllib.parse import quote, unquote, urlparse
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts" / "dashboard") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts" / "dashboard"))
+if str(ROOT / "scripts" / "gateway") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts" / "gateway"))
+
+import aoe_tg_operator_action_contract as operator_action_contract
 
 from control_dashboard_state import (
     load_dashboard_recovery_page,
@@ -31,6 +35,12 @@ from control_dashboard_views import render_template
 
 
 STATIC_ROOT = ROOT / "static"
+ACTION_PATHS = {
+    "/control/actions/task/retry",
+    "/control/actions/task/followup",
+    "/control/actions/runtime/sync-preview",
+    "/control/actions/control/auto-recover",
+}
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,57 @@ def _not_found(message: str) -> Tuple[int, Dict[str, str], bytes]:
     return _html(render_template("dashboard/not_found.html", page_title="Not Found", message=message), status=404)
 
 
+def _not_found_json(*, path: str, message: str) -> Tuple[int, Dict[str, str], bytes]:
+    return _json(
+        {
+            "ok": False,
+            "error": "not_found",
+            "path": path,
+            "message": message,
+        },
+        status=404,
+    )
+
+
+def _method_not_allowed(*, path: str, allowed: str) -> Tuple[int, Dict[str, str], bytes]:
+    status, headers, body = _json(
+        {
+            "ok": False,
+            "error": "method_not_allowed",
+            "path": path,
+            "allowed": allowed,
+        },
+        status=405,
+    )
+    headers["Allow"] = allowed
+    return status, headers, body
+
+
+def _bad_request(message: str, *, path: str, details: object | None = None) -> Tuple[int, Dict[str, str], bytes]:
+    payload: Dict[str, object] = {
+        "ok": False,
+        "error": "bad_request",
+        "path": path,
+        "message": message,
+    }
+    if details is not None:
+        payload["details"] = details
+    return _json(payload, status=400)
+
+
+def _unsupported_media_type(*, path: str, content_type: str) -> Tuple[int, Dict[str, str], bytes]:
+    return _json(
+        {
+            "ok": False,
+            "error": "unsupported_media_type",
+            "path": path,
+            "content_type": content_type or "-",
+            "expected": "application/json",
+        },
+        status=415,
+    )
+
+
 def _serve_static(path: str) -> Tuple[int, Dict[str, str], bytes]:
     rel = path.removeprefix("/")
     target = (ROOT / rel).resolve()
@@ -80,9 +141,133 @@ def _serve_static(path: str) -> Tuple[int, Dict[str, str], bytes]:
     return 200, {"Content-Type": mime or "application/octet-stream"}, target.read_bytes()
 
 
+def _normalize_lane_ids(raw: object) -> list[str]:
+    if raw is None or raw == "":
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("lane_ids must be a list of strings")
+    lane_ids: list[str] = []
+    for item in raw:
+        token = str(item or "").strip()
+        if not token:
+            continue
+        lane_ids.append(token)
+    return lane_ids
+
+
+def _is_known_dashboard_get_route(path: str) -> bool:
+    if path in {"", "/", "/control", "/control/offdesk", "/control/recovery", "/control/tasks", "/control/health"}:
+        return True
+    if path.startswith("/static/"):
+        return True
+    if path.startswith("/control/runtimes/"):
+        return bool(unquote(path.removeprefix("/control/runtimes/")).strip())
+    if path.startswith("/control/tasks/by-request/"):
+        return bool(unquote(path.removeprefix("/control/tasks/by-request/")).strip())
+
+    parts = [token for token in path.split("/") if token]
+    return len(parts) == 4 and parts[0] == "control" and parts[2] == "tasks"
+
+
+def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str, object]:
+    if path == "/control/actions/task/retry":
+        task_ref = str(payload.get("task_ref", "")).strip()
+        if not task_ref:
+            raise ValueError("task_ref is required")
+        lane_ids = _normalize_lane_ids(payload.get("lane_ids"))
+        command = f"/retry {task_ref}"
+        if lane_ids:
+            command += " lane " + ",".join(lane_ids)
+        spec = operator_action_contract.http_action_spec(command)
+        if spec is None:
+            raise ValueError("unsupported retry action contract")
+        return spec
+
+    if path == "/control/actions/task/followup":
+        task_ref = str(payload.get("task_ref", "")).strip()
+        if not task_ref:
+            raise ValueError("task_ref is required")
+        lane_ids = _normalize_lane_ids(payload.get("lane_ids"))
+        command = f"/followup {task_ref}"
+        if lane_ids:
+            command += " lane " + ",".join(lane_ids)
+        spec = operator_action_contract.http_action_spec(command)
+        if spec is None:
+            raise ValueError("unsupported followup action contract")
+        return spec
+
+    if path == "/control/actions/runtime/sync-preview":
+        project_ref = str(payload.get("project_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        window = str(payload.get("window", "24h")).strip() or "24h"
+        spec = operator_action_contract.http_action_spec(f"/sync preview {project_ref} {window}")
+        if spec is None:
+            raise ValueError("unsupported sync preview action contract")
+        return spec
+
+    if path == "/control/actions/control/auto-recover":
+        force_raw = payload.get("force", False)
+        if isinstance(force_raw, bool):
+            force = force_raw
+        else:
+            raise ValueError("force must be a boolean")
+        spec = operator_action_contract.http_action_spec("/auto recover force" if force else "/auto recover")
+        if spec is None:
+            raise ValueError("unsupported auto recover action contract")
+        return spec
+
+    raise ValueError("unknown action path")
+
+
+def build_dashboard_action_response(
+    raw_path: str,
+    *,
+    body: bytes,
+    content_type: str,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    del config
+    parsed = urlparse(raw_path)
+    path = parsed.path or "/control"
+    if path not in ACTION_PATHS:
+        if _is_known_dashboard_get_route(path):
+            return _method_not_allowed(path=path, allowed="GET")
+        return _not_found_json(path=path, message=f"unknown route: {path}")
+    if "application/json" not in str(content_type or "").lower():
+        return _unsupported_media_type(path=path, content_type=content_type)
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except Exception as exc:
+        return _bad_request("invalid json body", path=path, details=str(exc))
+    if not isinstance(payload, dict):
+        return _bad_request("json body must be an object", path=path)
+    try:
+        spec = _action_spec_for_request(path, payload)
+    except ValueError as exc:
+        return _bad_request(str(exc), path=path)
+    return _json(
+        {
+            "ok": False,
+            "implemented": False,
+            "status": "not_implemented",
+            "method": "POST",
+            "path": path,
+            "mode": spec.get("mode", "-"),
+            "source_command": spec.get("command", "-"),
+            "payload": spec.get("payload", {}),
+            "note": spec.get("note", "-"),
+        },
+        status=501,
+    )
+
+
 def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     parsed = urlparse(raw_path)
     path = parsed.path or "/control"
+
+    if path in ACTION_PATHS:
+        return _method_not_allowed(path=path, allowed="POST")
 
     if path.startswith("/static/"):
         return _serve_static(path)
@@ -250,6 +435,23 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if body:
             self.wfile.write(body)
+
+    def do_POST(self) -> None:  # noqa: N802
+        config: DashboardAppConfig = self.server.dashboard_config  # type: ignore[attr-defined]
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        body = self.rfile.read(length) if length > 0 else b"{}"
+        status, headers, response_body = build_dashboard_action_response(
+            self.path,
+            body=body,
+            content_type=str(self.headers.get("Content-Type", "")).strip(),
+            config=config,
+        )
+        self.send_response(int(status))
+        for key, value in headers.items():
+            self.send_header(key, value)
+        self.end_headers()
+        if response_body:
+            self.wfile.write(response_body)
 
     def log_message(self, fmt: str, *args: object) -> None:
         return
