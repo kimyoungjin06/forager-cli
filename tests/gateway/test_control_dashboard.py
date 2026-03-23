@@ -300,9 +300,11 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
     assert "Action Result" in overview_text
+    assert "Clear History" in overview_text
     assert "Raw Payload" in overview_text
     assert "action-result-rows" in overview_text
     assert "action-result-links" in overview_text
+    assert "action-result-history" in overview_text
     assert tasks_status == 200
     assert tasks_headers["Content-Type"].startswith("text/html")
     assert "Active Tasks" in tasks_text

@@ -38,11 +38,21 @@
       <section id="action-result" class="panel action-result hidden" aria-live="polite">
         <div class="action-result-header">
           <h2>Action Result</h2>
-          <button type="button" id="action-result-clear" class="action-result-clear">Clear</button>
+          <div class="action-result-controls">
+            <button type="button" id="action-result-clear-history" class="action-result-clear">Clear History</button>
+            <button type="button" id="action-result-clear" class="action-result-clear">Clear</button>
+          </div>
         </div>
         <p id="action-result-summary" class="muted">No action has been run yet.</p>
         <ul id="action-result-rows" class="kv-list action-result-rows hidden"></ul>
         <ul id="action-result-links" class="command-list compact hidden"></ul>
+        <section id="action-result-history-panel" class="action-result-history hidden">
+          <div class="action-result-history-header">
+            <strong>Recent Results</strong>
+            <span class="muted">latest 5</span>
+          </div>
+          <ul id="action-result-history" class="command-list compact"></ul>
+        </section>
         <details id="action-result-details" class="action-result-details hidden">
           <summary>Raw Payload</summary>
           <pre id="action-result-body" class="code-block">-</pre>
@@ -56,11 +66,22 @@
         const summary = document.getElementById("action-result-summary");
         const rows = document.getElementById("action-result-rows");
         const links = document.getElementById("action-result-links");
+        const historyPanel = document.getElementById("action-result-history-panel");
+        const historyList = document.getElementById("action-result-history");
         const details = document.getElementById("action-result-details");
         const body = document.getElementById("action-result-body");
         const clear = document.getElementById("action-result-clear");
-        if (!panel || !summary || !rows || !links || !details || !body) {
+        const clearHistory = document.getElementById("action-result-clear-history");
+        const historyStorageKey = "control-dashboard-action-history";
+        if (!panel || !summary || !rows || !links || !historyPanel || !historyList || !details || !body) {
           return;
+        }
+        let history = [];
+        try {
+          const raw = window.sessionStorage.getItem(historyStorageKey);
+          history = Array.isArray(JSON.parse(raw || "[]")) ? JSON.parse(raw || "[]") : [];
+        } catch (_error) {
+          history = [];
         }
         const clearRows = () => {
           rows.innerHTML = "";
@@ -93,6 +114,44 @@
           anchor.textContent = label;
           item.appendChild(anchor);
           links.appendChild(item);
+        };
+        const renderHistory = () => {
+          historyList.innerHTML = "";
+          if (!history.length) {
+            historyPanel.classList.add("hidden");
+            return;
+          }
+          history.forEach((entry) => {
+            const item = document.createElement("li");
+            const headline = document.createElement("strong");
+            headline.textContent = `${entry.at} | ${entry.headline}`;
+            item.appendChild(headline);
+            if (entry.nextStep && entry.nextStep !== "-") {
+              const meta = document.createElement("div");
+              meta.className = "muted";
+              meta.textContent = `next: ${entry.nextStep}`;
+              item.appendChild(meta);
+            }
+            historyList.appendChild(item);
+          });
+          historyPanel.classList.remove("hidden");
+        };
+        const persistHistory = () => {
+          try {
+            window.sessionStorage.setItem(historyStorageKey, JSON.stringify(history.slice(0, 5)));
+          } catch (_error) {
+            // Ignore storage failures; in-memory history still works for this page.
+          }
+        };
+        const pushHistory = (headline, nextStep) => {
+          history.unshift({
+            at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
+            headline,
+            nextStep: nextStep || "-",
+          });
+          history = history.slice(0, 5);
+          persistHistory();
+          renderHistory();
         };
         const asText = (value) => {
           if (value === null || value === undefined) {
@@ -147,7 +206,7 @@
           ];
           return { headline, rowsData, linkRows };
         };
-        const setResult = (label, status, payload, error = false) => {
+        const setResult = (label, status, payload, error = false, recordHistory = true) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
           const { headline, rowsData, linkRows } = buildSummary(label, status, payload);
@@ -165,6 +224,9 @@
           body.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
           details.classList.remove("hidden");
           details.open = Boolean(error);
+          if (recordHistory) {
+            pushHistory(headline, asText(payload?.next_step));
+          }
           panel.scrollIntoView({ block: "start", behavior: "smooth" });
         };
         clear?.addEventListener("click", () => {
@@ -177,6 +239,12 @@
           details.classList.add("hidden");
           details.open = false;
         });
+        clearHistory?.addEventListener("click", () => {
+          history = [];
+          persistHistory();
+          renderHistory();
+        });
+        renderHistory();
         document.addEventListener("submit", async (event) => {
           const form = event.target;
           if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-dashboard-action")) {
@@ -196,7 +264,7 @@
           if (button instanceof HTMLButtonElement) {
             button.disabled = true;
           }
-          setResult(label, "pending", { pending: true, source_command: form.dataset.actionCommand || "-", mode: form.dataset.actionMode || "-" });
+          setResult(label, "pending", { pending: true, source_command: form.dataset.actionCommand || "-", mode: form.dataset.actionMode || "-" }, false, false);
           try {
             const response = await fetch(form.action, {
               method: "POST",
