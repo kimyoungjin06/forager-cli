@@ -133,6 +133,7 @@
             ["command", command],
             ["task", taskLabel],
             ["runtime", runtimeLabel],
+            ["next_step", asText(payload?.next_step)],
             ["task_state", payload?.task ? `${asText(payload.task.status)}/${asText(payload.task.tf_phase)}` : "-"],
             ["followup", asText(payload?.preview?.followup_summary || payload?.preview?.completion_followup_when)],
             ["sync", asText(payload?.preview?.sync_summary)],

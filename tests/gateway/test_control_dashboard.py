@@ -552,6 +552,7 @@ def test_control_dashboard_post_retry_route_executes_retry_bridge(tmp_path: Path
                     "tf_phase": "planning",
                     "detail_path": "/control/tasks/by-request/REQ-RETRY",
                 },
+                "next_step": "/task T-003 | retry-run",
                 "transition": {
                     "cmd": "run",
                     "orch_target": "alpha",
@@ -590,6 +591,7 @@ def test_control_dashboard_post_retry_route_executes_retry_bridge(tmp_path: Path
     assert payload["transition"]["orch_target"] == "alpha"
     assert payload["task"]["request_id"] == "REQ-RETRY"
     assert payload["task"]["detail_path"] == "/control/tasks/by-request/REQ-RETRY"
+    assert payload["next_step"] == "/task T-003 | retry-run"
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
@@ -625,10 +627,12 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert followup_payload["mode"] == "safe"
     assert followup_payload["source_command"] == "/followup T-001 lane R1"
     assert followup_payload["payload"] == {"task_ref": "T-001", "lane_ids": ["R1"]}
+    assert followup_payload["next_step"] == "/task T-001"
     assert followup_payload["preview"]["kind"] == "task_followup"
     assert followup_payload["preview"]["project_alias"] == "O2"
     assert followup_payload["preview"]["request_id"] == "REQ-1"
     assert followup_payload["preview"]["detail_path"] == "/control/tasks/by-request/REQ-1"
+    assert followup_payload["preview"]["runtime_path"] == "/control/runtimes/O2"
 
     assert sync_status == 200
     assert sync_payload["ok"] is True
@@ -636,6 +640,7 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert sync_payload["mode"] == "safe"
     assert sync_payload["source_command"] == "/sync preview O2 48h"
     assert sync_payload["payload"] == {"project_ref": "O2", "window": "48h"}
+    assert sync_payload["next_step"] == "/monitor O2"
     assert sync_payload["preview"]["kind"] == "runtime_sync_preview"
     assert sync_payload["preview"]["project_alias"] == "O2"
     assert "quality=" in sync_payload["preview"]["sync_summary"]
@@ -668,6 +673,7 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
     assert payload["status"] == "executed"
     assert payload["source_command"] == "/auto recover"
     assert payload["payload"] == {"force": False}
+    assert payload["next_step"] == "/auto status"
     assert payload["auto_state"]["enabled"] is True
     assert payload["auto_state"]["command"] == "next"
     assert payload["auto_state"]["recovery_grace_until"] != "-"

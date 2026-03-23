@@ -485,6 +485,7 @@ def _execute_retry_run_transition(
             "tf_phase": str(executed_task.get("tf_phase", "")).strip() or "-",
             "detail_path": f"/control/tasks/by-request/{quote(executed_request_id, safe='')}",
         }
+    next_step = "/offdesk review" if blocked else (f"/task {task_payload['label']}" if isinstance(task_payload, dict) else "/monitor")
     return _json(
         {
             "ok": not blocked,
@@ -508,6 +509,7 @@ def _execute_retry_run_transition(
             "messages": messages,
             "events": events,
             "task": task_payload,
+            "next_step": next_step,
         },
         status=409 if blocked else 200,
     )
@@ -599,6 +601,7 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
             "mode": spec.get("mode", "-"),
             "source_command": spec.get("command", "-"),
             "payload": payload,
+            "next_step": (detail.command_hints[0] if detail.command_hints else f"/task {detail.label}"),
             "preview": {
                 "kind": "task_followup",
                 "project_alias": detail.project_alias,
@@ -610,6 +613,7 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
                 "command_hints": list(detail.command_hints),
                 "phase2_action_hints": list(detail.phase2_action_hints),
                 "detail_path": f"/control/tasks/by-request/{quote(detail.request_id, safe='')}",
+                "runtime_path": f"/control/runtimes/{quote(detail.project_alias, safe='')}",
             },
         },
         status=200,
@@ -652,6 +656,7 @@ def _preview_sync_action(spec: Dict[str, object], *, config: DashboardAppConfig)
             "source_command": spec.get("command", "-"),
             "payload": payload,
             "snapshot_taken_at": snapshot.snapshot_taken_at,
+            "next_step": (detail.runtime_command_hints[0] if detail.runtime_command_hints else f"/monitor {detail.project_alias}"),
             "preview": {
                 "kind": "runtime_sync_preview",
                 "project_alias": detail.project_alias,
@@ -726,6 +731,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "source_command": spec.get("command", "-"),
                 "payload": payload,
                 "messages": messages,
+                "next_step": "/offdesk review",
             },
             status=409,
         )
@@ -848,6 +854,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
                 "repeat_count": int(provider_state.get("recovery_repeat_count", 0) or 0),
             },
             "team_dir": str(paths.team_dir),
+            "next_step": "/auto status" if not blocked else "/offdesk review",
         },
         status=409 if blocked else 200,
     )
