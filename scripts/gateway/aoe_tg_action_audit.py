@@ -56,6 +56,7 @@ def append_latest_action_lines(
     latest_action: Dict[str, str],
     *,
     compact_reason: Optional[callable] = None,
+    line_prefix: str = "",
 ) -> None:
     if not isinstance(latest_action, dict) or not latest_action:
         return
@@ -64,8 +65,8 @@ def append_latest_action_lines(
     remediation = str(latest_action.get("remediation", "")).strip() or "-"
     formatter = compact_reason if callable(compact_reason) else compact_action_text
     if headline != "-":
-        lines.append(f"latest_action: {headline}")
+        lines.append(f"{line_prefix}latest_action: {headline}")
     if next_step != "-":
-        lines.append(f"latest_action_next: {next_step}")
+        lines.append(f"{line_prefix}latest_action_next: {next_step}")
     if remediation != "-":
-        lines.append(f"latest_action_note: {formatter(remediation, 120)}")
+        lines.append(f"{line_prefix}latest_action_note: {formatter(remediation, 120)}")
