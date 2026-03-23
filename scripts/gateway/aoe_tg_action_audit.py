@@ -70,3 +70,28 @@ def append_latest_action_lines(
         lines.append(f"{line_prefix}latest_action_next: {next_step}")
     if remediation != "-":
         lines.append(f"{line_prefix}latest_action_note: {formatter(remediation, 120)}")
+
+
+def append_latest_action_summary_line(
+    lines: List[str],
+    latest_action: Dict[str, str],
+    *,
+    compact_reason: Optional[callable] = None,
+    line_prefix: str = "",
+    note_limit: int = 88,
+) -> None:
+    if not isinstance(latest_action, dict) or not latest_action:
+        return
+    headline = str(latest_action.get("headline", "")).strip() or "-"
+    next_step = str(latest_action.get("next_step", "")).strip() or "-"
+    remediation = str(latest_action.get("remediation", "")).strip() or "-"
+    formatter = compact_reason if callable(compact_reason) else compact_action_text
+    parts: List[str] = []
+    if headline != "-":
+        parts.append(headline)
+    if next_step != "-":
+        parts.append(f"next={next_step}")
+    if remediation != "-":
+        parts.append(formatter(remediation, note_limit))
+    if parts:
+        lines.append(f"{line_prefix}latest_action: " + " | ".join(parts))

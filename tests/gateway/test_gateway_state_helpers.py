@@ -4089,12 +4089,8 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
 
     summary = task_view.summarize_task_lifecycle("Demo", task)
 
-    assert "latest_action: Retry | blocked" in summary
-    assert "latest_action_next: /offdesk review" in summary
-    assert (
-        "latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again"
-        in summary
-    )
+    assert "latest_action: Retry | blocked | next=/offdesk review |" in summary
+    assert "approval blockers in /task and /offdesk review bef..." in summary
 
 
 def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None:
@@ -4141,9 +4137,5 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
         lifecycle_stages=gw.LIFECYCLE_STAGES,
     )
 
-    assert "latest_action: Retry | blocked" in summary
-    assert "latest_action_next: /offdesk review" in summary
-    assert (
-        "latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again"
-        in summary
-    )
+    assert "latest_action: Retry | blocked | next=/offdesk review |" in summary
+    assert "approval blockers in /task and /offdesk review bef..." in summary
