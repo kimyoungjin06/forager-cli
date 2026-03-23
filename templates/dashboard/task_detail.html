@@ -39,19 +39,14 @@
     {% endfor %}
   </ul>
   {% endif %}
-  {% with buttons=detail.safe_action_buttons, title='safe_actions' %}
-  {% include 'dashboard/_action_buttons.html' %}
-  {% endwith %}
-  {% if detail.phase2_action_hints %}
-  <p><strong>phase2_actions</strong></p>
-  <ul class="command-list">
-    {% for hint in detail.phase2_action_hints %}
-    <li><code>{{ hint }}</code></li>
-    {% endfor %}
-  </ul>
-  {% endif %}
-  {% with buttons=detail.phase2_action_buttons, title='phase2_action_buttons' %}
-  {% include 'dashboard/_action_buttons.html' %}
+  {% with
+    section_title='operator_actions',
+    safe_hints=detail.command_hints,
+    safe_buttons=detail.safe_action_buttons,
+    phase2_hints=detail.phase2_action_hints,
+    phase2_buttons=detail.phase2_action_buttons
+  %}
+  {% include 'dashboard/_action_section.html' %}
   {% endwith %}
 </section>
 

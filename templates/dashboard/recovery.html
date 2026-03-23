@@ -22,8 +22,14 @@
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
-  {% with buttons=recovery.control_phase2_action_buttons, title='phase2_action_buttons' %}
-  {% include 'dashboard/_action_buttons.html' %}
+  {% with
+    section_title='control_actions',
+    safe_hints=[],
+    safe_buttons=[],
+    phase2_hints=[],
+    phase2_buttons=recovery.control_phase2_action_buttons
+  %}
+  {% include 'dashboard/_action_section.html' %}
   {% endwith %}
   {% else %}
   <p class="muted">nightly summary artifact not found</p>
@@ -45,27 +51,14 @@
       <p><strong>queue</strong> {{ runtime.queue_summary }}</p>
       <p><strong>provider_pressure</strong> {{ runtime.provider_pressure_summary }}</p>
       <p><strong>repeat</strong> {{ runtime.repeat_summary }}</p>
-      {% if runtime.runtime_command_hints %}
-      <p><strong>operator_hints</strong></p>
-      <ul class="command-list">
-        {% for hint in runtime.runtime_command_hints %}
-        <li><code>{{ hint }}</code></li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-      {% with buttons=runtime.runtime_safe_action_buttons, title='safe_actions' %}
-      {% include 'dashboard/_action_buttons.html' %}
-      {% endwith %}
-      {% if runtime.runtime_phase2_action_hints %}
-      <p><strong>phase2_actions</strong></p>
-      <ul class="command-list">
-        {% for hint in runtime.runtime_phase2_action_hints %}
-        <li><code>{{ hint }}</code></li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-      {% with buttons=runtime.runtime_phase2_action_buttons, title='phase2_action_buttons' %}
-      {% include 'dashboard/_action_buttons.html' %}
+      {% with
+        section_title='runtime_actions',
+        safe_hints=runtime.runtime_command_hints,
+        safe_buttons=runtime.runtime_safe_action_buttons,
+        phase2_hints=runtime.runtime_phase2_action_hints,
+        phase2_buttons=runtime.runtime_phase2_action_buttons
+      %}
+      {% include 'dashboard/_action_section.html' %}
       {% endwith %}
       {% if runtime.active_task_label %}
       <p><strong>active_task</strong> <a href="{{ runtime.active_task_path }}">{{ runtime.active_task_label }}</a> | {{ runtime.active_task_status }}/{{ runtime.active_task_phase }}</p>
@@ -79,27 +72,14 @@
       <p><strong>backend</strong> {{ runtime.active_task_backend }}</p>
       {% if runtime.active_task_backend_note %}<p><strong>backend_note</strong> {{ runtime.active_task_backend_note }}</p>{% endif %}
       <p><strong>rate_limit</strong> {{ runtime.active_task_rate_limit }}</p>
-      {% if runtime.active_task_command_hints %}
-      <p><strong>active_task_hints</strong></p>
-      <ul class="command-list">
-        {% for hint in runtime.active_task_command_hints %}
-        <li><code>{{ hint }}</code></li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-      {% with buttons=runtime.active_task_safe_action_buttons, title='active_task_safe_actions' %}
-      {% include 'dashboard/_action_buttons.html' %}
-      {% endwith %}
-      {% if runtime.active_task_phase2_action_hints %}
-      <p><strong>active_task_phase2_actions</strong></p>
-      <ul class="command-list">
-        {% for hint in runtime.active_task_phase2_action_hints %}
-        <li><code>{{ hint }}</code></li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-      {% with buttons=runtime.active_task_phase2_action_buttons, title='active_task_phase2_action_buttons' %}
-      {% include 'dashboard/_action_buttons.html' %}
+      {% with
+        section_title='active_task_actions',
+        safe_hints=runtime.active_task_command_hints,
+        safe_buttons=runtime.active_task_safe_action_buttons,
+        phase2_hints=runtime.active_task_phase2_action_hints,
+        phase2_buttons=runtime.active_task_phase2_action_buttons
+      %}
+      {% include 'dashboard/_action_section.html' %}
       {% endwith %}
       {% endif %}
       {% if runtime.task_teams %}
@@ -123,30 +103,14 @@
             <td>{{ task.phase2_shape }}<br><span class="muted">{{ task.completion_focus }}</span></td>
             <td>{{ task.backend_summary }}</td>
             <td>
-              {% if task.command_hints %}
-              <ul class="command-list compact">
-                {% for hint in task.command_hints %}
-                <li><code>{{ hint }}</code></li>
-                {% endfor %}
-              </ul>
-              {% elif task.phase2_action_hints %}
-              <span class="muted">-</span>
-              {% else %}
-              <span class="muted">-</span>
-              {% endif %}
-              {% if task.phase2_action_hints %}
-              <div><strong>phase2_actions</strong></div>
-              <ul class="command-list compact">
-                {% for hint in task.phase2_action_hints %}
-                <li><code>{{ hint }}</code></li>
-                {% endfor %}
-              </ul>
-              {% endif %}
-              {% with buttons=task.safe_action_buttons, title='safe_actions' %}
-              {% include 'dashboard/_action_buttons.html' %}
-              {% endwith %}
-              {% with buttons=task.phase2_action_buttons, title='phase2_action_buttons' %}
-              {% include 'dashboard/_action_buttons.html' %}
+              {% with
+                section_title='',
+                safe_hints=task.command_hints,
+                safe_buttons=task.safe_action_buttons,
+                phase2_hints=task.phase2_action_hints,
+                phase2_buttons=task.phase2_action_buttons
+              %}
+              {% include 'dashboard/_action_section.html' %}
               {% endwith %}
             </td>
           </tr>

@@ -123,9 +123,16 @@
           }
           history.forEach((entry) => {
             const item = document.createElement("li");
+            const head = document.createElement("div");
+            head.className = "action-history-head";
+            const badge = document.createElement("span");
+            badge.className = `action-history-badge ${entry.status || "unknown"}`;
+            badge.textContent = entry.status || "unknown";
             const headline = document.createElement("strong");
             headline.textContent = `${entry.at} | ${entry.headline}`;
-            item.appendChild(headline);
+            head.appendChild(badge);
+            head.appendChild(headline);
+            item.appendChild(head);
             if (entry.nextStep && entry.nextStep !== "-") {
               const meta = document.createElement("div");
               meta.className = "muted";
@@ -149,13 +156,14 @@
             // Ignore storage failures; in-memory history still works for this page.
           }
         };
-        const pushHistory = (headline, nextStep, linkLabel, linkHref) => {
+        const pushHistory = (headline, nextStep, linkLabel, linkHref, status) => {
           history.unshift({
             at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
             headline,
             nextStep: nextStep || "-",
             linkLabel: linkLabel || "-",
             linkHref: linkHref || "-",
+            status: status || "unknown",
           });
           history = history.slice(0, 5);
           persistHistory();
@@ -238,7 +246,7 @@
             const primaryRuntimeLink = payload?.preview?.runtime_path || "-";
             const linkHref = primaryTaskLink !== "-" ? primaryTaskLink : primaryRuntimeLink;
             const linkLabel = primaryTaskLink !== "-" ? "task detail" : (primaryRuntimeLink !== "-" ? "runtime detail" : "-");
-            pushHistory(headline, asText(payload?.next_step), linkLabel, linkHref);
+            pushHistory(headline, asText(payload?.next_step), linkLabel, linkHref, asText(payload?.status || status));
           }
           panel.scrollIntoView({ block: "start", behavior: "smooth" });
         };

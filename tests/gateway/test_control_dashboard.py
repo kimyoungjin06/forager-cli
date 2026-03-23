@@ -305,6 +305,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "action-result-rows" in overview_text
     assert "action-result-links" in overview_text
     assert "action-result-history" in overview_text
+    assert "action-history-badge" in overview_text
     assert "remediation" in overview_text
     assert tasks_status == 200
     assert tasks_headers["Content-Type"].startswith("text/html")
@@ -353,13 +354,14 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "/task T-001" in text
     assert "/request REQ-1" in text
     assert "/monitor O2" in text
-    assert "phase2_actions" in text
     assert "/retry T-001" in text
     assert "Follow-up Preview" in text
     assert "/control/actions/task/followup" in text
     assert "/control/actions/task/retry" in text
     assert "data-dashboard-action" in text
     assert "data-action-confirm=\"true\"" in text
+    assert "action-section" in text
+    assert "action-cluster-title" in text
     assert "/offdesk review" in text
 
 
@@ -412,7 +414,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "/control/actions/task/retry" in text
     assert "/monitor O2" in text
     assert "/todo O2" in text
-    assert "phase2_actions" in text
+    assert "action-section" in text
     assert "/task T-001" in text
     assert "/request REQ-1" in text
 
@@ -451,7 +453,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "/control/actions/runtime/sync-preview" in text
     assert "/control/actions/task/followup" in text
     assert "/control/actions/task/retry" in text
-    assert "phase2_actions" in text
+    assert "action-section" in text
     assert "/control/tasks/by-request/REQ-1" in text
     assert "/monitor O2" in text
     assert "/task T-001" in text
