@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 
 ACTION_AUDIT_DIRNAME = "dashboard"
@@ -20,13 +21,35 @@ def compact_action_text(raw: Any, limit: int = 120) -> str:
 
 
 def load_latest_action_audit(team_dir: Any) -> Dict[str, str]:
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    return _normalize_latest_action_row(rows[-1])
+
+
+def _action_audit_path(team_dir: Any) -> Path:
+    token = str(team_dir or "").strip()
+    return Path(token).expanduser().resolve() / ACTION_AUDIT_DIRNAME / ACTION_AUDIT_FILENAME
+
+
+def _normalize_latest_action_row(row: Dict[str, Any]) -> Dict[str, str]:
+    return {
+        "headline": str(row.get("headline", "")).strip() or "-",
+        "status": str(row.get("status", "")).strip() or "unknown",
+        "next_step": str(row.get("next_step", "")).strip() or "-",
+        "remediation": str(row.get("remediation", "")).strip() or "-",
+        "source_command": str(row.get("source_command", "")).strip() or "-",
+    }
+
+
+def _load_action_audit_rows(team_dir: Any) -> List[Dict[str, Any]]:
     token = str(team_dir or "").strip()
     if not token:
-        return {}
-    path = Path(token).expanduser().resolve() / ACTION_AUDIT_DIRNAME / ACTION_AUDIT_FILENAME
+        return []
+    path = _action_audit_path(token)
     if not path.exists():
-        return {}
-    latest: Dict[str, str] = {}
+        return []
+    rows: List[Dict[str, Any]] = []
     try:
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -39,16 +62,47 @@ def load_latest_action_audit(team_dir: Any) -> Dict[str, str]:
                     continue
                 if not isinstance(row, dict):
                     continue
-                latest = {
-                    "headline": str(row.get("headline", "")).strip() or "-",
-                    "status": str(row.get("status", "")).strip() or "unknown",
-                    "next_step": str(row.get("next_step", "")).strip() or "-",
-                    "remediation": str(row.get("remediation", "")).strip() or "-",
-                    "source_command": str(row.get("source_command", "")).strip() or "-",
-                }
+                rows.append(row)
     except Exception:
+        return []
+    return rows
+
+
+def load_latest_action_audit_for_task(team_dir: Any, request_id: Any) -> Dict[str, str]:
+    token = str(request_id or "").strip()
+    if not token:
         return {}
-    return latest
+    task_path = f"/control/tasks/by-request/{quote(token, safe='')}"
+    rows = _load_action_audit_rows(team_dir)
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() == task_path:
+            return _normalize_latest_action_row(row)
+    return {}
+
+
+def load_latest_action_audit_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+    request_ids: Optional[List[str]] = None,
+) -> Dict[str, str]:
+    alias = str(project_alias or "").strip()
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}" if alias else ""
+    task_paths = {
+        f"/control/tasks/by-request/{quote(str(item).strip(), safe='')}"
+        for item in (request_ids or [])
+        if str(item).strip()
+    }
+    for row in reversed(rows):
+        link_href = str(row.get("link_href", "")).strip()
+        if runtime_path and link_href == runtime_path:
+            return _normalize_latest_action_row(row)
+        if task_paths and link_href in task_paths:
+            return _normalize_latest_action_row(row)
+    return {}
 
 
 def append_latest_action_lines(

@@ -6,8 +6,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from aoe_tg_action_audit import append_latest_action_summary_line, load_latest_action_audit
-from aoe_tg_operator_summary import append_latest_intent_summary_line, load_latest_command_resolution
+from aoe_tg_action_audit import append_latest_action_summary_line, load_latest_action_audit_for_task
+from aoe_tg_operator_summary import append_latest_intent_summary_line, task_intent_summary
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
 
@@ -134,6 +134,10 @@ def build_task_context(
         put("exec_mode", source.get("exec_mode"))
         put("source_request_id", source.get("source_request_id"))
         put("control_mode", source.get("control_mode"))
+        put("intent_command", source.get("intent_command"))
+        put("intent_action", source.get("intent_action"))
+        put("intent_class", source.get("intent_class"))
+        put("intent_trace", source.get("intent_trace"))
         put("gateway_request_id", source.get("gateway_request_id"))
 
     if isinstance(tf_meta, dict):
@@ -163,6 +167,10 @@ def build_task_context(
         put("task_alias", task.get("alias"))
         put("source_request_id", task.get("source_request_id"))
         put("control_mode", task.get("control_mode"))
+        put("intent_command", task.get("intent_command"))
+        put("intent_action", task.get("intent_action"))
+        put("intent_class", task.get("intent_class"))
+        put("intent_trace", task.get("intent_trace"))
 
     if context.get("task_short_id"):
         context["tf_id"] = task_short_to_tf_id(context["task_short_id"])
@@ -278,9 +286,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     source=context.get("source_request_id"),
                 )
             )
-        latest_intent = load_latest_command_resolution(context.get("team_dir"))
+        latest_intent = task_intent_summary(task)
         append_latest_intent_summary_line(lines, latest_intent)
-        latest_action = load_latest_action_audit(context.get("team_dir"))
+        latest_action = load_latest_action_audit_for_task(context.get("team_dir"), request_id)
         append_latest_action_summary_line(lines, latest_action)
 
     lines.append("lifecycle:")

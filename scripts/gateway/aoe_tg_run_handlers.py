@@ -442,7 +442,11 @@ class RunContext:
     run_auto_source: str
     run_control_mode: str
     run_source_request_id: str
-    run_source_task: Optional[Dict[str, Any]]
+    run_intent_command: str = ""
+    run_intent_action: str = ""
+    run_intent_class: str = ""
+    run_intent_trace: str = ""
+    run_source_task: Optional[Dict[str, Any]] = None
     run_selected_execution_lane_ids: Optional[List[str]] = None
     run_selected_review_lane_ids: Optional[List[str]] = None
 
@@ -527,7 +531,11 @@ def build_run_context(
     run_auto_source: str,
     run_control_mode: str,
     run_source_request_id: str,
-    run_source_task: Optional[Dict[str, Any]],
+    run_intent_command: str = "",
+    run_intent_action: str = "",
+    run_intent_class: str = "",
+    run_intent_trace: str = "",
+    run_source_task: Optional[Dict[str, Any]] = None,
     run_selected_execution_lane_ids: Optional[List[str]] = None,
     run_selected_review_lane_ids: Optional[List[str]] = None,
 ) -> RunContext:
@@ -548,6 +556,10 @@ def build_run_context(
         run_auto_source=run_auto_source,
         run_control_mode=run_control_mode,
         run_source_request_id=run_source_request_id,
+        run_intent_command=str(run_intent_command or "").strip(),
+        run_intent_action=str(run_intent_action or "").strip(),
+        run_intent_class=str(run_intent_class or "").strip(),
+        run_intent_trace=str(run_intent_trace or "").strip(),
         run_source_task=run_source_task,
         run_selected_execution_lane_ids=run_selected_execution_lane_ids,
         run_selected_review_lane_ids=run_selected_review_lane_ids,
@@ -708,6 +720,10 @@ def _provision_planning_task(
     phase1_providers: Optional[List[str]] = None,
     phase1_role_preset: str = "",
     phase2_team_preset: str = "",
+    run_intent_command: str = "",
+    run_intent_action: str = "",
+    run_intent_class: str = "",
+    run_intent_trace: str = "",
 ) -> tuple[str, Dict[str, Any]]:
     request_id = str(create_request_id() or "").strip()
     task = ensure_task_record(
@@ -718,6 +734,10 @@ def _provision_planning_task(
         roles=list(selected_roles or []),
         verifier_roles=[],
         require_verifier=bool(require_verifier),
+        intent_command=run_intent_command,
+        intent_action=run_intent_action,
+        intent_class=run_intent_class,
+        intent_trace=run_intent_trace,
     )
     task["initiator_chat_id"] = str(chat_id)
     task["status"] = "running"
@@ -1193,6 +1213,10 @@ def _dispatch_and_sync_task(
     set_chat_selected_task_ref: Callable[..., None],
     now_iso: Callable[[], str],
     sync_task_lifecycle: Callable[..., Optional[Dict[str, Any]]],
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> DispatchSyncResult:
     return exec_dispatch_and_sync_task(
         p_args=p_args,
@@ -1216,6 +1240,10 @@ def _dispatch_and_sync_task(
         set_chat_selected_task_ref=set_chat_selected_task_ref,
         now_iso=now_iso,
         sync_task_lifecycle=sync_task_lifecycle,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
 
 
@@ -1442,6 +1470,10 @@ def handle_run_or_unknown_command(
     run_auto_source = ctx.run_auto_source
     run_control_mode = ctx.run_control_mode
     run_source_request_id = ctx.run_source_request_id
+    run_intent_command = ctx.run_intent_command
+    run_intent_action = ctx.run_intent_action
+    run_intent_class = ctx.run_intent_class
+    run_intent_trace = ctx.run_intent_trace
     run_source_task = ctx.run_source_task
     run_selected_execution_lane_ids = list(ctx.run_selected_execution_lane_ids or [])
     run_selected_review_lane_ids = list(ctx.run_selected_review_lane_ids or [])
@@ -1602,6 +1634,10 @@ def handle_run_or_unknown_command(
             phase1_providers=configured_phase1_providers,
             phase1_role_preset=selected_role_preset,
             phase2_team_preset=selected_role_preset,
+            run_intent_command=run_intent_command,
+            run_intent_action=run_intent_action,
+            run_intent_class=run_intent_class,
+            run_intent_trace=run_intent_trace,
         )
         save_manager_state(args.manager_state_file, manager_state)
 
@@ -1953,9 +1989,13 @@ def handle_run_or_unknown_command(
                     run_aoe_orch=run_aoe_orch,
                     touch_chat_recent_task_ref=touch_chat_recent_task_ref,
                     set_chat_selected_task_ref=set_chat_selected_task_ref,
-                    now_iso=now_iso,
-                    sync_task_lifecycle=sync_task_lifecycle,
-                )
+                now_iso=now_iso,
+                sync_task_lifecycle=sync_task_lifecycle,
+                intent_command=run_intent_command,
+                intent_action=run_intent_action,
+                intent_class=run_intent_class,
+                intent_trace=run_intent_trace,
+            )
             except Exception as exc:
                 reason = str(exc).strip().splitlines()[0] if str(exc).strip() else "dispatch_failed"
                 if (not local_todo_id) and str(run_auto_source or "").strip().lower().startswith("todo"):

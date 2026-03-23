@@ -1311,6 +1311,10 @@ def ensure_task_record(
     roles: List[str],
     verifier_roles: List[str],
     require_verifier: bool,
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> Dict[str, Any]:
     return ensure_task_record_state(
         entry,
@@ -1325,6 +1329,10 @@ def ensure_task_record(
         build_task_context=build_task_context,
         lifecycle_stages=LIFECYCLE_STAGES,
         keep_limit=DEFAULT_TASK_KEEP_PER_PROJECT,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
 
 
@@ -1350,6 +1358,10 @@ def sync_task_lifecycle(
     verifier_roles: Optional[List[str]],
     require_verifier: bool,
     verifier_candidates: List[str],
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> Optional[Dict[str, Any]]:
     return sync_task_lifecycle_state(
         entry,
@@ -1365,6 +1377,10 @@ def sync_task_lifecycle(
         lifecycle_set_stage=lifecycle_set_stage,
         normalize_task_status=normalize_task_status,
         sync_task_exec_context=sync_task_exec_context,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
 
 

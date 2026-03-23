@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from aoe_tg_action_audit import append_latest_action_summary_line, load_latest_action_audit
-from aoe_tg_operator_summary import append_latest_intent_summary_line, load_latest_command_resolution
+from aoe_tg_action_audit import append_latest_action_summary_line, load_latest_action_audit_for_runtime
+from aoe_tg_operator_summary import append_latest_intent_summary_line, runtime_latest_intent_summary
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
 
@@ -704,6 +704,21 @@ def sanitize_task_record(
     source_request_id = str(task.get("source_request_id", "")).strip()
     if source_request_id:
         task["source_request_id"] = source_request_id[:128]
+    intent_command = str(task.get("intent_command", "")).strip()
+    if intent_command:
+        task["intent_command"] = intent_command[:64]
+    intent_action = str(task.get("intent_action", "")).strip()
+    if intent_action:
+        task["intent_action"] = intent_action[:64]
+    intent_class = str(task.get("intent_class", "")).strip()
+    if intent_class:
+        task["intent_class"] = intent_class[:32]
+    intent_trace = str(task.get("intent_trace", "")).strip()
+    if intent_trace:
+        task["intent_trace"] = intent_trace[:400]
+    intent_recorded_at = str(task.get("intent_recorded_at", "")).strip()
+    if intent_recorded_at:
+        task["intent_recorded_at"] = intent_recorded_at[:64]
     retry_of = str(task.get("retry_of", "")).strip()
     if retry_of:
         task["retry_of"] = retry_of[:128]
@@ -1100,6 +1115,10 @@ def ensure_task_record(
     build_task_context: Callable[..., Dict[str, str]],
     lifecycle_stages: Iterable[str],
     keep_limit: int,
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> Dict[str, Any]:
     token = str(request_id or "").strip()
     tasks = ensure_project_tasks(entry)
@@ -1134,6 +1153,21 @@ def ensure_task_record(
             item["verifier_roles"] = dedupe_roles(verifier_roles)
         item["require_verifier"] = bool(require_verifier)
         item["updated_at"] = now
+
+    next_intent_command = str(intent_command or "").strip()
+    next_intent_action = str(intent_action or "").strip()
+    next_intent_class = str(intent_class or "").strip()
+    next_intent_trace = str(intent_trace or "").strip()
+    if next_intent_command:
+        item["intent_command"] = next_intent_command
+    if next_intent_action:
+        item["intent_action"] = next_intent_action
+    if next_intent_class:
+        item["intent_class"] = next_intent_class
+    if next_intent_trace:
+        item["intent_trace"] = next_intent_trace[:400]
+    if next_intent_command or next_intent_action or next_intent_class or next_intent_trace:
+        item["intent_recorded_at"] = now
 
     assign_task_alias(entry, item, prompt=prompt, rebuild_index=False)
     item["context"] = build_task_context(request_id=token, entry=entry, task=item)
@@ -1229,9 +1263,13 @@ def summarize_task_monitor(
     ]
     if invalid_stage_rows:
         lines.append(f"warning: invalid lifecycle stage rows={invalid_stage_rows}")
-    latest_intent = load_latest_command_resolution(entry.get("team_dir"))
+    latest_intent = runtime_latest_intent_summary(entry)
     append_latest_intent_summary_line(lines, latest_intent)
-    latest_action = load_latest_action_audit(entry.get("team_dir"))
+    latest_action = load_latest_action_audit_for_runtime(
+        entry.get("team_dir"),
+        project_alias=entry.get("project_alias", ""),
+        request_ids=[str(req_id or "").strip() for req_id, _task in rows if str(req_id or "").strip()],
+    )
     append_latest_action_summary_line(lines, latest_action)
 
     def _phase2_request_count(value: Any) -> int:
@@ -1575,6 +1613,10 @@ def sync_task_lifecycle(
     lifecycle_set_stage: Callable[..., None],
     normalize_task_status: Callable[[Any], str],
     sync_task_exec_context: Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, str]],
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> Optional[Dict[str, Any]]:
     snap = extract_request_snapshot(request_data, dedupe_roles=dedupe_roles)
     request_id = str(snap.get("gateway_request_id", "") or snap.get("request_id", "")).strip()
@@ -1597,6 +1639,10 @@ def sync_task_lifecycle(
         roles=roles,
         verifier_roles=verifiers,
         require_verifier=require_verifier,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
 
     assignments = int(snap.get("assignments", 0) or 0)

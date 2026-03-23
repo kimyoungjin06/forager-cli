@@ -963,6 +963,51 @@ def test_sync_task_lifecycle_attaches_exec_context_and_updates_tf_exec_map(tmp_p
     assert row["tf_id"] == gw.task_short_to_tf_id(task["short_id"])
 
 
+def test_sync_task_lifecycle_records_intent_lineage_metadata(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    entry = {
+        "name": "demo_proj",
+        "project_alias": "O9",
+        "project_root": str(tmp_path),
+        "team_dir": str(team_dir),
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+    }
+    request_data = {
+        "request_id": "REQ-INTENT",
+        "role_states": [{"role": "Codex-Reviewer", "status": "done"}],
+        "counts": {"assignments": 1, "replies": 1},
+        "complete": True,
+    }
+
+    task = gw.sync_task_lifecycle(
+        entry=entry,
+        request_data=request_data,
+        prompt="Review offdesk candidates",
+        mode="dispatch",
+        selected_roles=["Codex-Reviewer"],
+        verifier_roles=[],
+        require_verifier=False,
+        verifier_candidates=["Codex-Reviewer"],
+        intent_command="offdesk",
+        intent_action="offdesk_review",
+        intent_class="control",
+        intent_trace="selected=offdesk_review; matched=review:검토",
+    )
+
+    assert isinstance(task, dict)
+    assert task["intent_command"] == "offdesk"
+    assert task["intent_action"] == "offdesk_review"
+    assert task["intent_class"] == "control"
+    assert "selected=offdesk_review" in task["intent_trace"]
+    assert task["intent_recorded_at"]
+    assert task["context"]["intent_command"] == "offdesk"
+    assert task["context"]["intent_action"] == "offdesk_review"
+
+
 def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
     task = gw.sanitize_task_record(
         {
@@ -970,6 +1015,11 @@ def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
             "alias": "demo-task",
             "control_mode": "retry",
             "source_request_id": "REQ-000",
+            "intent_command": "offdesk",
+            "intent_action": "offdesk_review",
+            "intent_class": "control",
+            "intent_trace": "selected=offdesk_review; matched=review:검토",
+            "intent_recorded_at": "2026-03-23T10:00:00+09:00",
             "plan": {"summary": "do work"},
             "exec_critic": {"verdict": "retry"},
             "context": {
@@ -979,6 +1029,9 @@ def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
                 "team_dir": "/tmp/project/.aoe-team",
                 "workdir": "/tmp/project/work",
                 "run_dir": "/tmp/project/.aoe-team/tf_runs/REQ-007",
+                "intent_command": "offdesk",
+                "intent_action": "offdesk_review",
+                "intent_trace": "selected=offdesk_review; matched=review:검토",
             },
         },
         "REQ-007",
@@ -986,12 +1039,18 @@ def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
 
     assert task["control_mode"] == "retry"
     assert task["source_request_id"] == "REQ-000"
+    assert task["intent_command"] == "offdesk"
+    assert task["intent_action"] == "offdesk_review"
+    assert task["intent_class"] == "control"
+    assert task["intent_recorded_at"] == "2026-03-23T10:00:00+09:00"
     assert task["plan"]["summary"] == "do work"
     assert task["exec_critic"]["verdict"] == "retry"
     assert task["context"]["project_key"] == "demo_proj"
     assert task["context"]["project_alias"] == "O9"
     assert task["context"]["task_short_id"] == "T-007"
     assert task["context"]["tf_id"] == "TF-007"
+    assert task["context"]["intent_command"] == "offdesk"
+    assert task["context"]["intent_action"] == "offdesk_review"
     assert task["tf_phase"] == "needs_retry"
     assert task["tf_phase_reason"] == "critic_parse_error"
 
@@ -4054,7 +4113,7 @@ def test_task_lifecycle_and_monitor_show_rate_limit_and_degraded_state() -> None
     assert "degraded=claude_rate_limit->codex" in monitor
 
 
-def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> None:
+def test_task_lifecycle_includes_task_scoped_intent_and_action_lines(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     audit_dir = team_dir / "dashboard"
     logs_dir = team_dir / "logs"
@@ -4063,12 +4122,25 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
     (audit_dir / "action-history.jsonl").write_text(
         json.dumps(
             {
+                "at": "2026-03-21T02:48:00+09:00",
+                "headline": "Sync Preview | preview",
+                "status": "preview",
+                "next_step": "/monitor",
+                "remediation": "inspect runtime sync posture first",
+                "source_command": "/sync preview O9",
+                "link_href": "/control/runtimes/O9",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "at": "2026-03-21T02:49:00+09:00",
                 "headline": "Retry | blocked",
                 "status": "blocked",
                 "next_step": "/offdesk review",
                 "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
                 "source_command": "/retry T-001",
+                "link_href": "/control/tasks/by-request/REQ-900",
             }
         )
         + "\n",
@@ -4077,10 +4149,10 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
     (logs_dir / "gateway_events.jsonl").write_text(
         json.dumps(
             {
-                "timestamp": "2026-03-21T02:48:00+09:00",
+                "timestamp": "2026-03-21T02:50:00+09:00",
                 "event": "command_resolved",
                 "status": "accepted",
-                "detail": "cmd=offdesk action=offdesk_review class=control trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+                "detail": "cmd=run action=dispatch_task class=work trace=selected=dispatch_task; matched=work:작성",
             }
         )
         + "\n",
@@ -4093,6 +4165,10 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
         "status": "running",
         "stage": "planning",
         "roles": ["Codex-Dev", "Codex-Reviewer"],
+        "intent_command": "offdesk",
+        "intent_action": "offdesk_review",
+        "intent_trace": "selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+        "intent_recorded_at": "2026-03-21T02:48:00+09:00",
         "context": {
             "team_dir": str(team_dir),
             "project_alias": "O2",
@@ -4108,7 +4184,7 @@ def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> No
     assert "approval blockers in /task and /offdesk review bef..." in summary
 
 
-def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None:
+def test_task_monitor_includes_runtime_scoped_intent_and_action_lines(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     audit_dir = team_dir / "dashboard"
     logs_dir = team_dir / "logs"
@@ -4117,12 +4193,25 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
     (audit_dir / "action-history.jsonl").write_text(
         json.dumps(
             {
+                "at": "2026-03-21T02:48:00+09:00",
+                "headline": "Retry | blocked",
+                "status": "blocked",
+                "next_step": "/offdesk review",
+                "remediation": "inspect unrelated runtime blockers first",
+                "source_command": "/retry T-999",
+                "link_href": "/control/tasks/by-request/REQ-999",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "at": "2026-03-21T02:49:00+09:00",
                 "headline": "Retry | blocked",
                 "status": "blocked",
                 "next_step": "/offdesk review",
                 "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
                 "source_command": "/retry T-001",
+                "link_href": "/control/runtimes/O2",
             }
         )
         + "\n",
@@ -4131,10 +4220,10 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
     (logs_dir / "gateway_events.jsonl").write_text(
         json.dumps(
             {
-                "timestamp": "2026-03-21T02:48:00+09:00",
+                "timestamp": "2026-03-21T02:50:00+09:00",
                 "event": "command_resolved",
                 "status": "accepted",
-                "detail": "cmd=offdesk action=offdesk_review class=control trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+                "detail": "cmd=run action=dispatch_task class=work trace=selected=dispatch_task; matched=work:작성",
             }
         )
         + "\n",
@@ -4143,6 +4232,7 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
 
     entry = {
         "team_dir": str(team_dir),
+        "project_alias": "O2",
         "tasks": {
             "REQ-900": {
                 "request_id": "REQ-900",
@@ -4151,6 +4241,10 @@ def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None
                 "status": "running",
                 "stage": "planning",
                 "roles": ["Codex-Dev", "Codex-Reviewer"],
+                "intent_command": "offdesk",
+                "intent_action": "offdesk_review",
+                "intent_trace": "selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+                "intent_recorded_at": "2026-03-21T02:48:00+09:00",
                 "updated_at": "2026-03-21T02:49:30+09:00",
             }
         },

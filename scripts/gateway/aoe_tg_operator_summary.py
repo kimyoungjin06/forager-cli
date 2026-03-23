@@ -79,6 +79,47 @@ def load_latest_command_resolution(team_dir: Any) -> Dict[str, str]:
     return latest
 
 
+def task_intent_summary(task: Any) -> Dict[str, str]:
+    if not isinstance(task, dict):
+        return {}
+    context = task.get("context") if isinstance(task.get("context"), dict) else {}
+    command = str(task.get("intent_command", "") or context.get("intent_command", "")).strip()
+    action = str(task.get("intent_action", "") or context.get("intent_action", "")).strip()
+    trace = str(task.get("intent_trace", "") or context.get("intent_trace", "")).strip()
+    if not any((command, action, trace)):
+        return {}
+    return {
+        "command": command or "-",
+        "action": action or "-",
+        "trace": trace or "-",
+        "focus": latest_intent_focus(action, trace),
+        "recorded_at": str(task.get("intent_recorded_at", "")).strip() or str(task.get("updated_at", "")).strip() or "",
+    }
+
+
+def runtime_latest_intent_summary(entry: Any) -> Dict[str, str]:
+    if not isinstance(entry, dict):
+        return {}
+    tasks = entry.get("tasks")
+    if not isinstance(tasks, dict):
+        return {}
+    latest: Dict[str, str] = {}
+    latest_at = ""
+    for task in tasks.values():
+        intent = task_intent_summary(task)
+        if not intent:
+            continue
+        recorded_at = str(intent.get("recorded_at", "")).strip()
+        if recorded_at and recorded_at >= latest_at:
+            latest = intent
+            latest_at = recorded_at
+        elif (not latest) and (not latest_at):
+            latest = intent
+    if latest:
+        latest.pop("recorded_at", None)
+    return latest
+
+
 def append_latest_intent_lines(
     lines: List[str],
     intent: Dict[str, str],
