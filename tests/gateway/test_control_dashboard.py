@@ -530,7 +530,7 @@ def test_control_dashboard_post_retry_route_returns_501_with_normalized_payload(
     assert payload["payload"] == {"task_ref": "T-001", "lane_ids": ["L1", "R1"]}
 
 
-def test_control_dashboard_post_followup_and_sync_preview_routes_return_501(tmp_path: Path) -> None:
+def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     config = dashboard_app.DashboardAppConfig(
@@ -557,15 +557,26 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_501(tmp_
     followup_payload = json.loads(followup_body.decode("utf-8"))
     sync_payload = json.loads(sync_body.decode("utf-8"))
 
-    assert followup_status == 501
+    assert followup_status == 200
+    assert followup_payload["ok"] is True
+    assert followup_payload["implemented"] is True
     assert followup_payload["mode"] == "safe"
     assert followup_payload["source_command"] == "/followup T-001 lane R1"
     assert followup_payload["payload"] == {"task_ref": "T-001", "lane_ids": ["R1"]}
+    assert followup_payload["preview"]["kind"] == "task_followup"
+    assert followup_payload["preview"]["project_alias"] == "O2"
+    assert followup_payload["preview"]["request_id"] == "REQ-1"
+    assert followup_payload["preview"]["detail_path"] == "/control/tasks/by-request/REQ-1"
 
-    assert sync_status == 501
+    assert sync_status == 200
+    assert sync_payload["ok"] is True
+    assert sync_payload["implemented"] is True
     assert sync_payload["mode"] == "safe"
     assert sync_payload["source_command"] == "/sync preview O2 48h"
     assert sync_payload["payload"] == {"project_ref": "O2", "window": "48h"}
+    assert sync_payload["preview"]["kind"] == "runtime_sync_preview"
+    assert sync_payload["preview"]["project_alias"] == "O2"
+    assert "quality=" in sync_payload["preview"]["sync_summary"]
 
 
 def test_control_dashboard_post_auto_recover_defaults_force_false(tmp_path: Path) -> None:
@@ -590,6 +601,42 @@ def test_control_dashboard_post_auto_recover_defaults_force_false(tmp_path: Path
     assert status == 501
     assert payload["source_command"] == "/auto recover"
     assert payload["payload"] == {"force": False}
+
+
+def test_control_dashboard_post_safe_action_route_returns_404_for_unknown_target(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    followup_status, _followup_headers, followup_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup",
+        body=json.dumps({"task_ref": "T-999"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    sync_status, _sync_headers, sync_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/sync-preview",
+        body=json.dumps({"project_ref": "OX"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+
+    followup_payload = json.loads(followup_body.decode("utf-8"))
+    sync_payload = json.loads(sync_body.decode("utf-8"))
+
+    assert followup_status == 404
+    assert followup_payload["error"] == "not_found"
+    assert "task not found" in followup_payload["message"]
+
+    assert sync_status == 404
+    assert sync_payload["error"] == "not_found"
+    assert "runtime not found" in sync_payload["message"]
 
 
 def test_control_dashboard_post_action_route_rejects_invalid_payload_and_content_type(tmp_path: Path) -> None:

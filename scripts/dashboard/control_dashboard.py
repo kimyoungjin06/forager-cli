@@ -25,6 +25,7 @@ import aoe_tg_operator_action_contract as operator_action_contract
 
 from control_dashboard_state import (
     load_dashboard_recovery_page,
+    load_dashboard_runtime_details,
     load_dashboard_snapshot,
     load_dashboard_runtime_page,
     load_dashboard_task_page,
@@ -220,6 +221,97 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
     raise ValueError("unknown action path")
 
 
+def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    task_ref = str(payload.get("task_ref", "")).strip()
+    detail = load_task_detail(
+        control_root=config.control_root,
+        team_dir=config.team_dir,
+        manager_state_file=config.manager_state_file,
+        request_id=task_ref,
+    )
+    if detail is None:
+        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"task not found: {task_ref}")
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "status": "preview",
+            "method": "POST",
+            "path": spec.get("path", "-"),
+            "mode": spec.get("mode", "-"),
+            "source_command": spec.get("command", "-"),
+            "payload": payload,
+            "preview": {
+                "kind": "task_followup",
+                "project_alias": detail.project_alias,
+                "request_id": detail.request_id,
+                "label": detail.label,
+                "tf_phase": detail.tf_phase,
+                "followup_summary": detail.followup_summary or "-",
+                "completion_followup_when": detail.completion_followup_when or "-",
+                "command_hints": list(detail.command_hints),
+                "phase2_action_hints": list(detail.phase2_action_hints),
+                "detail_path": f"/control/tasks/by-request/{quote(detail.request_id, safe='')}",
+            },
+        },
+        status=200,
+    )
+
+
+def _preview_sync_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    project_ref = str(payload.get("project_ref", "")).strip()
+    snapshot, runtime_details, _manager_state = load_dashboard_runtime_details(
+        control_root=config.control_root,
+        team_dir=config.team_dir,
+        manager_state_file=config.manager_state_file,
+    )
+    token = project_ref.lower()
+    detail = next(
+        (
+            row
+            for row in runtime_details
+            if project_ref
+            and token
+            in {
+                str(row.project_alias).strip().lower(),
+                str(row.project_key).strip().lower(),
+                str(row.project_label).strip().lower(),
+            }
+        ),
+        None,
+    )
+    if detail is None:
+        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"runtime not found: {project_ref}")
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "status": "preview",
+            "method": "POST",
+            "path": spec.get("path", "-"),
+            "mode": spec.get("mode", "-"),
+            "source_command": spec.get("command", "-"),
+            "payload": payload,
+            "snapshot_taken_at": snapshot.snapshot_taken_at,
+            "preview": {
+                "kind": "runtime_sync_preview",
+                "project_alias": detail.project_alias,
+                "project_label": detail.project_label,
+                "sync_summary": detail.sync_summary or "-",
+                "queue_summary": detail.queue_summary or "-",
+                "provider_pressure_summary": detail.provider_pressure_summary or "-",
+                "next_focus": detail.next_focus or "-",
+                "runtime_command_hints": list(detail.runtime_command_hints),
+                "runtime_phase2_action_hints": list(detail.runtime_phase2_action_hints),
+                "runtime_path": detail.runtime_path,
+            },
+        },
+        status=200,
+    )
+
+
 def build_dashboard_action_response(
     raw_path: str,
     *,
@@ -227,7 +319,6 @@ def build_dashboard_action_response(
     content_type: str,
     config: DashboardAppConfig,
 ) -> Tuple[int, Dict[str, str], bytes]:
-    del config
     parsed = urlparse(raw_path)
     path = parsed.path or "/control"
     if path not in ACTION_PATHS:
@@ -246,6 +337,13 @@ def build_dashboard_action_response(
         spec = _action_spec_for_request(path, payload)
     except ValueError as exc:
         return _bad_request(str(exc), path=path)
+
+    if path == "/control/actions/task/followup":
+        return _preview_followup_action(spec, config=config)
+
+    if path == "/control/actions/runtime/sync-preview":
+        return _preview_sync_action(spec, config=config)
+
     return _json(
         {
             "ok": False,
