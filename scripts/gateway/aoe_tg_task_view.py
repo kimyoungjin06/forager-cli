@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from aoe_tg_action_audit import append_latest_action_lines, load_latest_action_audit
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
 
@@ -276,6 +277,8 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     source=context.get("source_request_id"),
                 )
             )
+        latest_action = load_latest_action_audit(context.get("team_dir"))
+        append_latest_action_lines(lines, latest_action)
 
     lines.append("lifecycle:")
     for name in LIFECYCLE_STAGES:

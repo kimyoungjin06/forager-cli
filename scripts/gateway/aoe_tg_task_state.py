@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
+from aoe_tg_action_audit import append_latest_action_lines, load_latest_action_audit
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
 
@@ -1227,6 +1228,8 @@ def summarize_task_monitor(
     ]
     if invalid_stage_rows:
         lines.append(f"warning: invalid lifecycle stage rows={invalid_stage_rows}")
+    latest_action = load_latest_action_audit(entry.get("team_dir"))
+    append_latest_action_lines(lines, latest_action)
 
     def _phase2_request_count(value: Any) -> int:
         if isinstance(value, list):

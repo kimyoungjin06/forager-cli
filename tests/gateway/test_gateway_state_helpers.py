@@ -3,6 +3,25 @@
 
 from _gateway_test_support import *  # noqa: F401,F403
 
+
+def _write_tf_exec_map(team_dir: Path, req_id: str, *, mode: str, workdir: Path, run_dir: Path) -> None:
+    mapping = gw.load_tf_exec_map(team_dir)
+    mapping[req_id] = {
+        "request_id": req_id,
+        "gateway_request_id": req_id,
+        "created_at": "2026-02-27T00:00:00+0000",
+        "mode": mode,
+        # Keep repo_root non-existent to avoid invoking git in tests.
+        "repo_root": str(team_dir / "_no_such_repo_"),
+        "workdir": str(workdir),
+        "run_dir": str(run_dir),
+        "branch": "",
+        "worktree_created": True,
+        "status": "running",
+    }
+    gw.save_tf_exec_map(team_dir, mapping)
+
+
 def test_sync_salvage_creates_proposals_when_only_loose_followups_exist(tmp_path: Path) -> None:
     project_root = tmp_path / "DemoProject"
     team_dir = project_root / ".aoe-team"
@@ -4033,3 +4052,98 @@ def test_task_lifecycle_and_monitor_show_rate_limit_and_degraded_state() -> None
     assert "degraded_by: claude_rate_limit->codex" in lifecycle
     assert "rate_limit providers=codex,claude retry=180s retry_at=2026-03-14T01:23:00+09:00" in monitor
     assert "degraded=claude_rate_limit->codex" in monitor
+
+
+def test_task_lifecycle_includes_latest_action_audit_lines(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-03-21T02:49:00+09:00",
+                "headline": "Retry | blocked",
+                "status": "blocked",
+                "next_step": "/offdesk review",
+                "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+                "source_command": "/retry T-001",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    task = {
+        "request_id": "REQ-900",
+        "short_id": "T-001",
+        "status": "running",
+        "stage": "planning",
+        "roles": ["Codex-Dev", "Codex-Reviewer"],
+        "context": {
+            "team_dir": str(team_dir),
+            "project_alias": "O2",
+            "project_key": "demo",
+            "task_short_id": "T-001",
+        },
+    }
+
+    summary = task_view.summarize_task_lifecycle("Demo", task)
+
+    assert "latest_action: Retry | blocked" in summary
+    assert "latest_action_next: /offdesk review" in summary
+    assert (
+        "latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again"
+        in summary
+    )
+
+
+def test_task_monitor_includes_latest_action_audit_lines(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-03-21T02:49:00+09:00",
+                "headline": "Retry | blocked",
+                "status": "blocked",
+                "next_step": "/offdesk review",
+                "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+                "source_command": "/retry T-001",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    entry = {
+        "team_dir": str(team_dir),
+        "tasks": {
+            "REQ-900": {
+                "request_id": "REQ-900",
+                "short_id": "T-001",
+                "prompt": "Retry the blocked task",
+                "status": "running",
+                "stage": "planning",
+                "roles": ["Codex-Dev", "Codex-Reviewer"],
+                "updated_at": "2026-03-21T02:49:30+09:00",
+            }
+        },
+    }
+
+    summary = task_state.summarize_task_monitor(
+        "Demo",
+        entry,
+        limit=5,
+        normalize_task_status=gw.normalize_task_status,
+        dedupe_roles=gw.dedupe_roles,
+        task_display_label=gw.task_display_label,
+        lifecycle_stages=gw.LIFECYCLE_STAGES,
+    )
+
+    assert "latest_action: Retry | blocked" in summary
+    assert "latest_action_next: /offdesk review" in summary
+    assert (
+        "latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again"
+        in summary
+    )
