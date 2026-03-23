@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import ipaddress
 import json
 import mimetypes
+import shutil
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,8 +28,12 @@ if str(ROOT / "scripts" / "gateway") not in sys.path:
 import aoe_tg_chat_state as chat_state
 import aoe_tg_management_handlers as management_handlers
 import aoe_tg_operator_action_contract as operator_action_contract
+import aoe_tg_parse as parse_mod
+import aoe_tg_request_state as request_state_mod
 import aoe_tg_retry_handlers as retry_handlers
+import aoe_tg_run_handlers as run_handlers
 import aoe_tg_runtime_read as runtime_read
+import aoe_tg_runtime_core as runtime_core_mod
 import aoe_tg_scheduler_control_handlers as scheduler_control_handlers
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
@@ -53,6 +60,16 @@ ACTION_PATHS = {
 }
 _DASHBOARD_CHAT_ID = "dashboard-http"
 _DASHBOARD_CHAT_ROLE = "owner"
+
+_RUN_BLOCKED_CONTEXTS = {
+    "planning-gate",
+    "dispatch-exception",
+    "exec-critic",
+    "verifier-gate failed",
+    "run usage",
+    "unknown command",
+    "empty prompt",
+}
 
 
 @dataclass(frozen=True)
@@ -189,6 +206,14 @@ def _dashboard_action_args(config: DashboardAppConfig) -> Any:
         project_root=str(paths.control_root),
         team_dir=str(paths.team_dir),
         manager_state_file=paths.manager_state_file,
+        roles="",
+        priority="P2",
+        orch_timeout_sec=600,
+        no_wait=False,
+        orch_command_timeout_sec=900,
+        orch_poll_sec=2.0,
+        aoe_orch_bin=shutil.which("aoe-orch") or "aoe-orch",
+        aoe_team_bin=shutil.which("aoe-team") or "aoe-team",
         dry_run=False,
         require_verifier=False,
         verifier_roles="",
@@ -216,6 +241,24 @@ def _make_send_collector(messages: List[Dict[str, Any]]):
     return _send
 
 
+def _make_log_collector(events: List[Dict[str, Any]]):
+    def _log(**kwargs: Any) -> None:
+        events.append(dict(kwargs))
+
+    return _log
+
+
+@lru_cache(maxsize=1)
+def _load_gateway_main_module():
+    module_path = ROOT / "scripts" / "gateway" / "aoe-telegram-gateway.py"
+    spec = importlib.util.spec_from_file_location("aoe_telegram_gateway_main", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to load gateway main module: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _dashboard_get_context_factory(manager_state: Dict[str, Any], paths: Any):
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
 
@@ -229,12 +272,20 @@ def _dashboard_get_context_factory(manager_state: Dict[str, Any], paths: Any):
                 alias = str(entry.get("project_alias", "")).strip().upper()
                 if str(key) == target or alias == upper:
                     return str(key), entry, SimpleNamespace(
-                        project_root=Path(str(entry.get("project_root", paths.control_root))).expanduser().resolve(),
-                        team_dir=Path(str(entry.get("team_dir", paths.team_dir))).expanduser().resolve(),
-                        manager_state_file=paths.manager_state_file,
-                        require_verifier=False,
-                        verifier_roles="",
-                    )
+                    project_root=Path(str(entry.get("project_root", paths.control_root))).expanduser().resolve(),
+                    team_dir=Path(str(entry.get("team_dir", paths.team_dir))).expanduser().resolve(),
+                    manager_state_file=paths.manager_state_file,
+                    roles="",
+                    priority="P2",
+                    orch_timeout_sec=600,
+                    no_wait=False,
+                    orch_command_timeout_sec=900,
+                    orch_poll_sec=2.0,
+                    aoe_orch_bin=shutil.which("aoe-orch") or "aoe-orch",
+                    aoe_team_bin=shutil.which("aoe-team") or "aoe-team",
+                    require_verifier=False,
+                    verifier_roles="",
+                )
         active = str(manager_state.get("active", "")).strip()
         entry = projects.get(active) if active and isinstance(projects.get(active), dict) else None
         if isinstance(entry, dict):
@@ -242,6 +293,14 @@ def _dashboard_get_context_factory(manager_state: Dict[str, Any], paths: Any):
                 project_root=Path(str(entry.get("project_root", paths.control_root))).expanduser().resolve(),
                 team_dir=Path(str(entry.get("team_dir", paths.team_dir))).expanduser().resolve(),
                 manager_state_file=paths.manager_state_file,
+                roles="",
+                priority="P2",
+                orch_timeout_sec=600,
+                no_wait=False,
+                orch_command_timeout_sec=900,
+                orch_poll_sec=2.0,
+                aoe_orch_bin=shutil.which("aoe-orch") or "aoe-orch",
+                aoe_team_bin=shutil.which("aoe-team") or "aoe-team",
                 require_verifier=False,
                 verifier_roles="",
             )
@@ -261,6 +320,197 @@ def _find_task_project_key(manager_state: Dict[str, Any], task_ref: str) -> str:
         if gateway_task_state.get_task_record(entry, target):
             return str(key)
     return ""
+
+
+def _dashboard_run_args(config: DashboardAppConfig, *, source_task: Optional[Dict[str, Any]]) -> Any:
+    args = _dashboard_action_args(config)
+    verifier_roles = gateway_task_view.dedupe_roles((source_task or {}).get("verifier_roles") or [])
+    phase1_rounds = int((source_task or {}).get("phase1_rounds", 0) or 0)
+    phase1_providers = [str(item).strip() for item in ((source_task or {}).get("phase1_providers") or []) if str(item).strip()]
+    args.auto_dispatch = False
+    args.task_planning = True
+    args.plan_phase1_ensemble = True
+    args.plan_phase1_rounds = phase1_rounds if phase1_rounds > 0 else 3
+    args.plan_phase1_providers = ",".join(phase1_providers) if phase1_providers else "codex,claude"
+    args.plan_max_subtasks = 4
+    args.plan_auto_replan = True
+    args.plan_replan_attempts = 2
+    args.plan_block_on_critic = True
+    args.exec_critic = False
+    args.exec_critic_retry_max = 3
+    args.chat_max_running = 3
+    args.chat_daily_cap = 20
+    args.require_verifier = bool((source_task or {}).get("require_verifier")) or bool(verifier_roles)
+    args.verifier_roles = ",".join(verifier_roles)
+    return args
+
+
+def _dashboard_render_run_response(state: Dict[str, Any], task: Optional[Dict[str, Any]] = None) -> str:
+    return request_state_mod.render_run_response(
+        state,
+        task=task,
+        report_level="normal",
+        default_report_level="normal",
+        task_display_label=gateway_task_view.task_display_label,
+        summarize_state=request_state_mod.summarize_state,
+    )
+
+
+def _build_dashboard_retry_run_deps(
+    *,
+    config: DashboardAppConfig,
+    manager_state: Dict[str, Any],
+    paths: Any,
+    messages: List[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+):
+    gateway_main = _load_gateway_main_module()
+    return run_handlers.build_run_deps(
+        send=_make_send_collector(messages),
+        log_event=_make_log_collector(events),
+        help_text=lambda: "dashboard retry action",
+        summarize_chat_usage=gateway_main.summarize_chat_usage,
+        detect_high_risk_prompt=parse_mod.detect_high_risk_prompt,
+        set_confirm_action=chat_state.set_confirm_action,
+        save_manager_state=runtime_core_mod.save_manager_state,
+        get_context=_dashboard_get_context_factory(manager_state, paths),
+        choose_auto_dispatch_roles=gateway_main.choose_auto_dispatch_roles,
+        resolve_verifier_candidates=gateway_main.resolve_verifier_candidates,
+        load_orchestrator_roles=gateway_main.load_orchestrator_roles,
+        parse_roles_csv=gateway_main.parse_roles_csv,
+        ensure_verifier_roles=gateway_main.ensure_verifier_roles,
+        available_worker_roles=gateway_main.available_worker_roles,
+        normalize_task_plan_payload=gateway_main.normalize_task_plan_payload,
+        build_task_execution_plan=gateway_main.build_task_execution_plan,
+        critique_task_execution_plan=gateway_main.critique_task_execution_plan,
+        critic_has_blockers=gateway_main.critic_has_blockers,
+        repair_task_execution_plan=gateway_main.repair_task_execution_plan,
+        plan_roles_from_subtasks=gateway_main.plan_roles_from_subtasks,
+        build_planned_dispatch_prompt=gateway_main.build_planned_dispatch_prompt,
+        phase1_ensemble_planning=gateway_main.run_phase1_ensemble_planning,
+        run_orchestrator_direct=lambda *_args, **_kwargs: "dashboard direct mode is not enabled for retry actions",
+        run_aoe_orch=gateway_main.run_aoe_orch,
+        create_request_id=gateway_main.create_request_id,
+        ensure_task_record=gateway_main.ensure_task_record,
+        finalize_request_reply_messages=lambda *_args, **_kwargs: {},
+        touch_chat_recent_task_ref=chat_state.touch_chat_recent_task_ref,
+        set_chat_selected_task_ref=chat_state.set_chat_selected_task_ref,
+        now_iso=gateway_main.now_iso,
+        sync_task_lifecycle=gateway_main.sync_task_lifecycle,
+        lifecycle_set_stage=gateway_main.lifecycle_set_stage,
+        summarize_task_lifecycle=gateway_main.summarize_task_lifecycle,
+        synthesize_orchestrator_response=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("dashboard synth disabled")),
+        critique_task_result=lambda **_kwargs: {"verdict": "success", "reason": ""},
+        extract_todo_proposals=lambda *_args, **_kwargs: [],
+        merge_todo_proposals=lambda **_kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+        render_run_response=_dashboard_render_run_response,
+    )
+
+
+def _execute_retry_run_transition(
+    transition: Dict[str, Any],
+    *,
+    config: DashboardAppConfig,
+    manager_state: Dict[str, Any],
+    paths: Any,
+    source_command: str,
+    payload: Dict[str, Any],
+) -> Tuple[int, Dict[str, str], bytes]:
+    messages: List[Dict[str, Any]] = []
+    events: List[Dict[str, Any]] = []
+    source_task = transition.get("run_source_task") if isinstance(transition.get("run_source_task"), dict) else None
+    args = _dashboard_run_args(config, source_task=source_task)
+    ctx = run_handlers.build_run_context(
+        cmd=str(transition.get("cmd", "run")).strip() or "run",
+        args=args,
+        manager_state=manager_state,
+        chat_id=_DASHBOARD_CHAT_ID,
+        text=str(transition.get("run_prompt", "")).strip(),
+        rest=str(transition.get("rest", "")).strip(),
+        orch_target=str(transition.get("orch_target", "")).strip() or None,
+        run_prompt=str(transition.get("run_prompt", "")).strip(),
+        run_roles_override=transition.get("run_roles_override"),
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=transition.get("run_no_wait_override"),
+        run_force_mode=str(transition.get("run_force_mode", "")).strip() or None,
+        run_auto_source="dashboard_retry",
+        run_control_mode=str(transition.get("run_control_mode", "")).strip(),
+        run_source_request_id=str(transition.get("run_source_request_id", "")).strip(),
+        run_source_task=source_task,
+        run_selected_execution_lane_ids=list(transition.get("run_selected_execution_lane_ids") or []),
+        run_selected_review_lane_ids=list(transition.get("run_selected_review_lane_ids") or []),
+    )
+    deps = _build_dashboard_retry_run_deps(
+        config=config,
+        manager_state=manager_state,
+        paths=paths,
+        messages=messages,
+        events=events,
+    )
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+    if not handled:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "unhandled",
+                "path": "/control/actions/task/retry",
+                "source_command": source_command,
+                "payload": payload,
+                "messages": messages,
+                "events": events,
+            },
+            status=500,
+        )
+
+    project_key = str(transition.get("orch_target", "")).strip()
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    entry = projects.get(project_key) if project_key and isinstance(projects.get(project_key), dict) else {}
+    executed_request_id = str(entry.get("last_request_id", "")).strip() if isinstance(entry, dict) else ""
+    executed_task = (
+        gateway_task_state.get_task_record(entry, executed_request_id)
+        if isinstance(entry, dict) and executed_request_id
+        else None
+    )
+    contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
+    blocked = any(context in _RUN_BLOCKED_CONTEXTS for context in contexts)
+    task_payload = None
+    if isinstance(executed_task, dict) and executed_request_id:
+        task_payload = {
+            "request_id": executed_request_id,
+            "label": gateway_task_view.task_display_label(executed_task, fallback_request_id=executed_request_id),
+            "status": str(executed_task.get("status", "")).strip() or "-",
+            "tf_phase": str(executed_task.get("tf_phase", "")).strip() or "-",
+            "detail_path": f"/control/tasks/by-request/{quote(executed_request_id, safe='')}",
+        }
+    return _json(
+        {
+            "ok": not blocked,
+            "implemented": True,
+            "executed": True,
+            "status": "blocked" if blocked else "executed",
+            "method": "POST",
+            "path": "/control/actions/task/retry",
+            "mode": "phase2",
+            "source_command": source_command,
+            "payload": payload,
+            "transition": {
+                "cmd": transition.get("cmd", "run"),
+                "orch_target": transition.get("orch_target", "-"),
+                "run_control_mode": transition.get("run_control_mode", "-"),
+                "run_source_request_id": transition.get("run_source_request_id", "-"),
+                "run_force_mode": transition.get("run_force_mode", "-"),
+                "execution_lane_ids": list(transition.get("run_selected_execution_lane_ids") or []),
+                "review_lane_ids": list(transition.get("run_selected_review_lane_ids") or []),
+            },
+            "messages": messages,
+            "events": events,
+            "task": task_payload,
+        },
+        status=409 if blocked else 200,
+    )
 
 
 def _is_known_dashboard_get_route(path: str) -> bool:
@@ -479,32 +729,13 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             },
             status=409,
         )
-
-    return _json(
-        {
-            "ok": True,
-            "implemented": True,
-            "executed": False,
-            "status": "accepted_transition",
-            "method": "POST",
-            "path": spec.get("path", "-"),
-            "mode": spec.get("mode", "-"),
-            "source_command": spec.get("command", "-"),
-            "payload": payload,
-            "transition": {
-                "cmd": transition.get("cmd", "run"),
-                "orch_target": transition.get("orch_target", "-"),
-                "run_control_mode": transition.get("run_control_mode", "-"),
-                "run_source_request_id": transition.get("run_source_request_id", "-"),
-                "run_force_mode": transition.get("run_force_mode", "-"),
-                "execution_lane_ids": list(transition.get("run_selected_execution_lane_ids") or []),
-                "review_lane_ids": list(transition.get("run_selected_review_lane_ids") or []),
-                "prompt_preview": _truncate_text(transition.get("run_prompt", ""), 160) or "-",
-            },
-            "messages": messages,
-            "note": "retry transition prepared; dashboard run execution bridge is still pending",
-        },
-        status=202,
+    return _execute_retry_run_transition(
+        transition,
+        config=config,
+        manager_state=manager_state,
+        paths=paths,
+        source_command=str(spec.get("command", "")).strip() or "/retry",
+        payload=payload,
     )
 
 

@@ -517,7 +517,7 @@ def test_control_dashboard_get_action_route_returns_405(tmp_path: Path) -> None:
     assert payload["path"] == "/control/actions/task/retry"
 
 
-def test_control_dashboard_post_retry_route_returns_202_transition(tmp_path: Path) -> None:
+def test_control_dashboard_post_retry_route_executes_retry_bridge(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     config = dashboard_app.DashboardAppConfig(
@@ -528,6 +528,40 @@ def test_control_dashboard_post_retry_route_returns_202_transition(tmp_path: Pat
         port=8765,
     )
 
+    def _fake_execute_retry_run_transition(transition, *, config, manager_state, paths, source_command, payload):
+        return dashboard_app._json(
+            {
+                "ok": True,
+                "implemented": True,
+                "executed": True,
+                "status": "executed",
+                "method": "POST",
+                "path": "/control/actions/task/retry",
+                "mode": "phase2",
+                "source_command": source_command,
+                "payload": payload,
+                "task": {
+                    "request_id": "REQ-RETRY",
+                    "label": "T-003 | retry-run",
+                    "status": "running",
+                    "tf_phase": "planning",
+                    "detail_path": "/control/tasks/by-request/REQ-RETRY",
+                },
+                "transition": {
+                    "cmd": "run",
+                    "orch_target": "alpha",
+                    "run_control_mode": "retry",
+                    "run_source_request_id": "REQ-1",
+                    "run_force_mode": "dispatch",
+                    "execution_lane_ids": ["L1"],
+                    "review_lane_ids": ["R1"],
+                },
+            },
+            status=200,
+        )
+
+    monkeypatch.setattr(dashboard_app, "_execute_retry_run_transition", _fake_execute_retry_run_transition)
+
     status, headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/task/retry",
         body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1", "R1"]}).encode("utf-8"),
@@ -536,20 +570,21 @@ def test_control_dashboard_post_retry_route_returns_202_transition(tmp_path: Pat
     )
     payload = json.loads(body.decode("utf-8"))
 
-    assert status == 202
+    assert status == 200
     assert headers["Content-Type"].startswith("application/json")
     assert payload["implemented"] is True
-    assert payload["executed"] is False
-    assert payload["status"] == "accepted_transition"
+    assert payload["executed"] is True
+    assert payload["status"] == "executed"
     assert payload["mode"] == "phase2"
     assert payload["source_command"] == "/retry T-001 lane L1,R1"
-    assert payload["payload"] == {"task_ref": "T-001", "lane_ids": ["L1", "R1"]}
     assert payload["transition"]["cmd"] == "run"
     assert payload["transition"]["run_control_mode"] == "retry"
     assert payload["transition"]["run_source_request_id"] == "REQ-1"
     assert payload["transition"]["execution_lane_ids"] == ["L1"]
     assert payload["transition"]["review_lane_ids"] == ["R1"]
     assert payload["transition"]["orch_target"] == "alpha"
+    assert payload["task"]["request_id"] == "REQ-RETRY"
+    assert payload["task"]["detail_path"] == "/control/tasks/by-request/REQ-RETRY"
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
