@@ -50,6 +50,17 @@ class FileFreshnessDTO:
 
 
 @dataclass(frozen=True)
+class ActionButtonDTO:
+    label: str
+    command: str
+    method: str
+    path: str
+    mode: str
+    note: str
+    payload_json: str
+
+
+@dataclass(frozen=True)
 class ControlSummaryDTO:
     auto_mode: str
     offdesk_mode: str
@@ -145,6 +156,8 @@ class TaskDetailDTO:
     updated_at: str = ""
     command_hints: List[str] = field(default_factory=list)
     phase2_action_hints: List[str] = field(default_factory=list)
+    safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     reference_lines: List[str] = field(default_factory=list)
 
 
@@ -187,6 +200,10 @@ class RuntimeDetailDTO:
     runtime_phase2_action_hints: List[str] = field(default_factory=list)
     active_task_command_hints: List[str] = field(default_factory=list)
     active_task_phase2_action_hints: List[str] = field(default_factory=list)
+    runtime_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    runtime_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
     recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
@@ -214,6 +231,8 @@ class RecoveryTaskDTO:
     rate_limit_summary: str
     command_hints: List[str] = field(default_factory=list)
     phase2_action_hints: List[str] = field(default_factory=list)
+    safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -254,6 +273,10 @@ class RecoveryRuntimeDTO:
     runtime_phase2_action_hints: List[str] = field(default_factory=list)
     active_task_command_hints: List[str] = field(default_factory=list)
     active_task_phase2_action_hints: List[str] = field(default_factory=list)
+    runtime_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    runtime_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
 
 
@@ -277,6 +300,7 @@ class RecoverySummaryDTO:
     latest_intent_action: str
     latest_intent_trace: str
     latest_intent_focus: str
+    control_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     runtimes: List[RecoveryRuntimeDTO] = field(default_factory=list)
 
 
@@ -703,6 +727,79 @@ def _runtime_command_contract(
     )
 
 
+def _action_button_label(spec: Dict[str, Any]) -> str:
+    path = str(spec.get("path", "")).strip()
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    if path == "/control/actions/task/retry":
+        lane_ids = [str(item).strip() for item in (payload.get("lane_ids") or []) if str(item).strip()]
+        return "Retry" if not lane_ids else f"Retry ({','.join(lane_ids)})"
+    if path == "/control/actions/task/followup":
+        lane_ids = [str(item).strip() for item in (payload.get("lane_ids") or []) if str(item).strip()]
+        return "Follow-up Preview" if not lane_ids else f"Follow-up Preview ({','.join(lane_ids)})"
+    if path == "/control/actions/runtime/sync-preview":
+        window = str(payload.get("window", "")).strip()
+        return f"Sync Preview ({window})" if window else "Sync Preview"
+    if path == "/control/actions/control/auto-recover":
+        return "Auto Recover Force" if bool(payload.get("force")) else "Auto Recover"
+    return str(spec.get("command", "")).strip() or "Action"
+
+
+def _build_action_buttons(commands: Iterable[str]) -> List[ActionButtonDTO]:
+    buttons: List[ActionButtonDTO] = []
+    seen: set[tuple[str, str]] = set()
+    for raw_command in commands:
+        command = str(raw_command or "").strip()
+        if not command:
+            continue
+        spec = operator_action_contract.http_action_spec(command)
+        if not isinstance(spec, dict):
+            continue
+        payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+        payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        key = (str(spec.get("path", "")).strip(), payload_json)
+        if key in seen:
+            continue
+        seen.add(key)
+        buttons.append(
+            ActionButtonDTO(
+                label=_action_button_label(spec),
+                command=str(spec.get("command", "")).strip() or command,
+                method=str(spec.get("method", "POST")).strip() or "POST",
+                path=str(spec.get("path", "")).strip() or "/control",
+                mode=str(spec.get("mode", "safe")).strip() or "safe",
+                note=str(spec.get("note", "")).strip(),
+                payload_json=payload_json,
+            )
+        )
+    return buttons
+
+
+def _task_action_buttons(
+    *,
+    label: str,
+    request_id: str,
+    phase2_commands: Iterable[str],
+    include_followup_preview: bool = True,
+) -> tuple[List[ActionButtonDTO], List[ActionButtonDTO]]:
+    ref = operator_action_contract.task_command_ref(label, request_id)
+    safe_commands: List[str] = [f"/followup {ref}"] if include_followup_preview and ref != "-" else []
+    return _build_action_buttons(safe_commands), _build_action_buttons(phase2_commands)
+
+
+def _runtime_action_buttons(
+    *,
+    project_alias: str,
+    phase2_commands: Iterable[str],
+) -> tuple[List[ActionButtonDTO], List[ActionButtonDTO]]:
+    alias = str(project_alias or "").strip()
+    safe_commands = [f"/sync preview {alias} 24h"] if alias else []
+    return _build_action_buttons(safe_commands), _build_action_buttons(phase2_commands)
+
+
+def _recovery_control_action_buttons() -> List[ActionButtonDTO]:
+    return _build_action_buttons(["/auto recover"])
+
+
 def _runtime_path(project_alias: str) -> str:
     return f"/control/runtimes/{quote(str(project_alias or '').strip(), safe='')}"
 
@@ -913,6 +1010,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             followup_summary=followup_summary,
             rate_limit_summary=rate_limit_summary,
         )
+        safe_action_buttons, phase2_action_buttons = _task_action_buttons(
+            label=task_view.task_display_label(task, fallback_request_id=rid),
+            request_id=rid,
+            phase2_commands=list(action_contract.get("phase2") or []),
+        )
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),
             str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
@@ -951,6 +1053,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             updated_at=str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
             command_hints=list(action_contract.get("safe") or []),
             phase2_action_hints=list(action_contract.get("phase2") or []),
+            safe_action_buttons=safe_action_buttons,
+            phase2_action_buttons=phase2_action_buttons,
             reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
         )
     return None
@@ -1080,6 +1184,16 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         if active_request_id
         else {"safe": [], "phase2": []}
     )
+    runtime_safe_action_buttons, runtime_phase2_action_buttons = _runtime_action_buttons(
+        project_alias=target_alias,
+        phase2_commands=list(runtime_action_contract.get("phase2") or []),
+    )
+    active_task_safe_action_buttons, active_task_phase2_action_buttons = _task_action_buttons(
+        label=str(row.get("active_task_label", "")).strip(),
+        request_id=active_request_id,
+        phase2_commands=list(active_task_action_contract.get("phase2") or []),
+        include_followup_preview=bool(active_request_id),
+    )
     return RuntimeDetailDTO(
         project_key=key,
         project_alias=target_alias,
@@ -1129,6 +1243,10 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         runtime_phase2_action_hints=list(runtime_action_contract.get("phase2") or []),
         active_task_command_hints=list(active_task_action_contract.get("safe") or []),
         active_task_phase2_action_hints=list(active_task_action_contract.get("phase2") or []),
+        runtime_safe_action_buttons=runtime_safe_action_buttons,
+        runtime_phase2_action_buttons=runtime_phase2_action_buttons,
+        active_task_safe_action_buttons=active_task_safe_action_buttons,
+        active_task_phase2_action_buttons=active_task_phase2_action_buttons,
         notes=list(row.get("notes") or []),
         lines=list(row.get("lines") or []),
         recent_tasks=_build_runtime_recent_task_rows(
@@ -1161,6 +1279,11 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
             followup_summary=followup_summary,
             rate_limit_summary=rate_limit_summary,
         )
+        safe_action_buttons, phase2_action_buttons = _task_action_buttons(
+            label=label,
+            request_id=request_id,
+            phase2_commands=list(action_contract.get("phase2") or []),
+        )
         built.append(
             RecoveryTaskDTO(
                 request_id=request_id,
@@ -1186,6 +1309,8 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 rate_limit_summary=rate_limit_summary,
                 command_hints=list(action_contract.get("safe") or []),
                 phase2_action_hints=list(action_contract.get("phase2") or []),
+                safe_action_buttons=safe_action_buttons,
+                phase2_action_buttons=phase2_action_buttons,
             )
         )
     return built
@@ -1229,6 +1354,16 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             if active_request_id
             else {"safe": [], "phase2": []}
         )
+        runtime_safe_action_buttons, runtime_phase2_action_buttons = _runtime_action_buttons(
+            project_alias=alias,
+            phase2_commands=list(runtime_action_contract.get("phase2") or []),
+        )
+        active_task_safe_action_buttons, active_task_phase2_action_buttons = _task_action_buttons(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            phase2_commands=list(active_task_action_contract.get("phase2") or []),
+            include_followup_preview=bool(active_request_id),
+        )
         built.append(
             RecoveryRuntimeDTO(
                 project_key=str(row.get("project_key", "")).strip() or alias,
@@ -1267,6 +1402,10 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 runtime_phase2_action_hints=list(runtime_action_contract.get("phase2") or []),
                 active_task_command_hints=list(active_task_action_contract.get("safe") or []),
                 active_task_phase2_action_hints=list(active_task_action_contract.get("phase2") or []),
+                runtime_safe_action_buttons=runtime_safe_action_buttons,
+                runtime_phase2_action_buttons=runtime_phase2_action_buttons,
+                active_task_safe_action_buttons=active_task_safe_action_buttons,
+                active_task_phase2_action_buttons=active_task_phase2_action_buttons,
                 task_teams=_build_recovery_task_rows(row.get("task_teams") or [], project_alias=alias),
             )
         )
@@ -1297,6 +1436,7 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
             str(control.get("latest_intent_action", "")).strip(),
             str(control.get("latest_intent_trace", "")).strip(),
         ),
+        control_phase2_action_buttons=_recovery_control_action_buttons(),
         runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
     )
 

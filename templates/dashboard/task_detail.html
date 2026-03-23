@@ -39,6 +39,9 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% with buttons=detail.safe_action_buttons, title='safe_actions' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
   {% if detail.phase2_action_hints %}
   <p><strong>phase2_actions</strong></p>
   <ul class="command-list">
@@ -47,6 +50,9 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% with buttons=detail.phase2_action_buttons, title='phase2_action_buttons' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
 </section>
 
 <section class="panel">

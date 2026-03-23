@@ -23,6 +23,9 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% with buttons=detail.runtime_safe_action_buttons, title='safe_actions' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
   {% if detail.runtime_phase2_action_hints %}
   <p><strong>phase2_actions</strong></p>
   <ul class="command-list">
@@ -31,6 +34,9 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% with buttons=detail.runtime_phase2_action_buttons, title='phase2_action_buttons' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
 </section>
 
 {% if detail.active_task_label %}
@@ -59,6 +65,9 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% with buttons=detail.active_task_safe_action_buttons, title='active_task_safe_actions' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
   {% if detail.active_task_phase2_action_hints %}
   <p><strong>active_task_phase2_actions</strong></p>
   <ul class="command-list">
@@ -67,6 +76,9 @@
     {% endfor %}
   </ul>
   {% endif %}
+  {% with buttons=detail.active_task_phase2_action_buttons, title='active_task_phase2_action_buttons' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
 </section>
 {% endif %}
 

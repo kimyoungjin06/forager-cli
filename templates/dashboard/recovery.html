@@ -22,6 +22,9 @@
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
+  {% with buttons=recovery.control_phase2_action_buttons, title='phase2_action_buttons' %}
+  {% include 'dashboard/_action_buttons.html' %}
+  {% endwith %}
   {% else %}
   <p class="muted">nightly summary artifact not found</p>
   <pre class="code-block">python3 scripts/dashboard/nightly_session_summary.py --control-root {{ snapshot.control_root }}</pre>
@@ -50,6 +53,9 @@
         {% endfor %}
       </ul>
       {% endif %}
+      {% with buttons=runtime.runtime_safe_action_buttons, title='safe_actions' %}
+      {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
       {% if runtime.runtime_phase2_action_hints %}
       <p><strong>phase2_actions</strong></p>
       <ul class="command-list">
@@ -58,6 +64,9 @@
         {% endfor %}
       </ul>
       {% endif %}
+      {% with buttons=runtime.runtime_phase2_action_buttons, title='phase2_action_buttons' %}
+      {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
       {% if runtime.active_task_label %}
       <p><strong>active_task</strong> <a href="{{ runtime.active_task_path }}">{{ runtime.active_task_label }}</a> | {{ runtime.active_task_status }}/{{ runtime.active_task_phase }}</p>
       <p><strong>preset</strong> {{ runtime.active_task_preset }}</p>
@@ -78,6 +87,9 @@
         {% endfor %}
       </ul>
       {% endif %}
+      {% with buttons=runtime.active_task_safe_action_buttons, title='active_task_safe_actions' %}
+      {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
       {% if runtime.active_task_phase2_action_hints %}
       <p><strong>active_task_phase2_actions</strong></p>
       <ul class="command-list">
@@ -86,6 +98,9 @@
         {% endfor %}
       </ul>
       {% endif %}
+      {% with buttons=runtime.active_task_phase2_action_buttons, title='active_task_phase2_action_buttons' %}
+      {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
       {% endif %}
       {% if runtime.task_teams %}
       <table class="task-table">
@@ -127,6 +142,12 @@
                 {% endfor %}
               </ul>
               {% endif %}
+              {% with buttons=task.safe_action_buttons, title='safe_actions' %}
+              {% include 'dashboard/_action_buttons.html' %}
+              {% endwith %}
+              {% with buttons=task.phase2_action_buttons, title='phase2_action_buttons' %}
+              {% include 'dashboard/_action_buttons.html' %}
+              {% endwith %}
             </td>
           </tr>
           {% endfor %}

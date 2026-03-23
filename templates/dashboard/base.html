@@ -35,7 +35,72 @@
     {% endif %}
 
     <main class="page">
+      <section id="action-result" class="panel action-result hidden" aria-live="polite">
+        <div class="action-result-header">
+          <h2>Action Result</h2>
+          <button type="button" id="action-result-clear" class="action-result-clear">Clear</button>
+        </div>
+        <p id="action-result-summary" class="muted">No action has been run yet.</p>
+        <pre id="action-result-body" class="code-block">-</pre>
+      </section>
       {% block content %}{% endblock %}
     </main>
+    <script>
+      (() => {
+        const panel = document.getElementById("action-result");
+        const summary = document.getElementById("action-result-summary");
+        const body = document.getElementById("action-result-body");
+        const clear = document.getElementById("action-result-clear");
+        if (!panel || !summary || !body) {
+          return;
+        }
+        const setResult = (label, status, payload, error = false) => {
+          panel.classList.remove("hidden");
+          panel.classList.toggle("error", Boolean(error));
+          summary.textContent = `${label} | status=${status}`;
+          body.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+          panel.scrollIntoView({ block: "start", behavior: "smooth" });
+        };
+        clear?.addEventListener("click", () => {
+          panel.classList.add("hidden");
+          panel.classList.remove("error");
+          summary.textContent = "No action has been run yet.";
+          body.textContent = "-";
+        });
+        document.addEventListener("submit", async (event) => {
+          const form = event.target;
+          if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-dashboard-action")) {
+            return;
+          }
+          event.preventDefault();
+          const payloadField = form.querySelector('input[name="payload_json"]');
+          const payload = payloadField instanceof HTMLInputElement ? payloadField.value : "{}";
+          const label = form.dataset.actionLabel || form.action;
+          const button = form.querySelector('button[type="submit"]');
+          if (button instanceof HTMLButtonElement) {
+            button.disabled = true;
+          }
+          setResult(label, "pending", { pending: true, command: form.dataset.actionCommand || "-" });
+          try {
+            const response = await fetch(form.action, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: payload,
+            });
+            const contentType = response.headers.get("content-type") || "";
+            const result = contentType.includes("application/json")
+              ? await response.json()
+              : { text: await response.text() };
+            setResult(label, response.status, result, !response.ok);
+          } catch (error) {
+            setResult(label, "network_error", { message: String(error) }, true);
+          } finally {
+            if (button instanceof HTMLButtonElement) {
+              button.disabled = false;
+            }
+          }
+        });
+      })();
+    </script>
   </body>
 </html>
