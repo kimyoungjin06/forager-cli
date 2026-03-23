@@ -187,6 +187,7 @@ def build_nightly_session_summary(
             "active_runtime_count": snapshot.control_summary.active_runtime_count,
             "attention_runtime_count": snapshot.control_summary.attention_runtime_count,
         },
+        "recent_action_audit": [asdict(row) for row in snapshot.recent_action_audit_rows],
         "source_files": [asdict(row) for row in snapshot.source_files],
         "runtimes": runtimes,
     }
@@ -214,6 +215,27 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         f"- first_focus: {control.get('latest_intent_focus', '-')}",
         "",
     ]
+    recent_action_audit = summary.get("recent_action_audit") if isinstance(summary.get("recent_action_audit"), list) else []
+    if recent_action_audit:
+        lines.extend(["## Recent Dashboard Actions"])
+        for row in recent_action_audit:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "- {at} | {headline} | next={next_step}".format(
+                    at=row.get("at", "-"),
+                    headline=row.get("headline", "-"),
+                    next_step=row.get("next_step", "-"),
+                )
+            )
+            if str(row.get("link_href", "")).strip():
+                lines.append(
+                    "  - link: {label} -> {href}".format(
+                        label=row.get("link_label", "detail"),
+                        href=row.get("link_href", "-"),
+                    )
+                )
+        lines.append("")
     for runtime in runtimes:
         if not isinstance(runtime, dict):
             continue

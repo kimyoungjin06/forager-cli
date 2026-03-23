@@ -756,6 +756,68 @@ def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_p
     assert latest["source_command"] == "/followup T-001 lane R1"
 
 
+def test_control_dashboard_action_audit_prunes_old_and_excess_rows(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_file.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "at": "2000-01-01T00:00:00+00:00",
+                        "headline": "Old Preview | preview",
+                        "status": "preview",
+                        "next_step": "/monitor O2",
+                        "remediation": "-",
+                        "link_label": "runtime detail",
+                        "link_href": "/control/runtimes/O2",
+                        "source_command": "/sync preview O2 24h",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "at": "2099-01-01T00:00:00+00:00",
+                        "headline": "Kept Preview | preview",
+                        "status": "preview",
+                        "next_step": "/monitor O2",
+                        "remediation": "-",
+                        "link_label": "runtime detail",
+                        "link_href": "/control/runtimes/O2",
+                        "source_command": "/sync preview O2 24h",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS", "1")
+    monkeypatch.setenv("AOE_DASHBOARD_ACTION_AUDIT_KEEP_ROWS", "2")
+
+    status, _headers, _body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert status == 200
+    assert len(rows) == 2
+    assert all(row["headline"] != "Old Preview | preview" for row in rows)
+    assert rows[-1]["headline"] == "Follow-up Preview | preview"
+
+
 def test_control_dashboard_post_auto_recover_executes_with_default_force_false(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

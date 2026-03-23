@@ -38,6 +38,7 @@
   - gateway event logs
   - room logs
   - replay-supporting traces
+  - dashboard action audit (`.aoe-team/dashboard/action-history.jsonl`)
 - policy:
   - retain for operational debugging and replay
   - rotate/prune on explicit retention windows
@@ -48,7 +49,7 @@
   - provider capacity memory
   - nightly summaries
   - room/event logs
-  - dashboard-related snapshots if introduced later
+  - dashboard-related snapshots and action audit trails
 
 ## 4. Immediate Follow-up
 - Connect this policy to:

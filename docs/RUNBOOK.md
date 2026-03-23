@@ -292,6 +292,8 @@ Operational rule:
 - `AOE_TF_WORK_ROOT`: worktree 모드에서 TF workdir 생성 루트 (default: `<project_root_parent>/.aoe-tf/`)
 - `AOE_TF_ARTIFACT_POLICY`: TF 실행 아티팩트/번들 보존 정책 (`success-only`|`all`|`none`, default `success-only`)
 - `AOE_TF_EXEC_CACHE_TTL_HOURS`: success TF exec cache TTL in hours (default 72, 0 disables; ignored when `AOE_TF_ARTIFACT_POLICY=all`)
+- `AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS`: dashboard action audit retention in days (default 14, 0 disables time-based pruning)
+- `AOE_DASHBOARD_ACTION_AUDIT_KEEP_ROWS`: dashboard action audit max retained rows after pruning (default 500)
 - `AOE_TF_DOC_MODE`: TF 문서 스캐폴드 모드 (`single`|`legacy`, default `single`)  
   `single`은 TF당 `report.md` 1장만 유지하고, `legacy`는 `ongoing/note/handoff` 스캐폴드를 유지
 

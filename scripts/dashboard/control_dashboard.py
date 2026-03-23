@@ -8,10 +8,11 @@ import importlib.util
 import ipaddress
 import json
 import mimetypes
+import os
 import shutil
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -81,6 +82,9 @@ _RETRY_BLOCKED_REMEDIATIONS = {
     "unknown command": "inspect the retry action contract and command mapping before retrying again",
     "empty prompt": "inspect the source task prompt in the runtime lifecycle before retrying again",
 }
+
+DEFAULT_ACTION_AUDIT_RETENTION_DAYS = 14
+DEFAULT_ACTION_AUDIT_KEEP_ROWS = 500
 
 
 @dataclass(frozen=True)
@@ -214,6 +218,32 @@ def _action_audit_now() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
 
+def _int_from_env(raw: object, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(str(raw if raw is not None else "").strip())
+    except Exception:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _action_audit_retention_days() -> int:
+    return _int_from_env(
+        os.environ.get("AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS"),
+        DEFAULT_ACTION_AUDIT_RETENTION_DAYS,
+        minimum=0,
+        maximum=3650,
+    )
+
+
+def _action_audit_keep_rows() -> int:
+    return _int_from_env(
+        os.environ.get("AOE_DASHBOARD_ACTION_AUDIT_KEEP_ROWS"),
+        DEFAULT_ACTION_AUDIT_KEEP_ROWS,
+        minimum=10,
+        maximum=10000,
+    )
+
+
 def _action_audit_headline(payload: Dict[str, Any]) -> str:
     path = str(payload.get("path", "")).strip()
     status = str(payload.get("status", "")).strip() or "unknown"
@@ -242,6 +272,57 @@ def _action_audit_link(payload: Dict[str, Any]) -> Tuple[str, str]:
     return "-", "-"
 
 
+def _parse_action_audit_at(raw: object) -> Optional[datetime]:
+    token = str(raw or "").strip()
+    if not token:
+        return None
+    normalized = token[:-1] + "+00:00" if token.endswith("Z") else token
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.astimezone()
+    return parsed
+
+
+def _load_existing_action_audit_rows(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: List[Dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = str(line or "").strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(parsed, dict):
+                    rows.append(parsed)
+    except Exception:
+        return []
+    return rows
+
+
+def _prune_action_audit_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    retention_days = _action_audit_retention_days()
+    keep_rows = _action_audit_keep_rows()
+    if retention_days > 0:
+        keep_from = datetime.now().astimezone() - timedelta(days=retention_days)
+        filtered: List[Dict[str, Any]] = []
+        for row in rows:
+            parsed_at = _parse_action_audit_at(row.get("at"))
+            if parsed_at is None or parsed_at >= keep_from:
+                filtered.append(row)
+        rows = filtered
+    if keep_rows > 0:
+        rows = rows[-keep_rows:]
+    return rows
+
+
 def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, Any]) -> None:
     source_command = str(payload.get("source_command", "")).strip()
     if not source_command:
@@ -260,8 +341,12 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, Any]) ->
     }
     try:
         paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)
-        with paths.action_audit_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        rows = _load_existing_action_audit_rows(paths.action_audit_file)
+        rows.append(row)
+        rows = _prune_action_audit_rows(rows)
+        with paths.action_audit_file.open("w", encoding="utf-8") as handle:
+            for item in rows:
+                handle.write(json.dumps(item, ensure_ascii=False) + "\n")
     except Exception:
         return
 

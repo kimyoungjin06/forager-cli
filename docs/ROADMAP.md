@@ -224,6 +224,12 @@
     - latest artifact metadata
     - recovered runtime summaries
     - task detail/runtime detail drill-down
+- [x] recent dashboard action audit를 recovery artifact에 연결
+  - source:
+    - `.aoe-team/dashboard/action-history.jsonl`
+  - output:
+    - nightly summary JSON/markdown
+    - recovery/dashboard history seed
 
 ### 8.6 Retention and Storage
 - [x] storage retention policy 고정
@@ -236,6 +242,12 @@
     - logs/rooms
 - [ ] disk hygiene와 retention policy 연결
   - TTL/cleanup 설정값과 실제 운영 저장소 전략 연결
+- [x] dashboard action audit retention 연결
+  - tunables:
+    - `AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS`
+    - `AOE_DASHBOARD_ACTION_AUDIT_KEEP_ROWS`
+  - 정책:
+    - append 시 prune/rewrite
 
 ### 8.7 Structural Debt
 - [ ] 다음 분해 타깃 선정

@@ -25,6 +25,7 @@
 - automation mode and whether it stayed on
 - provider capacity summary
 - next retry target if capacity-blocked work remains
+- recent dashboard actions with next-step links when available
 
 ### 4.2 Project Runtime Summary
 - runtime alias
