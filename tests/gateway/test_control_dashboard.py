@@ -300,6 +300,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
     assert "Action Result" in overview_text
+    assert "Raw Payload" in overview_text
+    assert "action-result-rows" in overview_text
     assert tasks_status == 200
     assert tasks_headers["Content-Type"].startswith("text/html")
     assert "Active Tasks" in tasks_text
@@ -353,6 +355,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "/control/actions/task/followup" in text
     assert "/control/actions/task/retry" in text
     assert "data-dashboard-action" in text
+    assert "data-action-confirm=\"true\"" in text
     assert "/offdesk review" in text
 
 

@@ -41,7 +41,11 @@
           <button type="button" id="action-result-clear" class="action-result-clear">Clear</button>
         </div>
         <p id="action-result-summary" class="muted">No action has been run yet.</p>
-        <pre id="action-result-body" class="code-block">-</pre>
+        <ul id="action-result-rows" class="kv-list action-result-rows hidden"></ul>
+        <details id="action-result-details" class="action-result-details hidden">
+          <summary>Raw Payload</summary>
+          <pre id="action-result-body" class="code-block">-</pre>
+        </details>
       </section>
       {% block content %}{% endblock %}
     </main>
@@ -49,23 +53,101 @@
       (() => {
         const panel = document.getElementById("action-result");
         const summary = document.getElementById("action-result-summary");
+        const rows = document.getElementById("action-result-rows");
+        const details = document.getElementById("action-result-details");
         const body = document.getElementById("action-result-body");
         const clear = document.getElementById("action-result-clear");
-        if (!panel || !summary || !body) {
+        if (!panel || !summary || !rows || !details || !body) {
           return;
         }
+        const clearRows = () => {
+          rows.innerHTML = "";
+          rows.classList.add("hidden");
+        };
+        const appendRow = (label, value) => {
+          if (!value || value === "-") {
+            return;
+          }
+          const item = document.createElement("li");
+          const key = document.createElement("span");
+          const val = document.createElement("strong");
+          key.textContent = label;
+          val.textContent = value;
+          item.appendChild(key);
+          item.appendChild(val);
+          rows.appendChild(item);
+        };
+        const asText = (value) => {
+          if (value === null || value === undefined) {
+            return "-";
+          }
+          if (Array.isArray(value)) {
+            return value.length ? value.join(", ") : "-";
+          }
+          if (typeof value === "object") {
+            return JSON.stringify(value);
+          }
+          const text = String(value).trim();
+          return text || "-";
+        };
+        const buildSummary = (label, httpStatus, payload) => {
+          const status = asText(payload?.status || httpStatus);
+          const command = asText(payload?.source_command);
+          const taskLabel = asText(payload?.task?.label || payload?.preview?.label || payload?.preview?.request_id);
+          const runtimeLabel = asText(payload?.transition?.orch_target || payload?.preview?.project_alias || payload?.auto_state?.command);
+          const contexts = Array.isArray(payload?.messages)
+            ? payload.messages.map((row) => asText(row?.context)).filter((row) => row && row !== "-")
+            : [];
+          let headline = `${label} | status=${status}`;
+          if (payload?.preview?.kind === "task_followup") {
+            headline = `${label} | follow-up preview ready`;
+          } else if (payload?.preview?.kind === "runtime_sync_preview") {
+            headline = `${label} | sync preview ready`;
+          } else if (payload?.path === "/control/actions/task/retry" && payload?.executed) {
+            headline = `${label} | retry execution submitted`;
+          } else if (payload?.path === "/control/actions/control/auto-recover" && payload?.executed) {
+            headline = `${label} | auto recover executed`;
+          } else if (payload?.error) {
+            headline = `${label} | ${payload.error}`;
+          }
+          const rowsData = [
+            ["status", status],
+            ["mode", asText(payload?.mode)],
+            ["command", command],
+            ["task", taskLabel],
+            ["runtime", runtimeLabel],
+            ["task_state", payload?.task ? `${asText(payload.task.status)}/${asText(payload.task.tf_phase)}` : "-"],
+            ["followup", asText(payload?.preview?.followup_summary || payload?.preview?.completion_followup_when)],
+            ["sync", asText(payload?.preview?.sync_summary)],
+            ["next_focus", asText(payload?.preview?.next_focus)],
+            ["auto_state", payload?.auto_state ? `${asText(payload.auto_state.command)} | grace=${asText(payload.auto_state.recovery_grace_until)}` : "-"],
+            ["contexts", contexts.join(", ") || "-"],
+          ];
+          return { headline, rowsData };
+        };
         const setResult = (label, status, payload, error = false) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
-          summary.textContent = `${label} | status=${status}`;
+          const { headline, rowsData } = buildSummary(label, status, payload);
+          summary.textContent = headline;
+          clearRows();
+          rowsData.forEach(([key, value]) => appendRow(key, asText(value)));
+          if (rows.children.length) {
+            rows.classList.remove("hidden");
+          }
           body.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+          details.classList.remove("hidden");
+          details.open = Boolean(error);
           panel.scrollIntoView({ block: "start", behavior: "smooth" });
         };
         clear?.addEventListener("click", () => {
           panel.classList.add("hidden");
           panel.classList.remove("error");
           summary.textContent = "No action has been run yet.";
+          clearRows();
           body.textContent = "-";
+          details.classList.add("hidden");
+          details.open = false;
         });
         document.addEventListener("submit", async (event) => {
           const form = event.target;
@@ -73,6 +155,12 @@
             return;
           }
           event.preventDefault();
+          if (form.dataset.actionConfirm === "true") {
+            const confirmed = window.confirm(form.dataset.actionConfirmMessage || `${form.dataset.actionLabel || form.action} will execute. Continue?`);
+            if (!confirmed) {
+              return;
+            }
+          }
           const payloadField = form.querySelector('input[name="payload_json"]');
           const payload = payloadField instanceof HTMLInputElement ? payloadField.value : "{}";
           const label = form.dataset.actionLabel || form.action;
@@ -80,7 +168,7 @@
           if (button instanceof HTMLButtonElement) {
             button.disabled = true;
           }
-          setResult(label, "pending", { pending: true, command: form.dataset.actionCommand || "-" });
+          setResult(label, "pending", { pending: true, source_command: form.dataset.actionCommand || "-", mode: form.dataset.actionMode || "-" });
           try {
             const response = await fetch(form.action, {
               method: "POST",

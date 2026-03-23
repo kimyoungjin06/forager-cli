@@ -106,6 +106,20 @@ body {
   opacity: 0.65;
   cursor: progress;
 }
+.action-result-rows {
+  margin-top: 0.75rem;
+}
+.action-result-rows li {
+  grid-template-columns: 120px 1fr;
+}
+.action-result-details {
+  margin-top: 0.85rem;
+}
+.action-result-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
 .action-block { margin-top: 0.75rem; }
 .action-toolbar {
   display: grid;
