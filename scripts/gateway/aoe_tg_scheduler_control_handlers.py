@@ -14,6 +14,8 @@ _PROVIDER_RECOVERY_GRACE_SEC = max(
     int(str(os.environ.get("AOE_PROVIDER_RECOVERY_GRACE_SEC", "600") or "600").strip() or "600"),
 )
 _COMMAND_RESOLVED_DETAIL_RE = re.compile(r"(?:^| )(?P<key>cmd|action|class|trace)=(?P<value>.*?)(?= (?:cmd|action|class|trace)=|$)")
+_ACTION_AUDIT_DIRNAME = "dashboard"
+_ACTION_AUDIT_FILENAME = "action-history.jsonl"
 
 
 def _parse_iso_datetime(raw: Any) -> Optional[datetime]:
@@ -121,6 +123,58 @@ def _append_latest_intent_lines(
     if trace != "-":
         formatter = compact_reason if callable(compact_reason) else _compact_text
         lines.append(f"- latest_intent_trace: {formatter(trace, 160)}")
+
+
+def _latest_action_audit(args: Any) -> Dict[str, str]:
+    team_dir = Path(getattr(args, "team_dir", "") or "")
+    if not team_dir:
+        return {}
+    path = team_dir / _ACTION_AUDIT_DIRNAME / _ACTION_AUDIT_FILENAME
+    if not path.exists():
+        return {}
+    latest: Dict[str, str] = {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = str(line or "").strip()
+                if not raw:
+                    continue
+                try:
+                    row = json.loads(raw)
+                except Exception:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                latest = {
+                    "headline": str(row.get("headline", "")).strip() or "-",
+                    "status": str(row.get("status", "")).strip() or "unknown",
+                    "next_step": str(row.get("next_step", "")).strip() or "-",
+                    "source_command": str(row.get("source_command", "")).strip() or "-",
+                    "remediation": str(row.get("remediation", "")).strip() or "-",
+                }
+    except Exception:
+        return {}
+    return latest
+
+
+def _append_latest_action_lines(
+    lines: List[str],
+    latest_action: Dict[str, str],
+    *,
+    compact_reason: Optional[Callable[[Any, int], str]] = None,
+) -> None:
+    if not isinstance(latest_action, dict) or not latest_action:
+        return
+    headline = str(latest_action.get("headline", "")).strip() or "-"
+    next_step = str(latest_action.get("next_step", "")).strip() or "-"
+    remediation = str(latest_action.get("remediation", "")).strip() or "-"
+    if headline != "-":
+        lines.append(f"- latest_action: {headline}")
+    if next_step != "-":
+        lines.append(f"- latest_action_next: {next_step}")
+    if remediation != "-":
+        formatter = compact_reason if callable(compact_reason) else _compact_text
+        lines.append(f"- latest_action_note: {formatter(remediation, 120)}")
 
 
 def _next_rate_limited_task_snapshot(manager_state: Dict[str, Any]) -> Dict[str, str]:
@@ -959,6 +1013,7 @@ def _handle_offdesk_command(
 
     if sub == "status":
         latest_intent = _latest_command_resolution(args)
+        latest_action = _latest_action_audit(args)
         lines = [
             "offdesk mode",
             f"- enabled: {'yes' if off_enabled else 'no'}",
@@ -981,6 +1036,7 @@ def _handle_offdesk_command(
             "- /auto status",
         ]
         _append_latest_intent_lines(lines, latest_intent)
+        _append_latest_action_lines(lines, latest_action, compact_reason=_compact_text)
         snapshot_lines = focused_project_snapshot_lines(manager_state)
         if status_level == "long" and snapshot_lines:
             lines.extend([""] + snapshot_lines)
@@ -992,6 +1048,7 @@ def _handle_offdesk_command(
 
     if sub in {"prepare", "preflight", "check"}:
         latest_intent = _latest_command_resolution(args)
+        latest_action = _latest_action_audit(args)
         raw_target = ""
         for tok in tokens[1:]:
             low = str(tok or "").strip().lower()
@@ -1015,6 +1072,7 @@ def _handle_offdesk_command(
         if not targets:
             lines = ["offdesk prepare", "- no orch projects registered"]
             _append_latest_intent_lines(lines, latest_intent)
+            _append_latest_action_lines(lines, latest_action, compact_reason=_compact_text)
             send("\n".join(lines).strip(), context="offdesk-prepare empty", with_menu=True)
             return True
 
@@ -1039,6 +1097,7 @@ def _handle_offdesk_command(
             f"- blocked: {blocked_count}",
         ]
         _append_latest_intent_lines(lines, latest_intent)
+        _append_latest_action_lines(lines, latest_action, compact_reason=_compact_text)
         lines.extend(_provider_capacity_memory_lines(provider_state))
         lines.extend(["", "projects:"])
         for report in reports:
@@ -1072,6 +1131,7 @@ def _handle_offdesk_command(
 
     if sub == "review":
         latest_intent = _latest_command_resolution(args)
+        latest_action = _latest_action_audit(args)
         raw_target = ""
         for tok in tokens[1:]:
             low = str(tok or "").strip().lower()
@@ -1107,6 +1167,7 @@ def _handle_offdesk_command(
             )
             lines = ["offdesk review", "- no orch projects registered"]
             _append_latest_intent_lines(lines, latest_intent)
+            _append_latest_action_lines(lines, latest_action, compact_reason=_compact_text)
             if capacity_summary:
                 lines.append(
                     "- provider_capacity: tasks={tasks} projects={projects} providers={providers}".format(
@@ -1172,6 +1233,7 @@ def _handle_offdesk_command(
             f"- flagged: {len(flagged)}",
         ]
         _append_latest_intent_lines(lines, latest_intent)
+        _append_latest_action_lines(lines, latest_action, compact_reason=_compact_text)
         if capacity_summary:
             lines.append(
                 "- provider_capacity: tasks={tasks} projects={projects} providers={providers}".format(
@@ -1593,6 +1655,7 @@ def _handle_auto_command(
 
     if sub == "status":
         latest_intent = _latest_command_resolution(args)
+        latest_action = _latest_action_audit(args)
         recovery_action = _capacity_recovery_action(current, provider_state, manager_state)
         recovery_target = _capacity_recovery_target(
             current,
@@ -1653,6 +1716,7 @@ def _handle_auto_command(
         if recovery_grace_until:
             lines.append(f"- recovery_grace_until: {recovery_grace_until}")
         _append_latest_intent_lines(lines, latest_intent, compact_reason=compact_reason)
+        _append_latest_action_lines(lines, latest_action, compact_reason=compact_reason)
         if capacity_summary:
             lines.append(
                 "- provider_capacity: tasks={tasks} projects={projects} providers={providers}".format(

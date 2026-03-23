@@ -148,6 +148,28 @@ def _write_gateway_events_log(tmp_path: Path, *details: str) -> None:
     )
 
 
+def _write_action_audit_log(tmp_path: Path, *rows: dict) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    payloads = rows or (
+        {
+            "at": "2026-03-21T02:49:00+09:00",
+            "headline": "Retry | blocked",
+            "status": "blocked",
+            "next_step": "/offdesk review",
+            "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+            "link_label": "task detail",
+            "link_href": "/control/tasks/by-request/REQ-1",
+            "source_command": "/retry T-001",
+        },
+    )
+    (audit_dir / "action-history.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in payloads) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _management_control_kwargs(
     *,
     tmp_path: Path,
@@ -1079,6 +1101,7 @@ def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
         tmp_path,
         "cmd=offdesk action=offdesk_review class=status trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
     )
+    _write_action_audit_log(tmp_path)
     state = gw.default_manager_state(tmp_path, team_dir)
 
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="auto", rest="status")
@@ -1086,6 +1109,9 @@ def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent: offdesk | offdesk_review" in text
     assert "- first_focus: execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in text
     assert "- latest_intent_trace: selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action_next: /offdesk review" in text
+    assert "- latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again" in text
 
 
 def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
@@ -1095,6 +1121,7 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
         tmp_path,
         "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
     )
+    _write_action_audit_log(tmp_path)
     state = gw.default_manager_state(tmp_path, team_dir)
 
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status")
@@ -1103,6 +1130,8 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent: offdesk | offdesk_prepare" in text
     assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action_next: /offdesk review" in text
 
 
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:
@@ -1377,6 +1406,7 @@ def test_offdesk_prepare_surfaces_latest_intent_summary(tmp_path: Path) -> None:
         tmp_path,
         "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
     )
+    _write_action_audit_log(tmp_path)
     state = gw.default_manager_state(tmp_path, team_dir)
 
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="prepare")
@@ -1386,6 +1416,8 @@ def test_offdesk_prepare_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent: offdesk | offdesk_prepare" in text
     assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action_next: /offdesk review" in text
 
 
 def test_offdesk_prepare_warns_when_syncback_drift_exists_without_other_issues(tmp_path: Path) -> None:
@@ -1756,6 +1788,7 @@ def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> 
         tmp_path,
         "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
     )
+    _write_action_audit_log(tmp_path)
     state = gw.default_manager_state(tmp_path, team_dir)
 
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review")
@@ -1765,6 +1798,8 @@ def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> 
     assert "- latest_intent: offdesk | offdesk_prepare" in text
     assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action_next: /offdesk review" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
