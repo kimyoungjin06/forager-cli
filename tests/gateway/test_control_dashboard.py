@@ -313,6 +313,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert overview_status == 200
     assert overview_headers["Content-Type"].startswith("text/html")
     assert "Control Summary" in overview_text
+    assert "Action Audit" in overview_text
     assert "O2 Alpha" in overview_text
     assert "next_retry_target" in overview_text
     assert "latest_intent_command" in overview_text
@@ -338,6 +339,31 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert health_headers["Content-Type"].startswith("application/json")
     assert health["ok"] is True
     assert health["active_runtime_count"] == 1
+
+
+def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/audit", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Action Audit" in text
+    assert "action-history.jsonl" in text
+    assert "status_summary" in text
+    assert "preview=1" in text
+    assert "Sync Preview | preview" in text
+    assert "/sync preview O2 24h" in text
+    assert "/control/runtimes/O2" in text
 
 
 def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_path: Path) -> None:

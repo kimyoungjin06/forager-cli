@@ -41,6 +41,7 @@ import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
 
 from control_dashboard_state import (
+    load_dashboard_action_audit_page,
     load_dashboard_recovery_page,
     load_dashboard_runtime_details,
     load_dashboard_snapshot,
@@ -714,7 +715,7 @@ def _execute_retry_run_transition(
 
 
 def _is_known_dashboard_get_route(path: str) -> bool:
-    if path in {"", "/", "/control", "/control/offdesk", "/control/recovery", "/control/tasks", "/control/health"}:
+    if path in {"", "/", "/control", "/control/offdesk", "/control/recovery", "/control/audit", "/control/tasks", "/control/health"}:
         return True
     if path.startswith("/static/"):
         return True
@@ -1188,6 +1189,22 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                 page_title="Recovery",
                 snapshot=snapshot,
                 recovery=recovery,
+                current_path=path,
+            )
+        )
+
+    if path == "/control/audit":
+        snapshot, audit = load_dashboard_action_audit_page(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+        )
+        return _html(
+            render_template(
+                "dashboard/audit.html",
+                page_title="Action Audit",
+                snapshot=snapshot,
+                audit=audit,
                 current_path=path,
             )
         )

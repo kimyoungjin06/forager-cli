@@ -320,6 +320,18 @@ class RecoverySummaryDTO:
 
 
 @dataclass(frozen=True)
+class ActionAuditPageDTO:
+    exists: bool
+    audit_path: str
+    updated_at: str
+    stale: bool
+    error: str
+    total_rows: int
+    status_summary: str
+    rows: List[ActionAuditRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class DashboardSnapshotDTO:
     control_root: str
     team_dir: str
@@ -551,6 +563,17 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
             stale=True,
             error=str(exc),
         )
+
+
+def _action_audit_status_summary(rows: List[ActionAuditRowDTO]) -> str:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        status = str(row.status or "").strip().lower() or "unknown"
+        counts[status] = int(counts.get(status, 0)) + 1
+    if not counts:
+        return "-"
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{status}={count}" for status, count in ordered)
 
 
 def _latest_intent_focus(action: str, trace: str) -> str:
@@ -1725,3 +1748,29 @@ def load_dashboard_recovery_page(
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     summary_state, freshness = _load_json_file(_recovery_summary_path(paths.team_dir), name="nightly_summary")
     return loaded.snapshot, _build_recovery_summary(summary_state, freshness)
+
+
+def load_dashboard_action_audit_page(
+    *,
+    control_root: Path | str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+    limit: int = 50,
+) -> Tuple[DashboardSnapshotDTO, ActionAuditPageDTO]:
+    loaded = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
+    rows, freshness = _load_recent_action_audit(paths.action_audit_file, limit=max(1, int(limit)))
+    return loaded.snapshot, ActionAuditPageDTO(
+        exists=bool(freshness.exists),
+        audit_path=freshness.path,
+        updated_at=freshness.updated_at,
+        stale=bool(freshness.stale),
+        error=freshness.error,
+        total_rows=len(rows),
+        status_summary=_action_audit_status_summary(rows),
+        rows=rows,
+    )

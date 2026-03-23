@@ -1,0 +1,52 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Action Audit</h2>
+  <ul class="kv-list">
+    <li><span>audit_path</span><strong>{{ audit.audit_path }}</strong></li>
+    <li><span>updated_at</span><strong>{{ audit.updated_at or '-' }}</strong></li>
+    <li><span>total_rows</span><strong>{{ audit.total_rows }}</strong></li>
+    <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
+    {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
+    {% if audit.error %}<li><span>audit_error</span><strong>{{ audit.error }}</strong></li>{% endif %}
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Recent Actions</h2>
+  {% if audit.rows %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>At</th>
+        <th>Headline</th>
+        <th>Status</th>
+        <th>Next</th>
+        <th>Command</th>
+        <th>Link</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in audit.rows %}
+      <tr>
+        <td>{{ row.at }}</td>
+        <td>{{ row.headline }}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
+        <td>{{ row.status }}</td>
+        <td>{{ row.next_step }}</td>
+        <td><code>{{ row.source_command }}</code></td>
+        <td>
+          {% if row.link_href and row.link_href != '-' %}
+          <a href="{{ row.link_href }}">{{ row.link_label or 'detail' }}</a>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no action audit rows</p>
+  {% endif %}
+</section>
+{% endblock %}
