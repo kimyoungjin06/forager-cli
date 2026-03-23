@@ -71,6 +71,16 @@ _RUN_BLOCKED_CONTEXTS = {
     "empty prompt",
 }
 
+_RETRY_BLOCKED_REMEDIATIONS = {
+    "planning-gate": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+    "dispatch-exception": "inspect dispatch exception output and backend notes in the task detail before attempting another retry",
+    "exec-critic": "inspect exec critic verdict and lane rerun targets in /task before retrying again",
+    "verifier-gate failed": "inspect verifier findings and required verifier roles in /task before retrying again",
+    "run usage": "inspect the retry command payload and lane selection before retrying again",
+    "unknown command": "inspect the retry action contract and command mapping before retrying again",
+    "empty prompt": "inspect the source task prompt in the runtime lifecycle before retrying again",
+}
+
 
 @dataclass(frozen=True)
 class DashboardAppConfig:
@@ -246,6 +256,28 @@ def _make_log_collector(events: List[Dict[str, Any]]):
         events.append(dict(kwargs))
 
     return _log
+
+
+def _retry_blocked_remediation(contexts: List[str]) -> str:
+    for context in contexts:
+        token = str(context or "").strip()
+        if token in _RETRY_BLOCKED_REMEDIATIONS:
+            return _RETRY_BLOCKED_REMEDIATIONS[token]
+    return "inspect planning or critic blockers in /offdesk review before re-running retry"
+
+
+def _auto_recover_remediation(*, blocked: bool, provider_state: Dict[str, Any]) -> str:
+    retry_at = str(provider_state.get("next_retry_at", "")).strip()
+    repeat_count = int(provider_state.get("recovery_repeat_count", 0) or 0)
+    if not blocked:
+        return "verify recovery grace and next retry timing in /auto status before making the next control decision"
+    if retry_at and repeat_count > 0:
+        return f"provider capacity is still blocked; inspect /offdesk review and /auto status, then wait for retry_at={retry_at} with repeat memory in mind"
+    if retry_at:
+        return f"provider capacity is still blocked; inspect /auto status and wait for retry_at={retry_at} before forcing another recover"
+    if repeat_count > 0:
+        return "provider capacity is repeatedly blocked; inspect repeat memory and blocked runtimes in /offdesk review before forcing another recover"
+    return "inspect provider capacity and blocked runtimes in /offdesk review before forcing another recover"
 
 
 @lru_cache(maxsize=1)
@@ -514,7 +546,7 @@ def _execute_retry_run_transition(
             "remediation": (
                 "review the updated task detail and lane state before repeating another retry"
                 if not blocked
-                else "inspect planning or critic blockers in /offdesk review before re-running retry"
+                else _retry_blocked_remediation(contexts)
             ),
         },
         status=409 if blocked else 200,
@@ -739,12 +771,12 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "mode": spec.get("mode", "-"),
                 "source_command": spec.get("command", "-"),
                 "payload": payload,
-                "messages": messages,
-                "next_step": "/offdesk review",
-                "remediation": "review critic blockers and lane eligibility in /offdesk review or /task before retrying again",
-            },
-            status=409,
-        )
+            "messages": messages,
+            "next_step": "/offdesk review",
+            "remediation": _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
+        },
+        status=409,
+    )
     return _execute_retry_run_transition(
         transition,
         config=config,
@@ -866,11 +898,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
             },
             "team_dir": str(paths.team_dir),
             "next_step": "/auto status" if not blocked else "/offdesk review",
-            "remediation": (
-                "verify recovery grace and next retry timing in /auto status before making the next control decision"
-                if not blocked
-                else "inspect provider capacity and blocked runtimes in /offdesk review before forcing another recover"
-            ),
+            "remediation": _auto_recover_remediation(blocked=blocked, provider_state=provider_state),
         },
         status=409 if blocked else 200,
     )

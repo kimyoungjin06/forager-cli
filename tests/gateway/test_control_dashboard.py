@@ -599,6 +599,53 @@ def test_control_dashboard_post_retry_route_executes_retry_bridge(tmp_path: Path
     assert "review the updated task detail" in payload["remediation"]
 
 
+def test_control_dashboard_post_retry_route_blocked_includes_context_specific_remediation(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    def _fake_execute_retry_run_transition(transition, *, config, manager_state, paths, source_command, payload):
+        return dashboard_app._json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": True,
+                "status": "blocked",
+                "method": "POST",
+                "path": "/control/actions/task/retry",
+                "mode": "phase2",
+                "source_command": source_command,
+                "payload": payload,
+                "messages": [{"context": "planning-gate", "text": "plan gate blocked"}],
+                "next_step": "/offdesk review",
+                "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+            },
+            status=409,
+        )
+
+    monkeypatch.setattr(dashboard_app, "_execute_retry_run_transition", _fake_execute_retry_run_transition)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["next_step"] == "/offdesk review"
+    assert "approval blockers" in payload["remediation"]
+
+
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -686,6 +733,38 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
     assert payload["auto_state"]["command"] == "next"
     assert payload["auto_state"]["recovery_grace_until"] != "-"
     assert payload["messages"][-1]["context"] == "auto-recover"
+
+
+def test_control_dashboard_post_auto_recover_blocked_includes_retry_at_remediation(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    def _fake_handle_scheduler_control_command(**kwargs):
+        send = kwargs["send"]
+        send("auto recovery blocked", context="auto-recover-blocked")
+        return True
+
+    monkeypatch.setattr(dashboard_app.scheduler_control_handlers, "handle_scheduler_control_command", _fake_handle_scheduler_control_command)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/auto-recover",
+        body=b"{}",
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["status"] == "blocked"
+    assert payload["next_step"] == "/offdesk review"
+    assert "retry_at=2026-03-16T10:30:00+09:00" in payload["remediation"]
 
 
 def test_control_dashboard_post_safe_action_route_returns_404_for_unknown_target(tmp_path: Path) -> None:
