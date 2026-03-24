@@ -129,6 +129,41 @@ def _latest_recorded_outcome(rows: List[Dict[str, Any]], *, kind: str) -> Dict[s
     return {}
 
 
+def _missing_outcome_response(
+    *,
+    path: str,
+    source_command: str,
+    payload: Dict[str, Any],
+    kind: str,
+    messages: List[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+    remediation: str,
+) -> Tuple[int, Dict[str, str], bytes]:
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "contract_missing",
+            "method": "POST",
+            "path": path,
+            "source_command": source_command,
+            "payload": payload,
+            "messages": messages,
+            "events": events,
+            "outcome": {
+                "kind": kind,
+                "status": "contract_missing",
+                "reason_code": "outcome_missing",
+                "detail": "handler returned without structured outcome",
+            },
+            "next_step": "/task" if kind == "retry_run" else "/auto status",
+            "remediation": remediation,
+        },
+        status=500,
+    )
+
+
 def _retry_blocked_remediation_for_reason(reason_code: str, detail: str = "") -> str:
     token = str(reason_code or "").strip().lower().replace("-", "_")
     if token == "planning_gate":
@@ -721,8 +756,17 @@ def _execute_retry_run_transition(
         if isinstance(entry, dict) and executed_request_id
         else None
     )
-    contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
     outcome = _latest_recorded_outcome(outcomes, kind="retry_run")
+    if not outcome:
+        return _missing_outcome_response(
+            path="/control/actions/task/retry",
+            source_command=source_command,
+            payload=payload,
+            kind="retry_run",
+            messages=messages,
+            events=events,
+            remediation="inspect the retry handler contract; dashboard actions now require structured outcome rows",
+        )
     blocked = str(outcome.get("status", "")).strip() == "blocked"
     task_payload = None
     if isinstance(executed_task, dict) and executed_request_id:
@@ -733,8 +777,6 @@ def _execute_retry_run_transition(
             "tf_phase": str(executed_task.get("tf_phase", "")).strip() or "-",
             "detail_path": f"/control/tasks/by-request/{quote(executed_request_id, safe='')}",
         }
-    if not outcome:
-        blocked = any(context in _RUN_BLOCKED_CONTEXTS for context in contexts)
     next_step = (
         str(outcome.get("next_step", "")).strip()
         or ("/offdesk review" if blocked else (f"/task {task_payload['label']}" if isinstance(task_payload, dict) else "/monitor"))
@@ -742,15 +784,12 @@ def _execute_retry_run_transition(
     remediation = (
         "review the updated task detail and lane state before repeating another retry"
         if not blocked
-        else _retry_blocked_remediation(contexts)
+        else "inspect the structured retry outcome and planning contract before repeating another retry"
     )
-    if outcome:
-        reason_code = str(outcome.get("reason_code", "")).strip() or "-"
-        detail_note = str(outcome.get("detail", "")).strip()
-        if blocked:
-            remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
-    else:
-        reason_code = "-"
+    reason_code = str(outcome.get("reason_code", "")).strip() or "-"
+    detail_note = str(outcome.get("detail", "")).strip()
+    if blocked:
+        remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
     return _json(
         {
             "ok": not blocked,
@@ -1107,11 +1146,18 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
 
     auto_state = management_handlers._load_auto_state(management_handlers._auto_state_path(args))
     provider_state = management_handlers._load_provider_capacity_state(management_handlers._provider_capacity_state_path(args))
-    last_context = str(messages[-1].get("context", "")).strip() if messages else ""
     outcome = _latest_recorded_outcome(outcomes, kind="auto_recover")
-    blocked = str(outcome.get("status", "")).strip() == "blocked"
     if not outcome:
-        blocked = last_context == "auto-recover-blocked"
+        return _missing_outcome_response(
+            path=str(spec.get("path", "-")),
+            source_command=str(spec.get("command", "-")),
+            payload=payload,
+            kind="auto_recover",
+            messages=messages,
+            events=[],
+            remediation="inspect the auto recover handler contract; dashboard actions now require structured outcome rows",
+        )
+    blocked = str(outcome.get("status", "")).strip() == "blocked"
 
     return _json(
         {

@@ -1025,6 +1025,38 @@ def test_control_dashboard_post_auto_recover_blocked_includes_retry_at_remediati
     assert "retry_at=2026-03-16T10:30:00+09:00" in payload["remediation"]
 
 
+def test_control_dashboard_post_auto_recover_requires_structured_outcome(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    def _fake_handle_scheduler_control_command(**kwargs):
+        send = kwargs["send"]
+        send("legacy auto recover message", context="auto-recover")
+        return True
+
+    monkeypatch.setattr(dashboard_app.scheduler_control_handlers, "handle_scheduler_control_command", _fake_handle_scheduler_control_command)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/auto-recover",
+        body=b"{}",
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 500
+    assert payload["status"] == "contract_missing"
+    assert payload["outcome"]["reason_code"] == "outcome_missing"
+    assert "structured outcome rows" in payload["remediation"]
+
+
 def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -1078,6 +1110,49 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert payload["outcome"]["reason_code"] == "planning_gate"
     assert payload["next_step"] == "/offdesk review"
     assert "approval blockers" in payload["remediation"]
+
+
+def test_execute_retry_run_transition_requires_structured_outcome(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    paths, manager_state = dashboard_app._load_dashboard_manager_state(config)
+
+    def _fake_handle_run_or_unknown_command(*, ctx, deps):
+        deps.core.send("legacy body without outcome", context="run-dispatched")
+        return True
+
+    monkeypatch.setattr(dashboard_app.run_handlers, "handle_run_or_unknown_command", _fake_handle_run_or_unknown_command)
+
+    status, _headers, body = dashboard_app._execute_retry_run_transition(
+        {
+            "cmd": "run",
+            "rest": "",
+            "orch_target": "alpha",
+            "run_prompt": "retry it",
+            "run_force_mode": "dispatch",
+            "run_control_mode": "retry",
+            "run_source_request_id": "REQ-1",
+            "run_source_task": {"request_id": "REQ-1"},
+        },
+        config=config,
+        manager_state=manager_state,
+        paths=paths,
+        source_command="/retry T-001",
+        payload={"task_ref": "T-001"},
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 500
+    assert payload["status"] == "contract_missing"
+    assert payload["outcome"]["reason_code"] == "outcome_missing"
+    assert "structured outcome rows" in payload["remediation"]
 
 
 def test_control_dashboard_post_safe_action_route_returns_404_for_unknown_target(tmp_path: Path) -> None:
