@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Read-only helpers for operator-facing latest intent summaries."""
+"""Helpers for operator-facing latest intent summaries."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -12,6 +13,8 @@ from aoe_tg_action_audit import compact_action_text
 
 
 _COMMAND_RESOLVED_DETAIL_RE = re.compile(r"(?:^| )(?P<key>cmd|action|class|trace)=(?P<value>.*?)(?= (?:cmd|action|class|trace)=|$)")
+LATEST_INTENT_DIRNAME = "control"
+LATEST_INTENT_FILENAME = "latest-intent.json"
 
 
 def parse_command_resolved_detail(detail: Any) -> Dict[str, str]:
@@ -24,6 +27,7 @@ def parse_command_resolved_detail(detail: Any) -> Dict[str, str]:
     return {
         "command": parsed.get("cmd", "").strip() or "-",
         "action": parsed.get("action", "").strip() or "-",
+        "intent_class": parsed.get("class", "").strip(),
         "trace": parsed.get("trace", "").strip() or "-",
     }
 
@@ -46,11 +50,38 @@ def latest_intent_focus(action: Any, trace: Any) -> str:
     return "-"
 
 
-def load_latest_command_resolution(team_dir: Any) -> Dict[str, str]:
+def latest_intent_snapshot_path(team_dir: Any) -> Path:
     token = str(team_dir or "").strip()
     if not token:
+        return Path("")
+    return Path(token).expanduser().resolve() / LATEST_INTENT_DIRNAME / LATEST_INTENT_FILENAME
+
+
+def _normalize_latest_intent_record(raw: Any) -> Dict[str, str]:
+    if not isinstance(raw, dict):
         return {}
-    path = Path(token).expanduser().resolve() / "logs" / "gateway_events.jsonl"
+    if not any(str(raw.get(key, "")).strip() for key in ("command", "action", "trace", "focus", "intent_class", "recorded_at")):
+        return {}
+    command = str(raw.get("command", "")).strip() or "-"
+    action = str(raw.get("action", "")).strip() or "-"
+    trace = str(raw.get("trace", "")).strip() or "-"
+    focus = str(raw.get("focus", "")).strip() or latest_intent_focus(action, trace)
+    intent_class = str(raw.get("intent_class", "")).strip()
+    recorded_at = str(raw.get("recorded_at", "")).strip()
+    out = {
+        "command": command,
+        "action": action,
+        "trace": trace,
+        "focus": focus,
+    }
+    if intent_class:
+        out["intent_class"] = intent_class
+    if recorded_at:
+        out["recorded_at"] = recorded_at
+    return out
+
+
+def _load_latest_command_resolution_from_events(path: Path) -> Dict[str, str]:
     if not path.exists():
         return {}
     latest: Dict[str, str] = {}
@@ -77,6 +108,63 @@ def load_latest_command_resolution(team_dir: Any) -> Dict[str, str]:
         return {}
     latest["focus"] = latest_intent_focus(latest.get("action", ""), latest.get("trace", ""))
     return latest
+
+
+def _write_latest_intent_payload(path: Path, payload: Dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def save_latest_command_resolution(
+    team_dir: Any,
+    *,
+    command: Any,
+    action: Any,
+    trace: Any,
+    intent_class: Any = "",
+    recorded_at: Any = "",
+    mirror_team_dir: Any = None,
+) -> None:
+    payload = _normalize_latest_intent_record(
+        {
+            "command": command,
+            "action": action,
+            "trace": trace,
+            "focus": latest_intent_focus(action, trace),
+            "intent_class": intent_class,
+            "recorded_at": recorded_at,
+        }
+    )
+    if not payload:
+        return
+    primary = latest_intent_snapshot_path(team_dir)
+    if str(primary).strip():
+        _write_latest_intent_payload(primary, payload)
+    if mirror_team_dir is None:
+        return
+    mirror = latest_intent_snapshot_path(mirror_team_dir)
+    if str(mirror).strip() and mirror != primary:
+        _write_latest_intent_payload(mirror, payload)
+
+
+def load_latest_command_resolution(team_dir: Any) -> Dict[str, str]:
+    token = str(team_dir or "").strip()
+    if not token:
+        return {}
+    try:
+        snapshot = latest_intent_snapshot_path(token)
+        if str(snapshot).strip() and snapshot.exists():
+            parsed = json.loads(snapshot.read_text(encoding="utf-8"))
+            normalized = _normalize_latest_intent_record(parsed)
+            if normalized:
+                return normalized
+    except Exception:
+        pass
+    return _load_latest_command_resolution_from_events(
+        Path(token).expanduser().resolve() / "logs" / "gateway_events.jsonl"
+    )
 
 
 def task_intent_summary(task: Any) -> Dict[str, str]:

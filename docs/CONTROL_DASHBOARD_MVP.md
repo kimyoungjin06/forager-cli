@@ -134,6 +134,7 @@ Current implementation note:
 - `.aoe-team/orch_manager_state.json`
 - `.aoe-team/auto_scheduler.json`
 - `.aoe-team/provider_capacity.json`
+- `.aoe-team/control/latest-intent.json`
 - `.aoe-team/logs/gateway_events.jsonl` only for evidence links, not for primary page assembly
 
 ### 6.2 Reuse Rule

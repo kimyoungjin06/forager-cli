@@ -171,6 +171,9 @@ Success for Phase 1 means:
 
 ### 7.1 Control Plane Summary
 - Reuse:
+  - latest intent snapshot from `.aoe-team/control/latest-intent.json`
+    - `command_resolved accepted` updates this file
+    - `gateway_events.jsonl` stays fallback/evidence only
   - provider capacity loading from `aoe_tg_offdesk_flow.py`
     - `provider_capacity_state_path(...)`
     - `load_provider_capacity_state(...)`

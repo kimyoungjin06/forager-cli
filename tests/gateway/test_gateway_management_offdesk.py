@@ -2,6 +2,9 @@
 """Gateway management, auto, and offdesk workflow regression tests."""
 
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_operator_summary as operator_summary
+
+
 def _call_management_status(
     *,
     tmp_path: Path,
@@ -146,6 +149,16 @@ def _write_gateway_events_log(tmp_path: Path, *details: str) -> None:
         "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
         encoding="utf-8",
     )
+    if details:
+        latest = operator_summary.parse_command_resolved_detail(details[-1])
+        operator_summary.save_latest_command_resolution(
+            team_dir,
+            command=latest.get("command", ""),
+            action=latest.get("action", ""),
+            intent_class=latest.get("intent_class", ""),
+            trace=latest.get("trace", ""),
+            recorded_at=rows[-1]["timestamp"],
+        )
 
 
 def _write_action_audit_log(tmp_path: Path, *rows: dict) -> None:

@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from aoe_tg_operator_summary import save_latest_command_resolution
+
 
 def handle_text_message(
     args: Any,
@@ -218,6 +220,19 @@ def handle_text_message(
             status="accepted",
             detail=" ".join(part for part in detail_parts if part),
         )
+        if not args.dry_run:
+            try:
+                save_latest_command_resolution(
+                    default_log_team_dir,
+                    mirror_team_dir=root_log_team_dir,
+                    command=cmd_key,
+                    action=resolved.intent_action,
+                    intent_class=resolved.intent_class,
+                    trace=resolved.intent_trace,
+                    recorded_at=deps["now_iso"]() if callable(deps.get("now_iso")) else "",
+                )
+            except Exception:
+                pass
 
         chat_role = deps["resolve_chat_role"](chat_id, args)
         if deps["enforce_command_auth"](

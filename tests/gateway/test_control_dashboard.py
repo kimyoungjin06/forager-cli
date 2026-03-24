@@ -17,6 +17,7 @@ for path in (GW_DIR, DASH_DIR):
         sys.path.insert(0, str(path))
 
 from _gateway_test_support import gw  # noqa: E402
+import aoe_tg_operator_summary as operator_summary  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
@@ -249,6 +250,14 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         )
         + "\n",
         encoding="utf-8",
+    )
+    operator_summary.save_latest_command_resolution(
+        team_dir,
+        command="offdesk",
+        action="offdesk_prepare",
+        intent_class="status",
+        trace="selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+        recorded_at="2026-03-16T09:59:00+09:00",
     )
     action_audit_dir = team_dir / "dashboard"
     action_audit_dir.mkdir(parents=True, exist_ok=True)
@@ -526,8 +535,52 @@ def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_p
     assert paths.manager_state_file == manager_state_file.resolve()
     assert paths.auto_state_file == (custom_team_dir / "auto_scheduler.json").resolve()
     assert paths.provider_capacity_file == (custom_team_dir / "provider_capacity.json").resolve()
+    assert paths.latest_intent_file == (custom_team_dir / "control" / "latest-intent.json").resolve()
     assert paths.gateway_events_file == (custom_team_dir / "logs" / "gateway_events.jsonl").resolve()
     assert paths.action_audit_file == (custom_team_dir / "dashboard" / "action-history.jsonl").resolve()
+
+
+def test_control_dashboard_prefers_latest_intent_snapshot_over_gateway_events(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    operator_summary.save_latest_command_resolution(
+        team_dir,
+        command="offdesk",
+        action="offdesk_review",
+        intent_class="status",
+        trace="selected=offdesk_review; matched=review:검토",
+        recorded_at="2026-03-16T10:05:00+09:00",
+    )
+    logs_dir = team_dir / "logs"
+    (logs_dir / "gateway_events.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-03-16T10:06:00+09:00",
+                "event": "command_resolved",
+                "status": "accepted",
+                "detail": "cmd=run action=dispatch_task class=work trace=selected=dispatch_task; matched=work:작성",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_response("/control", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert "latest_intent_action" in text
+    assert "offdesk_review" in text
+    assert "selected=offdesk_review; matched=review:검토" in text
+    assert "dispatch_task" not in text
 
 
 def test_dashboard_task_page_uses_single_manager_snapshot(tmp_path: Path, monkeypatch) -> None:

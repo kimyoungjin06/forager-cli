@@ -34,6 +34,8 @@ ACTION_AUDIT_DIRNAME = "dashboard"
 ACTION_AUDIT_FILENAME = "action-history.jsonl"
 RECOVERY_SUMMARY_DIRNAME = "nightly-session-summary"
 RECOVERY_SUMMARY_FILENAME = "latest.json"
+LATEST_INTENT_DIRNAME = operator_summary.LATEST_INTENT_DIRNAME
+LATEST_INTENT_FILENAME = operator_summary.LATEST_INTENT_FILENAME
 
 _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
@@ -358,6 +360,7 @@ class ControlPaths:
     manager_state_file: Path
     auto_state_file: Path
     provider_capacity_file: Path
+    latest_intent_file: Path
     gateway_events_file: Path
     action_audit_file: Path
 
@@ -401,6 +404,7 @@ def resolve_control_paths(
         manager_state_file=resolved_manager,
         auto_state_file=(resolved_team_dir / AUTO_STATE_FILENAME).resolve(),
         provider_capacity_file=(resolved_team_dir / PROVIDER_CAPACITY_FILENAME).resolve(),
+        latest_intent_file=(resolved_team_dir / LATEST_INTENT_DIRNAME / LATEST_INTENT_FILENAME).resolve(),
         gateway_events_file=(resolved_team_dir / "logs" / GATEWAY_EVENTS_FILENAME).resolve(),
         action_audit_file=(resolved_team_dir / ACTION_AUDIT_DIRNAME / ACTION_AUDIT_FILENAME).resolve(),
     )
@@ -425,7 +429,21 @@ def _load_json_file(path: Path, *, name: str) -> Tuple[Dict[str, Any], FileFresh
         return {}, FileFreshnessDTO(name=name, path=key, exists=True, updated_at=updated_at, stale=True, error=str(exc))
 
 
-def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFreshnessDTO]:
+def _normalize_latest_intent_record(raw: Dict[str, Any]) -> Dict[str, str]:
+    if not any(str(raw.get(key, "")).strip() for key in ("command", "action", "trace", "focus")):
+        return {}
+    command = str(raw.get("command", "")).strip() or "-"
+    action = str(raw.get("action", "")).strip() or "-"
+    trace = str(raw.get("trace", "")).strip() or "-"
+    return {
+        "command": command,
+        "action": action,
+        "trace": trace,
+        "focus": str(raw.get("focus", "")).strip() or operator_summary.latest_intent_focus(action, trace),
+    }
+
+
+def _load_latest_command_resolution_from_events(path: Path) -> Tuple[Dict[str, str], FileFreshnessDTO]:
     key = str(path)
     exists = path.exists()
     updated_at = _iso_from_mtime(path) if exists else ""
@@ -477,6 +495,18 @@ def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFre
             stale=True,
             error=str(exc),
         )
+
+
+def _load_latest_command_resolution(
+    latest_intent_path: Path,
+    gateway_events_path: Path,
+) -> Tuple[Dict[str, str], FileFreshnessDTO, Optional[FileFreshnessDTO]]:
+    latest_intent_data, latest_intent_freshness = _load_json_file(latest_intent_path, name="latest_intent")
+    normalized = _normalize_latest_intent_record(latest_intent_data)
+    if normalized:
+        return normalized, latest_intent_freshness, None
+    fallback, gateway_events_freshness = _load_latest_command_resolution_from_events(gateway_events_path)
+    return fallback, latest_intent_freshness, gateway_events_freshness
 
 
 def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
@@ -1574,7 +1604,10 @@ def load_dashboard_snapshot_result(
     manager_loaded = _load_manager_state(paths)
     auto_state, auto_freshness = _load_json_file(paths.auto_state_file, name="auto_state")
     provider_state, provider_freshness = _load_json_file(paths.provider_capacity_file, name="provider_capacity")
-    latest_intent, gateway_events_freshness = _load_latest_command_resolution(paths.gateway_events_file)
+    latest_intent, latest_intent_freshness, gateway_events_freshness = _load_latest_command_resolution(
+        paths.latest_intent_file,
+        paths.gateway_events_file,
+    )
     action_audit_rows, action_audit_freshness = _load_recent_action_audit(paths.action_audit_file)
 
     runtime_cards = _build_runtime_cards(manager_loaded.state, provider_state)
@@ -1611,7 +1644,14 @@ def load_dashboard_snapshot_result(
             team_dir=str(paths.team_dir),
             manager_state_file=str(paths.manager_state_file),
             snapshot_taken_at=snapshot_taken_at,
-            source_files=[manager_loaded.freshness, auto_freshness, provider_freshness, gateway_events_freshness, action_audit_freshness],
+            source_files=[
+                manager_loaded.freshness,
+                auto_freshness,
+                provider_freshness,
+                latest_intent_freshness,
+                *([gateway_events_freshness] if gateway_events_freshness is not None else []),
+                action_audit_freshness,
+            ],
             control_summary=summary,
             runtime_cards=runtime_cards,
             attention_runtime_cards=attention_cards,
