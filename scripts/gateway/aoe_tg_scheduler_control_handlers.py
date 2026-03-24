@@ -1425,6 +1425,7 @@ def _handle_auto_command(
     default_auto_interval_sec: int,
     default_auto_idle_sec: int,
     default_auto_max_failures: int,
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
     tokens = [t for t in str(rest or "").split() if t.strip()]
     sub = (tokens[0].lower() if tokens else "status").strip()
@@ -1710,6 +1711,16 @@ def _handle_auto_command(
         if now_dt.tzinfo is None:
             now_dt = now_dt.replace(tzinfo=timezone.utc)
         if retry_dt is not None and retry_dt > now_dt.astimezone(timezone.utc) and not force_recover:
+            if callable(record_outcome):
+                record_outcome(
+                    {
+                        "kind": "auto_recover",
+                        "status": "blocked",
+                        "reason_code": "provider_capacity_blocked",
+                        "next_step": "/offdesk review",
+                        "detail": f"next_retry_at={retry_at}" if retry_at else "provider capacity is still blocked",
+                    }
+                )
             send(
                 "auto recovery blocked\n"
                 f"- next_retry_at: {retry_at}\n"
@@ -1767,6 +1778,16 @@ def _handle_auto_command(
             ok, out = True, "dry-run: skipped tmux auto recover"
         else:
             ok, out = tmux_auto_command(args, "on")
+        if callable(record_outcome):
+            record_outcome(
+                {
+                    "kind": "auto_recover",
+                    "status": "executed" if ok else "blocked",
+                    "reason_code": "auto_recover_started" if ok else "tmux_start_failed",
+                    "next_step": "/auto status" if ok else "/offdesk review",
+                    "detail": str(out or "-").strip(),
+                }
+            )
         send(
             "auto scheduler recovered\n"
             "- enabled: yes\n"
@@ -1931,6 +1952,7 @@ def handle_scheduler_control_command(
     default_offdesk_prefetch_since: str,
     default_offdesk_report_level: str,
     default_offdesk_room: str,
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
     if cmd == "focus":
         return _handle_focus_command(
@@ -2054,5 +2076,6 @@ def handle_scheduler_control_command(
             default_auto_interval_sec=default_auto_interval_sec,
             default_auto_idle_sec=default_auto_idle_sec,
             default_auto_max_failures=default_auto_max_failures,
+            record_outcome=record_outcome,
         )
     return False

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,6 +18,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_operator_action_contract as operator_action_contract
+import aoe_tg_operator_summary as operator_summary
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_orch_contract as orch_contract
 import aoe_tg_runtime_read as runtime_read
@@ -39,7 +39,6 @@ _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_COMMAND_RESOLUTION: Dict[str, Dict[str, str]] = {}
 _LAST_GOOD_ACTION_AUDIT: Dict[str, List[Dict[str, str]]] = {}
-_COMMAND_RESOLVED_DETAIL_RE = re.compile(r"(?:^| )(?P<key>cmd|action|class|trace)=(?P<value>.*?)(?= (?:cmd|action|class|trace)=|$)")
 
 
 @dataclass(frozen=True)
@@ -426,20 +425,6 @@ def _load_json_file(path: Path, *, name: str) -> Tuple[Dict[str, Any], FileFresh
         return {}, FileFreshnessDTO(name=name, path=key, exists=True, updated_at=updated_at, stale=True, error=str(exc))
 
 
-def _parse_command_resolved_detail(detail: str) -> Dict[str, str]:
-    parsed: Dict[str, str] = {}
-    for match in _COMMAND_RESOLVED_DETAIL_RE.finditer(str(detail or "").strip()):
-        key = str(match.group("key") or "").strip()
-        value = str(match.group("value") or "").strip()
-        if key and value:
-            parsed[key] = value
-    return {
-        "command": parsed.get("cmd", "").strip() or "-",
-        "action": parsed.get("action", "").strip() or "-",
-        "trace": parsed.get("trace", "").strip() or "-",
-    }
-
-
 def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFreshnessDTO]:
     key = str(path)
     exists = path.exists()
@@ -464,7 +449,7 @@ def _load_latest_command_resolution(path: Path) -> Tuple[Dict[str, str], FileFre
                     continue
                 if str(row.get("status", "")).strip() != "accepted":
                     continue
-                latest = _parse_command_resolved_detail(str(row.get("detail", "")))
+                latest = operator_summary.parse_command_resolved_detail(str(row.get("detail", "")))
         resolution = latest or {"command": "-", "action": "-", "trace": "-"}
         _LAST_GOOD_COMMAND_RESOLUTION[key] = dict(resolution)
         return resolution, FileFreshnessDTO(name="gateway_events", path=key, exists=True, updated_at=updated_at)
@@ -574,24 +559,6 @@ def _action_audit_status_summary(rows: List[ActionAuditRowDTO]) -> str:
         return "-"
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return ", ".join(f"{status}={count}" for status, count in ordered)
-
-
-def _latest_intent_focus(action: str, trace: str) -> str:
-    action_token = str(action or "").strip().lower()
-    trace_text = str(trace or "").strip().lower()
-    if action_token == "offdesk_review":
-        if "safe_mode=prefer_control_review_over_dispatch" in trace_text:
-            return "execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인"
-        return "active runtime/task를 먼저 검토하고 blocked·followup·warning을 정리"
-    if action_token == "offdesk_prepare":
-        return "오늘 밤 scope, provider capacity, auto posture를 먼저 점검"
-    if action_token in {"monitor_project", "status", "orch-monitor"}:
-        return "재시도보다 먼저 현재 runtime/task 상태와 latest warnings를 확인"
-    if action_token == "dispatch_task":
-        return "runtime으로 넘기기 전에 preset, approval mode, quality contract를 다시 확인"
-    if action_token in {"recover_auto", "auto_recover"}:
-        return "recover 전에 retry_at, blocked provider, repeat memory를 먼저 확인"
-    return "-"
 
 
 def _load_manager_state(paths: ControlPaths) -> ManagerStateLoadResult:
@@ -1544,7 +1511,7 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
         latest_intent_command=str(control.get("latest_intent_command", "")).strip() or "-",
         latest_intent_action=str(control.get("latest_intent_action", "")).strip() or "-",
         latest_intent_trace=str(control.get("latest_intent_trace", "")).strip() or "-",
-        latest_intent_focus=str(control.get("latest_intent_focus", "")).strip() or _latest_intent_focus(
+        latest_intent_focus=str(control.get("latest_intent_focus", "")).strip() or operator_summary.latest_intent_focus(
             str(control.get("latest_intent_action", "")).strip(),
             str(control.get("latest_intent_trace", "")).strip(),
         ),
@@ -1629,7 +1596,7 @@ def load_dashboard_snapshot_result(
         latest_intent_command=str(latest_intent.get("command", "")).strip() or "-",
         latest_intent_action=str(latest_intent.get("action", "")).strip() or "-",
         latest_intent_trace=str(latest_intent.get("trace", "")).strip() or "-",
-        latest_intent_focus=_latest_intent_focus(
+        latest_intent_focus=operator_summary.latest_intent_focus(
             str(latest_intent.get("action", "")).strip(),
             str(latest_intent.get("trace", "")).strip(),
         ),

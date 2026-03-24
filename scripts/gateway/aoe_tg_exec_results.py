@@ -149,12 +149,24 @@ def send_dispatch_result(
     synthesize_orchestrator_response: Callable[[Any, str, Dict[str, Any]], str],
     render_run_response: Callable[..., str],
     finalize_request_reply_messages: Callable[..., Dict[str, Any]],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
     request_ids = result_request_ids(state, req_id)
     reply_markup = confirmed_result_reply_markup(entry, key) if str(run_auto_source or "").strip().lower() == "confirmed" else None
     if task is not None:
         ver_status = str((task.get("stages") or {}).get("verification", "pending"))
         if bool(args.require_verifier) and ver_status == "failed":
+            if callable(record_outcome):
+                record_outcome(
+                    {
+                        "kind": "retry_run",
+                        "status": "blocked",
+                        "reason_code": "verifier_gate_failed",
+                        "task_request_id": str(req_id or "").strip(),
+                        "next_step": f"/task {req_id}" if str(req_id or "").strip() else "/offdesk review",
+                        "detail": "verifier gate not satisfied",
+                    }
+                )
             send(
                 summarize_task_lifecycle(key, task),
                 context="verifier-gate failed",
@@ -189,6 +201,17 @@ def send_dispatch_result(
                 status=str((task or {}).get("status", "completed")),
                 detail=f"control_mode={run_control_mode or 'normal'} source_request_id={run_source_request_id or '-'}",
             )
+            if callable(record_outcome):
+                record_outcome(
+                    {
+                        "kind": "retry_run",
+                        "status": "executed",
+                        "reason_code": "dispatch_completed",
+                        "task_request_id": str(req_id or "").strip(),
+                        "next_step": f"/task {req_id}" if str(req_id or "").strip() else "/monitor",
+                        "detail": "dispatch completed",
+                    }
+                )
             return True
         except Exception:
             pass
@@ -209,4 +232,15 @@ def send_dispatch_result(
         status=str((task or {}).get("status", "running" if not bool(state.get("complete", False)) else "completed")),
         detail=f"control_mode={run_control_mode or 'normal'} source_request_id={run_source_request_id or '-'}",
     )
+    if callable(record_outcome):
+        record_outcome(
+            {
+                "kind": "retry_run",
+                "status": "executed",
+                "reason_code": "dispatch_result",
+                "task_request_id": str(req_id or "").strip(),
+                "next_step": f"/task {req_id}" if str(req_id or "").strip() else "/monitor",
+                "detail": "dispatch result available",
+            }
+        )
     return True

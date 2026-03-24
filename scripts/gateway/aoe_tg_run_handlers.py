@@ -394,7 +394,19 @@ def _send_exec_critic_intervention(
     exec_attempt: int,
     exec_max_attempts: int,
     send: Callable[..., bool],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
+    if callable(record_outcome):
+        record_outcome(
+            {
+                "kind": "retry_run",
+                "status": "blocked",
+                "reason_code": "exec_critic",
+                "task_request_id": str(final_req_id or "").strip(),
+                "next_step": f"/task {final_req_id}" if str(final_req_id or "").strip() else "/task",
+                "detail": str(reason or "").strip() or "exec critic intervention needed",
+            }
+        )
     exec_send_exec_critic_intervention(
         entry=entry,
         key=key,
@@ -414,7 +426,18 @@ def _send_dispatch_exception(
     todo_id: str,
     reason: str,
     send: Callable[..., bool],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
+    if callable(record_outcome):
+        record_outcome(
+            {
+                "kind": "retry_run",
+                "status": "blocked",
+                "reason_code": "dispatch_exception",
+                "next_step": "/offdesk review",
+                "detail": str(reason or "").strip() or "dispatch failed before request start",
+            }
+        )
     exec_send_dispatch_exception(
         entry=entry,
         key=key,
@@ -456,6 +479,7 @@ class RunCoreDeps:
     send: Callable[..., bool]
     log_event: Callable[..., None]
     help_text: Callable[[], str]
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None
 
 
 @dataclass
@@ -606,12 +630,14 @@ def build_run_deps(
     extract_todo_proposals: Callable[..., List[Dict[str, Any]]],
     merge_todo_proposals: Callable[..., Dict[str, Any]],
     render_run_response: Callable[..., str],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> RunDeps:
     return RunDeps(
         core=RunCoreDeps(
             send=send,
             log_event=log_event,
             help_text=help_text,
+            record_outcome=record_outcome,
         ),
         guard=RunGuardDeps(
             summarize_chat_usage=summarize_chat_usage,
@@ -1309,6 +1335,7 @@ def _send_dispatch_result(
     synthesize_orchestrator_response: Callable[[Any, str, Dict[str, Any]], str],
     render_run_response: Callable[..., str],
     finalize_request_reply_messages: Callable[..., Dict[str, Any]],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
     return exec_send_dispatch_result(
         args=args,
@@ -1328,6 +1355,7 @@ def _send_dispatch_result(
         synthesize_orchestrator_response=synthesize_orchestrator_response,
         render_run_response=render_run_response,
         finalize_request_reply_messages=finalize_request_reply_messages,
+        record_outcome=record_outcome,
     )
 
 
@@ -1346,6 +1374,7 @@ def _enforce_dispatch_policies(
     ensure_verifier_roles: Callable[..., tuple[List[str], List[str], bool, List[str]]],
     dispatch_roles: str,
     send: Callable[..., bool],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> DispatchPolicyResult:
     return guard_enforce_dispatch_policies(
         dispatch_mode=dispatch_mode,
@@ -1361,6 +1390,7 @@ def _enforce_dispatch_policies(
         ensure_verifier_roles=ensure_verifier_roles,
         dispatch_roles=dispatch_roles,
         send=send,
+        record_outcome=record_outcome,
     )
 
 
@@ -1480,6 +1510,7 @@ def handle_run_or_unknown_command(
     send = deps.core.send
     log_event = deps.core.log_event
     help_text = deps.core.help_text
+    record_outcome = deps.core.record_outcome
     summarize_chat_usage = deps.guard.summarize_chat_usage
     detect_high_risk_prompt = deps.guard.detect_high_risk_prompt
     set_confirm_action = deps.guard.set_confirm_action
@@ -1685,6 +1716,7 @@ def handle_run_or_unknown_command(
             ensure_verifier_roles=ensure_verifier_roles,
             dispatch_roles=dispatch_roles,
             send=send,
+            record_outcome=record_outcome,
         )
         if bool(policy.terminal):
             if not args.dry_run:
@@ -1846,6 +1878,7 @@ def handle_run_or_unknown_command(
                 ensure_verifier_roles=ensure_verifier_roles,
                 dispatch_roles=dispatch_roles,
                 send=send,
+                record_outcome=record_outcome,
             )
             if bool(policy.terminal):
                 _finalize_provisional_task(
@@ -2054,6 +2087,7 @@ def handle_run_or_unknown_command(
                     todo_id=local_todo_id,
                     reason=reason,
                     send=send,
+                    record_outcome=record_outcome,
                 )
                 log_event(
                     event="dispatch_failed",
@@ -2246,6 +2280,7 @@ def handle_run_or_unknown_command(
                 exec_attempt=exec_attempt,
                 exec_max_attempts=exec_max_attempts,
                 send=send,
+                record_outcome=record_outcome,
             )
             log_event(
                 event="exec_critic_blocked",
@@ -2314,6 +2349,7 @@ def handle_run_or_unknown_command(
             synthesize_orchestrator_response=synthesize_orchestrator_response,
             render_run_response=render_run_response,
             finalize_request_reply_messages=deps.routing.finalize_request_reply_messages,
+            record_outcome=record_outcome,
         )
 
     if dispatch_mode and planning_requested and effective_no_wait and (not args.dry_run):
@@ -2345,6 +2381,7 @@ def handle_run_or_unknown_command(
                     todo_id=todo_id,
                     reason=reason,
                     send=send,
+                    record_outcome=record_outcome,
                 )
                 log_event(
                     event="dispatch_detached_failed",

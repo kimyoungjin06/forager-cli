@@ -892,6 +892,15 @@ def test_control_dashboard_post_auto_recover_blocked_includes_retry_at_remediati
 
     def _fake_handle_scheduler_control_command(**kwargs):
         send = kwargs["send"]
+        kwargs["record_outcome"](
+            {
+                "kind": "auto_recover",
+                "status": "blocked",
+                "reason_code": "provider_capacity_blocked",
+                "next_step": "/offdesk review",
+                "detail": "next_retry_at=2026-03-16T10:30:00+09:00",
+            }
+        )
         send("auto recovery blocked", context="auto-recover-blocked")
         return True
 
@@ -908,7 +917,63 @@ def test_control_dashboard_post_auto_recover_blocked_includes_retry_at_remediati
     assert status == 409
     assert payload["status"] == "blocked"
     assert payload["next_step"] == "/offdesk review"
+    assert payload["outcome"]["reason_code"] == "provider_capacity_blocked"
     assert "retry_at=2026-03-16T10:30:00+09:00" in payload["remediation"]
+
+
+def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    paths, manager_state = dashboard_app._load_dashboard_manager_state(config)
+
+    def _fake_handle_run_or_unknown_command(*, ctx, deps):
+        deps.core.record_outcome(
+            {
+                "kind": "retry_run",
+                "status": "blocked",
+                "reason_code": "planning_gate",
+                "next_step": "/offdesk review",
+                "detail": "critic issues remain after auto-replan",
+            }
+        )
+        deps.core.send("unrelated body", context="result")
+        return True
+
+    monkeypatch.setattr(dashboard_app.run_handlers, "handle_run_or_unknown_command", _fake_handle_run_or_unknown_command)
+
+    status, _headers, body = dashboard_app._execute_retry_run_transition(
+        {
+            "cmd": "run",
+            "rest": "",
+            "orch_target": "alpha",
+            "run_prompt": "retry it",
+            "run_force_mode": "dispatch",
+            "run_control_mode": "retry",
+            "run_source_request_id": "REQ-1",
+            "run_source_task": {"request_id": "REQ-1"},
+            "run_selected_execution_lane_ids": ["L1"],
+            "run_selected_review_lane_ids": ["R1"],
+        },
+        config=config,
+        manager_state=manager_state,
+        paths=paths,
+        source_command="/retry T-001 lane L1,R1",
+        payload={"task_ref": "T-001", "lane_ids": ["L1", "R1"]},
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["status"] == "blocked"
+    assert payload["outcome"]["reason_code"] == "planning_gate"
+    assert payload["next_step"] == "/offdesk review"
+    assert "approval blockers" in payload["remediation"]
 
 
 def test_control_dashboard_post_safe_action_route_returns_404_for_unknown_target(tmp_path: Path) -> None:

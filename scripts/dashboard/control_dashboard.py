@@ -118,6 +118,30 @@ def _json(payload: Dict[str, object], status: int = 200) -> Tuple[int, Dict[str,
     return status, {"Content-Type": "application/json; charset=utf-8"}, (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def _latest_recorded_outcome(rows: List[Dict[str, Any]], *, kind: str) -> Dict[str, Any]:
+    for row in reversed(rows):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("kind", "")).strip() == kind:
+            return row
+    return {}
+
+
+def _retry_blocked_remediation_for_reason(reason_code: str, detail: str = "") -> str:
+    token = str(reason_code or "").strip().lower().replace("-", "_")
+    if token == "planning_gate":
+        return _RETRY_BLOCKED_REMEDIATIONS["planning-gate"]
+    if token == "dispatch_exception":
+        return _RETRY_BLOCKED_REMEDIATIONS["dispatch-exception"]
+    if token == "exec_critic":
+        return _RETRY_BLOCKED_REMEDIATIONS["exec-critic"]
+    if token == "verifier_gate_failed":
+        return _RETRY_BLOCKED_REMEDIATIONS["verifier-gate failed"]
+    if token == "verifier_gate_setup":
+        return "assign or enable the required verifier role before retrying the runtime again"
+    return str(detail or "").strip() or "inspect the task and runtime state before retrying again"
+
+
 def _redirect(location: str) -> Tuple[int, Dict[str, str], bytes]:
     return HTTPStatus.FOUND, {"Location": location}, b""
 
@@ -556,12 +580,14 @@ def _build_dashboard_retry_run_deps(
     paths: Any,
     messages: List[Dict[str, Any]],
     events: List[Dict[str, Any]],
+    outcomes: List[Dict[str, Any]],
 ):
     gateway_main = _load_gateway_main_module()
     return run_handlers.build_run_deps(
         send=_make_send_collector(messages),
         log_event=_make_log_collector(events),
         help_text=lambda: "dashboard retry action",
+        record_outcome=lambda row: outcomes.append(dict(row)) if isinstance(row, dict) else None,
         summarize_chat_usage=gateway_main.summarize_chat_usage,
         detect_high_risk_prompt=parse_mod.detect_high_risk_prompt,
         set_confirm_action=chat_state.set_confirm_action,
@@ -611,6 +637,7 @@ def _execute_retry_run_transition(
 ) -> Tuple[int, Dict[str, str], bytes]:
     messages: List[Dict[str, Any]] = []
     events: List[Dict[str, Any]] = []
+    outcomes: List[Dict[str, Any]] = []
     source_task = transition.get("run_source_task") if isinstance(transition.get("run_source_task"), dict) else None
     args = _dashboard_run_args(config, source_task=source_task)
     ctx = run_handlers.build_run_context(
@@ -640,6 +667,7 @@ def _execute_retry_run_transition(
         paths=paths,
         messages=messages,
         events=events,
+        outcomes=outcomes,
     )
     handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
     if not handled:
@@ -669,7 +697,8 @@ def _execute_retry_run_transition(
         else None
     )
     contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
-    blocked = any(context in _RUN_BLOCKED_CONTEXTS for context in contexts)
+    outcome = _latest_recorded_outcome(outcomes, kind="retry_run")
+    blocked = str(outcome.get("status", "")).strip() == "blocked"
     task_payload = None
     if isinstance(executed_task, dict) and executed_request_id:
         task_payload = {
@@ -679,7 +708,24 @@ def _execute_retry_run_transition(
             "tf_phase": str(executed_task.get("tf_phase", "")).strip() or "-",
             "detail_path": f"/control/tasks/by-request/{quote(executed_request_id, safe='')}",
         }
-    next_step = "/offdesk review" if blocked else (f"/task {task_payload['label']}" if isinstance(task_payload, dict) else "/monitor")
+    if not outcome:
+        blocked = any(context in _RUN_BLOCKED_CONTEXTS for context in contexts)
+    next_step = (
+        str(outcome.get("next_step", "")).strip()
+        or ("/offdesk review" if blocked else (f"/task {task_payload['label']}" if isinstance(task_payload, dict) else "/monitor"))
+    )
+    remediation = (
+        "review the updated task detail and lane state before repeating another retry"
+        if not blocked
+        else _retry_blocked_remediation(contexts)
+    )
+    if outcome:
+        reason_code = str(outcome.get("reason_code", "")).strip() or "-"
+        detail_note = str(outcome.get("detail", "")).strip()
+        if blocked:
+            remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
+    else:
+        reason_code = "-"
     return _json(
         {
             "ok": not blocked,
@@ -702,13 +748,15 @@ def _execute_retry_run_transition(
             },
             "messages": messages,
             "events": events,
+            "outcome": {
+                "kind": "retry_run",
+                "status": "blocked" if blocked else "executed",
+                "reason_code": reason_code,
+                "detail": str(outcome.get("detail", "")).strip() if outcome else "-",
+            },
             "task": task_payload,
             "next_step": next_step,
-            "remediation": (
-                "review the updated task detail and lane state before repeating another retry"
-                if not blocked
-                else _retry_blocked_remediation(contexts)
-            ),
+            "remediation": remediation,
         },
         status=409 if blocked else 200,
     )
@@ -953,6 +1001,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
     args = _dashboard_action_args(config)
     paths, manager_state = _load_dashboard_manager_state(config)
     messages: List[Dict[str, Any]] = []
+    outcomes: List[Dict[str, Any]] = []
 
     handled = scheduler_control_handlers.handle_scheduler_control_command(
         cmd="auto",
@@ -1015,6 +1064,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
         default_offdesk_prefetch_since=management_handlers.DEFAULT_OFFDESK_PREFETCH_SINCE,
         default_offdesk_report_level=management_handlers.DEFAULT_OFFDESK_REPORT_LEVEL,
         default_offdesk_room=management_handlers.DEFAULT_OFFDESK_ROOM,
+        record_outcome=lambda row: outcomes.append(dict(row)) if isinstance(row, dict) else None,
     )
 
     if not handled:
@@ -1033,7 +1083,10 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
     auto_state = management_handlers._load_auto_state(management_handlers._auto_state_path(args))
     provider_state = management_handlers._load_provider_capacity_state(management_handlers._provider_capacity_state_path(args))
     last_context = str(messages[-1].get("context", "")).strip() if messages else ""
-    blocked = last_context == "auto-recover-blocked"
+    outcome = _latest_recorded_outcome(outcomes, kind="auto_recover")
+    blocked = str(outcome.get("status", "")).strip() == "blocked"
+    if not outcome:
+        blocked = last_context == "auto-recover-blocked"
 
     return _json(
         {
@@ -1047,6 +1100,12 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
             "source_command": spec.get("command", "-"),
             "payload": payload,
             "messages": messages,
+            "outcome": {
+                "kind": "auto_recover",
+                "status": "blocked" if blocked else "executed",
+                "reason_code": str(outcome.get("reason_code", "")).strip() if outcome else "-",
+                "detail": str(outcome.get("detail", "")).strip() if outcome else "-",
+            },
             "auto_state": {
                 "enabled": bool(auto_state.get("enabled", False)),
                 "command": str(auto_state.get("command", "")).strip() or "-",
@@ -1058,7 +1117,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
                 "repeat_count": int(provider_state.get("recovery_repeat_count", 0) or 0),
             },
             "team_dir": str(paths.team_dir),
-            "next_step": "/auto status" if not blocked else "/offdesk review",
+            "next_step": str(outcome.get("next_step", "")).strip() or ("/auto status" if not blocked else "/offdesk review"),
             "remediation": _auto_recover_remediation(blocked=blocked, provider_state=provider_state),
         },
         status=409 if blocked else 200,
