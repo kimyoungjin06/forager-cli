@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import importlib.util
 import ipaddress
 import json
@@ -11,6 +12,7 @@ import mimetypes
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -332,6 +334,10 @@ def _load_existing_action_audit_rows(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def _action_audit_lock_path(path: Path) -> Path:
+    return path.with_name(path.name + ".lock")
+
+
 def _prune_action_audit_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     retention_days = _action_audit_retention_days()
     keep_rows = _action_audit_keep_rows()
@@ -366,12 +372,26 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, Any]) ->
     }
     try:
         paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)
-        rows = _load_existing_action_audit_rows(paths.action_audit_file)
-        rows.append(row)
-        rows = _prune_action_audit_rows(rows)
-        with paths.action_audit_file.open("w", encoding="utf-8") as handle:
-            for item in rows:
-                handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+        lock_path = _action_audit_lock_path(paths.action_audit_file)
+        with lock_path.open("a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            rows = _load_existing_action_audit_rows(paths.action_audit_file)
+            rows.append(row)
+            rows = _prune_action_audit_rows(rows)
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=str(paths.action_audit_file.parent),
+                prefix=paths.action_audit_file.name + ".tmp.",
+                delete=False,
+            ) as tmp_handle:
+                tmp_path = Path(tmp_handle.name)
+                for item in rows:
+                    tmp_handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+                tmp_handle.flush()
+                os.fsync(tmp_handle.fileno())
+            os.replace(tmp_path, paths.action_audit_file)
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
     except Exception:
         return
 

@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -842,6 +844,55 @@ def test_control_dashboard_action_audit_prunes_old_and_excess_rows(tmp_path: Pat
     assert len(rows) == 2
     assert all(row["headline"] != "Old Preview | preview" for row in rows)
     assert rows[-1]["headline"] == "Follow-up Preview | preview"
+
+
+def test_control_dashboard_action_audit_appends_concurrently_without_row_loss(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    original_loader = dashboard_app._load_existing_action_audit_rows
+
+    def _slow_loader(path):
+        rows = original_loader(path)
+        time.sleep(0.01)
+        return rows
+
+    monkeypatch.setattr(dashboard_app, "_load_existing_action_audit_rows", _slow_loader)
+
+    def _append(idx: int) -> None:
+        dashboard_app._append_action_audit(
+            config,
+            {
+                "path": "/control/actions/task/followup",
+                "status": "preview",
+                "source_command": f"/followup T-{idx:03d}",
+                "next_step": f"/task T-{idx:03d}",
+                "remediation": "-",
+                "preview": {
+                    "detail_path": f"/control/tasks/by-request/REQ-{idx:03d}",
+                },
+            },
+        )
+
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    baseline_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(_append, range(1, 13)))
+
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    appended_rows = [row for row in rows if row.get("source_command", "").startswith("/followup T-")]
+
+    assert len(rows) == len(baseline_rows) + 12
+    assert len(appended_rows) == 12
+    assert {row["source_command"] for row in appended_rows} == {f"/followup T-{idx:03d}" for idx in range(1, 13)}
 
 
 def test_control_dashboard_post_auto_recover_executes_with_default_force_false(tmp_path: Path, monkeypatch) -> None:
