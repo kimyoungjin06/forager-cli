@@ -7,11 +7,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from aoe_tg_action_audit import append_latest_action_lines, load_latest_action_audit
-from aoe_tg_operator_summary import (
-    append_latest_intent_lines,
-    load_latest_command_resolution,
-)
+from aoe_tg_action_audit import load_latest_action_audit
+from aoe_tg_operator_summary import load_latest_command_resolution
+from aoe_tg_operator_surface import append_operator_status_lines
 
 
 _PROVIDER_RECOVERY_GRACE_SEC = max(
@@ -899,8 +897,13 @@ def _handle_offdesk_command(
             "- /offdesk off",
             "- /auto status",
         ]
-        append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
-        append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
+        append_operator_status_lines(
+            lines,
+            latest_intent=latest_intent,
+            latest_action=latest_action,
+            compact_reason=_compact_text,
+            line_prefix="- ",
+        )
         snapshot_lines = focused_project_snapshot_lines(manager_state)
         if status_level == "long" and snapshot_lines:
             lines.extend([""] + snapshot_lines)
@@ -935,8 +938,13 @@ def _handle_offdesk_command(
             return True
         if not targets:
             lines = ["offdesk prepare", "- no orch projects registered"]
-            append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
-            append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
+            append_operator_status_lines(
+                lines,
+                latest_intent=latest_intent,
+                latest_action=latest_action,
+                compact_reason=_compact_text,
+                line_prefix="- ",
+            )
             send("\n".join(lines).strip(), context="offdesk-prepare empty", with_menu=True)
             return True
 
@@ -960,8 +968,13 @@ def _handle_offdesk_command(
             f"- warn: {warn_count}",
             f"- blocked: {blocked_count}",
         ]
-        append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
-        append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
+        append_operator_status_lines(
+            lines,
+            latest_intent=latest_intent,
+            latest_action=latest_action,
+            compact_reason=_compact_text,
+            line_prefix="- ",
+        )
         lines.extend(_provider_capacity_memory_lines(provider_state))
         lines.extend(["", "projects:"])
         for report in reports:
@@ -1030,8 +1043,13 @@ def _handle_offdesk_command(
                 prefetch_display=prefetch_display,
             )
             lines = ["offdesk review", "- no orch projects registered"]
-            append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
-            append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
+            append_operator_status_lines(
+                lines,
+                latest_intent=latest_intent,
+                latest_action=latest_action,
+                compact_reason=_compact_text,
+                line_prefix="- ",
+            )
             if capacity_summary:
                 lines.append(
                     "- provider_capacity: tasks={tasks} projects={projects} providers={providers}".format(
@@ -1096,8 +1114,13 @@ def _handle_offdesk_command(
             f"- reviewed: {len(reports)}",
             f"- flagged: {len(flagged)}",
         ]
-        append_latest_intent_lines(lines, latest_intent, compact_reason=_compact_text, line_prefix="- ")
-        append_latest_action_lines(lines, latest_action, compact_reason=_compact_text, line_prefix="- ")
+        append_operator_status_lines(
+            lines,
+            latest_intent=latest_intent,
+            latest_action=latest_action,
+            compact_reason=_compact_text,
+            line_prefix="- ",
+        )
         if capacity_summary:
             lines.append(
                 "- provider_capacity: tasks={tasks} projects={projects} providers={providers}".format(
@@ -1580,8 +1603,13 @@ def _handle_auto_command(
             lines.append(f"- next_retry_at: {next_retry_at}")
         if recovery_grace_until:
             lines.append(f"- recovery_grace_until: {recovery_grace_until}")
-        append_latest_intent_lines(lines, latest_intent, compact_reason=compact_reason, line_prefix="- ")
-        append_latest_action_lines(lines, latest_action, compact_reason=compact_reason, line_prefix="- ")
+        append_operator_status_lines(
+            lines,
+            latest_intent=latest_intent,
+            latest_action=latest_action,
+            compact_reason=compact_reason,
+            line_prefix="- ",
+        )
         if capacity_summary:
             lines.append(
                 "- provider_capacity: tasks={tasks} projects={projects} providers={providers}".format(

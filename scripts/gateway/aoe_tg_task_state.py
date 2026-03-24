@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from aoe_tg_action_audit import append_latest_action_summary_line, load_latest_action_audit_for_runtime
-from aoe_tg_operator_summary import append_latest_intent_summary_line, runtime_latest_intent_summary
+from aoe_tg_action_audit import load_latest_action_audit_for_runtime
+from aoe_tg_operator_summary import runtime_latest_intent_summary
+from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
 
@@ -1264,13 +1265,16 @@ def summarize_task_monitor(
     if invalid_stage_rows:
         lines.append(f"warning: invalid lifecycle stage rows={invalid_stage_rows}")
     latest_intent = runtime_latest_intent_summary(entry)
-    append_latest_intent_summary_line(lines, latest_intent)
     latest_action = load_latest_action_audit_for_runtime(
         entry.get("team_dir"),
         project_alias=entry.get("project_alias", ""),
         request_ids=[str(req_id or "").strip() for req_id, _task in rows if str(req_id or "").strip()],
     )
-    append_latest_action_summary_line(lines, latest_action)
+    append_operator_status_summary_lines(
+        lines,
+        latest_intent=latest_intent,
+        latest_action=latest_action,
+    )
 
     def _phase2_request_count(value: Any) -> int:
         if isinstance(value, list):
