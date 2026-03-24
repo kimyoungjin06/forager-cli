@@ -170,6 +170,10 @@ def _write_action_audit_log(tmp_path: Path, *rows: dict) -> None:
             "at": "2026-03-21T02:49:00+09:00",
             "headline": "Retry | blocked",
             "status": "blocked",
+            "outcome_kind": "retry_run",
+            "outcome_status": "blocked",
+            "outcome_reason_code": "planning_gate",
+            "outcome_detail": "plan gate blocked",
             "next_step": "/offdesk review",
             "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
             "link_label": "task detail",
@@ -1122,7 +1126,7 @@ def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent: offdesk | offdesk_review" in text
     assert "- first_focus: execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in text
     assert "- latest_intent_trace: selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch" in text
-    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
     assert "- latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again" in text
 
@@ -1143,7 +1147,7 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent: offdesk | offdesk_prepare" in text
     assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
-    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
 
 
@@ -1429,7 +1433,7 @@ def test_offdesk_prepare_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent: offdesk | offdesk_prepare" in text
     assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
-    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
 
 
@@ -1811,7 +1815,7 @@ def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> 
     assert "- latest_intent: offdesk | offdesk_prepare" in text
     assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
-    assert "- latest_action: Retry | blocked" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
 
 

@@ -69,6 +69,10 @@ class ActionAuditRowDTO:
     at: str
     headline: str
     status: str
+    outcome_kind: str
+    outcome_status: str
+    outcome_reason_code: str
+    outcome_detail: str
     next_step: str
     remediation: str
     link_label: str
@@ -514,6 +518,10 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         status=str(raw.get("status", "")).strip() or "unknown",
+        outcome_kind=str(raw.get("outcome_kind", "")).strip() or "-",
+        outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",
+        outcome_reason_code=str(raw.get("outcome_reason_code", "")).strip() or "-",
+        outcome_detail=str(raw.get("outcome_detail", "")).strip() or "-",
         next_step=str(raw.get("next_step", "")).strip() or "-",
         remediation=str(raw.get("remediation", "")).strip() or "-",
         link_label=str(raw.get("link_label", "")).strip() or "-",
@@ -549,6 +557,10 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
                 "at": row.at,
                 "headline": row.headline,
                 "status": row.status,
+                "outcome_kind": row.outcome_kind,
+                "outcome_status": row.outcome_status,
+                "outcome_reason_code": row.outcome_reason_code,
+                "outcome_detail": row.outcome_detail,
                 "next_step": row.next_step,
                 "remediation": row.remediation,
                 "link_label": row.link_label,

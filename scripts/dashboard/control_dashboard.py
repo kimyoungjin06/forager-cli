@@ -360,10 +360,15 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, Any]) ->
         return
     paths = _dashboard_paths(config)
     link_label, link_href = _action_audit_link(payload)
+    outcome = payload.get("outcome") if isinstance(payload.get("outcome"), dict) else {}
     row = {
         "at": _action_audit_now(),
         "headline": _action_audit_headline(payload),
         "status": str(payload.get("status", "")).strip() or "unknown",
+        "outcome_kind": str(outcome.get("kind", "")).strip() or "-",
+        "outcome_status": str(outcome.get("status", "")).strip() or str(payload.get("status", "")).strip() or "unknown",
+        "outcome_reason_code": str(outcome.get("reason_code", "")).strip() or "-",
+        "outcome_detail": str(outcome.get("detail", "")).strip() or "-",
         "next_step": str(payload.get("next_step", "")).strip() or "-",
         "remediation": str(payload.get("remediation", "")).strip() or "-",
         "link_label": link_label,

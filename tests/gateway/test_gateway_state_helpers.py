@@ -4137,6 +4137,10 @@ def test_task_lifecycle_includes_task_scoped_intent_and_action_lines(tmp_path: P
                 "at": "2026-03-21T02:49:00+09:00",
                 "headline": "Retry | blocked",
                 "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "plan gate blocked",
                 "next_step": "/offdesk review",
                 "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
                 "source_command": "/retry T-001",
@@ -4180,7 +4184,7 @@ def test_task_lifecycle_includes_task_scoped_intent_and_action_lines(tmp_path: P
     summary = task_view.summarize_task_lifecycle("Demo", task)
 
     assert "latest_intent: offdesk | offdesk_review | execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in summary
-    assert "latest_action: Retry | blocked | next=/offdesk review |" in summary
+    assert "latest_action: Retry | blocked | reason=planning_gate | next=/offdesk review |" in summary
     assert "approval blockers in /task and /offdesk review bef..." in summary
 
 
@@ -4208,6 +4212,10 @@ def test_task_monitor_includes_runtime_scoped_intent_and_action_lines(tmp_path: 
                 "at": "2026-03-21T02:49:00+09:00",
                 "headline": "Retry | blocked",
                 "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "plan gate blocked",
                 "next_step": "/offdesk review",
                 "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
                 "source_command": "/retry T-001",
@@ -4261,5 +4269,5 @@ def test_task_monitor_includes_runtime_scoped_intent_and_action_lines(tmp_path: 
     )
 
     assert "latest_intent: offdesk | offdesk_review | execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in summary
-    assert "latest_action: Retry | blocked | next=/offdesk review |" in summary
+    assert "latest_action: Retry | blocked | reason=planning_gate | next=/offdesk review |" in summary
     assert "approval blockers in /task and /offdesk review bef..." in summary

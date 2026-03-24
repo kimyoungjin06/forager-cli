@@ -36,10 +36,24 @@ def _normalize_latest_action_row(row: Dict[str, Any]) -> Dict[str, str]:
     return {
         "headline": str(row.get("headline", "")).strip() or "-",
         "status": str(row.get("status", "")).strip() or "unknown",
+        "outcome_kind": str(row.get("outcome_kind", "")).strip() or "-",
+        "outcome_status": str(row.get("outcome_status", "")).strip() or str(row.get("status", "")).strip() or "unknown",
+        "outcome_reason_code": str(row.get("outcome_reason_code", "")).strip() or "-",
+        "outcome_detail": str(row.get("outcome_detail", "")).strip() or "-",
         "next_step": str(row.get("next_step", "")).strip() or "-",
         "remediation": str(row.get("remediation", "")).strip() or "-",
         "source_command": str(row.get("source_command", "")).strip() or "-",
     }
+
+
+def _latest_action_headline(latest_action: Dict[str, str]) -> str:
+    headline = str(latest_action.get("headline", "")).strip() or "-"
+    reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
+    if reason_code in {"", "-"}:
+        return headline
+    if "reason=" in headline:
+        return headline
+    return f"{headline} | reason={reason_code}"
 
 
 def _load_action_audit_rows(team_dir: Any) -> List[Dict[str, Any]]:
@@ -114,7 +128,7 @@ def append_latest_action_lines(
 ) -> None:
     if not isinstance(latest_action, dict) or not latest_action:
         return
-    headline = str(latest_action.get("headline", "")).strip() or "-"
+    headline = _latest_action_headline(latest_action)
     next_step = str(latest_action.get("next_step", "")).strip() or "-"
     remediation = str(latest_action.get("remediation", "")).strip() or "-"
     formatter = compact_reason if callable(compact_reason) else compact_action_text
@@ -136,7 +150,7 @@ def append_latest_action_summary_line(
 ) -> None:
     if not isinstance(latest_action, dict) or not latest_action:
         return
-    headline = str(latest_action.get("headline", "")).strip() or "-"
+    headline = _latest_action_headline(latest_action)
     next_step = str(latest_action.get("next_step", "")).strip() or "-"
     remediation = str(latest_action.get("remediation", "")).strip() or "-"
     formatter = compact_reason if callable(compact_reason) else compact_action_text
