@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import fcntl
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -110,11 +113,76 @@ def _load_latest_command_resolution_from_events(path: Path) -> Dict[str, str]:
     return latest
 
 
+def _parse_recorded_at(raw: Any) -> Optional[datetime]:
+    token = str(raw or "").strip()
+    if not token:
+        return None
+    normalized = token[:-1] + "+00:00" if token.endswith("Z") else token
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_intent_lock_path(path: Path) -> Path:
+    return path.with_name(path.name + ".lock")
+
+
+def _load_existing_latest_intent_payload(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return _normalize_latest_intent_record(parsed)
+
+
+def _should_replace_latest_intent(current: Dict[str, str], incoming: Dict[str, str]) -> bool:
+    current_dt = _parse_recorded_at(current.get("recorded_at"))
+    incoming_dt = _parse_recorded_at(incoming.get("recorded_at"))
+    if current_dt is not None and incoming_dt is not None:
+        return incoming_dt >= current_dt
+    if current_dt is not None and incoming_dt is None:
+        return False
+    if current_dt is None and incoming_dt is not None:
+        return True
+    return True
+
+
 def _write_latest_intent_payload(path: Path, payload: Dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    lock_path = _latest_intent_lock_path(path)
+    tmp_path: Optional[Path] = None
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = _load_existing_latest_intent_payload(path)
+        if current and not _should_replace_latest_intent(current, payload):
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            return
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=str(path.parent),
+                prefix=path.name + ".tmp.",
+                delete=False,
+            ) as tmp_handle:
+                tmp_path = Path(tmp_handle.name)
+                tmp_handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+                tmp_handle.flush()
+                os.fsync(tmp_handle.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            if tmp_path is not None and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
 
 
 def save_latest_command_resolution(

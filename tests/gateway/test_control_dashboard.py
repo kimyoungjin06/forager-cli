@@ -583,6 +583,34 @@ def test_control_dashboard_prefers_latest_intent_snapshot_over_gateway_events(tm
     assert "dispatch_task" not in text
 
 
+def test_latest_intent_snapshot_does_not_overwrite_newer_record(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    operator_summary.save_latest_command_resolution(
+        team_dir,
+        command="offdesk",
+        action="offdesk_prepare",
+        intent_class="status",
+        trace="selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검",
+        recorded_at="2026-03-16T10:05:00+09:00",
+    )
+    operator_summary.save_latest_command_resolution(
+        team_dir,
+        command="offdesk",
+        action="offdesk_review",
+        intent_class="status",
+        trace="selected=offdesk_review; matched=review:검토",
+        recorded_at="2026-03-16T10:04:00+09:00",
+    )
+
+    latest = operator_summary.load_latest_command_resolution(team_dir)
+
+    assert latest["command"] == "offdesk"
+    assert latest["action"] == "offdesk_prepare"
+    assert "오늘 밤" in latest["trace"]
+
+
 def test_dashboard_task_page_uses_single_manager_snapshot(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
