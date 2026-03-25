@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""Dashboard state DTO models."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import List
+
+from control_dashboard_state_io import ActionAuditRowDTO, FileFreshnessDTO
+
+
+@dataclass(frozen=True)
+class ActionButtonDTO:
+    label: str
+    command: str
+    method: str
+    path: str
+    mode: str
+    note: str
+    payload_json: str
+
+@dataclass(frozen=True)
+class ControlSummaryDTO:
+    auto_mode: str
+    offdesk_mode: str
+    provider_capacity_summary: str
+    next_retry_at: str
+    next_retry_target: str
+    repeat_memory_summary: str
+    latest_intent_command: str
+    latest_intent_action: str
+    latest_intent_trace: str
+    latest_intent_focus: str
+    active_runtime_count: int
+    attention_runtime_count: int
+    snapshot_taken_at: str
+
+
+@dataclass(frozen=True)
+class RuntimeCardDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    runtime_path: str
+    status: str
+    readiness: str
+    attention_summary: str
+    priority_action: str
+    priority_reason: str
+    next_focus: str
+    severity_score: int
+    provider_pressure_score: int
+    provider_repeat_count: int
+    active_task_request_id: str
+    active_task_label: str
+    active_task_phase: str
+    active_task_status: str
+    active_task_preset: str
+    active_task_phase2_shape: str
+    active_task_phase2_quality: str
+    active_task_backend: str
+    notes: List[str] = field(default_factory=list)
+    lines: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ActiveTaskRowDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    runtime_path: str
+    request_id: str
+    label: str
+    status: str
+    stage: str
+    tf_phase: str
+    preset: str
+    phase2_shape: str
+    lane_summary: str
+    backend_summary: str
+    updated_at: str
+    detail_path: str
+
+
+@dataclass(frozen=True)
+class TaskDetailDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    request_id: str
+    label: str
+    status: str
+    tf_phase: str
+    mode: str
+    prompt: str
+    roles: List[str] = field(default_factory=list)
+    verifier_roles: List[str] = field(default_factory=list)
+    phase1_summary: str = ""
+    phase1_progress: str = ""
+    phase1_candidate_roles: List[str] = field(default_factory=list)
+    phase1_role_preset: str = ""
+    phase2_team_preset: str = ""
+    phase2_shape: str = ""
+    phase2_quality: str = ""
+    lane_summary: str = ""
+    rerun_summary: str = ""
+    followup_summary: str = ""
+    completion_focus: str = ""
+    completion_done_when: str = ""
+    completion_rerun_when: str = ""
+    completion_followup_when: str = ""
+    backend_summary: str = ""
+    backend_note: str = ""
+    rate_limit_summary: str = ""
+    updated_at: str = ""
+    command_hints: List[str] = field(default_factory=list)
+    phase2_action_hints: List[str] = field(default_factory=list)
+    safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    reference_lines: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RuntimeDetailDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    runtime_path: str
+    status: str
+    readiness: str
+    attention_summary: str
+    priority_action: str
+    priority_reason: str
+    next_focus: str
+    completed_task_count: int
+    blocked_task_count: int
+    parked_task_count: int
+    queue_summary: str
+    proposal_summary: str
+    sync_summary: str
+    provider_pressure_summary: str
+    repeat_summary: str
+    active_task_request_id: str
+    active_task_label: str
+    active_task_path: str
+    active_task_phase: str
+    active_task_status: str
+    active_task_preset: str
+    active_task_phase2_shape: str
+    active_task_phase2_quality: str
+    active_task_completion_focus: str
+    active_task_completion_done: str
+    active_task_completion_rerun: str
+    active_task_completion_followup: str
+    active_task_backend: str
+    active_task_backend_note: str
+    active_task_rate_limit: str
+    runtime_command_hints: List[str] = field(default_factory=list)
+    runtime_phase2_action_hints: List[str] = field(default_factory=list)
+    active_task_command_hints: List[str] = field(default_factory=list)
+    active_task_phase2_action_hints: List[str] = field(default_factory=list)
+    runtime_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    runtime_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
+    lines: List[str] = field(default_factory=list)
+    recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RecoveryTaskDTO:
+    request_id: str
+    label: str
+    detail_path: str
+    status: str
+    tf_phase: str
+    preset: str
+    phase2_shape: str
+    phase2_quality: str
+    lane_summary: str
+    rerun_summary: str
+    followup_summary: str
+    completion_focus: str
+    completion_done_when: str
+    completion_rerun_when: str
+    completion_followup_when: str
+    backend_summary: str
+    backend_note: str
+    rate_limit_summary: str
+    command_hints: List[str] = field(default_factory=list)
+    phase2_action_hints: List[str] = field(default_factory=list)
+    safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RecoveryRuntimeDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    runtime_path: str
+    status: str
+    readiness: str
+    attention_summary: str
+    priority_action: str
+    priority_reason: str
+    next_focus: str
+    queue_summary: str
+    proposal_summary: str
+    sync_summary: str
+    provider_pressure_summary: str
+    repeat_summary: str
+    completed_task_count: int
+    blocked_task_count: int
+    parked_task_count: int
+    active_task_label: str
+    active_task_path: str
+    active_task_status: str
+    active_task_phase: str
+    active_task_preset: str
+    active_task_phase2_shape: str
+    active_task_phase2_quality: str
+    active_task_completion_focus: str
+    active_task_completion_done: str
+    active_task_completion_rerun: str
+    active_task_completion_followup: str
+    active_task_backend: str
+    active_task_backend_note: str
+    active_task_rate_limit: str
+    runtime_command_hints: List[str] = field(default_factory=list)
+    runtime_phase2_action_hints: List[str] = field(default_factory=list)
+    active_task_command_hints: List[str] = field(default_factory=list)
+    active_task_phase2_action_hints: List[str] = field(default_factory=list)
+    runtime_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    runtime_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    active_task_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RecoverySummaryDTO:
+    exists: bool
+    artifact_path: str
+    updated_at: str
+    stale: bool
+    error: str
+    generated_at: str
+    snapshot_taken_at: str
+    automation_posture: str
+    auto_mode: str
+    offdesk_mode: str
+    provider_capacity_summary: str
+    next_retry_at: str
+    next_retry_target: str
+    repeat_memory_summary: str
+    latest_intent_command: str
+    latest_intent_action: str
+    latest_intent_trace: str
+    latest_intent_focus: str
+    control_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    runtimes: List[RecoveryRuntimeDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ActionAuditPageDTO:
+    exists: bool
+    audit_path: str
+    updated_at: str
+    stale: bool
+    error: str
+    total_rows: int
+    status_summary: str
+    rows: List[ActionAuditRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DashboardSnapshotDTO:
+    control_root: str
+    team_dir: str
+    manager_state_file: str
+    snapshot_taken_at: str
+    source_files: List[FileFreshnessDTO]
+    control_summary: ControlSummaryDTO
+    runtime_cards: List[RuntimeCardDTO]
+    attention_runtime_cards: List[RuntimeCardDTO]
+    active_task_rows: List[ActiveTaskRowDTO]
+    recent_action_audit_rows: List[ActionAuditRowDTO]
+
+
+@dataclass(frozen=True)
+class DashboardSnapshotLoadResult:
+    snapshot: DashboardSnapshotDTO
+    manager_state: Dict[str, Any]
+    provider_state: Dict[str, Any]
+
+
