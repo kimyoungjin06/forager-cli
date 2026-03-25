@@ -188,6 +188,7 @@ from aoe_tg_task_state import (
     get_task_record as get_task_record_state,
     latest_task_request_refs as latest_task_request_refs_state,
     lifecycle_set_stage as lifecycle_set_stage_state,
+    normalize_role_rows as normalize_role_rows_state,
     normalize_task_alias_key as normalize_task_alias_key_state,
     parse_task_seq_from_short_id as parse_task_seq_from_short_id_state,
     rebuild_task_alias_index as rebuild_task_alias_index_state,
@@ -1141,67 +1142,7 @@ def ensure_verifier_roles(
 
 
 def normalize_role_rows(data: Dict[str, Any]) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
-
-    role_states = data.get("role_states")
-    if isinstance(role_states, list):
-        for item in role_states:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role", "")).strip()
-            if not role:
-                continue
-            status = str(item.get("status", "pending")).strip().lower() or "pending"
-            rows.append({"role": role, "status": status})
-
-    if rows:
-        return rows
-
-    roles_obj = data.get("roles")
-    if isinstance(roles_obj, list) and roles_obj and isinstance(roles_obj[0], dict):
-        for item in roles_obj:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role", "")).strip()
-            if not role:
-                continue
-            status = str(item.get("status", "pending")).strip().lower() or "pending"
-            rows.append({"role": role, "status": status})
-        if rows:
-            return rows
-
-    done_set = {str(x).strip() for x in (data.get("done_roles") or []) if str(x).strip()}
-    failed_set = {str(x).strip() for x in (data.get("failed_roles") or []) if str(x).strip()}
-    pending_set = {str(x).strip() for x in (data.get("pending_roles") or data.get("unresolved_roles") or []) if str(x).strip()}
-
-    if isinstance(roles_obj, list):
-        for item in roles_obj:
-            role = str(item).strip()
-            if not role:
-                continue
-            if role in failed_set:
-                status = "failed"
-            elif role in done_set:
-                status = "done"
-            elif role in pending_set:
-                status = "pending"
-            else:
-                status = "pending"
-            rows.append({"role": role, "status": status})
-        if rows:
-            return rows
-
-    all_roles = dedupe_roles(list(done_set) + list(failed_set) + list(pending_set))
-    for role in all_roles:
-        if role in failed_set:
-            status = "failed"
-        elif role in done_set:
-            status = "done"
-        else:
-            status = "pending"
-        rows.append({"role": role, "status": status})
-
-    return rows
+    return normalize_role_rows_state(data, dedupe_roles=dedupe_roles)
 
 
 def extract_request_snapshot(data: Dict[str, Any]) -> Dict[str, Any]:
