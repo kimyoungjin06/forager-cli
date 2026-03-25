@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Task-scoped dashboard state builders."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+ROOT = Path(__file__).resolve().parents[2]
+GW_DIR = ROOT / "scripts" / "gateway"
+if str(GW_DIR) not in sys.path:
+    sys.path.insert(0, str(GW_DIR))
+
+import aoe_tg_ops_policy as ops_policy
+import aoe_tg_runtime_read as runtime_read
+import aoe_tg_task_state as task_state
+import aoe_tg_task_view as task_view
+
+from control_dashboard_state_common import (
+    _compose_backend_summary,
+    _compose_lane_summary,
+    _compose_phase2_shape,
+    _compose_task_quality,
+    _completion_contract_for_preset,
+    _detail_path,
+    _task_action_buttons,
+    _task_command_contract,
+    _task_followup_summary,
+    _task_phase1_progress,
+    _task_phase1_summary,
+    _task_rate_limit_summary,
+    _task_rerun_summary,
+    _runtime_path,
+)
+from control_dashboard_state_models import ActiveTaskRowDTO, TaskDetailDTO
+
+
+def _build_active_task_rows(manager_state: Dict[str, Any], *, cap: int = 60) -> List[ActiveTaskRowDTO]:
+    rows: List[ActiveTaskRowDTO] = []
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    for key, entry in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
+        alias = str(entry.get("project_alias", "")).strip().upper() or str(key)
+        display = str(entry.get("display_name", "")).strip() or str(key)
+        tasks = task_state.ensure_project_tasks(entry)
+        for request_id, task in tasks.items():
+            if not isinstance(task, dict):
+                continue
+            status = runtime_read.normalize_task_status(task.get("status", "pending"))
+            if status == "completed":
+                continue
+            snap = task_state.task_monitor_row_snapshot(
+                task,
+                str(request_id or "").strip(),
+                normalize_task_status=runtime_read.normalize_task_status,
+                task_display_label=task_view.task_display_label,
+            )
+            preset = str(snap.get("phase2_team_preset", "")).strip() or str(snap.get("phase1_role_preset", "")).strip() or "-"
+            rows.append(
+                ActiveTaskRowDTO(
+                    project_key=str(key),
+                    project_alias=alias,
+                    project_label=display,
+                    runtime_path=_runtime_path(alias),
+                    request_id=str(snap.get("request_id", "")).strip(),
+                    label=str(snap.get("label", "")).strip(),
+                    status=str(snap.get("status", "")).strip(),
+                    stage=str(snap.get("stage", "")).strip(),
+                    tf_phase=str(snap.get("tf_phase", "")).strip(),
+                    preset=preset,
+                    phase2_shape=_compose_phase2_shape(snap.get("phase2_execution_roles") or [], snap.get("phase2_review_roles") or []),
+                    lane_summary=_compose_lane_summary(snap),
+                    backend_summary=_compose_backend_summary(
+                        str(snap.get("backend", "")).strip(),
+                        str(snap.get("backend_profile", "")).strip(),
+                        str(snap.get("backend_verdict", "")).strip(),
+                        str(snap.get("backend_contract", "")).strip(),
+                    ),
+                    updated_at=str(snap.get("updated_at", "")).strip(),
+                    detail_path=_detail_path(str(request_id or "").strip()),
+                )
+            )
+    rows.sort(key=lambda row: (row.updated_at, row.project_alias, row.request_id), reverse=True)
+    return rows[: max(1, int(cap))]
+
+
+def _build_runtime_recent_task_rows(
+    entry: Dict[str, Any],
+    *,
+    project_key: str,
+    project_alias: str,
+    project_label: str,
+    cap: int = 8,
+) -> List[ActiveTaskRowDTO]:
+    rows: List[ActiveTaskRowDTO] = []
+    tasks = task_state.ensure_project_tasks(entry)
+    for request_id, task in tasks.items():
+        if not isinstance(task, dict):
+            continue
+        status = runtime_read.normalize_task_status(task.get("status", "pending"))
+        if status == "canceled":
+            continue
+        snap = task_state.task_monitor_row_snapshot(
+            task,
+            str(request_id or "").strip(),
+            normalize_task_status=runtime_read.normalize_task_status,
+            task_display_label=task_view.task_display_label,
+        )
+        preset = str(snap.get("phase2_team_preset", "")).strip() or str(snap.get("phase1_role_preset", "")).strip() or "-"
+        rows.append(
+            ActiveTaskRowDTO(
+                project_key=project_key,
+                project_alias=project_alias,
+                project_label=project_label,
+                runtime_path=_runtime_path(project_alias),
+                request_id=str(snap.get("request_id", "")).strip(),
+                label=str(snap.get("label", "")).strip(),
+                status=str(snap.get("status", "")).strip(),
+                stage=str(snap.get("stage", "")).strip(),
+                tf_phase=str(snap.get("tf_phase", "")).strip(),
+                preset=preset,
+                phase2_shape=_compose_phase2_shape(snap.get("phase2_execution_roles") or [], snap.get("phase2_review_roles") or []),
+                lane_summary=_compose_lane_summary(snap),
+                backend_summary=_compose_backend_summary(
+                    str(snap.get("backend", "")).strip(),
+                    str(snap.get("backend_profile", "")).strip(),
+                    str(snap.get("backend_verdict", "")).strip(),
+                    str(snap.get("backend_contract", "")).strip(),
+                ),
+                updated_at=str(snap.get("updated_at", "")).strip(),
+                detail_path=_detail_path(str(request_id or "").strip()),
+            )
+        )
+    rows.sort(key=lambda row: (row.updated_at, row.request_id), reverse=True)
+    return rows[: max(1, int(cap))]
+
+
+def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Optional[TaskDetailDTO]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    target = str(request_id or "").strip()
+    if not target:
+        return None
+    for key, entry in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
+        task = task_state.get_task_record(entry, target)
+        if not isinstance(task, dict):
+            continue
+        rid = task_state.resolve_task_request_id(entry, target)
+        alias = str(entry.get("project_alias", "")).strip().upper() or str(key)
+        display = str(entry.get("display_name", "")).strip() or str(key)
+        shape = task_state.task_phase2_shape_snapshot(task)
+        lane = task_state.task_lane_summary_snapshot(task)
+        result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        contract = _completion_contract_for_preset(str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip())
+        rerun_summary = _task_rerun_summary(task)
+        followup_summary = _task_followup_summary(task)
+        rate_limit_summary = _task_rate_limit_summary(task)
+        action_contract = _task_command_contract(
+            project_alias=alias,
+            label=task_view.task_display_label(task, fallback_request_id=rid),
+            request_id=rid,
+            tf_phase=str(task.get("tf_phase", "")).strip() or task_view.normalize_tf_phase(task_view.derive_tf_phase(task), "queued"),
+            rerun_summary=rerun_summary,
+            followup_summary=followup_summary,
+            rate_limit_summary=rate_limit_summary,
+        )
+        safe_action_buttons, phase2_action_buttons = _task_action_buttons(
+            label=task_view.task_display_label(task, fallback_request_id=rid),
+            request_id=rid,
+            phase2_commands=list(action_contract.get("phase2") or []),
+        )
+        backend_summary = _compose_backend_summary(
+            str(task.get("backend", "") or result.get("backend", "")).strip(),
+            str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
+            str(task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip(),
+            str(task.get("backend_contract", "") or result.get("backend_contract", "")).strip(),
+        )
+        return TaskDetailDTO(
+            project_key=str(key),
+            project_alias=alias,
+            project_label=display,
+            request_id=rid,
+            label=task_view.task_display_label(task, fallback_request_id=rid),
+            status=runtime_read.normalize_task_status(task.get("status", "pending")),
+            tf_phase=str(task.get("tf_phase", "")).strip() or task_view.normalize_tf_phase(task_view.derive_tf_phase(task), "queued"),
+            mode=str(task.get("mode", "dispatch")).strip(),
+            prompt=str(task.get("prompt", "")).strip(),
+            roles=task_view.dedupe_roles(task.get("roles") or []),
+            verifier_roles=task_view.dedupe_roles(task.get("verifier_roles") or []),
+            phase1_summary=_task_phase1_summary(task),
+            phase1_progress=_task_phase1_progress(task),
+            phase1_candidate_roles=task_view.dedupe_roles(task.get("phase1_candidate_roles") or []),
+            phase1_role_preset=str(task.get("phase1_role_preset", "")).strip(),
+            phase2_team_preset=str(task.get("phase2_team_preset", "")).strip(),
+            phase2_shape=_compose_phase2_shape(shape["execution_roles"], shape["review_roles"]),
+            phase2_quality=_compose_task_quality(task),
+            lane_summary=_compose_lane_summary(lane),
+            rerun_summary=rerun_summary,
+            followup_summary=followup_summary,
+            completion_focus=str(contract.get("focus", "")).strip() or "-",
+            completion_done_when=str(contract.get("done_when", "")).strip() or "-",
+            completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",
+            completion_followup_when=str(contract.get("manual_followup_when", "")).strip() or "-",
+            backend_summary=backend_summary,
+            backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
+            rate_limit_summary=rate_limit_summary,
+            updated_at=str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
+            command_hints=list(action_contract.get("safe") or []),
+            phase2_action_hints=list(action_contract.get("phase2") or []),
+            safe_action_buttons=safe_action_buttons,
+            phase2_action_buttons=phase2_action_buttons,
+            reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
+        )
+    return None
+
+
+
