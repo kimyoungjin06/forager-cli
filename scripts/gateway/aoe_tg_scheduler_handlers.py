@@ -55,6 +55,7 @@ from aoe_tg_sync_merge import apply_scenario_items_to_entry as _apply_scenario_i
 from aoe_tg_sync_merge import stamp_sync_meta as _stamp_sync_meta
 import aoe_tg_scheduler_sync as scheduler_sync_mod
 import aoe_tg_scheduler_queue as scheduler_queue_mod
+import aoe_tg_scheduler_next as scheduler_next_mod
 from aoe_tg_todo_state import merge_todo_proposals
 
 _PRIORITIES = {"P1", "P2", "P3"}
@@ -421,166 +422,31 @@ def handle_scheduler_command(
             status_canceled=_STATUS_CANCELED,
         )
 
-    if chat_role == "readonly":
-        send(
-            "permission denied: readonly chat cannot start scheduling.\n"
-            "read-only: /status /monitor /todo (list) ...",
-            context="next-deny",
-            with_menu=True,
-        )
-        return {"terminal": True}
-
-    tokens = [t for t in str(rest or "").split() if t.strip()]
-    force = any(t.lower() in {"force", "!", "--force"} for t in tokens)
-
-    # 0) If a pending todo exists for this chat, try to resume it instead of selecting a new one.
-    candidate_projects = ({focus_key: focus_entry} if focus_key and isinstance(focus_entry, dict) else projects)
-    unready_rows: List[str] = []
-    for p_key, p_entry in candidate_projects.items():
-        if not isinstance(p_entry, dict):
-            continue
-        if not project_schedulable(p_entry):
-            continue
-        if not project_runtime_issue(p_entry):
-            continue
-        alias = _project_alias(p_entry, str(p_key))
-        unready_rows.append(f"- {alias} ({p_key}): {project_runtime_label(p_entry)}")
-    pending_hit = _find_pending_todo_for_chat(candidate_projects, chat_id, skip_paused=not force)
-    if pending_hit and not force:
-        p_key, pending = pending_hit
-        p_todo_id = str(pending.get("todo_id", "")).strip()
-        try:
-            key, entry, _p_args = get_context(p_key)
-        except Exception:
-            key = p_key
-            entry = projects.get(p_key) if isinstance(projects.get(p_key), dict) else {}
-
-        alias = _project_alias(entry if isinstance(entry, dict) else {}, key)
-        if isinstance(entry, dict) and _has_task_linked_to_todo(entry, p_todo_id):
-            send(
-                "next blocked: pending todo already has an active task\n"
-                f"- runtime: {key} ({alias})\n"
-                f"- pending: {p_todo_id}\n"
-                "next:\n"
-                "- /todo (list)\n"
-                "- /monitor",
-                context="next-pending-has-task",
-                with_menu=True,
-            )
-            return {"terminal": True}
-
-        todo_item = _find_todo_item(entry if isinstance(entry, dict) else {}, p_todo_id) if isinstance(entry, dict) else None
-        summary = str((todo_item or {}).get("summary", "")).strip() if isinstance(todo_item, dict) else ""
-        if not summary:
-            send(
-                "next blocked: pending todo exists but summary was not found\n"
-                f"- runtime: {key} ({alias})\n"
-                f"- pending: {p_todo_id}\n"
-                "next:\n"
-                f"- /todo {key}\n"
-                "- /next force  (override)",
-                context="next-pending-missing",
-                with_menu=True,
-            )
-            return {"terminal": True}
-
-        summary_preview = summary.replace("\n", " ").strip()
-        if len(summary_preview) > 220:
-            summary_preview = summary_preview[:217] + "..."
-        send(
-            "next resumed: pending todo\n"
-            f"- runtime: {key} ({alias})\n"
-            f"- id: {p_todo_id}\n"
-            f"- summary: {summary_preview or '-'}\n"
-            "dispatch starting...",
-            context="next-resume",
-            with_menu=True,
-        )
-        return {
-            "terminal": False,
-            "cmd": "run",
-            "orch_target": key,
-            "run_prompt": summary,
-            "run_force_mode": "dispatch",
-            "run_auto_source": "todo-next-global",
-        }
-
-    # 1) Pick a candidate across all projects.
-    recovery_grace_until = _auto_recovery_grace_until(args)
-    provider_capacity_state = load_provider_capacity_state(getattr(args, "team_dir", ""))
-    candidate = _pick_global_next_candidate(
-        candidate_projects,
-        ignore_busy=force,
-        skip_paused=not force,
-        recovery_grace_until=recovery_grace_until,
-        provider_capacity_state=provider_capacity_state,
+    return scheduler_next_mod.handle_next_command(
+        args=args,
+        manager_state=manager_state,
+        chat_id=chat_id,
+        chat_role=chat_role,
+        rest=rest,
+        send=send,
+        get_context=get_context,
+        save_manager_state=save_manager_state,
+        now_iso=now_iso,
+        projects=projects,
+        focus_key=focus_key,
+        focus_entry=focus_entry if isinstance(focus_entry, dict) else {},
+        focus_alias=focus_alias,
+        project_schedulable=project_schedulable,
+        project_runtime_issue=project_runtime_issue,
+        project_runtime_label=project_runtime_label,
+        project_alias=_project_alias,
+        find_pending_todo_for_chat=_find_pending_todo_for_chat,
+        has_task_linked_to_todo=_has_task_linked_to_todo,
+        find_todo_item=_find_todo_item,
+        auto_recovery_grace_until=_auto_recovery_grace_until,
+        load_provider_capacity_state=load_provider_capacity_state,
+        pick_global_next_candidate=_pick_global_next_candidate,
+        build_no_runnable_todo_message=build_no_runnable_todo_message,
+        blocked_head_summary=_blocked_head_summary,
+        normalize_priority=_normalize_priority,
     )
-    if not candidate:
-        body = build_no_runnable_todo_message(
-            focus_label=focus_alias or focus_key,
-            unready_rows=unready_rows,
-        )
-        send(body, context="next-none", with_menu=True)
-        return {"terminal": True}
-
-    key = str(candidate.get("project_key", "")).strip()
-    todo = candidate.get("todo") if isinstance(candidate.get("todo"), dict) else {}
-    selection_kind = str(candidate.get("selection_kind", "")).strip().lower()
-
-    # Resolve entry via get_context to ensure target exists and uses normalized key.
-    key, entry, _p_args = get_context(key)
-    alias = _project_alias(entry, key)
-
-    todo_id = str(todo.get("id", "")).strip() or "-"
-    pr = _normalize_priority(str(todo.get("priority", "P2")))
-    summary = str(todo.get("summary", "")).strip()
-    if not summary:
-        send(
-            "next blocked: selected todo has empty summary\n"
-            f"- runtime: {key} ({alias})\n"
-            f"- id: {todo_id}\n"
-            "next:\n"
-            f"- /todo {key}\n"
-            "- /next force",
-            context="next-empty-summary",
-            with_menu=True,
-        )
-        return {"terminal": True}
-
-    now = now_iso()
-    todo["updated_at"] = now
-    todo["queued_at"] = str(todo.get("queued_at", "")).strip() or now
-    todo["queued_by"] = str(todo.get("queued_by", "")).strip() or f"telegram:{chat_id}"
-    entry["pending_todo"] = {"todo_id": todo_id, "chat_id": str(chat_id), "selected_at": now}
-    entry["updated_at"] = now
-    if not args.dry_run:
-        save_manager_state(args.manager_state_file, manager_state)
-
-    summary_preview = summary.replace("\n", " ").strip()
-    if len(summary_preview) > 220:
-        summary_preview = summary_preview[:217] + "..."
-    lines = [
-        "next resumed (global)" if selection_kind == "resume" else "next selected (global)",
-        f"- runtime: {key} ({alias})",
-        f"- id: {todo_id}",
-        f"- priority: {pr}",
-        f"- summary: {summary_preview or '-'}",
-    ]
-    blocked_head = _blocked_head_summary(entry.get("todos") if isinstance(entry.get("todos"), list) else [])
-    if blocked_head and str(blocked_head.get("bucket", "")).strip() == "manual_followup":
-        attention = f"- attention: blocked backlog {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)} [manual_followup]"
-        reason = str(blocked_head.get("reason", "")).strip()
-        if reason:
-            attention += f" | {reason}"
-        lines.append(attention)
-    lines.append("dispatch starting...")
-    send("\n".join(lines), context="next-selected", with_menu=True)
-
-    return {
-        "terminal": False,
-        "cmd": "run",
-        "orch_target": key,
-        "run_prompt": summary,
-        "run_force_mode": "dispatch",
-        "run_auto_source": "todo-next-global",
-    }
