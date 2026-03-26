@@ -258,3 +258,34 @@
   - 원칙:
     - 새 기능보다 운영 병목이 큰 곳부터 자른다.
     - 대시보드 MVP 후에 착수한다.
+
+### 8.8 Harness Adoption
+- [x] OMC benchmark / harness trend 정리
+  - 문서:
+    - `docs/OH_MY_CLAUDE_BENCHMARK_20260327.md`
+- [x] harness adoption master plan 작성
+  - 문서:
+    - `docs/HARNESS_ADOPTION_PLAN.md`
+- [ ] `Session Search`
+  - source:
+    - `gateway_events.jsonl`
+    - nightly summary artifacts
+    - dashboard action audit
+    - runtime/task snapshots
+  - surface:
+    - Telegram `/history search`
+    - later dashboard `/control/history`
+- [ ] `Task Team Observatory`
+  - lane age / stale warning
+  - last event / bottleneck summary
+  - touched file index / conflict hint
+  - `/task`, `/monitor`, dashboard detail/recovery 우선
+- [ ] `AOE_STATE_DIR`
+  - worktree-local `.aoe-team` 위에 centralized state root 도입
+  - stable project-id 기반 state continuity
+- [ ] `doctor / setup / migration` discipline
+  - bootstrap, health, upgrade, state-root migration guidance
+- [ ] compatibility / deprecation envelope
+  - legacy surface retirements에 deterministic response envelope 추가
+- [ ] learned runbook extraction
+  - repeated blocker / remediation를 durable runbook으로 승격
