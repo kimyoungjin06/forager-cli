@@ -366,6 +366,14 @@ def emit_planning_progress(
     phase_token = str(phase or "").strip().lower() or "planning"
     suffix = f" attempt={attempt}/{total}" if int(attempt or 0) > 0 and int(total or 0) > 0 else ""
     detail_text = str(detail or "").strip()
+    task_row = task if isinstance(task, dict) else None
+    task_short_id = ""
+    if task_row:
+        task_short_id = (
+            str(task_row.get("short_id", "")).strip()
+            or str(task_row.get("label", "")).strip()
+            or str(task_row.get("request_id", "")).strip()
+        )
     log_status = "running"
     if phase_token in {"ready", "reuse"}:
         log_status = "completed"
@@ -375,7 +383,8 @@ def emit_planning_progress(
         event=f"planning_{phase_token}",
         project=key,
         request_id=str(request_id or "").strip(),
-        task=task if isinstance(task, dict) else None,
+        task=task_row,
+        task_short_id=task_short_id,
         stage="planning",
         status=log_status,
         detail=f"{detail_text}{suffix}".strip(),

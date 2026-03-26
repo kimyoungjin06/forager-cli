@@ -89,6 +89,7 @@ def _update_provisional_planning_task(
 ) -> None:
     if not isinstance(task, dict):
         return
+    summary_tokens = {"ready", "blocked", "fallback", "reuse"}
     note_parts: List[str] = []
     token = str(phase or "").strip()
     if token:
@@ -102,7 +103,10 @@ def _update_provisional_planning_task(
     task["status"] = "running"
     task["tf_phase"] = "planning"
     task["tf_phase_reason"] = note
-    task["phase1_current_phase"] = token or "planning"
+    if token and token not in summary_tokens:
+        task["phase1_current_phase"] = token
+    elif not str(task.get("phase1_current_phase", "")).strip():
+        task["phase1_current_phase"] = "planning"
     task["phase1_current_detail"] = str(detail or "").strip()[:240]
     if attempt > 0:
         task["phase1_current_round"] = int(attempt)
