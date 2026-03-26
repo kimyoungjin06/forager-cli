@@ -4,7 +4,6 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 import re
-import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_ops_policy import list_ops_projects, project_alias as ops_project_alias
@@ -26,6 +25,10 @@ from aoe_tg_sync_sources import (
     _rel_display,
     _scenario_include_tokens,
     _tag_sync_items,
+)
+from aoe_tg_scheduler_sync_command import (
+    parse_sync_command,
+    resolve_sync_targets,
 )
 
 _STATUS_OPEN = "open"
@@ -262,174 +265,50 @@ def handle_sync_command(
     focus_entry: Dict[str, Any],
     focus_alias: str,
 ) -> Dict[str, Any]:
-    recalled_last_args = False
-    raw_rest = str(rest or "").strip()
-    user_provided_args = bool(raw_rest)
-    if not raw_rest:
-        last = _get_last_cmd_args(manager_state, chat_id, "sync")
-        if last:
-            raw_rest = last
-            rest = last
-            recalled_last_args = True
-
-    tokens = [t for t in str(rest or "").split() if t.strip()]
-    quiet = False
-    preview = False
-    prune_missing = False
-    filtered: List[str] = []
-    for tok in tokens:
-        low = tok.strip().lower()
-        if low in {"quiet", "--quiet", "-q"}:
-            quiet = True
-            continue
-        if low in {"preview", "inspect", "--preview", "--inspect"}:
-            preview = True
-            continue
-        if low in {"prune", "replace", "rebuild", "--prune", "--replace"}:
-            prune_missing = True
-            continue
-        filtered.append(tok)
-    tokens = filtered
-    history_candidate = raw_rest if (user_provided_args and (not _is_auto_invocation(args)) and (not preview)) else ""
-
-    since_seconds = 0
-    since_label = ""
-    filtered_since: List[str] = []
-    i = 0
-    while i < len(tokens):
-        tok = str(tokens[i] or "").strip()
-        low = tok.lower()
-
-        raw_val = ""
-        if low in {"since", "--since", "-s", "within", "--within"}:
-            if i + 1 < len(tokens):
-                raw_val = str(tokens[i + 1] or "").strip()
-                i += 2
-            else:
-                i += 1
-            secs = _parse_since_seconds(raw_val)
-            if secs > 0:
-                since_seconds = secs
-                since_label = raw_val
-            continue
-
-        if low.startswith("since=") or low.startswith("--since=") or low.startswith("-s="):
-            raw_val = tok.split("=", 1)[1].strip() if "=" in tok else ""
-            secs = _parse_since_seconds(raw_val)
-            if secs > 0:
-                since_seconds = secs
-                since_label = raw_val
-                i += 1
-                continue
-
-        filtered_since.append(tok)
-        i += 1
-
-    tokens = filtered_since
-    # Shorthand: allow trailing duration token like "1h" without writing "since 1h".
-    if since_seconds <= 0 and tokens:
-        tail = str(tokens[-1] or "").strip()
-        secs = _parse_since_seconds(tail)
-        if secs > 0:
-            since_seconds = secs
-            since_label = tail
-            tokens = tokens[:-1]
-    if since_seconds > 0:
-        min_mtime = max(0.0, float(time.time()) - float(since_seconds))
-    else:
-        min_mtime = 0.0
-
-    mode = "scenario"
-    if tokens:
-        head = tokens[0].strip().lower()
-        if head in {"recent", "docs", "scan"}:
-            mode = "recent_docs"
-            tokens = tokens[1:]
-        elif head in {"salvage"}:
-            mode = "salvage_docs"
-            tokens = tokens[1:]
-        elif head in {"bootstrap", "recover"}:
-            mode = "bootstrap_docs"
-            tokens = tokens[1:]
-        elif head in {"files", "todo-files", "todofiles"}:
-            mode = "todo_files"
-            tokens = tokens[1:]
-
-    docs_limit = _DISCOVERY_DEFAULT_DOCS_LIMIT
-    if mode in {"recent_docs", "salvage_docs", "bootstrap_docs"} and tokens and tokens[-1].isdigit():
-        docs_limit = max(1, min(50, int(tokens[-1])))
-        tokens = tokens[:-1]
-
-    files_limit = _DISCOVERY_DEFAULT_TODO_FILES_LIMIT
-    if mode == "todo_files" and tokens and tokens[-1].isdigit():
-        files_limit = max(1, min(400, int(tokens[-1])))
-        tokens = tokens[:-1]
-
-    if prune_missing and (mode in {"recent_docs", "salvage_docs", "bootstrap_docs"} or since_seconds > 0):
-        if mode == "recent_docs":
-            detail = "recent_docs mode"
-        elif mode == "salvage_docs":
-            detail = "salvage_docs mode"
-        elif mode == "bootstrap_docs":
-            detail = "bootstrap_docs mode"
-        else:
-            detail = f"since {since_label or 'window'}"
-        send(
-            "sync prune blocked\n"
-            "- reason: prune/replace needs a full-scope sync to avoid canceling unrelated todos\n"
-            f"- scope: {detail}\n"
-            "next:\n"
-            "- /sync preview replace <O#|name>\n"
-            "- /sync replace <O#|name>\n"
-            "- or run plain /sync recent ... without replace",
-            context="sync-prune-blocked",
-            with_menu=True,
-        )
+    parse = parse_sync_command(
+        args=args,
+        manager_state=manager_state,
+        chat_id=chat_id,
+        rest=rest,
+        send=send,
+        get_last_cmd_args=_get_last_cmd_args,
+        is_auto_invocation=_is_auto_invocation,
+        parse_since_seconds=_parse_since_seconds,
+        default_docs_limit=_DISCOVERY_DEFAULT_DOCS_LIMIT,
+        default_files_limit=_DISCOVERY_DEFAULT_TODO_FILES_LIMIT,
+    )
+    if parse is None:
         return {"terminal": True}
+    recalled_last_args = bool(parse.recalled_last_args)
+    raw_rest = str(parse.raw_rest)
+    quiet = bool(parse.quiet)
+    preview = bool(parse.preview)
+    prune_missing = bool(parse.prune_missing)
+    history_candidate = str(parse.history_candidate)
+    since_seconds = int(parse.since_seconds)
+    since_label = str(parse.since_label)
+    min_mtime = float(parse.min_mtime)
+    mode = str(parse.mode)
+    docs_limit = int(parse.docs_limit)
+    files_limit = int(parse.files_limit)
 
-    target_token = tokens[0].strip() if tokens else ""
-    want_all = False
-    if mode == "scenario":
-        want_all = (not target_token) or target_token.lower() in {"all", "*"}
-    else:
-        want_all = bool(target_token) and target_token.lower() in {"all", "*"}
-
-    targets: List[Tuple[str, Dict[str, Any]]] = []
-    lock_narrowed = False
-    if want_all:
-        if focus_key and isinstance(focus_entry, dict):
-            targets.append((focus_key, focus_entry))
-            lock_narrowed = True
-        else:
-            targets.extend(list_ops_projects(projects))
-    else:
-        # allow alias/name: O1, default, etc (or active project when empty)
-        requested_label = str(target_token or orch_target or "").strip()
-        try:
-            key, entry, _p_args = get_context(target_token or orch_target)
-        except Exception as exc:
-            if focus_key and "project lock active" in str(exc).strip().lower():
-                send(
-                    _render_sync_lock_message(
-                        locked_label=focus_alias or focus_key,
-                        requested_label=requested_label or "-",
-                    ),
-                    context="sync-locked",
-                    with_menu=True,
-                )
-                return {"terminal": True}
-            raise
-        if focus_key and key != focus_key:
-            send(
-                _render_sync_lock_message(
-                    locked_label=focus_alias or focus_key,
-                    requested_label=_project_alias(entry, key),
-                ),
-                context="sync-locked",
-                with_menu=True,
-            )
-            return {"terminal": True}
-        targets.append((key, entry))
+    target_resolution = resolve_sync_targets(
+        spec=parse,
+        projects=projects,
+        focus_key=focus_key,
+        focus_entry=focus_entry,
+        focus_alias=focus_alias,
+        orch_target=orch_target,
+        send=send,
+        get_context=get_context,
+        list_projects=list_ops_projects,
+        project_alias=_project_alias,
+        render_sync_lock_message=_render_sync_lock_message,
+    )
+    if target_resolution is None:
+        return {"terminal": True}
+    targets = list(target_resolution.targets or [])
+    lock_narrowed = bool(target_resolution.lock_narrowed)
 
     total = {
         "parsed": 0,
