@@ -30,6 +30,13 @@ from aoe_tg_scheduler_sync_command import (
     parse_sync_command,
     resolve_sync_targets,
 )
+from aoe_tg_scheduler_sync_render import (
+    SyncRenderContext,
+    persist_sync_state,
+    send_sync_complete,
+    send_sync_preview,
+    send_sync_quiet,
+)
 
 _STATUS_OPEN = "open"
 _STATUS_DONE = "done"
@@ -1057,181 +1064,56 @@ def handle_sync_command(
             for note in diagnosis_lines[:2]:
                 per_project_lines.append(f"  diag: {note}")
 
+    render_ctx = SyncRenderContext(
+        focus_key=focus_key,
+        focus_alias=focus_alias,
+        lock_narrowed=lock_narrowed,
+        recalled_last_args=recalled_last_args,
+        raw_rest=raw_rest,
+        mode=mode,
+        docs_limit=docs_limit,
+        files_limit=files_limit,
+        since_seconds=since_seconds,
+        since_label=since_label,
+        target_count=len(targets),
+        prune_missing=prune_missing,
+    )
+
     if preview:
-        lines: List[str] = ["sync preview"]
-        if focus_key:
-            lines.append(f"- project_lock: {focus_alias or focus_key}")
-            if lock_narrowed:
-                lines.append("- scope: narrowed to locked project")
-        if recalled_last_args and raw_rest:
-            lines.append(f"- args: {raw_rest} (reused)")
-        if mode == "recent_docs":
-            lines.append("- mode: recent_docs")
-            lines.append(f"- docs_per_project: {docs_limit}")
-        elif mode == "salvage_docs":
-            lines.append("- mode: salvage_docs")
-            lines.append(f"- docs_per_project: {max(docs_limit, 5)}")
-        elif mode == "bootstrap_docs":
-            lines.append("- mode: bootstrap_docs")
-            lines.append(f"- docs_per_project: {max(docs_limit, 5)}")
-            lines.append(f"- files_per_project: {files_limit}")
-        elif mode == "todo_files":
-            lines.append("- mode: todo_files")
-            lines.append(f"- files_per_project: {files_limit}")
-        else:
-            lines.append("- mode: scenario")
-        if since_seconds > 0 and since_label:
-            lines.append(f"- since: {since_label}")
-        lines.append(f"- projects: {len(targets)}")
-        if total_candidate_classes:
-            ordered = sorted(total_candidate_classes.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))
-            lines.append("- candidate_classes: " + ", ".join(f"{k}={v}" for k, v in ordered[:6]))
-        if total_candidate_doc_types:
-            ordered = sorted(total_candidate_doc_types.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))
-            lines.append("- candidate_doc_types: " + ", ".join(f"{k}={v}" for k, v in ordered[:6]))
-        lines.append(f"- parsed: {total['parsed']}")
-        lines.append(f"- would_add: {total['added']}")
-        lines.append(f"- would_update: {total['updated']}")
-        lines.append(f"- would_done: {total['done']}")
-        if total["proposed"]:
-            lines.append(f"- would_propose: {total['proposed']}")
-        if prune_missing:
-            lines.append(f"- would_prune: {total['pruned']}")
-        if total["missing"]:
-            lines.append(f"- missing: {total['missing']}")
-        skipped_done = int(total.get("skipped_done_missing", 0) or 0)
-        if skipped_done:
-            lines.append(f"- skipped_done_missing: {skipped_done}")
-        if preview_blocks:
-            lines.append("")
-            lines.append("projects:")
-            for idx, block in enumerate(preview_blocks[:8]):
-                if idx:
-                    lines.append("")
-                lines.extend(block.splitlines())
-            if len(preview_blocks) > 8:
-                lines.append("")
-                lines.append(f"... ({len(preview_blocks) - 8} more projects)")
-        lines.extend(
-            [
-                "",
-                "next:",
-                "- /sync <same args without preview>   # actually import",
-                "- /queue",
-                "- /next",
-            ]
+        return send_sync_preview(
+            ctx=render_ctx,
+            total=total,
+            total_candidate_classes=total_candidate_classes,
+            total_candidate_doc_types=total_candidate_doc_types,
+            preview_blocks=preview_blocks,
+            send=send,
         )
-        send("\n".join(lines).strip(), context="sync-preview", with_menu=True)
-        return {"terminal": True}
 
-    history_changed = False
-    if history_candidate and (not args.dry_run):
-        history_changed = _set_last_cmd_args(manager_state, chat_id, "sync", history_candidate, now_iso())
-
-    if (any_changed or proposal_changed) and (not args.dry_run):
-        save_manager_state(args.manager_state_file, manager_state)
-    elif sync_meta_changed and (not args.dry_run):
-        save_manager_state(args.manager_state_file, manager_state)
-    elif history_changed and (not args.dry_run):
-        save_manager_state(args.manager_state_file, manager_state)
+    persist_sync_state(
+        args=args,
+        manager_state=manager_state,
+        chat_id=chat_id,
+        history_candidate=history_candidate,
+        any_changed=any_changed,
+        proposal_changed=proposal_changed,
+        sync_meta_changed=sync_meta_changed,
+        save_manager_state=save_manager_state,
+        now_iso=now_iso,
+        set_last_cmd_args=_set_last_cmd_args,
+    )
 
     if quiet:
-        # Quiet mode: do not spam output unless this run actually changed the queue.
-        if any_changed or proposal_changed:
-            msg_lines: List[str] = ["sync updated"]
-            if recalled_last_args and raw_rest:
-                msg_lines.append(f"- args: {raw_rest} (reused)")
-            if mode == "recent_docs":
-                msg_lines.append("- mode: recent_docs")
-                msg_lines.append(f"- docs_per_project: {docs_limit}")
-            elif mode == "salvage_docs":
-                msg_lines.append("- mode: salvage_docs")
-                msg_lines.append(f"- docs_per_project: {max(docs_limit, 5)}")
-            elif mode == "bootstrap_docs":
-                msg_lines.append("- mode: bootstrap_docs")
-                msg_lines.append(f"- docs_per_project: {max(docs_limit, 5)}")
-                msg_lines.append(f"- files_per_project: {files_limit}")
-            elif mode == "todo_files":
-                msg_lines.append("- mode: todo_files")
-                msg_lines.append(f"- files_per_project: {files_limit}")
-            if since_seconds > 0 and since_label:
-                msg_lines.append(f"- since: {since_label}")
-            msg_lines.append(f"- projects: {len(targets)}")
-            if mode == "scenario":
-                msg_lines.append(f"- missing_files: {total['missing']}")
-                if since_seconds > 0:
-                    msg_lines.append(f"- skipped_stale: {total['skipped_stale']}")
-            else:
-                if mode in {"recent_docs", "salvage_docs", "bootstrap_docs"}:
-                    msg_lines.append(f"- missing_docs: {total['missing']}")
-                else:
-                    msg_lines.append(f"- missing_files: {total['missing']}")
-            msg_lines.append(f"- added: {total['added']}")
-            msg_lines.append(f"- updated: {total['updated']}")
-            msg_lines.append(f"- done: {total['done']}")
-            if total["proposed"]:
-                msg_lines.append(f"- proposed: {total['proposed']}")
-            if prune_missing:
-                msg_lines.append(f"- pruned: {total['pruned']}")
-            send("\n".join(msg_lines).strip(), context="sync-quiet", with_menu=True)
-        return {"terminal": True}
+        return send_sync_quiet(
+            ctx=render_ctx,
+            total=total,
+            any_changed=any_changed,
+            proposal_changed=proposal_changed,
+            send=send,
+        )
 
-    lines: List[str] = ["sync finished"]
-    if focus_key:
-        lines.append(f"- project_lock: {focus_alias or focus_key}")
-        if lock_narrowed:
-            lines.append("- scope: narrowed to locked project")
-    if recalled_last_args and raw_rest:
-        lines.append(f"- args: {raw_rest} (reused)")
-    if mode == "recent_docs":
-        lines.append("- mode: recent_docs")
-        lines.append(f"- docs_per_project: {docs_limit}")
-    elif mode == "salvage_docs":
-        lines.append("- mode: salvage_docs")
-        lines.append(f"- docs_per_project: {max(docs_limit, 5)}")
-    elif mode == "bootstrap_docs":
-        lines.append("- mode: bootstrap_docs")
-        lines.append(f"- docs_per_project: {max(docs_limit, 5)}")
-        lines.append(f"- files_per_project: {files_limit}")
-    elif mode == "todo_files":
-        lines.append("- mode: todo_files")
-        lines.append(f"- files_per_project: {files_limit}")
-    if since_seconds > 0 and since_label:
-        lines.append(f"- since: {since_label}")
-    lines.append(f"- projects: {len(targets)}")
-    if mode == "scenario":
-        lines.append(f"- missing_files: {total['missing']}")
-        if since_seconds > 0:
-            lines.append(f"- skipped_stale: {total['skipped_stale']}")
-    else:
-        if mode in {"recent_docs", "salvage_docs", "bootstrap_docs"}:
-            lines.append(f"- missing_docs: {total['missing']}")
-            lines.append(f"- docs_used: {total.get('docs_used', 0)}")
-            lines.append(f"- docs_scanned: {total.get('docs_scanned', 0)}")
-            if mode == "bootstrap_docs":
-                lines.append(f"- files_used: {total.get('files_used', 0)}")
-                lines.append(f"- files_scanned: {total.get('files_scanned', 0)}")
-        else:
-            lines.append(f"- missing_files: {total['missing']}")
-            lines.append(f"- files_used: {total.get('files_used', 0)}")
-            lines.append(f"- files_scanned: {total.get('files_scanned', 0)}")
-    lines.append(f"- parsed: {total['parsed']}")
-    lines.append(f"- added: {total['added']}")
-    lines.append(f"- updated: {total['updated']}")
-    lines.append(f"- done: {total['done']}")
-    if total["proposed"]:
-        lines.append(f"- proposed: {total['proposed']}")
-    if prune_missing:
-        lines.append(f"- pruned: {total['pruned']}")
-    skipped_done = int(total.get("skipped_done_missing", 0) or 0)
-    if skipped_done:
-        lines.append(f"- skipped_done_missing: {skipped_done}")
-    if per_project_lines:
-        lines.append("")
-        lines.append("details:")
-        lines.extend(per_project_lines[:30])
-        if len(per_project_lines) > 30:
-            lines.append(f"... ({len(per_project_lines) - 30} more)")
-    lines.extend(["", "next:", "- /queue", "- /next", "- /fanout", "- /auto on"])
-    send("\n".join(lines).strip(), context="sync", with_menu=True)
-    return {"terminal": True}
+    return send_sync_complete(
+        ctx=render_ctx,
+        total=total,
+        per_project_lines=per_project_lines,
+        send=send,
+    )
