@@ -310,5 +310,8 @@
     - broader migration/deprecation workflow remains open
 - [ ] compatibility / deprecation envelope
   - legacy surface retirements에 deterministic response envelope 추가
+  - note:
+    - shared deprecation envelope helper added
+    - initial retired surfaces: `mother-orch`, `swarm`
 - [ ] learned runbook extraction
   - repeated blocker / remediation를 durable runbook으로 승격

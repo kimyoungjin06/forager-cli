@@ -352,6 +352,34 @@ pause/resume 동작 규칙:
 - `/replay [list|latest|<idx>|<id>|show <...>|purge]`: 핸들러 오류 입력 큐 조회/재실행/정리
 - `/history search <query> [--project O#|name] [--since 12h] [--limit N] [--scope control|runtime|task|dashboard|recovery|all]`: gateway events, dashboard action audit, nightly summary, latest intent, current manager state를 합쳐 recovery-relevant history를 검색
 
+### G-2. Compatibility / Deprecation Envelope
+
+초기 deprecated surface는 deterministic response로만 처리한다.
+
+- `/mother`
+- `/mother-orch`
+- `aoe mother`
+- `aoe mother-orch`
+- `/swarm`
+- `aoe swarm`
+
+응답 계약:
+
+- `deprecated surface`
+- `code: deprecated_surface.<name>`
+- `replacement: <canonical surface>`
+- `note: <migration wording>`
+- `next: <operator hint>`
+
+현재 canonical replacement:
+
+- `mother-orch` 계열
+  - 기본 replacement: `/auto status`
+  - recovery intent면 `/offdesk review`
+- `swarm` 계열
+  - 기본 replacement: `/task`
+  - runtime status intent면 `/monitor`
+
 ---
 
 ## Telegram CLI-스타일 입력(`aoe ...`)은 무엇인가?

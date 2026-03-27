@@ -282,6 +282,17 @@ without grepping raw logs manually.
 - old command forms
 - legacy dashboard routes if replaced later
 
+### 8.4 Current Status
+- shared deterministic deprecation envelope added
+- initial retired surfaces:
+  - `mother-orch`
+  - `swarm`
+- current response contract:
+  - machine-readable `code`
+  - canonical `replacement`
+  - human `note`
+  - optional `next` operator hint
+
 ## 9. Package F: Delegation Contract Enforcement
 
 ### 9.1 Goal

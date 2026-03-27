@@ -286,3 +286,45 @@ def test_warning_project_review_prompt_prefers_offdesk_review() -> None:
     assert resolved.cmd == "offdesk"
     assert resolved.rest == "review"
     assert resolved.intent_action == "offdesk_review"
+
+
+def test_legacy_mother_orch_surface_returns_deprecated_envelope() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/mother-orch status",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "deprecated"
+    assert resolved.deprecated_code == "deprecated_surface.mother_orch"
+    assert resolved.deprecated_replacement == "/auto status"
+
+
+def test_legacy_swarm_cli_surface_returns_deprecated_envelope() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="aoe swarm status",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "deprecated"
+    assert resolved.deprecated_code == "deprecated_surface.swarm"
+    assert resolved.deprecated_replacement == "/monitor"

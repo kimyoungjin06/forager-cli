@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from aoe_tg_acl import parse_acl_command_args, parse_acl_revoke_args
+from aoe_tg_deprecation import match_deprecated_cli_surface, match_deprecated_slash_surface
 from aoe_tg_parse import (
     infer_natural_run_mode,
     normalize_lang_token,
@@ -137,6 +138,11 @@ class ResolvedCommand:
     intent_action: str = ""
     intent_class: str = ""
     intent_trace: str = ""
+    deprecated_code: str = ""
+    deprecated_surface: str = ""
+    deprecated_replacement: str = ""
+    deprecated_note: str = ""
+    deprecated_next_step: str = ""
 
 
 def _default_project_key_for_plaintext(manager_state: Dict[str, Any]) -> str:
@@ -181,6 +187,15 @@ def resolve_message_command(
     out.came_from_slash = bool(out.cmd)
 
     if out.cmd:
+        deprecated = match_deprecated_slash_surface(out.cmd, out.rest)
+        if deprecated is not None:
+            out.cmd = "deprecated"
+            out.deprecated_code = deprecated.code
+            out.deprecated_surface = deprecated.surface
+            out.deprecated_replacement = deprecated.replacement
+            out.deprecated_note = deprecated.note
+            out.deprecated_next_step = deprecated.next_step
+            return out
         slash_rest = str(out.rest or "").strip()
         if out.cmd in {"menu"}:
             out.cmd = "help"
@@ -401,6 +416,16 @@ def resolve_message_command(
                 out.cmd = "quick-direct"
 
     if (not out.cmd) and (not bool(slash_only)):
+        deprecated_cli = match_deprecated_cli_surface(text)
+        if deprecated_cli is not None:
+            out.cmd = "deprecated"
+            out.deprecated_code = deprecated_cli.code
+            out.deprecated_surface = deprecated_cli.surface
+            out.deprecated_replacement = deprecated_cli.replacement
+            out.deprecated_note = deprecated_cli.note
+            out.deprecated_next_step = deprecated_cli.next_step
+            return out
+
         quick = parse_quick_message(text)
         if quick:
             out.cmd = str(quick.get("cmd", "")).strip().lower()

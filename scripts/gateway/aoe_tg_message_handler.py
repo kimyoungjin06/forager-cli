@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from aoe_tg_deprecation import DeprecatedSurfaceMatch, render_deprecated_surface_message
 from aoe_tg_operator_summary import save_latest_command_resolution
 
 
@@ -196,6 +197,31 @@ def handle_text_message(
                 status="rejected",
                 error_code=deps["ERROR_COMMAND"],
                 detail="slash_only",
+            )
+            return
+
+        if resolved.cmd == "deprecated":
+            deprecated = DeprecatedSurfaceMatch(
+                code=str(resolved.deprecated_code or "").strip() or "deprecated_surface.unknown",
+                surface=str(resolved.deprecated_surface or text_preview).strip() or text_preview,
+                replacement=str(resolved.deprecated_replacement or "").strip() or "/help",
+                note=str(resolved.deprecated_note or "").strip() or "Use the canonical replacement surface instead.",
+                next_step=str(resolved.deprecated_next_step or "").strip(),
+            )
+            send(
+                render_deprecated_surface_message(deprecated),
+                context="deprecated-surface",
+                with_menu=True,
+            )
+            log_event(
+                event="deprecated_surface",
+                stage="intake",
+                status="redirected",
+                detail=(
+                    f"code={deprecated.code} "
+                    f"surface={deprecated.surface[:120]} "
+                    f"replacement={deprecated.replacement}"
+                ),
             )
             return
 

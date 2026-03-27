@@ -827,6 +827,98 @@ def test_room_runtime_module_matches_gateway_route_and_gc_helpers(tmp_path: Path
     assert not old_file.exists()
 
 
+def test_message_handler_short_circuits_deprecated_surface_before_latest_intent_save(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        team_dir=tmp_path / ".aoe-team",
+        project_root=tmp_path,
+        manager_state_file=tmp_path / ".aoe-team" / "orch_manager_state.json",
+        dry_run=False,
+        verbose=False,
+        max_text_chars=4000,
+        http_timeout_sec=10,
+        slash_only=False,
+        owner_bootstrap_mode="",
+        default_lang="ko",
+        default_reply_lang="ko",
+        default_report_level="normal",
+        owner_chat_id="",
+    )
+    args.team_dir.mkdir(parents=True, exist_ok=True)
+
+    sent: list[tuple[str, str]] = []
+    logged: list[dict] = []
+    saved_latest: list[dict] = []
+    deps = {
+        "mask_sensitive_text": lambda s: s,
+        "ResolvedCommand": gw.ResolvedCommand,
+        "RunTransitionState": gw.RunTransitionState,
+        "load_manager_state": lambda *_a, **_k: _empty_state(),
+        "ensure_default_project_registered": lambda *_a, **_k: None,
+        "is_owner_chat": lambda *_a, **_k: False,
+        "get_default_mode": lambda *_a, **_k: "",
+        "set_default_mode": lambda *_a, **_k: None,
+        "save_manager_state": lambda *_a, **_k: None,
+        "get_manager_project": lambda *_a, **_k: (
+            "default",
+            {"team_dir": str(args.team_dir), "project_root": str(tmp_path)},
+        ),
+        "make_project_args": lambda base_args, entry, key="": argparse.Namespace(
+            **vars(base_args),
+            team_dir=Path(str(entry["team_dir"])),
+            project_root=Path(str(entry["project_root"])),
+            _aoe_project_key=key or "default",
+        ),
+        "log_gateway_event": lambda **kwargs: logged.append(kwargs),
+        "room_autopublish_event": lambda **_k: None,
+        "int_from_env": gw.int_from_env,
+        "build_quick_reply_keyboard": lambda: {"keyboard": []},
+        "safe_tg_send_text": lambda **kwargs: sent.append((str(kwargs.get("context", "")), str(kwargs.get("text", "")))) or True,
+        "ERROR_TELEGRAM": gw.ERROR_TELEGRAM,
+        "resolve_message_command": lambda **_k: gw.ResolvedCommand(
+            cmd="deprecated",
+            deprecated_code="deprecated_surface.mother_orch",
+            deprecated_surface="/mother-orch status",
+            deprecated_replacement="/auto status",
+            deprecated_note="Mother-Orch terminology is retired.",
+            deprecated_next_step="/offdesk review or /monitor depending on intent",
+        ),
+        "resolve_chat_role": lambda *_a, **_k: "owner",
+        "enforce_command_auth": lambda **_k: False,
+        "ensure_chat_alias": lambda *_a, **_k: "1",
+        "normalize_chat_lang_token": lambda raw, default: raw or default,
+        "get_pending_mode": lambda *_a, **_k: "",
+        "clear_pending_mode": lambda *_a, **_k: None,
+        "get_chat_lang": lambda *_a, **_k: "ko",
+        "get_chat_report_level": lambda *_a, **_k: "normal",
+        "DEFAULT_REPORT_LEVEL": gw.DEFAULT_REPORT_LEVEL,
+        "preferred_command_prefix": lambda: "/",
+        "ERROR_COMMAND": gw.ERROR_COMMAND,
+        "READONLY_ALLOWED_COMMANDS": gw.READONLY_ALLOWED_COMMANDS,
+        "ERROR_AUTH": gw.ERROR_AUTH,
+        "now_iso": lambda: "2026-03-27T00:00:00+0900",
+    }
+
+    original_save_latest = message_handler.save_latest_command_resolution
+    try:
+        message_handler.save_latest_command_resolution = lambda *a, **k: saved_latest.append({"args": a, "kwargs": k})
+        message_handler.handle_text_message(
+            args,
+            "token-1",
+            "939062873",
+            "/mother-orch status",
+            deps=deps,
+        )
+    finally:
+        message_handler.save_latest_command_resolution = original_save_latest
+
+    assert saved_latest == []
+    assert sent
+    assert sent[-1][0] == "deprecated-surface"
+    assert "deprecated surface" in sent[-1][1]
+    event = next(row for row in logged if row.get("event") == "deprecated_surface")
+    assert event["status"] == "redirected"
+
+
 def test_gateway_batch_ops_module_matches_gateway_parse_helpers() -> None:
     assert gateway_batch_ops.parse_drain_args("5 force") == gw._parse_drain_args("5 force")
     assert gateway_batch_ops.parse_drain_args("all") == gw._parse_drain_args("all")
