@@ -75,21 +75,24 @@
 - `reason`
 - `depends_on`
 - `subtask_ids`
-- task-level `created_at`
-- task-level `updated_at`
-- task-level lane summary counts
-- backend/result summary already present on task rows
-
-### 4.3 Missing Fields That Need Explicit Artifact Support
 - per-lane `started_at`
 - per-lane `last_event_at`
 - per-lane `last_event_kind`
-- per-lane `tool_count`
-- per-lane `touched_files`
 - per-lane `backend`
 - per-lane `outcome_reason_code`
+- per-lane `touched_files`
+- best-effort per-lane `tool_count`
+  - explicit `tool_count` when backend/runtime provides it
+  - fallback to structured `reply_count` / `counts.replies` when exact tool telemetry is unavailable
+- task-level lane summary counts
+- backend/result summary already present on task rows
 
-These must be written as structured fields in runtime artifacts. They must not be derived from rendered Telegram/dashboard text.
+### 4.3 Remaining Gaps
+- exact backend-native per-lane `tool_count` across every runtime backend
+- richer per-lane `touched_files` producers beyond current artifact path fields
+- stronger file conflict classification beyond simple overlapping path detection
+
+These must remain structured runtime artifacts. They must not be derived from rendered Telegram/dashboard text.
 
 ## 5. Observability Model
 
@@ -228,6 +231,15 @@ These must be written as structured fields in runtime artifacts. They must not b
 2. replace task-scoped fallback with true lane freshness
 3. add conflict hints
 4. add touched file summary
+
+Current status:
+- implemented:
+  - lane-scoped freshness
+  - touched file summaries
+  - overlap-based conflict hints
+  - best-effort tool-count producer from structured backend/runtime counts
+- remaining:
+  - exact per-tool telemetry across every backend
 
 ## 9. Guardrails
 - observatory fields must be rebuildable from runtime artifacts

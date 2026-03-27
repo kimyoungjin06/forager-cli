@@ -464,6 +464,14 @@ def merge_request_states(execution_state: Dict[str, Any], review_state: Optional
         "replies": int(exec_counts.get("replies", len(exec_data.get("replies") or [])) or 0)
         + int(review_counts.get("replies", len(review_data.get("replies") or [])) or 0),
     }
+    merged_tool_count = max(
+        _state_tool_count(exec_data),
+        _state_tool_count(review_data),
+        int(merged["counts"].get("replies", 0) or 0),
+        len(replies),
+    )
+    if merged_tool_count > 0:
+        merged["tool_count"] = merged_tool_count
     merged["phase2_review_triggered"] = True
     return merged
 
@@ -579,7 +587,39 @@ def aggregate_parallel_stage_states(
     )
     if degraded_by:
         aggregate["degraded_by"] = degraded_by
+    aggregate_tool_count = sum(max(0, _state_tool_count(row)) for row in ordered_states)
+    if aggregate_tool_count <= 0:
+        aggregate_tool_count = int(aggregate["counts"].get("replies", 0) or 0)
+    if aggregate_tool_count > 0:
+        aggregate["tool_count"] = aggregate_tool_count
     return aggregate
+
+
+def _state_tool_count(state: Dict[str, Any]) -> int:
+    if not isinstance(state, dict):
+        return 0
+    counts = state.get("counts") if isinstance(state.get("counts"), dict) else {}
+    runtime_events = state.get("runtime_events") if isinstance(state.get("runtime_events"), list) else []
+    latest_event = runtime_events[-1] if runtime_events and isinstance(runtime_events[-1], dict) else {}
+    latest_payload = latest_event.get("payload") if isinstance(latest_event.get("payload"), dict) else {}
+
+    tool_count = 0
+    for candidate in (
+        state.get("tool_count"),
+        state.get("reply_count"),
+        counts.get("replies"),
+        latest_payload.get("tool_count"),
+        latest_payload.get("reply_count"),
+        latest_payload.get("tools_used"),
+        latest_payload.get("tool_calls"),
+        state.get("reply_messages"),
+        state.get("replies"),
+    ):
+        if isinstance(candidate, int):
+            tool_count = max(tool_count, int(candidate))
+        elif isinstance(candidate, list):
+            tool_count = max(tool_count, len([row for row in candidate if row]))
+    return tool_count
 
 
 def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage: str) -> Dict[str, Any]:
@@ -599,17 +639,7 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
             token = str(row.get(key, "")).strip()
             if token and token not in touched_files:
                 touched_files.append(token)
-    tool_count = 0
-    for candidate in (
-        state.get("tool_count"),
-        latest_event_payload.get("tool_count"),
-        latest_event_payload.get("tools_used"),
-        latest_event_payload.get("tool_calls"),
-    ):
-        if isinstance(candidate, int):
-            tool_count = max(tool_count, int(candidate))
-        elif isinstance(candidate, list):
-            tool_count = max(tool_count, len([row for row in candidate if row]))
+    tool_count = _state_tool_count(state)
     observability: Dict[str, Any] = {
         "request_id": str(state.get("request_id", "")).strip() or str(state.get("gateway_request_id", "")).strip(),
         "started_at": str(state.get("created_at", "")).strip(),

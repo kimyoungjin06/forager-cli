@@ -281,11 +281,15 @@
 - [x] `Session Search` Phase 1 spec
   - 문서:
     - `docs/SESSION_SEARCH_SPEC.md`
-- [ ] `Task Team Observatory`
+- [x] `Task Team Observatory`
   - lane age / stale warning
   - last event / bottleneck summary
   - touched file index / conflict hint
   - `/task`, `/monitor`, dashboard detail/recovery 우선
+  - note:
+    - Phase 2 source plumbing 완료
+    - `tool_count`는 explicit backend/runtime 값 우선, `reply_count`/`counts.replies` fallback 사용
+    - exact per-tool telemetry는 후속 고도화 항목으로 남긴다
 - [x] `Task Team Observatory` Phase 1 spec
   - 문서:
     - `docs/TASK_TEAM_OBSERVATORY_SPEC.md`
