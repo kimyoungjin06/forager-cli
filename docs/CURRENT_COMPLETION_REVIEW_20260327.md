@@ -198,7 +198,7 @@
 - do not let code splitting outrun verification and convergence work
 
 ## 7. Immediate Next Sprint
-1. write `Live Runtime Verification` execution spec
+1. use `docs/LIVE_RUNTIME_VERIFICATION_SPEC.md` as the execution contract
 2. run verification scenarios for `build`, `data`, `review`, `mixed`
 3. record mismatches between:
    - preset contract

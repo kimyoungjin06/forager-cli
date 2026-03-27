@@ -208,6 +208,9 @@
 - [x] completion matrix를 operator/recovery surface wording에 연결
 
 ### 8.4 Live Runtime Verification
+- [x] `Live Runtime Verification` spec
+  - 문서:
+    - `docs/LIVE_RUNTIME_VERIFICATION_SPEC.md`
 - [ ] preset별 실제 `Phase2` 완료 흐름 검증
   - 대상:
     - `build`
@@ -222,6 +225,8 @@
     - `/task`
     - `/monitor`
     - `/offdesk review`
+    - dashboard `Task Detail`
+    - dashboard `Recovery`
 
 ### 8.5 Recovery Summary
 - [x] nightly session summary spec 고정
