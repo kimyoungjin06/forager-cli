@@ -295,6 +295,36 @@ pause/resume 동작 규칙:
 - `logs/gateway_events.jsonl`
 - `recovery/nightly-session-summary/*`
 
+### F-3. Runtime Doctor
+
+- `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo>`
+  - resolved state root, artifact readability, runtime config, binary presence를 점검
+- `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo> --json`
+  - machine-readable JSON report 출력
+- `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo> --team-dir <path>`
+  - explicit team dir 기준으로 same checks 실행
+
+현재 점검 범위:
+
+- state root selection / drift
+  - `AOE_STATE_DIR` configured but legacy fallback still active
+  - `AOE_TEAM_DIR` overriding `AOE_STATE_DIR`
+  - legacy + centralized dual state presence
+- artifact readability
+  - `telegram_gateway_state.json`
+  - `orch_manager_state.json`
+  - `telegram_chat_aliases.json`
+  - `provider_capacity.json`
+  - `control/latest-intent.json`
+  - `dashboard/action-history.jsonl`
+  - `recovery/nightly-session-summary/latest.json`
+- runtime config presence
+  - `orchestrator.json`
+- binary presence
+  - `aoe-orch`
+  - `aoe-team`
+  - `tmux` (`warn` only)
+
 ### G. 복구/재실행
 
 - `/retry <T-###|request_id> [lane <L#|R#,...>]`: 같은 입력으로 재실행. lane을 주면 critic이 허용한 실행/review lane만 다시 돎

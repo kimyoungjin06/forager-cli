@@ -304,6 +304,9 @@
     - copy-first migration helper 추가
 - [ ] `doctor / setup / migration` discipline
   - bootstrap, health, upgrade, state-root migration guidance
+  - note:
+    - standalone `doctor` script added for state-root, artifact, runtime-config, and binary health
+    - `setup` guidance and broader migration/deprecation workflow remain open
 - [ ] compatibility / deprecation envelope
   - legacy surface retirements에 deterministic response envelope 추가
 - [ ] learned runbook extraction

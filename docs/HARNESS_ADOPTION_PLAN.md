@@ -249,6 +249,14 @@ without grepping raw logs manually.
 ### 7.3 Priority
 - medium-term
 - should follow `AOE_STATE_DIR` because migration logic depends on it
+- current status:
+  - standalone `doctor` script added first
+  - initial checks:
+    - resolved state root / drift warnings
+    - artifact readability
+    - runtime config presence
+    - binary presence
+  - `setup` guidance and broader upgrade envelopes remain open
 
 ## 8. Package E: Compatibility / Deprecation Envelopes
 
