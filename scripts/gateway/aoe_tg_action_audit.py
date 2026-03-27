@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+from aoe_tg_runtime_core import action_audit_path as runtime_action_audit_path
 
 ACTION_AUDIT_DIRNAME = "dashboard"
 ACTION_AUDIT_FILENAME = "action-history.jsonl"
@@ -29,7 +30,7 @@ def load_latest_action_audit(team_dir: Any) -> Dict[str, str]:
 
 def _action_audit_path(team_dir: Any) -> Path:
     token = str(team_dir or "").strip()
-    return Path(token).expanduser().resolve() / ACTION_AUDIT_DIRNAME / ACTION_AUDIT_FILENAME
+    return runtime_action_audit_path(token)
 
 
 def _normalize_latest_action_row(row: Dict[str, Any]) -> Dict[str, str]:

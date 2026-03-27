@@ -88,6 +88,26 @@ def resolve_centralized_team_dir(project_root: Path, state_root_dir: Path) -> Pa
     return Path(state_root_dir).expanduser().resolve() / stable_project_id(project_root)
 
 
+def provider_capacity_state_path(team_dir: Path | str, filename: str = "provider_capacity.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "provider_capacity.json").strip()
+
+
+def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
+
+
+def action_audit_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "dashboard" / "action-history.jsonl"
+
+
+def recovery_summary_dir(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "recovery" / "nightly-session-summary"
+
+
+def recovery_summary_latest_path(team_dir: Path | str) -> Path:
+    return recovery_summary_dir(team_dir) / "latest.json"
+
+
 def describe_resolved_team_dir(team_dir: Path | str) -> Dict[str, str]:
     resolved = Path(team_dir).expanduser().resolve()
     explicit_env = str(os.environ.get("AOE_TEAM_DIR", "")).strip()

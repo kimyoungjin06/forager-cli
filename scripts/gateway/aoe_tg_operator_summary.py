@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from aoe_tg_runtime_core import latest_intent_snapshot_path as runtime_latest_intent_snapshot_path
 from aoe_tg_action_audit import compact_action_text
 
 
@@ -57,7 +58,7 @@ def latest_intent_snapshot_path(team_dir: Any) -> Path:
     token = str(team_dir or "").strip()
     if not token:
         return Path("")
-    return Path(token).expanduser().resolve() / LATEST_INTENT_DIRNAME / LATEST_INTENT_FILENAME
+    return runtime_latest_intent_snapshot_path(token)
 
 
 def _normalize_latest_intent_record(raw: Any) -> Dict[str, str]:

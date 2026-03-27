@@ -14,7 +14,10 @@ from typing import Any, Dict, List, Tuple
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts" / "dashboard") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts" / "dashboard"))
+if str(ROOT / "scripts" / "gateway") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts" / "gateway"))
 
+from aoe_tg_runtime_core import recovery_summary_dir as runtime_recovery_summary_dir
 from control_dashboard_state import (
     DashboardSnapshotDTO,
     RuntimeDetailDTO,
@@ -30,7 +33,7 @@ def _safe_stamp(iso_text: str) -> str:
 
 
 def _default_output_dir(snapshot: DashboardSnapshotDTO) -> Path:
-    return Path(snapshot.team_dir).expanduser().resolve() / "recovery" / "nightly-session-summary"
+    return runtime_recovery_summary_dir(snapshot.team_dir)
 
 
 def _automation_posture(snapshot: DashboardSnapshotDTO) -> str:
@@ -403,7 +406,7 @@ def main(argv: List[str] | None = None) -> int:
     output_dir = (
         Path(args.output_dir).expanduser().resolve()
         if args.output_dir
-        else (Path(str(summary.get("team_dir", "."))).expanduser().resolve() / "recovery" / "nightly-session-summary")
+        else runtime_recovery_summary_dir(str(summary.get("team_dir", ".")))
     )
     latest_md, latest_json = write_nightly_session_summary(
         summary=summary,

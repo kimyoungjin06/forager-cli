@@ -115,10 +115,10 @@ def resolve_control_paths(
         team_dir=resolved_team_dir,
         manager_state_file=resolved_manager,
         auto_state_file=(resolved_team_dir / AUTO_STATE_FILENAME).resolve(),
-        provider_capacity_file=(resolved_team_dir / PROVIDER_CAPACITY_FILENAME).resolve(),
-        latest_intent_file=(resolved_team_dir / LATEST_INTENT_DIRNAME / LATEST_INTENT_FILENAME).resolve(),
+        provider_capacity_file=runtime_core.provider_capacity_state_path(resolved_team_dir, filename=PROVIDER_CAPACITY_FILENAME),
+        latest_intent_file=runtime_core.latest_intent_snapshot_path(resolved_team_dir),
         gateway_events_file=(resolved_team_dir / "logs" / GATEWAY_EVENTS_FILENAME).resolve(),
-        action_audit_file=(resolved_team_dir / ACTION_AUDIT_DIRNAME / ACTION_AUDIT_FILENAME).resolve(),
+        action_audit_file=runtime_core.action_audit_path(resolved_team_dir),
     )
 
 

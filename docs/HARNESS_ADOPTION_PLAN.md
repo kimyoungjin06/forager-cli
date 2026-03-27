@@ -221,8 +221,8 @@ without grepping raw logs manually.
 - `telegram_gateway_state.json` now follows the resolved team dir instead of assuming local `.aoe-team`.
 - foreign project rows loaded from manager state repair their `team_dir` using the same centralized-state-aware default.
 - resolved state root is now surfaced in `/auto`, `/offdesk`, and dashboard control summary/recovery views.
+- provider-capacity, latest-intent, action-audit, dashboard history search, and nightly summary paths now share runtime-core artifact resolvers.
 - remaining work:
-  - migrate provider/recovery/action artifacts to the same canonical root
   - add explicit migration tooling
 
 ## 7. Package D: Doctor / Setup / Migration Discipline

@@ -12,6 +12,11 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_project_state import project_alias_for_key
+from aoe_tg_runtime_core import (
+    action_audit_path as runtime_action_audit_path,
+    latest_intent_snapshot_path as runtime_latest_intent_snapshot_path,
+    recovery_summary_dir as runtime_recovery_summary_dir,
+)
 from aoe_tg_task_view import task_display_label
 
 
@@ -369,7 +374,7 @@ def _action_audit_rows(
     team_dir: Path,
     task_index: Dict[str, Dict[str, str]],
 ) -> List[HistoryRow]:
-    path = team_dir / "dashboard" / "action-history.jsonl"
+    path = runtime_action_audit_path(team_dir)
     if not path.exists():
         return []
     rows: List[HistoryRow] = []
@@ -426,7 +431,7 @@ def _action_audit_rows(
 
 
 def _nightly_summary_rows(team_dir: Path) -> List[HistoryRow]:
-    root = team_dir / "recovery" / "nightly-session-summary"
+    root = runtime_recovery_summary_dir(team_dir)
     if not root.exists():
         return []
     rows: List[HistoryRow] = []
@@ -522,7 +527,7 @@ def _latest_intent_rows(team_dir: Path) -> List[HistoryRow]:
     latest = load_latest_command_resolution(team_dir)
     if not latest:
         return []
-    path = team_dir / "control" / "latest-intent.json"
+    path = runtime_latest_intent_snapshot_path(team_dir)
     return [
         HistoryRow(
             at=str(latest.get("recorded_at", "")).strip(),

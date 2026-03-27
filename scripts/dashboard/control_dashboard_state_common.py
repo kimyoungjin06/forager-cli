@@ -18,9 +18,8 @@ import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_operator_action_contract as operator_action_contract
 import aoe_tg_orch_contract as orch_contract
 import aoe_tg_ops_policy as ops_policy
+import aoe_tg_runtime_core as runtime_core
 import aoe_tg_task_view as task_view
-
-from control_dashboard_state_io import RECOVERY_SUMMARY_DIRNAME, RECOVERY_SUMMARY_FILENAME
 from control_dashboard_state_models import ActionButtonDTO
 
 
@@ -318,7 +317,7 @@ def _detail_path(request_id: str) -> str:
 
 
 def _recovery_summary_path(team_dir: Path) -> Path:
-    return team_dir / "recovery" / RECOVERY_SUMMARY_DIRNAME / RECOVERY_SUMMARY_FILENAME
+    return runtime_core.recovery_summary_latest_path(team_dir)
 
 
 def _provider_repeat_counts(provider_state: Dict[str, Any]) -> Dict[str, int]:
@@ -344,6 +343,4 @@ def _runtime_reports(manager_state: Dict[str, Any], provider_state: Dict[str, An
         report["capacity_repeat_count"] = int(repeat_counts.get(alias, 0) or 0)
         reports.append(report)
     return offdesk_flow.sort_offdesk_reports(reports)
-
-
 

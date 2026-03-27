@@ -21,6 +21,7 @@ from aoe_tg_ops_view import (
     render_project_snapshot_lines,
 )
 from aoe_tg_package_paths import team_tmux_script
+from aoe_tg_runtime_core import provider_capacity_state_path as runtime_provider_capacity_state_path
 from aoe_tg_priority_actions import (
     offdesk_priority_action_snapshot,
     task_lane_target_snapshot,
@@ -1280,7 +1281,7 @@ def offdesk_state_path(args: Any, *, filename: str) -> Path:
 
 
 def provider_capacity_state_path(args: Any, *, filename: str) -> Path:
-    return Path(str(getattr(args, "team_dir", "."))).expanduser().resolve() / filename
+    return runtime_provider_capacity_state_path(getattr(args, "team_dir", "."), filename=filename)
 
 
 def load_auto_state(path: Path) -> Dict[str, Any]:
