@@ -194,8 +194,19 @@ def _bottleneck_sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, str]:
     else:
         status_rank = 5
     phase_rank = 0 if phase == "review" and status_rank <= 1 else 1
+    conflict_rank = -int(row.get("conflict_file_count", 0) or 0)
     idle_rank = -int(row.get("idle_sec", 0) or 0)
-    return status_rank, phase_rank, idle_rank, str(row.get("lane_id", "")).strip()
+    return status_rank, phase_rank, conflict_rank, idle_rank, str(row.get("lane_id", "")).strip()
+
+
+def _focus_conflict_suffix(row: Dict[str, Any]) -> str:
+    conflict_count = int(row.get("conflict_file_count", 0) or 0)
+    if conflict_count <= 0:
+        return ""
+    conflict_summary = str(row.get("conflict_summary", "")).strip()
+    if conflict_summary and conflict_summary != "-":
+        return f"; overlapping files: {conflict_summary}"
+    return f"; overlapping files={conflict_count}"
 
 
 def _build_first_focus(bottleneck: Dict[str, Any], *, freshness_scope: str) -> str:
@@ -204,12 +215,15 @@ def _build_first_focus(bottleneck: Dict[str, Any], *, freshness_scope: str) -> s
         return "-"
     status = str(bottleneck.get("status", "")).strip()
     reason = str(bottleneck.get("reason", "")).strip() or _lane_note(bottleneck)
+    conflict_suffix = _focus_conflict_suffix(bottleneck)
     if status == "failed":
-        return f"inspect failed lane {lane_id} first: {reason}"
+        return f"inspect failed lane {lane_id} first: {reason}{conflict_suffix}"
     if status == "waiting_on_dependencies":
-        return f"inspect blocked lane {lane_id} first: {reason}"
+        return f"inspect blocked lane {lane_id} first: {reason}{conflict_suffix}"
     if bool(bottleneck.get("is_stale")):
-        return f"inspect stale lane {lane_id} first ({freshness_scope}-scoped freshness)"
+        return f"inspect stale lane {lane_id} first ({freshness_scope}-scoped freshness){conflict_suffix}"
+    if conflict_suffix:
+        return f"inspect lane {lane_id} first{conflict_suffix}"
     return f"inspect lane {lane_id} first"
 
 

@@ -4400,6 +4400,7 @@ def test_task_team_observatory_prefers_lane_scoped_timestamps() -> None:
     assert observatory["conflict_file_count"] == 1
     assert observatory["lanes"][0]["conflict_file_count"] == 1
     assert observatory["lanes"][1]["conflict_file_count"] == 1
+    assert "overlapping files: reports/summary.md" in observatory["first_focus"]
 
 
 def test_annotate_lane_role_rows_collects_source_path_and_tool_count() -> None:

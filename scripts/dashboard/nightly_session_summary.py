@@ -102,6 +102,8 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
             "stale_lane_count": task.observatory_stale_lane_count,
             "bottleneck_lane": task.observatory_bottleneck_lane,
             "bottleneck_reason": task.observatory_bottleneck_reason,
+            "conflict_file_count": task.observatory_conflict_file_count,
+            "touched_file_count": task.observatory_touched_file_count,
         },
         "operator_hints": list(task.command_hints),
         "phase2_actions": list(task.phase2_action_hints),
@@ -340,6 +342,12 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     lines.append(
                         "    - first_focus: {focus}".format(
                             focus=str(observatory.get("first_focus", "")).strip() or "-",
+                        )
+                    )
+                    lines.append(
+                        "    - observatory_files: touched={touched} conflicts={conflicts}".format(
+                            touched=int(observatory.get("touched_file_count", 0) or 0),
+                            conflicts=int(observatory.get("conflict_file_count", 0) or 0),
                         )
                     )
                 task_hints = task.get("operator_hints") if isinstance(task.get("operator_hints"), list) else []
