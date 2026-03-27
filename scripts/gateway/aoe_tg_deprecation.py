@@ -38,6 +38,10 @@ def _swarm_replacement(rest: str) -> str:
     return "/task"
 
 
+def _first_token(rest: str) -> str:
+    return str(rest or "").strip().split(" ", 1)[0].strip().lower()
+
+
 def match_deprecated_slash_surface(cmd: str, rest: str) -> Optional[DeprecatedSurfaceMatch]:
     token = str(cmd or "").strip().lower()
     tail = str(rest or "").strip()
@@ -56,6 +60,54 @@ def match_deprecated_slash_surface(cmd: str, rest: str) -> Optional[DeprecatedSu
             replacement=_swarm_replacement(tail),
             note="Swarm wording is retired. Use Task Team or runtime surfaces instead.",
             next_step="/monitor for runtime status, /task for task detail, /offdesk review for recovery",
+        )
+    if token == "orch" and _first_token(tail) in {"map"}:
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.orch_map",
+            surface=f"/orch {tail}".strip(),
+            replacement="/map",
+            note="Use the canonical project map surface directly instead of /orch map.",
+            next_step="/map",
+        )
+    if token in {"tasks", "board"}:
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.monitor_alias",
+            surface=f"/{token}" + (f" {tail}" if tail else ""),
+            replacement="/monitor",
+            note="Use the canonical runtime monitor surface.",
+            next_step="/monitor",
+        )
+    if token in {"lifecycle"}:
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.lifecycle_alias",
+            surface=f"/{token}" + (f" {tail}" if tail else ""),
+            replacement="/task",
+            note="Use the canonical task lifecycle surface.",
+            next_step="/task",
+        )
+    if token in {"follow-up"}:
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.followup_alias",
+            surface=f"/{token}" + (f" {tail}" if tail else ""),
+            replacement="/followup",
+            note="Use the canonical followup command spelling.",
+            next_step="/followup <request_or_alias>",
+        )
+    if token in {"off-desk"}:
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.offdesk_alias",
+            surface=f"/{token}" + (f" {tail}" if tail else ""),
+            replacement="/offdesk",
+            note="Use the canonical offdesk preset surface.",
+            next_step="/offdesk status or /offdesk review",
+        )
+    if token in {"cleanup"}:
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.gc_alias",
+            surface=f"/{token}" + (f" {tail}" if tail else ""),
+            replacement="/gc",
+            note="Use the canonical maintenance cleanup surface.",
+            next_step="/gc",
         )
     return None
 
@@ -80,6 +132,46 @@ def match_deprecated_cli_surface(text: str) -> Optional[DeprecatedSurfaceMatch]:
             replacement=_swarm_replacement(rest),
             note="Swarm wording is retired. Use Task Team or runtime surfaces instead.",
             next_step="/monitor for runtime status, /task for task detail, /offdesk review for recovery",
+        )
+    if low == "aoe orch map" or low.startswith("aoe orch map "):
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.orch_map",
+            surface=raw,
+            replacement="aoe orch list",
+            note="Use the canonical project listing surface instead of orch map.",
+            next_step="aoe orch list",
+        )
+    if low == "aoe lifecycle" or low.startswith("aoe lifecycle "):
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.lifecycle_alias",
+            surface=raw,
+            replacement="aoe task",
+            note="Use the canonical task lifecycle surface.",
+            next_step="aoe task",
+        )
+    if low == "aoe follow-up" or low.startswith("aoe follow-up "):
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.followup_alias",
+            surface=raw,
+            replacement="aoe followup",
+            note="Use the canonical followup command spelling.",
+            next_step="aoe followup <request_or_alias>",
+        )
+    if low == "aoe off-desk" or low.startswith("aoe off-desk "):
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.offdesk_alias",
+            surface=raw,
+            replacement="aoe offdesk",
+            note="Use the canonical offdesk preset surface.",
+            next_step="aoe offdesk status",
+        )
+    if low == "aoe cleanup" or low.startswith("aoe cleanup "):
+        return DeprecatedSurfaceMatch(
+            code="deprecated_surface.gc_alias",
+            surface=raw,
+            replacement="aoe gc",
+            note="Use the canonical maintenance cleanup surface.",
+            next_step="aoe gc",
         )
     return None
 

@@ -287,6 +287,12 @@ without grepping raw logs manually.
 - initial retired surfaces:
   - `mother-orch`
   - `swarm`
+  - `orch map`
+  - `tasks` / `board`
+  - `lifecycle`
+  - `follow-up`
+  - `off-desk`
+  - `cleanup`
 - current response contract:
   - machine-readable `code`
   - canonical `replacement`

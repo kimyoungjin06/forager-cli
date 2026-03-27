@@ -328,3 +328,60 @@ def test_legacy_swarm_cli_surface_returns_deprecated_envelope() -> None:
     assert resolved.cmd == "deprecated"
     assert resolved.deprecated_code == "deprecated_surface.swarm"
     assert resolved.deprecated_replacement == "/monitor"
+
+
+def test_legacy_orch_map_surface_returns_deprecated_envelope() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/orch map",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "deprecated"
+    assert resolved.deprecated_code == "deprecated_surface.orch_map"
+    assert resolved.deprecated_replacement == "/map"
+
+
+def test_legacy_lifecycle_and_cleanup_surfaces_return_deprecated_envelopes() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    lifecycle = resolver.resolve_message_command(
+        text="aoe lifecycle",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+    cleanup = resolver.resolve_message_command(
+        text="/cleanup",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert lifecycle.cmd == "deprecated"
+    assert lifecycle.deprecated_code == "deprecated_surface.lifecycle_alias"
+    assert lifecycle.deprecated_replacement == "aoe task"
+    assert cleanup.cmd == "deprecated"
+    assert cleanup.deprecated_code == "deprecated_surface.gc_alias"
+    assert cleanup.deprecated_replacement == "/gc"

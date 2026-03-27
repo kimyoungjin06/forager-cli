@@ -362,6 +362,18 @@ pause/resume 동작 규칙:
 - `aoe mother-orch`
 - `/swarm`
 - `aoe swarm`
+- `/orch map`
+- `aoe orch map`
+- `/tasks`
+- `/board`
+- `/lifecycle`
+- `aoe lifecycle`
+- `/follow-up`
+- `aoe follow-up`
+- `/off-desk`
+- `aoe off-desk`
+- `/cleanup`
+- `aoe cleanup`
 
 응답 계약:
 
@@ -379,6 +391,19 @@ pause/resume 동작 규칙:
 - `swarm` 계열
   - 기본 replacement: `/task`
   - runtime status intent면 `/monitor`
+- `orch map` 계열
+  - 기본 replacement: `/map`
+  - CLI는 `aoe orch list`
+- `tasks` / `board`
+  - replacement: `/monitor`
+- `lifecycle`
+  - replacement: `/task`
+- `follow-up`
+  - replacement: `/followup`
+- `off-desk`
+  - replacement: `/offdesk`
+- `cleanup`
+  - replacement: `/gc`
 
 ---
 
