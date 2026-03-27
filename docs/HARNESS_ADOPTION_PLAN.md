@@ -2,6 +2,8 @@
 
 ## 1. Purpose
 - This document turns the `docs/OH_MY_CLAUDE_BENCHMARK_20260327.md` findings into an actionable adoption plan for `aoe_orch_control`.
+- Strategic alignment and adoption filters are defined separately in:
+  - `docs/HARNESS_ALIGNMENT_PRINCIPLES.md`
 - It is intentionally selective.
 - The goal is not to copy `oh-my-claudecode`.
 - The goal is to import the parts of its harness quality that strengthen the existing `Control Plane -> Project Runtime -> Task Team` model.

@@ -263,6 +263,9 @@
 - [x] OMC benchmark / harness trend 정리
   - 문서:
     - `docs/OH_MY_CLAUDE_BENCHMARK_20260327.md`
+- [x] harness alignment principles 고정
+  - 문서:
+    - `docs/HARNESS_ALIGNMENT_PRINCIPLES.md`
 - [x] harness adoption master plan 작성
   - 문서:
     - `docs/HARNESS_ADOPTION_PLAN.md`
