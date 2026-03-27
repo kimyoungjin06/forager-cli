@@ -325,6 +325,26 @@ pause/resume 동작 규칙:
   - `aoe-team`
   - `tmux` (`warn` only)
 
+### F-4. Runtime Setup Guide
+
+- `python3 scripts/gateway/aoe_tg_setup_guide.py --project-root <repo>`
+  - 현재 runtime 상태를 보고 bootstrap / env / migration / systemd / dashboard / doctor next-step을 순서대로 출력
+- `python3 scripts/gateway/aoe_tg_setup_guide.py --project-root <repo> --json`
+  - machine-readable setup step report 출력
+
+현재 setup step이 안내하는 실제 명령:
+
+- runtime bootstrap
+  - `bash scripts/team/bootstrap_runtime_templates.sh --project-root <repo> --team-dir <resolved-team-dir>`
+- state root migration
+  - `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <AOE_STATE_DIR>`
+- systemd install
+  - `bash scripts/systemd/install_user_services.sh`
+- local dashboard
+  - `python3 scripts/dashboard/control_dashboard.py --control-root <repo> --host 127.0.0.1 --port 8765`
+- doctor rerun
+  - `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo>`
+
 ### G. 복구/재실행
 
 - `/retry <T-###|request_id> [lane <L#|R#,...>]`: 같은 입력으로 재실행. lane을 주면 critic이 허용한 실행/review lane만 다시 돎

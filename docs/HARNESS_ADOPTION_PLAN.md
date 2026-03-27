@@ -251,12 +251,20 @@ without grepping raw logs manually.
 - should follow `AOE_STATE_DIR` because migration logic depends on it
 - current status:
   - standalone `doctor` script added first
+  - standalone `setup guide` script added next
   - initial checks:
     - resolved state root / drift warnings
     - artifact readability
     - runtime config presence
     - binary presence
-  - `setup` guidance and broader upgrade envelopes remain open
+  - setup guidance now covers:
+    - runtime bootstrap
+    - env file creation
+    - state-root migration
+    - systemd install
+    - local dashboard launch
+    - doctor rerun
+  - broader upgrade envelopes remain open
 
 ## 8. Package E: Compatibility / Deprecation Envelopes
 

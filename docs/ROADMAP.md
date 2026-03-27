@@ -306,7 +306,8 @@
   - bootstrap, health, upgrade, state-root migration guidance
   - note:
     - standalone `doctor` script added for state-root, artifact, runtime-config, and binary health
-    - `setup` guidance and broader migration/deprecation workflow remain open
+    - standalone `setup guide` script added for bootstrap/env/migration/systemd/dashboard/doctor next-steps
+    - broader migration/deprecation workflow remains open
 - [ ] compatibility / deprecation envelope
   - legacy surface retirements에 deterministic response envelope 추가
 - [ ] learned runbook extraction
