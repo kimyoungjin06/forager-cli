@@ -284,6 +284,7 @@ without grepping raw logs manually.
 
 ### 8.4 Current Status
 - shared deterministic deprecation envelope added
+- code-centric retired-surface inventory added
 - initial retired surfaces:
   - `mother-orch`
   - `swarm`

@@ -355,6 +355,9 @@ pause/resume 동작 규칙:
 ### G-2. Compatibility / Deprecation Envelope
 
 초기 deprecated surface는 deterministic response로만 처리한다.
+source of truth:
+
+- `scripts/gateway/aoe_tg_deprecation.py`
 
 - `/mother`
 - `/mother-orch`
