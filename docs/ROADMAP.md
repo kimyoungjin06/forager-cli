@@ -211,6 +211,9 @@
 - [x] `Live Runtime Verification` spec
   - 문서:
     - `docs/LIVE_RUNTIME_VERIFICATION_SPEC.md`
+- [x] preset verification scenario inventory
+  - 문서:
+    - `docs/LIVE_RUNTIME_VERIFICATION_SCENARIOS.md`
 - [ ] preset별 실제 `Phase2` 완료 흐름 검증
   - 대상:
     - `build`
@@ -227,6 +230,10 @@
     - `/offdesk review`
     - dashboard `Task Detail`
     - dashboard `Recovery`
+  - 실행 순서:
+    1. happy-path 1개씩
+    2. rerun path 1개씩
+    3. manual-followup path 1개씩
 
 ### 8.5 Recovery Summary
 - [x] nightly session summary spec 고정
