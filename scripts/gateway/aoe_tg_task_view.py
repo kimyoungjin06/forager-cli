@@ -11,6 +11,11 @@ from aoe_tg_operator_summary import task_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
+from aoe_tg_team_observatory import (
+    observatory_lane_lines,
+    observatory_task_line,
+    task_team_observatory_snapshot,
+)
 
 
 DEFAULT_PROJECT_ALIAS_MAX = 999
@@ -465,6 +470,10 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                 if action and action != "none":
                     verdict_suffix += f"/{action}"
             lines.append(f"- critic {gid} [{role}/{kind}/{mode}]{status_suffix}{verdict_suffix}{suffix}")
+        observatory = task_team_observatory_snapshot(task)
+        if observatory.get("lanes"):
+            lines.append(observatory_task_line(observatory))
+            lines.extend(observatory_lane_lines(observatory, limit=4))
 
         for row in subtasks[:6]:
             if not isinstance(row, dict):

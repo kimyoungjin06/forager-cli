@@ -39,6 +39,7 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
         followup_summary = str(row.get("followup_summary", "")).strip() or "-"
         rate_limit_summary = str(row.get("rate_limit_summary", "")).strip() or "-"
         contract = row.get("completion_contract") if isinstance(row.get("completion_contract"), dict) else {}
+        observatory = row.get("observatory") if isinstance(row.get("observatory"), dict) else {}
         action_contract = _task_command_contract(
             project_alias=project_alias,
             label=label,
@@ -76,6 +77,11 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 backend_summary=str(row.get("backend_summary", "")).strip() or "-",
                 backend_note=str(row.get("backend_note", "")).strip(),
                 rate_limit_summary=rate_limit_summary,
+                observatory_headline=str(observatory.get("headline", "")).strip() or "-",
+                observatory_first_focus=str(observatory.get("first_focus", "")).strip() or "-",
+                observatory_stale_lane_count=int(observatory.get("stale_lane_count", 0) or 0),
+                observatory_bottleneck_lane=str(observatory.get("bottleneck_lane", "")).strip() or "-",
+                observatory_bottleneck_reason=str(observatory.get("bottleneck_reason", "")).strip() or "-",
                 command_hints=list(action_contract.get("safe") or []),
                 phase2_action_hints=list(action_contract.get("phase2") or []),
                 safe_action_buttons=safe_action_buttons,
@@ -208,5 +214,4 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
         control_phase2_action_buttons=_recovery_control_action_buttons(),
         runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
     )
-
 

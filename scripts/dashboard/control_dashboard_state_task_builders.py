@@ -16,6 +16,7 @@ import aoe_tg_ops_policy as ops_policy
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 import aoe_tg_task_view as task_view
+import aoe_tg_team_observatory as team_observatory
 
 from control_dashboard_state_common import (
     _compose_backend_summary,
@@ -33,7 +34,28 @@ from control_dashboard_state_common import (
     _task_rerun_summary,
     _runtime_path,
 )
-from control_dashboard_state_models import ActiveTaskRowDTO, TaskDetailDTO
+from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
+
+
+def _observatory_lane_rows(snapshot: Dict[str, Any]) -> List[LaneObservatoryDTO]:
+    rows: List[LaneObservatoryDTO] = []
+    for row in snapshot.get("lanes") or []:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            LaneObservatoryDTO(
+                lane_id=str(row.get("lane_id", "")).strip() or "-",
+                phase=str(row.get("phase", "")).strip() or "-",
+                role=str(row.get("role", "")).strip() or "-",
+                status=str(row.get("status", "")).strip() or "-",
+                age_text=str(row.get("age_text", "")).strip() or "-",
+                idle_text=str(row.get("idle_text", "")).strip() or "-",
+                note=str(row.get("note", "")).strip() or "-",
+                freshness_scope=str(row.get("freshness_scope", "")).strip() or "-",
+                is_stale=bool(row.get("is_stale")),
+            )
+        )
+    return rows
 
 
 def _build_active_task_rows(manager_state: Dict[str, Any], *, cap: int = 60) -> List[ActiveTaskRowDTO]:
@@ -149,6 +171,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         display = str(entry.get("display_name", "")).strip() or str(key)
         shape = task_state.task_phase2_shape_snapshot(task)
         lane = task_state.task_lane_summary_snapshot(task)
+        observatory = team_observatory.task_team_observatory_snapshot(task)
         result = task.get("result") if isinstance(task.get("result"), dict) else {}
         contract = _completion_contract_for_preset(str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip())
         rerun_summary = _task_rerun_summary(task)
@@ -203,6 +226,13 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,
+            observatory_headline=str(observatory.get("headline", "")).strip() or "-",
+            observatory_first_focus=str(observatory.get("first_focus", "")).strip() or "-",
+            observatory_freshness_scope=str(observatory.get("freshness_scope", "")).strip() or "-",
+            observatory_stale_lane_count=int(observatory.get("stale_lane_count", 0) or 0),
+            observatory_bottleneck_lane=str(observatory.get("bottleneck_lane_id", "")).strip() or "-",
+            observatory_bottleneck_reason=str(observatory.get("bottleneck_reason", "")).strip() or "-",
+            observatory_lanes=_observatory_lane_rows(observatory),
             updated_at=str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
             command_hints=list(action_contract.get("safe") or []),
             phase2_action_hints=list(action_contract.get("phase2") or []),
@@ -211,6 +241,5 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
         )
     return None
-
 
 

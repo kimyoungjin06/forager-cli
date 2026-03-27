@@ -4271,3 +4271,67 @@ def test_task_monitor_includes_runtime_scoped_intent_and_action_lines(tmp_path: 
     assert "latest_intent: offdesk | offdesk_review | execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in summary
     assert "latest_action: Retry | blocked | reason=planning_gate | next=/offdesk review |" in summary
     assert "approval blockers in /task and /offdesk review bef..." in summary
+
+
+def test_task_lifecycle_and_monitor_include_task_team_observatory_lines() -> None:
+    task = {
+        "request_id": "REQ-OBS",
+        "short_id": "T-010",
+        "alias": "observability-check",
+        "status": "running",
+        "stage": "execution",
+        "roles": ["Codex-Writer", "Codex-Reviewer"],
+        "phase2_team_preset": "build",
+        "created_at": "2026-03-20T09:00:00+09:00",
+        "updated_at": "2026-03-20T10:00:00+09:00",
+        "plan": {
+            "meta": {
+                "phase2_execution_plan": {
+                    "execution_lanes": [
+                        {"lane_id": "L1", "role": "Codex-Writer", "subtask_ids": ["S1"]},
+                    ],
+                    "review_lanes": [
+                        {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L1"]},
+                    ],
+                }
+            }
+        },
+        "lane_states": {
+            "execution": [
+                {"lane_id": "L1", "role": "Codex-Writer", "status": "running", "subtask_ids": ["S1"]},
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "verifier",
+                    "status": "waiting_on_dependencies",
+                    "depends_on": ["L1"],
+                    "waiting_on": ["L1"],
+                    "reason": "waiting on execution lane(s): L1",
+                },
+            ],
+            "summary": {
+                "execution": {"running": 1},
+                "review": {"waiting_on_dependencies": 1},
+            },
+        },
+    }
+    entry = {"tasks": {"REQ-OBS": task}}
+
+    lifecycle = task_view.summarize_task_lifecycle("Demo", task)
+    monitor = task_state.summarize_task_monitor(
+        "Demo",
+        entry,
+        limit=5,
+        normalize_task_status=gw.normalize_task_status,
+        dedupe_roles=gw.dedupe_roles,
+        task_display_label=gw.task_display_label,
+        lifecycle_stages=gw.LIFECYCLE_STAGES,
+    )
+
+    assert "team_observatory: stale=2 bottleneck=R1/waiting on execution lane(s): L1 freshness=task" in lifecycle
+    assert "- obs L1 [execution/Codex-Writer] running" in lifecycle
+    assert "- obs R1 [review/Codex-Reviewer] waiting_on_dependencies" in lifecycle
+    assert "observatory: stale=2 bottleneck=R1/waiting_on_dependencies" in monitor
+    assert "inspect blocked lane R1 first: waiting on execution lane(s): L1" in monitor

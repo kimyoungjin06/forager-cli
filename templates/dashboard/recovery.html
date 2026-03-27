@@ -100,8 +100,16 @@
             <td><a href="{{ task.detail_path }}">{{ task.label }}</a><br><span class="muted">{{ task.request_id }}</span></td>
             <td>{{ task.status }}/{{ task.tf_phase }}</td>
             <td>{{ task.preset }}</td>
-            <td>{{ task.phase2_shape }}<br><span class="muted">{{ task.completion_focus }}</span></td>
-            <td>{{ task.backend_summary }}</td>
+            <td>
+              {{ task.phase2_shape }}<br>
+              <span class="muted">{{ task.completion_focus }}</span><br>
+              <span class="muted">obs {{ task.observatory_headline }}</span><br>
+              <span class="muted">first {{ task.observatory_first_focus }}</span>
+            </td>
+            <td>
+              {{ task.backend_summary }}<br>
+              <span class="muted">{{ task.observatory_bottleneck_lane }} / {{ task.observatory_bottleneck_reason }}</span>
+            </td>
             <td>
               {% with
                 section_title='',

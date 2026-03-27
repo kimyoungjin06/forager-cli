@@ -19,6 +19,20 @@ class ActionButtonDTO:
     note: str
     payload_json: str
 
+
+@dataclass(frozen=True)
+class LaneObservatoryDTO:
+    lane_id: str
+    phase: str
+    role: str
+    status: str
+    age_text: str
+    idle_text: str
+    note: str
+    freshness_scope: str
+    is_stale: bool = False
+
+
 @dataclass(frozen=True)
 class ControlSummaryDTO:
     auto_mode: str
@@ -112,6 +126,13 @@ class TaskDetailDTO:
     backend_summary: str = ""
     backend_note: str = ""
     rate_limit_summary: str = ""
+    observatory_headline: str = ""
+    observatory_first_focus: str = ""
+    observatory_freshness_scope: str = ""
+    observatory_stale_lane_count: int = 0
+    observatory_bottleneck_lane: str = ""
+    observatory_bottleneck_reason: str = ""
+    observatory_lanes: List[LaneObservatoryDTO] = field(default_factory=list)
     updated_at: str = ""
     command_hints: List[str] = field(default_factory=list)
     phase2_action_hints: List[str] = field(default_factory=list)
@@ -188,6 +209,11 @@ class RecoveryTaskDTO:
     backend_summary: str
     backend_note: str
     rate_limit_summary: str
+    observatory_headline: str = ""
+    observatory_first_focus: str = ""
+    observatory_stale_lane_count: int = 0
+    observatory_bottleneck_lane: str = ""
+    observatory_bottleneck_reason: str = ""
     command_hints: List[str] = field(default_factory=list)
     phase2_action_hints: List[str] = field(default_factory=list)
     safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
@@ -326,4 +352,3 @@ class DashboardSnapshotLoadResult:
     snapshot: DashboardSnapshotDTO
     manager_state: Dict[str, Any]
     provider_state: Dict[str, Any]
-

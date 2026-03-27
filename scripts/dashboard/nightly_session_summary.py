@@ -96,6 +96,13 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
         "backend_summary": task.backend_summary,
         "backend_note": task.backend_note,
         "rate_limit_summary": task.rate_limit_summary,
+        "observatory": {
+            "headline": task.observatory_headline,
+            "first_focus": task.observatory_first_focus,
+            "stale_lane_count": task.observatory_stale_lane_count,
+            "bottleneck_lane": task.observatory_bottleneck_lane,
+            "bottleneck_reason": task.observatory_bottleneck_reason,
+        },
         "operator_hints": list(task.command_hints),
         "phase2_actions": list(task.phase2_action_hints),
         "updated_at": task.updated_at,
@@ -323,6 +330,18 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                         f"    - rate_limit: {task.get('rate_limit_summary', '-')}",
                     ]
                 )
+                observatory = task.get("observatory") if isinstance(task.get("observatory"), dict) else {}
+                if observatory:
+                    lines.append(
+                        "    - observatory: {headline}".format(
+                            headline=str(observatory.get("headline", "")).strip() or "-",
+                        )
+                    )
+                    lines.append(
+                        "    - first_focus: {focus}".format(
+                            focus=str(observatory.get("first_focus", "")).strip() or "-",
+                        )
+                    )
                 task_hints = task.get("operator_hints") if isinstance(task.get("operator_hints"), list) else []
                 task_phase2 = task.get("phase2_actions") if isinstance(task.get("phase2_actions"), list) else []
                 if task_hints:

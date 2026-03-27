@@ -107,6 +107,40 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                         },
                     },
                     "lane_states": {
+                        "execution": [
+                            {
+                                "lane_id": "L1",
+                                "role": "Codex-Analyst",
+                                "status": "running",
+                                "subtask_ids": ["S1"],
+                            },
+                            {
+                                "lane_id": "L2",
+                                "role": "Claude-Analyst",
+                                "status": "pending",
+                                "subtask_ids": ["S2"],
+                            },
+                        ],
+                        "review": [
+                            {
+                                "lane_id": "R1",
+                                "role": "Codex-Reviewer",
+                                "kind": "verifier",
+                                "status": "waiting_on_dependencies",
+                                "depends_on": ["L1"],
+                                "waiting_on": ["L1"],
+                                "reason": "waiting on execution lane(s): L1",
+                                "verdict": "retry",
+                                "action": "rerun",
+                            },
+                            {
+                                "lane_id": "R2",
+                                "role": "Claude-Reviewer",
+                                "kind": "verifier",
+                                "status": "pending",
+                                "depends_on": ["L2"],
+                            },
+                        ],
                         "summary": {
                             "execution": {"running": 1},
                             "review": {"waiting_on_dependencies": 1},
@@ -431,6 +465,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "execution=L1 | review=R1" in text
+    assert "Task Team Observatory" in text
+    assert "task-scoped freshness fallback" in text
+    assert "waiting on execution lane(s): L1" in text
+    assert "R1" in text
     assert "/task T-001" in text
     assert "/request REQ-1" in text
     assert "/monitor O2" in text
@@ -527,6 +565,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "selected=offdesk_prepare" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "obs stale=" in text
+    assert "waiting on execution lane(s): L1" in text
     assert "/control/actions/control/auto-recover" in text
     assert "Auto Recover" in text
     assert "Auto Recover Force" in text

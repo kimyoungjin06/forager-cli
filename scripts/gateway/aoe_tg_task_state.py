@@ -10,6 +10,7 @@ from aoe_tg_operator_summary import runtime_latest_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
+from aoe_tg_team_observatory import observatory_monitor_line, task_team_observatory_snapshot
 
 
 LANE_STATES = ("pending", "running", "done", "failed", "waiting_on_dependencies")
@@ -296,6 +297,7 @@ def task_monitor_row_snapshot(
     result = task.get("result") if isinstance(task.get("result"), dict) else {}
     shape = task_phase2_shape_snapshot(task)
     lane = task_lane_summary_snapshot(task)
+    observatory = task_team_observatory_snapshot(task)
     return {
         "request_id": str(request_id or "").strip(),
         "label": task_display_label(task, str(request_id or "").strip()),
@@ -317,6 +319,9 @@ def task_monitor_row_snapshot(
         "backend_verdict": str(task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip(),
         "backend_contract": str(task.get("backend_contract", "") or result.get("backend_contract", "")).strip(),
         "backend_contract_note": str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
+        "task_team_observatory": observatory,
+        "task_team_observatory_headline": str(observatory.get("headline", "")).strip(),
+        "task_team_observatory_first_focus": str(observatory.get("first_focus", "")).strip(),
     }
 
 
@@ -1444,6 +1449,10 @@ def summarize_task_monitor(
         first_action = str(priority_action.get("action", "")).strip()
         if first_action:
             lines.append(f"  first: {first_action} | {str(priority_action.get('reason', '')).strip() or '-'}")
+        observatory = task_team_observatory_snapshot(task)
+        observatory_line = observatory_monitor_line(observatory)
+        if observatory_line:
+            lines.append(f"  {observatory_line}")
 
     lines.append("")
     lines.append("alias map (number/label -> request_id):")
