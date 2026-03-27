@@ -105,6 +105,8 @@ without grepping raw logs manually.
 2. define normalized history row schema
 3. add Telegram `/history search`
 4. add optional dashboard history page later
+5. detailed Phase 1 contract is defined in:
+   - `docs/SESSION_SEARCH_SPEC.md`
 
 ## 5. Package B: Task Team Observatory
 

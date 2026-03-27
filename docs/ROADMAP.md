@@ -278,6 +278,9 @@
   - surface:
     - Telegram `/history search`
     - later dashboard `/control/history`
+- [x] `Session Search` Phase 1 spec
+  - 문서:
+    - `docs/SESSION_SEARCH_SPEC.md`
 - [ ] `Task Team Observatory`
   - lane age / stale warning
   - last event / bottleneck summary
