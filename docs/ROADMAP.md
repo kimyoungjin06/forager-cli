@@ -214,6 +214,14 @@
 - [x] preset verification scenario inventory
   - 문서:
     - `docs/LIVE_RUNTIME_VERIFICATION_SCENARIOS.md`
+- [x] first-wave verification artifact template and happy-path stubs
+  - 문서:
+    - `docs/runtime_verification/README.md`
+    - `docs/runtime_verification/phase2/TEMPLATE.md`
+    - `docs/runtime_verification/phase2/build/B1_happy_path.md`
+    - `docs/runtime_verification/phase2/data/D1_happy_path.md`
+    - `docs/runtime_verification/phase2/review/R1_happy_path.md`
+    - `docs/runtime_verification/phase2/mixed/M1_happy_path.md`
 - [ ] preset별 실제 `Phase2` 완료 흐름 검증
   - 대상:
     - `build`
