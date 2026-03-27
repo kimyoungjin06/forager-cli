@@ -118,6 +118,12 @@ def _merge_lane_rows(
             token = str((state or {}).get(key, "")).strip()
             if token:
                 row[key] = token
+        try:
+            tool_count = int((state or {}).get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            row["tool_count"] = tool_count
         touched_files = [str(x).strip() for x in ((state or {}).get("touched_files") or []) if str(x).strip()]
         if touched_files:
             row["touched_files"] = touched_files
@@ -252,6 +258,11 @@ def task_team_observatory_snapshot(
         is_stale = _stale_candidate(row) and lane_idle_sec >= threshold
         note = _lane_note(row)
         lane = dict(row)
+        touched_files = [str(item).strip() for item in (row.get("touched_files") or []) if str(item).strip()]
+        try:
+            tool_count = int(row.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
         lane.update(
             {
                 "started_at": lane_started_at,
@@ -265,9 +276,30 @@ def task_team_observatory_snapshot(
                 "is_stale": is_stale,
                 "freshness_scope": lane_freshness_scope,
                 "note": note,
+                "tool_count": tool_count,
+                "touched_files": touched_files,
+                "touched_file_count": len(touched_files),
+                "touched_file_summary": ", ".join(touched_files[:3]) if touched_files else "-",
             }
         )
         lanes.append(lane)
+
+    file_to_lanes: Dict[str, List[str]] = {}
+    for row in lanes:
+        lane_id = str(row.get("lane_id", "")).strip()
+        if not lane_id:
+            continue
+        for token in [str(item).strip() for item in (row.get("touched_files") or []) if str(item).strip()]:
+            file_to_lanes.setdefault(token, [])
+            if lane_id not in file_to_lanes[token]:
+                file_to_lanes[token].append(lane_id)
+    conflict_files = sorted(path for path, lane_ids in file_to_lanes.items() if len(lane_ids) >= 2)
+    for row in lanes:
+        lane_id = str(row.get("lane_id", "")).strip()
+        lane_conflicts = [path for path in conflict_files if lane_id in file_to_lanes.get(path, [])]
+        row["conflict_files"] = lane_conflicts
+        row["conflict_file_count"] = len(lane_conflicts)
+        row["conflict_summary"] = ", ".join(lane_conflicts[:3]) if lane_conflicts else "-"
 
     scopes = {str(row.get("freshness_scope", "")).strip() or "task" for row in lanes if isinstance(row, dict)}
     if scopes == {"lane"}:
@@ -289,6 +321,7 @@ def task_team_observatory_snapshot(
         f"stale={stale_count} bottleneck={bottleneck_lane_id or '-'}"
         + (f"/{bottleneck_status}" if bottleneck_status else "")
         + (f" note={bottleneck_reason}" if bottleneck_reason and bottleneck_reason != "-" else "")
+        + (f" conflicts={len(conflict_files)}" if conflict_files else "")
         + f" freshness={freshness_scope}"
     )
     return {
@@ -299,6 +332,9 @@ def task_team_observatory_snapshot(
         "bottleneck_lane_id": bottleneck_lane_id,
         "bottleneck_reason": bottleneck_reason or "-",
         "bottleneck_status": bottleneck_status or "-",
+        "conflict_file_count": len(conflict_files),
+        "touched_file_count": len(file_to_lanes),
+        "conflict_files": conflict_files,
         "first_focus": _build_first_focus(bottleneck, freshness_scope=freshness_scope),
         "headline": headline,
         "lanes": lanes,
@@ -322,7 +358,7 @@ def observatory_lane_lines(snapshot: Dict[str, Any], *, limit: int = 4) -> List[
         if not isinstance(row, dict):
             continue
         lines.append(
-            "- obs {lane_id} [{phase}/{role}] {status} age={age} idle={idle}{stale} note={note}".format(
+            "- obs {lane_id} [{phase}/{role}] {status} age={age} idle={idle}{stale}{tools}{files}{conflicts} note={note}".format(
                 lane_id=str(row.get("lane_id", "")).strip() or "-",
                 phase=str(row.get("phase", "")).strip() or "-",
                 role=str(row.get("role", "")).strip() or "-",
@@ -330,6 +366,9 @@ def observatory_lane_lines(snapshot: Dict[str, Any], *, limit: int = 4) -> List[
                 age=str(row.get("age_text", "")).strip() or "-",
                 idle=str(row.get("idle_text", "")).strip() or "-",
                 stale=" stale=yes" if bool(row.get("is_stale")) else "",
+                tools=f" tools={int(row.get('tool_count', 0) or 0)}" if int(row.get("tool_count", 0) or 0) > 0 else "",
+                files=f" files={int(row.get('touched_file_count', 0) or 0)}" if int(row.get("touched_file_count", 0) or 0) > 0 else "",
+                conflicts=f" conflicts={int(row.get('conflict_file_count', 0) or 0)}" if int(row.get("conflict_file_count", 0) or 0) > 0 else "",
                 note=str(row.get("note", "")).strip() or "-",
             )
         )
@@ -351,10 +390,12 @@ def observatory_monitor_line(snapshot: Dict[str, Any]) -> str:
     )
     idle_text = str(bottleneck.get("idle_text", "")).strip() or "-"
     status = str(bottleneck.get("status", "")).strip() or "-"
-    return "observatory: stale={stale} bottleneck={lane}/{status} idle={idle} | first={focus}".format(
+    conflict_file_count = int(snapshot.get("conflict_file_count", 0) or 0)
+    return "observatory: stale={stale} bottleneck={lane}/{status} idle={idle}{conflicts} | first={focus}".format(
         stale=int(snapshot.get("stale_lane_count", 0) or 0),
         lane=bottleneck_lane_id or "-",
         status=status,
         idle=idle_text,
+        conflicts=f" conflicts={conflict_file_count}" if conflict_file_count > 0 else "",
         focus=first_focus,
     )

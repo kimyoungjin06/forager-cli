@@ -591,11 +591,25 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
     latest_event_kind = str(latest_event.get("stage", "")).strip() or str(latest_event.get("kind", "")).strip()
     latest_event_payload = latest_event.get("payload") if isinstance(latest_event.get("payload"), dict) else {}
     artifacts = state.get("artifacts") if isinstance(state.get("artifacts"), list) else []
-    touched_files = [
-        str(row.get("path", "")).strip()
-        for row in artifacts
-        if isinstance(row, dict) and str(row.get("path", "")).strip()
-    ]
+    touched_files: List[str] = []
+    for row in artifacts:
+        if not isinstance(row, dict):
+            continue
+        for key in ("path", "source_path", "output_path", "file_path"):
+            token = str(row.get(key, "")).strip()
+            if token and token not in touched_files:
+                touched_files.append(token)
+    tool_count = 0
+    for candidate in (
+        state.get("tool_count"),
+        latest_event_payload.get("tool_count"),
+        latest_event_payload.get("tools_used"),
+        latest_event_payload.get("tool_calls"),
+    ):
+        if isinstance(candidate, int):
+            tool_count = max(tool_count, int(candidate))
+        elif isinstance(candidate, list):
+            tool_count = max(tool_count, len([row for row in candidate if row]))
     observability: Dict[str, Any] = {
         "request_id": str(state.get("request_id", "")).strip() or str(state.get("gateway_request_id", "")).strip(),
         "started_at": str(state.get("created_at", "")).strip(),
@@ -606,6 +620,8 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
     }
     if touched_files:
         observability["touched_files"] = touched_files
+    if tool_count > 0:
+        observability["tool_count"] = tool_count
     annotated = dict(state)
     role_states = annotated.get("role_states")
     if isinstance(role_states, list):

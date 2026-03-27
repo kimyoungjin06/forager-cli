@@ -30,6 +30,13 @@ class LaneObservatoryDTO:
     idle_text: str
     note: str
     freshness_scope: str
+    last_event_kind: str = ""
+    backend: str = ""
+    tool_count: int = 0
+    touched_file_count: int = 0
+    touched_file_summary: str = ""
+    conflict_file_count: int = 0
+    conflict_summary: str = ""
     is_stale: bool = False
 
 
@@ -132,6 +139,8 @@ class TaskDetailDTO:
     observatory_stale_lane_count: int = 0
     observatory_bottleneck_lane: str = ""
     observatory_bottleneck_reason: str = ""
+    observatory_conflict_file_count: int = 0
+    observatory_touched_file_count: int = 0
     observatory_lanes: List[LaneObservatoryDTO] = field(default_factory=list)
     updated_at: str = ""
     command_hints: List[str] = field(default_factory=list)
@@ -214,6 +223,8 @@ class RecoveryTaskDTO:
     observatory_stale_lane_count: int = 0
     observatory_bottleneck_lane: str = ""
     observatory_bottleneck_reason: str = ""
+    observatory_conflict_file_count: int = 0
+    observatory_touched_file_count: int = 0
     command_hints: List[str] = field(default_factory=list)
     phase2_action_hints: List[str] = field(default_factory=list)
     safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)

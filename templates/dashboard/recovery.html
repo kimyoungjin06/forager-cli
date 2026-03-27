@@ -108,7 +108,8 @@
             </td>
             <td>
               {{ task.backend_summary }}<br>
-              <span class="muted">{{ task.observatory_bottleneck_lane }} / {{ task.observatory_bottleneck_reason }}</span>
+              <span class="muted">{{ task.observatory_bottleneck_lane }} / {{ task.observatory_bottleneck_reason }}</span><br>
+              <span class="muted">files={{ task.observatory_touched_file_count }} conflicts={{ task.observatory_conflict_file_count }}</span>
             </td>
             <td>
               {% with

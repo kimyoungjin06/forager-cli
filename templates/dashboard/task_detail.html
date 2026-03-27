@@ -59,6 +59,8 @@
     <li><span>stale_lane_count</span><strong>{{ detail.observatory_stale_lane_count }}</strong></li>
     <li><span>bottleneck_lane</span><strong>{{ detail.observatory_bottleneck_lane }}</strong></li>
     <li><span>bottleneck_reason</span><strong>{{ detail.observatory_bottleneck_reason }}</strong></li>
+    <li><span>conflict_file_count</span><strong>{{ detail.observatory_conflict_file_count }}</strong></li>
+    <li><span>touched_file_count</span><strong>{{ detail.observatory_touched_file_count }}</strong></li>
   </ul>
   {% if detail.observatory_lanes %}
   <table class="task-table">
@@ -70,6 +72,8 @@
         <th>Status</th>
         <th>Age</th>
         <th>Idle</th>
+        <th>Last Event</th>
+        <th>Artifacts</th>
         <th>Note</th>
       </tr>
     </thead>
@@ -82,6 +86,11 @@
         <td>{{ lane.status }}</td>
         <td>{{ lane.age_text }}</td>
         <td>{{ lane.idle_text }}<br><span class="muted">{{ lane.freshness_scope }}-scoped</span></td>
+        <td>{{ lane.last_event_kind }}<br><span class="muted">{{ lane.backend }}</span>{% if lane.tool_count %}<br><span class="muted">tools={{ lane.tool_count }}</span>{% endif %}</td>
+        <td>
+          {% if lane.touched_file_count %}files={{ lane.touched_file_count }}<br><span class="muted">{{ lane.touched_file_summary }}</span>{% else %}-{% endif %}
+          {% if lane.conflict_file_count %}<br><span class="muted">conflicts={{ lane.conflict_file_count }} {{ lane.conflict_summary }}</span>{% endif %}
+        </td>
         <td>{{ lane.note }}</td>
       </tr>
       {% endfor %}

@@ -4364,6 +4364,8 @@ def test_task_team_observatory_prefers_lane_scoped_timestamps() -> None:
                     "started_at": "2026-03-20T09:10:00+09:00",
                     "last_event_at": "2026-03-20T09:55:00+09:00",
                     "last_event_kind": "runtime.completed",
+                    "tool_count": 3,
+                    "touched_files": ["src/app.py", "reports/summary.md"],
                 }
             ],
             "review": [
@@ -4377,6 +4379,7 @@ def test_task_team_observatory_prefers_lane_scoped_timestamps() -> None:
                     "started_at": "2026-03-20T09:12:00+09:00",
                     "last_event_at": "2026-03-20T09:56:00+09:00",
                     "last_event_kind": "dispatch.submitted",
+                    "touched_files": ["reports/summary.md", "docs/review.md"],
                 }
             ],
         },
@@ -4392,3 +4395,37 @@ def test_task_team_observatory_prefers_lane_scoped_timestamps() -> None:
     assert observatory["lanes"][1]["last_event_kind"] == "dispatch.submitted"
     assert observatory["lanes"][0]["idle_text"] == "35m"
     assert observatory["lanes"][1]["idle_text"] == "34m"
+    assert observatory["lanes"][0]["tool_count"] == 3
+    assert observatory["lanes"][0]["touched_file_count"] == 2
+    assert observatory["conflict_file_count"] == 1
+    assert observatory["lanes"][0]["conflict_file_count"] == 1
+    assert observatory["lanes"][1]["conflict_file_count"] == 1
+
+
+def test_annotate_lane_role_rows_collects_source_path_and_tool_count() -> None:
+    state = {
+        "request_id": "REQ-OBS",
+        "created_at": "2026-03-20T09:10:00+09:00",
+        "updated_at": "2026-03-20T09:40:00+09:00",
+        "backend": "autogen_core",
+        "role_states": [{"role": "Codex-Writer", "status": "done"}],
+        "runtime_events": [
+            {
+                "ts": "2026-03-20T09:39:00+09:00",
+                "stage": "runtime.completed",
+                "kind": "lifecycle",
+                "payload": {"tool_count": 4, "reason_code": "dispatch_completed"},
+            }
+        ],
+        "artifacts": [
+            {"kind": "backlog_snapshot", "source_path": "tasks/todo.md"},
+            {"kind": "report", "path": "reports/out.md"},
+        ],
+    }
+
+    annotated = gw.tf_exec_mod.annotate_lane_role_rows(state, lane_id="L1", phase2_stage="execution")
+    role_rows = annotated.get("role_states") or []
+
+    assert role_rows[0]["lane_id"] == "L1"
+    assert role_rows[0]["tool_count"] == 4
+    assert role_rows[0]["touched_files"] == ["tasks/todo.md", "reports/out.md"]

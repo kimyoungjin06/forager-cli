@@ -52,6 +52,13 @@ def _observatory_lane_rows(snapshot: Dict[str, Any]) -> List[LaneObservatoryDTO]
                 idle_text=str(row.get("idle_text", "")).strip() or "-",
                 note=str(row.get("note", "")).strip() or "-",
                 freshness_scope=str(row.get("freshness_scope", "")).strip() or "-",
+                last_event_kind=str(row.get("last_event_kind", "")).strip() or "-",
+                backend=str(row.get("backend", "")).strip() or "-",
+                tool_count=int(row.get("tool_count", 0) or 0),
+                touched_file_count=int(row.get("touched_file_count", 0) or 0),
+                touched_file_summary=str(row.get("touched_file_summary", "")).strip() or "-",
+                conflict_file_count=int(row.get("conflict_file_count", 0) or 0),
+                conflict_summary=str(row.get("conflict_summary", "")).strip() or "-",
                 is_stale=bool(row.get("is_stale")),
             )
         )
@@ -232,6 +239,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             observatory_stale_lane_count=int(observatory.get("stale_lane_count", 0) or 0),
             observatory_bottleneck_lane=str(observatory.get("bottleneck_lane_id", "")).strip() or "-",
             observatory_bottleneck_reason=str(observatory.get("bottleneck_reason", "")).strip() or "-",
+            observatory_conflict_file_count=int(observatory.get("conflict_file_count", 0) or 0),
+            observatory_touched_file_count=int(observatory.get("touched_file_count", 0) or 0),
             observatory_lanes=_observatory_lane_rows(observatory),
             updated_at=str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
             command_hints=list(action_contract.get("safe") or []),
@@ -241,5 +250,4 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
         )
     return None
-
 

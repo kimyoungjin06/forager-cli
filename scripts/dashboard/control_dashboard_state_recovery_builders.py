@@ -82,6 +82,8 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 observatory_stale_lane_count=int(observatory.get("stale_lane_count", 0) or 0),
                 observatory_bottleneck_lane=str(observatory.get("bottleneck_lane", "")).strip() or "-",
                 observatory_bottleneck_reason=str(observatory.get("bottleneck_reason", "")).strip() or "-",
+                observatory_conflict_file_count=int(observatory.get("conflict_file_count", 0) or 0),
+                observatory_touched_file_count=int(observatory.get("touched_file_count", 0) or 0),
                 command_hints=list(action_contract.get("safe") or []),
                 phase2_action_hints=list(action_contract.get("phase2") or []),
                 safe_action_buttons=safe_action_buttons,
@@ -214,4 +216,3 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
         control_phase2_action_buttons=_recovery_control_action_buttons(),
         runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
     )
-

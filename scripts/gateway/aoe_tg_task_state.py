@@ -86,6 +86,26 @@ def _normalize_lane_state_rows(raw_rows: Any, *, kind: str) -> List[Dict[str, An
         reason = str(row.get("reason", "")).strip()
         if reason:
             item["reason"] = reason[:240]
+        for key in (
+            "request_id",
+            "started_at",
+            "last_event_at",
+            "last_event_kind",
+            "backend",
+            "outcome_reason_code",
+        ):
+            token = str(row.get(key, "")).strip()
+            if token:
+                item[key] = token[:240]
+        try:
+            tool_count = int(row.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            item["tool_count"] = tool_count
+        touched_files = [str(x).strip()[:240] for x in (row.get("touched_files") or []) if str(x).strip()]
+        if touched_files:
+            item["touched_files"] = touched_files[:8]
         normalized.append(item)
     return normalized
 
@@ -523,6 +543,12 @@ def derive_lane_states(
             token = str(lane_meta.get(key, "")).strip()
             if token:
                 item[key] = token
+        try:
+            tool_count = int(lane_meta.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            item["tool_count"] = tool_count
         touched_files = [str(x).strip() for x in (lane_meta.get("touched_files") or []) if str(x).strip()]
         if touched_files:
             item["touched_files"] = touched_files
@@ -568,6 +594,12 @@ def derive_lane_states(
             token = str(lane_meta.get(key, "")).strip()
             if token:
                 item[key] = token
+        try:
+            tool_count = int(lane_meta.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            item["tool_count"] = tool_count
         touched_files = [str(x).strip() for x in (lane_meta.get("touched_files") or []) if str(x).strip()]
         if touched_files:
             item["touched_files"] = touched_files
@@ -1505,6 +1537,12 @@ def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterabl
             token = str(source.get(key, "")).strip()
             if token:
                 target[key] = token
+        try:
+            tool_count = int(source.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            target["tool_count"] = tool_count
         touched_files = [str(item).strip() for item in (source.get("touched_files") or []) if str(item).strip()]
         if touched_files:
             target["touched_files"] = touched_files
