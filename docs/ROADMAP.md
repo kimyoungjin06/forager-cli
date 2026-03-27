@@ -286,6 +286,9 @@
   - last event / bottleneck summary
   - touched file index / conflict hint
   - `/task`, `/monitor`, dashboard detail/recovery 우선
+- [x] `Task Team Observatory` Phase 1 spec
+  - 문서:
+    - `docs/TASK_TEAM_OBSERVATORY_SPEC.md`
 - [ ] `AOE_STATE_DIR`
   - worktree-local `.aoe-team` 위에 centralized state root 도입
   - stable project-id 기반 state continuity

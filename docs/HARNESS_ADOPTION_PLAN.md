@@ -160,6 +160,8 @@ without grepping raw logs manually.
 3. stale warning heuristics
 4. file conflict detection
 5. bottleneck summary and intervention hints
+6. detailed Phase 1 contract is defined in:
+   - `docs/TASK_TEAM_OBSERVATORY_SPEC.md`
 
 ## 6. Package C: Centralized State Root
 
