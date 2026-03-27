@@ -187,6 +187,13 @@ def _write_action_audit_log(tmp_path: Path, *rows: dict) -> None:
     )
 
 
+def _write_nightly_summary_log(tmp_path: Path, payload: dict) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    recovery_dir = team_dir / "recovery" / "nightly-session-summary"
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+    (recovery_dir / "latest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def _management_control_kwargs(
     *,
     tmp_path: Path,
@@ -267,6 +274,153 @@ def _management_control_kwargs(
         default_offdesk_report_level=mgmt_handlers.DEFAULT_OFFDESK_REPORT_LEVEL,
         default_offdesk_room=mgmt_handlers.DEFAULT_OFFDESK_ROOM,
     )
+
+
+def test_history_search_matches_gateway_events_and_task_hint(tmp_path: Path) -> None:
+    manager_state = _empty_state()
+    manager_state["projects"]["local_map"] = {
+        "name": "local_map",
+        "display_name": "LocalMap",
+        "project_alias": "O3",
+        "project_root": str(tmp_path / "LocalMap"),
+        "team_dir": str(tmp_path / "LocalMap" / ".aoe-team"),
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "prompt": "Investigate planning gate issue",
+                "status": "blocked",
+                "updated_at": "2026-03-27T02:54:00+09:00",
+            }
+        },
+    }
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=run action=dispatch_task class=runtime trace=reason=planning_gate blocked",
+    )
+    team_dir = tmp_path / ".aoe-team"
+    logs_dir = team_dir / "logs"
+    rows = [
+        {
+            "timestamp": "2026-03-27T02:54:00+09:00",
+            "event": "dispatch_result",
+            "project": "local_map",
+            "request_id": "REQ-1",
+            "task_short_id": "T-001",
+            "stage": "planning",
+            "status": "failed",
+            "error_code": "planning_gate",
+            "detail": "plan gate blocked after critic issues remain",
+        }
+    ]
+    (logs_dir / "gateway_events.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=manager_state,
+        cmd="history",
+        rest="search planning_gate",
+    )
+
+    assert "history search" in body
+    assert "planning_gate" in body
+    assert "O3 T-001" in body
+    assert "next: /task T-001" in body
+
+
+def test_history_search_matches_dashboard_action_audit(tmp_path: Path) -> None:
+    manager_state = _empty_state()
+    manager_state["projects"]["local_map"] = {
+        "name": "local_map",
+        "display_name": "LocalMap",
+        "project_alias": "O3",
+        "project_root": str(tmp_path / "LocalMap"),
+        "team_dir": str(tmp_path / "LocalMap" / ".aoe-team"),
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "prompt": "Retry task",
+                "status": "blocked",
+                "updated_at": "2026-03-27T02:54:00+09:00",
+            }
+        },
+    }
+    _write_action_audit_log(
+        tmp_path,
+        {
+            "at": "2026-03-27T03:00:00+09:00",
+            "headline": "Retry | blocked",
+            "status": "blocked",
+            "outcome_kind": "retry_run",
+            "outcome_status": "blocked",
+            "outcome_reason_code": "planning_gate",
+            "outcome_detail": "plan gate blocked",
+            "next_step": "/offdesk review",
+            "remediation": "inspect planning critic issues",
+            "link_label": "task detail",
+            "link_href": "/control/tasks/by-request/REQ-1",
+            "source_command": "/retry T-001",
+        },
+    )
+
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=manager_state,
+        cmd="history",
+        rest="search --scope dashboard retry",
+    )
+
+    assert "Retry | blocked | reason=planning_gate" in body
+    assert "next: /offdesk review" in body
+
+
+def test_history_search_matches_recovery_summary(tmp_path: Path) -> None:
+    manager_state = _empty_state()
+    payload = {
+        "generated_at": "2026-03-27T09:00:00+09:00",
+        "runtimes": [
+            {
+                "project_key": "local_map",
+                "project_alias": "O3",
+                "project_label": "LocalMap",
+                "status": "attention",
+                "attention_summary": "blocked overnight",
+                "priority_action": "/offdesk review",
+                "priority_reason": "review blocked runtime first",
+                "next_focus": "clear planning blockers",
+                "provider_pressure_summary": "codex limited",
+                "task_teams": [],
+            }
+        ],
+    }
+    _write_nightly_summary_log(tmp_path, payload)
+
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=manager_state,
+        cmd="history",
+        rest="search --scope recovery blocked overnight",
+    )
+
+    assert "nightly runtime" in body
+    assert "O3" in body
+    assert "next: /offdesk review" in body
+
+
+def test_history_search_reports_zero_matches(tmp_path: Path) -> None:
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=_empty_state(),
+        cmd="history",
+        rest="search no_such_token",
+    )
+
+    assert "- matches: 0" in body
+    assert "/offdesk review" in body
 
 
 def _management_chat_kwargs(

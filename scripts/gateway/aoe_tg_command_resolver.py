@@ -49,6 +49,7 @@ _ABBREV_COMMANDS = [
     "lang",
     "report",
     "replay",
+    "history",
     "ok",
     "whoami",
     "lockme",
@@ -198,6 +199,9 @@ def resolve_message_command(
                 out.cmd = "cancel-pending"
         elif out.cmd in {"replay"}:
             out.cmd = "replay"
+            out.rest = slash_rest
+        elif out.cmd in {"history"}:
+            out.cmd = "history"
             out.rest = slash_rest
         elif out.cmd in {"id", "whoami"}:
             out.cmd = "whoami"
@@ -525,6 +529,8 @@ def resolve_message_command(
                 out.report_setting = token if token in {"status", "short", "normal", "long", "off"} else ""
             elif out.cmd == "replay":
                 out.rest = str(cli.get("target", "")).strip()
+            elif out.cmd == "history":
+                out.rest = str(cli.get("rest", "")).strip()
             elif out.cmd == "todo":
                 out.rest = str(cli.get("rest", "")).strip()
             elif out.cmd == "next":

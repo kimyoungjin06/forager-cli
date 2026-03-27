@@ -288,6 +288,7 @@ READONLY_ALLOWED_COMMANDS = {
     "offdesk",
     "auto",
     "replay-read",
+    "history",
     "cancel-pending",
 }
 

@@ -4015,6 +4015,26 @@ def test_resolve_message_command_parses_followup_lane_selector() -> None:
     assert resolved.orch_followup_lane_ids == ["L2", "R1"]
 
 
+def test_resolve_message_command_parses_history_search() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/history search planning_gate --project O3",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "history"
+    assert resolved.rest == "search planning_gate --project O3"
+
+
 def test_resolve_retry_replan_transition_rejects_invalid_lane_selector() -> None:
     manager_state = _empty_state()
     manager_state["projects"]["twinpaper"] = {

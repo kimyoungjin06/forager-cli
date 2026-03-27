@@ -748,6 +748,11 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
             return {"cmd": "replay", "target": f"show {argv[1].strip()}"}
         raise RuntimeError("usage: aoe replay [list|latest|<idx>|<id>|show <idx|id|latest>|purge]")
 
+    if cmd == "history":
+        if len(argv) == 0:
+            raise RuntimeError("usage: aoe history search <query> [--project O#|name] [--since 12h] [--limit N] [--scope control|runtime|task|dashboard|recovery|all]")
+        return {"cmd": "history", "rest": " ".join(str(item).strip() for item in argv if str(item).strip())}
+
     if cmd == "retry":
         if len(argv) == 0:
             raise RuntimeError("usage: aoe retry <request_or_alias> [lane <L#|R#,...>]")

@@ -123,7 +123,7 @@ def enforce_command_auth(
         if cmd_key not in readonly_allowed_commands:
             send(
                 "permission denied: readonly chat.\n"
-                "allowed: /status /check /task /monitor /pick /kpi /queue /todo /auto /help /whoami /mode /lang /report /acl /replay list|show",
+                "allowed: /status /check /task /monitor /pick /kpi /queue /todo /auto /history search /help /whoami /mode /lang /report /acl /replay list|show",
                 context="auth-deny",
                 with_menu=True,
             )

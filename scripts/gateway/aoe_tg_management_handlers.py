@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import aoe_tg_management_acl as mgmt_acl_mod
 import aoe_tg_management_chat as mgmt_chat_mod
+import aoe_tg_history_search as history_search_mod
 from aoe_tg_ops_view import (
     blocked_bucket_count as ops_view_blocked_bucket_count,
     blocked_head_summary as ops_view_blocked_head_summary,
@@ -677,6 +678,18 @@ def handle_management_command(
             default_offdesk_report_level=DEFAULT_OFFDESK_REPORT_LEVEL,
             default_offdesk_room=DEFAULT_OFFDESK_ROOM,
         )
+
+    if cmd == "history":
+        send(
+            history_search_mod.render_history_search(
+                team_dir=Path(str(getattr(args, "team_dir", ""))).expanduser().resolve(),
+                manager_state=manager_state,
+                rest=rest,
+            ),
+            context="history-search",
+            with_menu=True,
+        )
+        return True
 
     if cmd in {"mode", "lang", "report", "quick-dispatch", "quick-direct", "cancel-pending"}:
         return mgmt_chat_mod.handle_chat_management_command(

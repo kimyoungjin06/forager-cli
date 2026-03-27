@@ -278,6 +278,7 @@ pause/resume 동작 규칙:
 - `/retry <T-###|request_id> [lane <L#|R#,...>]`: 같은 입력으로 재실행. lane을 주면 critic이 허용한 실행/review lane만 다시 돎
 - `/replan <T-###|request_id> [lane <L#|R#,...>]`: 플래너/크리틱을 다시 붙여 재계획 후 실행. lane을 주면 해당 lane만 범위를 좁힘
 - `/replay [list|latest|<idx>|<id>|show <...>|purge]`: 핸들러 오류 입력 큐 조회/재실행/정리
+- `/history search <query> [--project O#|name] [--since 12h] [--limit N] [--scope control|runtime|task|dashboard|recovery|all]`: gateway events, dashboard action audit, nightly summary, latest intent, current manager state를 합쳐 recovery-relevant history를 검색
 
 ---
 
