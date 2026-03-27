@@ -293,6 +293,17 @@
 - [x] `Task Team Observatory` Phase 1 spec
   - 문서:
     - `docs/TASK_TEAM_OBSERVATORY_SPEC.md`
+- [ ] `Document Registry + Dashboard Convergence`
+  - 목표:
+    - runtime-centric dashboard에 project document flow를 붙여 개별 프로젝트 진행도를 ondesk/dashboard에서 함께 판단할 수 있게 한다
+  - 구현 축:
+    - `Project Flow Compiler`
+    - per-project compiled flow artifact
+    - doc/runtime drift detection
+    - dashboard `Project Runtime Detail` `Document Flow` card
+- [x] `Project Flow Compiler` spec
+  - 문서:
+    - `docs/PROJECT_FLOW_COMPILER_SPEC.md`
 - [x] `AOE_STATE_DIR`
   - worktree-local `.aoe-team` 위에 centralized state root 도입
   - stable project-id 기반 state continuity

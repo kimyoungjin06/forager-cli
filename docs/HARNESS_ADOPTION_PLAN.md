@@ -33,7 +33,8 @@
 ### 3.1 Immediate Adoption
 1. `Session Search`
 2. `Task Team Observatory`
-3. `Centralized State Root`
+3. `Project Flow Compiler`
+4. `Centralized State Root`
 
 ### 3.2 Medium-Term Adoption
 1. `Doctor / Setup / Migration Discipline`
@@ -226,6 +227,63 @@ without grepping raw logs manually.
   - `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <AOE_STATE_DIR>`
   - add `--apply` to copy missing artifacts into the centralized state root
   - add `--force` to overwrite already-present target files
+
+## 6A. Package C2: Project Flow Compiler
+
+### 6A.1 Goal
+- Turn scattered project docs into a structured flow artifact that can be surfaced in the dashboard alongside runtime truth.
+- This package is the missing bridge between:
+  - document registry / per-project docs
+  - runtime/project monitoring views
+
+### 6A.2 Why It Matters
+- We already have:
+  - runtime-centric dashboard views
+  - document registry and TF report scaffolding
+- We still do not have:
+  - one compiled per-project flow artifact that answers
+    - what the project is doing,
+    - what the latest TF/doc lineage is,
+    - where doc/runtime drift exists
+
+### 6A.3 Phase 1 Surface
+- dashboard `Project Runtime Detail`
+  - `Document Flow` card
+- dashboard `Recovery`
+  - compact doc drift note for blocked runtimes
+
+### 6A.4 Canonical Inputs
+- `docs/investigations_mo/registry/project_lock.yaml`
+- `docs/investigations_mo/registry/project_registry.md`
+- `docs/investigations_mo/registry/tf_registry.md`
+- `docs/investigations_mo/registry/handoff_index.csv`
+- `docs/investigations_mo/registry/tf_close_index.csv`
+- `docs/investigations_mo/projects/<project_alias>/ongoing.md`
+- `docs/investigations_mo/projects/<project_alias>/note.md`
+- `docs/investigations_mo/projects/<project_alias>/tfs/<tf_id>/report.md`
+- runtime state and recovery artifacts from `.aoe-team`
+
+### 6A.5 Output Contract
+- machine artifact:
+  - `.aoe-team/project-flow/<project_alias>/latest.json`
+- optional later human artifact:
+  - `docs/investigations_mo/projects/<project_alias>/flow.md`
+
+### 6A.6 Constraints
+- read-only in Phase 1
+- no document rewriting
+- no dashboard-only policy layer
+- runtime truth remains primary; compiled flow is convergence/evidence, not a second scheduler
+
+### 6A.7 Current Plan
+1. add pure-read compiler helper
+2. emit per-project compiled flow JSON
+3. surface `Document Flow` in dashboard runtime detail
+4. add doc/runtime drift excerpts to recovery
+5. later decide whether to add optional rendered `flow.md`
+
+### 6A.8 Detailed Contract
+- `docs/PROJECT_FLOW_COMPILER_SPEC.md`
 
 ## 7. Package D: Doctor / Setup / Migration Discipline
 
