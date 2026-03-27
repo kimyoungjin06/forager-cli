@@ -293,7 +293,7 @@
 - [x] `Task Team Observatory` Phase 1 spec
   - 문서:
     - `docs/TASK_TEAM_OBSERVATORY_SPEC.md`
-- [ ] `AOE_STATE_DIR`
+- [x] `AOE_STATE_DIR`
   - worktree-local `.aoe-team` 위에 centralized state root 도입
   - stable project-id 기반 state continuity
   - note:
@@ -301,7 +301,7 @@
     - `AOE_STATE_DIR` + legacy `.aoe-team` migration-safe fallback 반영
     - resolved state root surface visibility 반영
     - artifact path helper 정렬 반영
-    - remaining: migration tooling
+    - copy-first migration helper 추가
 - [ ] `doctor / setup / migration` discipline
   - bootstrap, health, upgrade, state-root migration guidance
 - [ ] compatibility / deprecation envelope

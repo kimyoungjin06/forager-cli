@@ -273,6 +273,28 @@ pause/resume 동작 규칙:
 - `/gc` : room 로그(기본 14일) + TF 실행 캐시(기본 72시간 TTL)를 정책에 따라 정리
 - `/gc force` : room GC를 강제로 재실행(하루 1회 마커 무시)
 
+### F-2. State Root Migration
+
+- `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <state-root>`
+  - legacy `<project_root>/.aoe-team` 기준으로 centralized `AOE_STATE_DIR/<project-id>/` migration plan을 출력
+- `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <state-root> --apply`
+  - missing artifact를 copy-first로 migration
+- `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <state-root> --apply --force`
+  - existing target artifact도 overwrite
+
+포함 artifact:
+
+- `telegram_gateway_state.json`
+- `orch_manager_state.json`
+- `telegram_chat_aliases.json`
+- `auto_scheduler.json`
+- `offdesk_state.json`
+- `provider_capacity.json`
+- `control/latest-intent.json`
+- `dashboard/action-history.jsonl`
+- `logs/gateway_events.jsonl`
+- `recovery/nightly-session-summary/*`
+
 ### G. 복구/재실행
 
 - `/retry <T-###|request_id> [lane <L#|R#,...>]`: 같은 입력으로 재실행. lane을 주면 critic이 허용한 실행/review lane만 다시 돎

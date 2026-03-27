@@ -222,8 +222,10 @@ without grepping raw logs manually.
 - foreign project rows loaded from manager state repair their `team_dir` using the same centralized-state-aware default.
 - resolved state root is now surfaced in `/auto`, `/offdesk`, and dashboard control summary/recovery views.
 - provider-capacity, latest-intent, action-audit, dashboard history search, and nightly summary paths now share runtime-core artifact resolvers.
-- remaining work:
-  - add explicit migration tooling
+- copy-first migration helper is now available:
+  - `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <AOE_STATE_DIR>`
+  - add `--apply` to copy missing artifacts into the centralized state root
+  - add `--force` to overwrite already-present target files
 
 ## 7. Package D: Doctor / Setup / Migration Discipline
 
