@@ -210,6 +210,21 @@ without grepping raw logs manually.
 - keep fallback to local `.aoe-team`
 - document migration clearly
 
+### 6.8 Current Implementation Status
+- Phase 1 core resolver is implemented.
+- current precedence:
+  - explicit `team_dir`
+  - `AOE_TEAM_DIR`
+  - centralized `AOE_STATE_DIR/<project-id>/` when it already exists
+  - legacy `<project_root>/.aoe-team` when legacy state already exists
+  - centralized `AOE_STATE_DIR/<project-id>/` for new state with no legacy directory
+- `telegram_gateway_state.json` now follows the resolved team dir instead of assuming local `.aoe-team`.
+- foreign project rows loaded from manager state repair their `team_dir` using the same centralized-state-aware default.
+- remaining work:
+  - surface resolved state root in operator views
+  - migrate provider/recovery/action artifacts to the same canonical root
+  - add explicit migration tooling
+
 ## 7. Package D: Doctor / Setup / Migration Discipline
 
 ### 7.1 Goal

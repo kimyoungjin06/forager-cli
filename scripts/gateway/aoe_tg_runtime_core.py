@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -16,19 +19,102 @@ def resolve_project_root(raw: str) -> Path:
     return Path(raw).expanduser().resolve()
 
 
+def _legacy_team_dir(project_root: Path) -> Path:
+    return project_root / ".aoe-team"
+
+
+def _state_root_dir() -> Optional[Path]:
+    raw = str(os.environ.get("AOE_STATE_DIR", "")).strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser().resolve()
+
+
+def _slugify_project_name(name: str) -> str:
+    slug = []
+    last_dash = False
+    for char in str(name or "").strip().lower():
+        if char.isalnum():
+            slug.append(char)
+            last_dash = False
+            continue
+        if not last_dash:
+            slug.append("-")
+            last_dash = True
+    text = "".join(slug).strip("-")
+    return text or "project"
+
+
+def _normalize_git_remote_url(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if text.endswith(".git"):
+        text = text[:-4]
+    if text.startswith("git@") and ":" in text:
+        host_path = text.split("@", 1)[1]
+        host, path = host_path.split(":", 1)
+        text = f"ssh://{host}/{path}"
+    return text.rstrip("/")
+
+
+@lru_cache(maxsize=256)
+def _git_origin_url(project_root_raw: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", project_root_raw, "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=1.5,
+        )
+    except Exception:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return _normalize_git_remote_url(proc.stdout)
+
+
+def stable_project_id(project_root: Path) -> str:
+    root = Path(project_root).expanduser().resolve()
+    remote = _git_origin_url(str(root))
+    identity = f"git:{remote}" if remote else f"path:{root}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"{_slugify_project_name(root.name)}-{digest}"
+
+
+def resolve_centralized_team_dir(project_root: Path, state_root_dir: Path) -> Path:
+    return Path(state_root_dir).expanduser().resolve() / stable_project_id(project_root)
+
+
+def resolve_default_team_dir(project_root: Path) -> Path:
+    root = Path(project_root).expanduser().resolve()
+    state_root = _state_root_dir()
+    legacy_dir = _legacy_team_dir(root)
+    if not state_root:
+        return legacy_dir
+    centralized_dir = resolve_centralized_team_dir(root, state_root)
+    if centralized_dir.exists():
+        return centralized_dir
+    if legacy_dir.exists():
+        return legacy_dir
+    return centralized_dir
+
+
 def resolve_team_dir(project_root: Path, explicit_team_dir: Optional[str]) -> Path:
     if explicit_team_dir:
         return Path(explicit_team_dir).expanduser().resolve()
     env_dir = os.environ.get("AOE_TEAM_DIR")
     if env_dir:
         return Path(env_dir).expanduser().resolve()
-    return project_root / ".aoe-team"
+    return resolve_default_team_dir(project_root)
 
 
 def resolve_state_file(project_root: Path, explicit_state_file: Optional[str]) -> Path:
     if explicit_state_file:
         return Path(explicit_state_file).expanduser().resolve()
-    return project_root / ".aoe-team" / "telegram_gateway_state.json"
+    return resolve_team_dir(project_root, None) / "telegram_gateway_state.json"
 
 
 def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callable[[], str]) -> Dict[str, Any]:
@@ -115,17 +201,17 @@ def load_manager_state(
         root = str(raw_entry.get("project_root", "")).strip()
         if not root:
             continue
+        root_path = Path(root).expanduser().resolve()
         td = str(raw_entry.get("team_dir", "")).strip()
         if not td:
-            td = str(Path(root).expanduser().resolve() / ".aoe-team")
+            td = str(resolve_default_team_dir(root_path))
         else:
             try:
                 gw_team = Path(team_dir).expanduser().resolve()
                 gw_root = Path(project_root).expanduser().resolve()
-                root_path = Path(root).expanduser().resolve()
                 td_path = Path(td).expanduser().resolve()
                 if td_path == gw_team and root_path != gw_root:
-                    td = str(root_path / ".aoe-team")
+                    td = str(resolve_default_team_dir(root_path))
             except Exception:
                 pass
         raw_tasks = raw_entry.get("tasks")
@@ -347,7 +433,7 @@ def load_manager_state(
             "name": key,
             "display_name": str(raw_entry.get("display_name", key)).strip() or key,
             "project_alias": normalize_project_alias(str(raw_entry.get("project_alias", ""))),
-            "project_root": str(Path(root).expanduser().resolve()),
+            "project_root": str(root_path),
             "team_dir": str(Path(td).expanduser().resolve()),
             "overview": str(raw_entry.get("overview", "")).strip(),
             "last_request_id": str(raw_entry.get("last_request_id", "")).strip(),

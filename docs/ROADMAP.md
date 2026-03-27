@@ -296,6 +296,10 @@
 - [ ] `AOE_STATE_DIR`
   - worktree-local `.aoe-team` 위에 centralized state root 도입
   - stable project-id 기반 state continuity
+  - note:
+    - core resolver precedence 구현 완료
+    - `AOE_STATE_DIR` + legacy `.aoe-team` migration-safe fallback 반영
+    - remaining: surface visibility, artifact root expansion, migration tooling
 - [ ] `doctor / setup / migration` discipline
   - bootstrap, health, upgrade, state-root migration guidance
 - [ ] compatibility / deprecation envelope

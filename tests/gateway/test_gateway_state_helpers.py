@@ -4002,6 +4002,82 @@ def test_runtime_core_matches_gateway_path_and_default_state_helpers(tmp_path: P
     assert actual == expected
 
 
+def test_runtime_core_prefers_legacy_team_dir_over_centralized_state_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root = runtime_core.resolve_project_root(str(tmp_path / "demo"))
+    legacy_team_dir = project_root / ".aoe-team"
+    state_root = tmp_path / "state-root"
+    legacy_team_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("AOE_TEAM_DIR", raising=False)
+    monkeypatch.setenv("AOE_STATE_DIR", str(state_root))
+
+    team_dir = runtime_core.resolve_team_dir(project_root, None)
+    state_file = runtime_core.resolve_state_file(project_root, None)
+
+    assert team_dir == legacy_team_dir.resolve()
+    assert state_file == legacy_team_dir.resolve() / "telegram_gateway_state.json"
+    assert gw.resolve_team_dir(project_root, None) == team_dir
+    assert gw.resolve_state_file(project_root, None) == state_file
+
+
+def test_runtime_core_uses_centralized_state_root_when_no_legacy_team_dir(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root = runtime_core.resolve_project_root(str(tmp_path / "demo"))
+    state_root = tmp_path / "state-root"
+    monkeypatch.delenv("AOE_TEAM_DIR", raising=False)
+    monkeypatch.setenv("AOE_STATE_DIR", str(state_root))
+
+    team_dir = runtime_core.resolve_team_dir(project_root, None)
+    state_file = runtime_core.resolve_state_file(project_root, None)
+
+    assert team_dir.parent == state_root.resolve()
+    assert team_dir.name == runtime_core.stable_project_id(project_root)
+    assert state_file == team_dir / "telegram_gateway_state.json"
+    assert gw.resolve_team_dir(project_root, None) == team_dir
+    assert gw.resolve_state_file(project_root, None) == state_file
+
+
+def test_runtime_core_prefers_explicit_team_env_over_centralized_state_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root = runtime_core.resolve_project_root(str(tmp_path / "demo"))
+    explicit_team_dir = tmp_path / "explicit-team"
+    state_root = tmp_path / "state-root"
+    monkeypatch.setenv("AOE_TEAM_DIR", str(explicit_team_dir))
+    monkeypatch.setenv("AOE_STATE_DIR", str(state_root))
+
+    team_dir = runtime_core.resolve_team_dir(project_root, None)
+    state_file = runtime_core.resolve_state_file(project_root, None)
+
+    assert team_dir == explicit_team_dir.resolve()
+    assert state_file == explicit_team_dir.resolve() / "telegram_gateway_state.json"
+    assert gw.resolve_team_dir(project_root, None) == team_dir
+    assert gw.resolve_state_file(project_root, None) == state_file
+
+
+def test_runtime_core_prefers_existing_centralized_state_root_over_legacy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root = runtime_core.resolve_project_root(str(tmp_path / "demo"))
+    legacy_team_dir = project_root / ".aoe-team"
+    state_root = tmp_path / "state-root"
+    monkeypatch.delenv("AOE_TEAM_DIR", raising=False)
+    monkeypatch.setenv("AOE_STATE_DIR", str(state_root))
+    legacy_team_dir.mkdir(parents=True, exist_ok=True)
+    centralized_team_dir = runtime_core.resolve_centralized_team_dir(project_root, state_root)
+    centralized_team_dir.mkdir(parents=True, exist_ok=True)
+
+    team_dir = runtime_core.resolve_team_dir(project_root, None)
+    state_file = runtime_core.resolve_state_file(project_root, None)
+
+    assert team_dir == centralized_team_dir.resolve()
+    assert state_file == centralized_team_dir.resolve() / "telegram_gateway_state.json"
+    assert gw.resolve_team_dir(project_root, None) == team_dir
+    assert gw.resolve_state_file(project_root, None) == state_file
+
+
 def test_gateway_events_module_matches_gateway_task_identifiers() -> None:
     task = {"short_id": "T-001", "alias": "demo"}
     assert gw.task_identifiers(task) == gateway_events.task_identifiers(task)
@@ -4028,6 +4104,61 @@ def test_runtime_core_matches_gateway_default_project_registration(tmp_path: Pat
     )
 
     assert state_a == state_b
+
+
+def test_runtime_core_repairs_foreign_project_team_dir_with_centralized_state_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    current_root = tmp_path / "current"
+    foreign_root = tmp_path / "foreign"
+    state_root = tmp_path / "state-root"
+    state_path = tmp_path / "orch_manager_state.json"
+    current_root.mkdir(parents=True, exist_ok=True)
+    foreign_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("AOE_TEAM_DIR", raising=False)
+    monkeypatch.setenv("AOE_STATE_DIR", str(state_root))
+
+    current_team_dir = runtime_core.resolve_team_dir(current_root, None)
+    payload = {
+        "active": "default",
+        "projects": {
+            "default": {
+                "name": "default",
+                "project_alias": "O1",
+                "project_root": str(current_root),
+                "team_dir": str(current_team_dir),
+                "tasks": {},
+            },
+            "foreign": {
+                "name": "foreign",
+                "project_alias": "O2",
+                "project_root": str(foreign_root),
+                "team_dir": str(current_team_dir),
+                "tasks": {},
+            },
+        },
+    }
+    state_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    loaded = runtime_core.load_manager_state(
+        state_path,
+        current_root,
+        current_team_dir,
+        default_manager_state=gw.default_manager_state,
+        now_iso=gw.now_iso,
+        normalize_project_name=gw.normalize_project_name,
+        sanitize_task_record=gw.sanitize_task_record,
+        trim_project_tasks=gw.trim_project_tasks,
+        normalize_task_alias_key=gw.normalize_task_alias_key,
+        bool_from_json=gw.bool_from_json,
+        normalize_project_alias=gw.normalize_project_alias,
+        backfill_task_aliases=gw.backfill_task_aliases,
+        ensure_project_aliases=gw.ensure_project_aliases,
+        sanitize_project_lock_row=gw.sanitize_project_lock_row,
+        sanitize_chat_session_row=gw.sanitize_chat_session_row,
+    )
+
+    assert loaded["projects"]["foreign"]["team_dir"] == str(runtime_core.resolve_default_team_dir(foreign_root))
 
 
     assert tg_parse.parse_quick_message("동기화가 계속 꼬이는 이유를 분석해줘") is None
