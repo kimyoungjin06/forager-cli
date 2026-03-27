@@ -112,6 +112,12 @@
               <span class="muted">files={{ task.observatory_touched_file_count }} conflicts={{ task.observatory_conflict_file_count }}</span>
             </td>
             <td>
+              {% if task.observatory_first_focus and task.observatory_first_focus != '-' %}
+              <p class="muted"><strong>obs</strong> {{ task.observatory_first_focus }}</p>
+              {% endif %}
+              {% if task.observatory_touched_file_count or task.observatory_conflict_file_count %}
+              <p class="muted"><strong>obs_files</strong> touched={{ task.observatory_touched_file_count }} conflicts={{ task.observatory_conflict_file_count }}</p>
+              {% endif %}
               {% with
                 section_title='',
                 safe_hints=task.command_hints,

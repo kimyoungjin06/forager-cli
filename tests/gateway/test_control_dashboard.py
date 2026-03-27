@@ -113,6 +113,7 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                                 "role": "Codex-Analyst",
                                 "status": "running",
                                 "subtask_ids": ["S1"],
+                                "touched_files": ["reports/summary.md", "src/analysis.py"],
                             },
                             {
                                 "lane_id": "L2",
@@ -132,6 +133,7 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                                 "reason": "waiting on execution lane(s): L1",
                                 "verdict": "retry",
                                 "action": "rerun",
+                                "touched_files": ["reports/summary.md", "docs/review.md"],
                             },
                             {
                                 "lane_id": "R2",
@@ -468,6 +470,11 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "Task Team Observatory" in text
     assert "task-scoped freshness fallback" in text
     assert "waiting on execution lane(s): L1" in text
+    assert "conflict_file_count" in text
+    assert "touched_file_count" in text
+    assert "files=2" in text
+    assert "conflicts=1" in text
+    assert "reports/summary.md" in text
     assert "R1" in text
     assert "/task T-001" in text
     assert "/request REQ-1" in text
@@ -567,6 +574,9 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
+    assert "overlapping files: reports/summary.md" in text
+    assert "obs_files" in text
+    assert "touched=3 conflicts=1" in text
     assert "/control/actions/control/auto-recover" in text
     assert "Auto Recover" in text
     assert "Auto Recover Force" in text

@@ -4300,7 +4300,13 @@ def test_task_lifecycle_and_monitor_include_task_team_observatory_lines() -> Non
         },
         "lane_states": {
             "execution": [
-                {"lane_id": "L1", "role": "Codex-Writer", "status": "running", "subtask_ids": ["S1"]},
+                {
+                    "lane_id": "L1",
+                    "role": "Codex-Writer",
+                    "status": "running",
+                    "subtask_ids": ["S1"],
+                    "touched_files": ["src/app.py", "reports/summary.md"],
+                },
             ],
             "review": [
                 {
@@ -4311,6 +4317,7 @@ def test_task_lifecycle_and_monitor_include_task_team_observatory_lines() -> Non
                     "depends_on": ["L1"],
                     "waiting_on": ["L1"],
                     "reason": "waiting on execution lane(s): L1",
+                    "touched_files": ["reports/summary.md", "docs/review.md"],
                 },
             ],
             "summary": {
@@ -4336,6 +4343,7 @@ def test_task_lifecycle_and_monitor_include_task_team_observatory_lines() -> Non
     assert "- obs L1 [execution/Codex-Writer] running" in lifecycle
     assert "- obs R1 [review/Codex-Reviewer] waiting_on_dependencies" in lifecycle
     assert "observatory: stale=2 bottleneck=R1/waiting_on_dependencies" in monitor
+    assert "files=3 conflicts=1 top_conflict=reports/summary.md" in monitor
     assert "inspect blocked lane R1 first: waiting on execution lane(s): L1" in monitor
 
 

@@ -405,11 +405,16 @@ def observatory_monitor_line(snapshot: Dict[str, Any]) -> str:
     idle_text = str(bottleneck.get("idle_text", "")).strip() or "-"
     status = str(bottleneck.get("status", "")).strip() or "-"
     conflict_file_count = int(snapshot.get("conflict_file_count", 0) or 0)
-    return "observatory: stale={stale} bottleneck={lane}/{status} idle={idle}{conflicts} | first={focus}".format(
+    touched_file_count = int(snapshot.get("touched_file_count", 0) or 0)
+    conflict_files = snapshot.get("conflict_files") if isinstance(snapshot.get("conflict_files"), list) else []
+    top_conflict = str(conflict_files[0]).strip() if conflict_files else ""
+    return "observatory: stale={stale} bottleneck={lane}/{status} idle={idle}{files}{conflicts}{top} | first={focus}".format(
         stale=int(snapshot.get("stale_lane_count", 0) or 0),
         lane=bottleneck_lane_id or "-",
         status=status,
         idle=idle_text,
+        files=f" files={touched_file_count}" if touched_file_count > 0 else "",
         conflicts=f" conflicts={conflict_file_count}" if conflict_file_count > 0 else "",
+        top=f" top_conflict={top_conflict}" if top_conflict else "",
         focus=first_focus,
     )
