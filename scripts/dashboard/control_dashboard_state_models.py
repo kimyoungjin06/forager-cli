@@ -276,6 +276,38 @@ class ActionAuditPageDTO:
 
 
 @dataclass(frozen=True)
+class HistorySearchRowDTO:
+    at: str
+    scope: str
+    source: str
+    project_alias: str
+    project_key: str
+    request_id: str
+    task_short_id: str
+    task_title: str
+    action: str
+    intent_action: str
+    reason_code: str
+    phase: str
+    status: str
+    summary: str
+    detail: str
+    followup_hint: str
+    raw_ref: str
+
+
+@dataclass(frozen=True)
+class HistorySearchPageDTO:
+    query: str
+    project_filter: str
+    since_label: str
+    scope: str
+    limit: int
+    total_rows: int
+    rows: List[HistorySearchRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class DashboardSnapshotDTO:
     control_root: str
     team_dir: str
@@ -294,5 +326,4 @@ class DashboardSnapshotLoadResult:
     snapshot: DashboardSnapshotDTO
     manager_state: Dict[str, Any]
     provider_state: Dict[str, Any]
-
 

@@ -8,13 +8,12 @@
 ## 2. Scope
 
 ### 2.1 Phase 1
-- Telegram-only command surface
+- Telegram primary command surface
 - read-only search over existing artifacts
 - no search index required
-- no dashboard search page yet
+- read-only dashboard `/control/history`
 
 ### 2.2 Phase 2
-- optional dashboard `/control/history`
 - optional cached index
 - optional saved searches
 

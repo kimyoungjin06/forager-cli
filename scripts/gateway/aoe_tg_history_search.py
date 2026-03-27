@@ -613,9 +613,21 @@ def load_history_rows(*, team_dir: Path, manager_state: Dict[str, Any]) -> List[
     return rows
 
 
+def search_history_rows(
+    *,
+    team_dir: Path | str,
+    manager_state: Dict[str, Any],
+    options: HistorySearchOptions,
+) -> List[HistoryRow]:
+    return _filter_rows(
+        load_history_rows(team_dir=Path(str(team_dir)).expanduser().resolve(), manager_state=manager_state),
+        options=options,
+    )
+
+
 def _filter_rows(rows: Iterable[HistoryRow], *, options: HistorySearchOptions) -> List[HistoryRow]:
     out: List[HistoryRow] = []
-    query = options.query.lower()
+    query = options.query.lower().strip()
     cutoff: Optional[datetime] = None
     if options.since_seconds > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=options.since_seconds)
@@ -627,7 +639,7 @@ def _filter_rows(rows: Iterable[HistoryRow], *, options: HistorySearchOptions) -
         row_dt = _parse_iso_dt(row.at)
         if cutoff is not None and row_dt is not None and row_dt < cutoff:
             continue
-        if query not in _row_text(row):
+        if query and query not in _row_text(row):
             continue
         out.append(row)
     out.sort(
@@ -647,8 +659,7 @@ def render_history_search(
     rest: Any,
 ) -> str:
     options = parse_history_search_options(rest)
-    base_dir = Path(str(team_dir)).expanduser().resolve()
-    rows = _filter_rows(load_history_rows(team_dir=base_dir, manager_state=manager_state), options=options)
+    rows = search_history_rows(team_dir=team_dir, manager_state=manager_state, options=options)
     if not rows:
         filters: List[str] = []
         if options.project_filter:

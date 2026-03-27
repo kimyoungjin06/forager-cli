@@ -13,6 +13,7 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_operator_summary as operator_summary
+import aoe_tg_history_search as history_search
 import aoe_tg_task_state as task_state
 
 from control_dashboard_state_builders import (
@@ -46,6 +47,8 @@ from control_dashboard_state_models import (
     ControlSummaryDTO,
     DashboardSnapshotDTO,
     DashboardSnapshotLoadResult,
+    HistorySearchPageDTO,
+    HistorySearchRowDTO,
     RecoverySummaryDTO,
     RuntimeCardDTO,
     RuntimeDetailDTO,
@@ -283,4 +286,66 @@ def load_dashboard_action_audit_page(
         total_rows=len(rows),
         status_summary=_action_audit_status_summary(rows),
         rows=rows,
+    )
+
+
+def load_dashboard_history_page(
+    *,
+    control_root: Path | str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+    query: str = "",
+    project_filter: str = "",
+    since: str = "",
+    scope: str = "all",
+    limit: int = 20,
+) -> Tuple[DashboardSnapshotDTO, HistorySearchPageDTO]:
+    loaded = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    since_label = str(since or "").strip()
+    options = history_search.HistorySearchOptions(
+        query=" ".join(str(query or "").strip().split()),
+        project_filter=str(project_filter or "").strip(),
+        since_seconds=history_search._parse_since_seconds(since_label) if since_label else 0,
+        since_label=since_label,
+        limit=max(1, min(100, int(limit or 20))),
+        scope=str(scope or "all").strip().lower() or "all",
+    )
+    rows = history_search.search_history_rows(
+        team_dir=loaded.snapshot.team_dir,
+        manager_state=loaded.manager_state,
+        options=options,
+    )
+    return loaded.snapshot, HistorySearchPageDTO(
+        query=options.query,
+        project_filter=options.project_filter,
+        since_label=options.since_label,
+        scope=options.scope,
+        limit=options.limit,
+        total_rows=len(rows),
+        rows=[
+            HistorySearchRowDTO(
+                at=row.at,
+                scope=row.scope,
+                source=row.source,
+                project_alias=row.project_alias,
+                project_key=row.project_key,
+                request_id=row.request_id,
+                task_short_id=row.task_short_id,
+                task_title=row.task_title,
+                action=row.action,
+                intent_action=row.intent_action,
+                reason_code=row.reason_code,
+                phase=row.phase,
+                status=row.status,
+                summary=row.summary,
+                detail=row.detail,
+                followup_hint=row.followup_hint,
+                raw_ref=row.raw_ref,
+            )
+            for row in rows
+        ],
     )

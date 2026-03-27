@@ -60,8 +60,7 @@ without grepping raw logs manually.
   - `/history search --project O3 <query>`
   - `/history search --since 12h <query>`
 - Dashboard:
-  - Phase 1: link out to Telegram command hint only
-  - Phase 2: add `/control/history` page
+  - `/control/history`
 
 ### 4.3 Sources
 - `.aoe-team/logs/gateway_events.jsonl`
@@ -104,7 +103,7 @@ without grepping raw logs manually.
 1. add pure-read history aggregation helper
 2. define normalized history row schema
 3. add Telegram `/history search`
-4. add optional dashboard history page later
+4. add read-only dashboard `/control/history`
 5. detailed Phase 1 contract is defined in:
    - `docs/SESSION_SEARCH_SPEC.md`
 

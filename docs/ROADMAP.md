@@ -269,7 +269,7 @@
 - [x] harness adoption master plan 작성
   - 문서:
     - `docs/HARNESS_ADOPTION_PLAN.md`
-- [ ] `Session Search`
+- [x] `Session Search`
   - source:
     - `gateway_events.jsonl`
     - nightly summary artifacts
@@ -277,7 +277,7 @@
     - runtime/task snapshots
   - surface:
     - Telegram `/history search`
-    - later dashboard `/control/history`
+    - dashboard `/control/history`
 - [x] `Session Search` Phase 1 spec
   - 문서:
     - `docs/SESSION_SEARCH_SPEC.md`

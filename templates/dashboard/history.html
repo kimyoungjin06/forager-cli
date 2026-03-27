@@ -1,0 +1,83 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>History Search</h2>
+  <form class="inline-form" method="get" action="/control/history">
+    <label>
+      <span>Query</span>
+      <input type="text" name="q" value="{{ history.query }}" placeholder="planning_gate, REQ-..., retry">
+    </label>
+    <label>
+      <span>Project</span>
+      <input type="text" name="project" value="{{ history.project_filter }}" placeholder="O3">
+    </label>
+    <label>
+      <span>Since</span>
+      <input type="text" name="since" value="{{ history.since_label }}" placeholder="12h">
+    </label>
+    <label>
+      <span>Scope</span>
+      <select name="scope">
+        {% for token in ['all', 'control', 'runtime', 'task', 'dashboard', 'recovery'] %}
+        <option value="{{ token }}" {% if history.scope == token %}selected{% endif %}>{{ token }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Limit</span>
+      <input type="number" name="limit" min="1" max="100" value="{{ history.limit }}">
+    </label>
+    <button type="submit">Search</button>
+  </form>
+  <ul class="kv-list">
+    <li><span>query</span><strong>{{ history.query or '-' }}</strong></li>
+    <li><span>project</span><strong>{{ history.project_filter or '-' }}</strong></li>
+    <li><span>since</span><strong>{{ history.since_label or '-' }}</strong></li>
+    <li><span>scope</span><strong>{{ history.scope }}</strong></li>
+    <li><span>rows</span><strong>{{ history.total_rows }}</strong></li>
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Results</h2>
+  {% if history.rows %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>At</th>
+        <th>Scope</th>
+        <th>Target</th>
+        <th>Summary</th>
+        <th>Next</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in history.rows %}
+      <tr>
+        <td>{{ row.at or '-' }}</td>
+        <td>{{ row.scope }}</td>
+        <td>
+          {% if row.project_alias %}{{ row.project_alias }} {% endif %}
+          {% if row.task_short_id %}{{ row.task_short_id }}{% elif row.request_id %}{{ row.request_id }}{% else %}-{% endif %}
+        </td>
+        <td>
+          {{ row.summary }}
+          {% if row.reason_code %}<br><span class="muted">reason: {{ row.reason_code }}</span>{% endif %}
+          {% if row.detail %}<br><span class="muted">{{ row.detail }}</span>{% endif %}
+        </td>
+        <td>
+          {% if row.followup_hint %}
+          <code>{{ row.followup_hint }}</code>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no matching history rows</p>
+  {% endif %}
+</section>
+{% endblock %}

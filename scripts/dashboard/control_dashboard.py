@@ -8,7 +8,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts" / "dashboard") not in sys.path:
@@ -41,6 +41,7 @@ from control_dashboard_common import (
 )
 from control_dashboard_state import (
     load_dashboard_action_audit_page,
+    load_dashboard_history_page,
     load_dashboard_recovery_page,
     load_dashboard_runtime_page,
     load_dashboard_snapshot,
@@ -64,7 +65,7 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, object])
 
 
 def _is_known_dashboard_get_route(path: str) -> bool:
-    if path in {"", "/", "/control", "/control/offdesk", "/control/recovery", "/control/audit", "/control/tasks", "/control/health"}:
+    if path in {"", "/", "/control", "/control/offdesk", "/control/recovery", "/control/audit", "/control/history", "/control/tasks", "/control/health"}:
         return True
     if path.startswith("/static/"):
         return True
@@ -136,6 +137,28 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             manager_state_file=config.manager_state_file,
         )
         return _html(render_template("dashboard/audit.html", page_title="Action Audit", snapshot=snapshot, audit=audit, current_path=path))
+
+    if path == "/control/history":
+        query = parse_qs(parsed.query or "", keep_blank_values=False)
+        snapshot, history = load_dashboard_history_page(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+            query=str((query.get("q") or [""])[0]),
+            project_filter=str((query.get("project") or [""])[0]),
+            since=str((query.get("since") or [""])[0]),
+            scope=str((query.get("scope") or ["all"])[0]),
+            limit=int(str((query.get("limit") or ["20"])[0] or "20")),
+        )
+        return _html(
+            render_template(
+                "dashboard/history.html",
+                page_title="History Search",
+                snapshot=snapshot,
+                history=history,
+                current_path=path,
+            )
+        )
 
     if path == "/control/tasks":
         snapshot = load_dashboard_snapshot(

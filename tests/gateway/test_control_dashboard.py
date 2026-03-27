@@ -377,6 +377,28 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
     assert "/control/runtimes/O2" in text
 
 
+def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/history?q=offdesk_prepare&scope=control", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "History Search" in text
+    assert "offdesk_prepare" in text
+    assert "latest intent | offdesk | offdesk_prepare" in text
+    assert "/offdesk review" in text
+
+
 def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
