@@ -55,7 +55,7 @@
   <ul class="kv-list">
     <li><span>headline</span><strong>{{ detail.observatory_headline }}</strong></li>
     <li><span>first_focus</span><strong>{{ detail.observatory_first_focus }}</strong></li>
-    <li><span>freshness_scope</span><strong>{{ detail.observatory_freshness_scope }}-scoped freshness fallback</strong></li>
+    <li><span>freshness_scope</span><strong>{% if detail.observatory_freshness_scope == 'task' %}task-scoped freshness fallback{% elif detail.observatory_freshness_scope == 'lane' %}lane-scoped freshness{% else %}mixed lane/task freshness{% endif %}</strong></li>
     <li><span>stale_lane_count</span><strong>{{ detail.observatory_stale_lane_count }}</strong></li>
     <li><span>bottleneck_lane</span><strong>{{ detail.observatory_bottleneck_lane }}</strong></li>
     <li><span>bottleneck_reason</span><strong>{{ detail.observatory_bottleneck_reason }}</strong></li>

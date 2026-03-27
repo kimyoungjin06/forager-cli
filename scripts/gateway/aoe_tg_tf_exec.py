@@ -585,6 +585,27 @@ def aggregate_parallel_stage_states(
 def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage: str) -> Dict[str, Any]:
     if not isinstance(state, dict):
         return {}
+    runtime_events = state.get("runtime_events") if isinstance(state.get("runtime_events"), list) else []
+    latest_event = runtime_events[-1] if runtime_events and isinstance(runtime_events[-1], dict) else {}
+    latest_event_at = str(latest_event.get("ts", "")).strip() or str(state.get("updated_at", "")).strip()
+    latest_event_kind = str(latest_event.get("stage", "")).strip() or str(latest_event.get("kind", "")).strip()
+    latest_event_payload = latest_event.get("payload") if isinstance(latest_event.get("payload"), dict) else {}
+    artifacts = state.get("artifacts") if isinstance(state.get("artifacts"), list) else []
+    touched_files = [
+        str(row.get("path", "")).strip()
+        for row in artifacts
+        if isinstance(row, dict) and str(row.get("path", "")).strip()
+    ]
+    observability: Dict[str, Any] = {
+        "request_id": str(state.get("request_id", "")).strip() or str(state.get("gateway_request_id", "")).strip(),
+        "started_at": str(state.get("created_at", "")).strip(),
+        "last_event_at": latest_event_at,
+        "last_event_kind": latest_event_kind,
+        "backend": str(state.get("backend", "")).strip(),
+        "outcome_reason_code": str(latest_event_payload.get("reason_code", "")).strip(),
+    }
+    if touched_files:
+        observability["touched_files"] = touched_files
     annotated = dict(state)
     role_states = annotated.get("role_states")
     if isinstance(role_states, list):
@@ -595,6 +616,9 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
             item = dict(row)
             item.setdefault("lane_id", lane_id)
             item.setdefault("phase2_stage", phase2_stage)
+            for key, value in observability.items():
+                if value not in ("", None, []):
+                    item.setdefault(key, value)
             new_rows.append(item)
         annotated["role_states"] = new_rows
     roles_obj = annotated.get("roles")
@@ -606,6 +630,9 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
             item = dict(row)
             item.setdefault("lane_id", lane_id)
             item.setdefault("phase2_stage", phase2_stage)
+            for key, value in observability.items():
+                if value not in ("", None, []):
+                    item.setdefault(key, value)
             new_roles.append(item)
         annotated["roles"] = new_roles
     return annotated

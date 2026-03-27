@@ -456,6 +456,8 @@ def derive_lane_states(
 
     role_status: Dict[str, str] = {}
     lane_role_status: Dict[Tuple[str, str], str] = {}
+    lane_role_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    status_rank = {"failed": 4, "running": 3, "done": 2, "pending": 1, "waiting_on_dependencies": 1}
     for row in snapshot.get("rows") or []:
         if not isinstance(row, dict):
             continue
@@ -470,6 +472,10 @@ def derive_lane_states(
                 lane_role_status.get((lane_id, role), "pending"),
                 status,
             )
+            key = (lane_id, role)
+            prev = lane_role_rows.get(key)
+            if prev is None or status_rank.get(status, 0) >= status_rank.get(str(prev.get("status", "")).strip().lower(), 0):
+                lane_role_rows[key] = dict(row)
 
     complete = bool(snapshot.get("complete", False))
     pending_roles = {str(x).strip() for x in (snapshot.get("pending_roles") or []) if str(x).strip()}
@@ -512,6 +518,14 @@ def derive_lane_states(
             "status": status,
             "parallel": bool(row.get("parallel", True)),
         }
+        lane_meta = lane_role_rows.get((lane_id, role), {})
+        for key in ("request_id", "started_at", "last_event_at", "last_event_kind", "backend", "outcome_reason_code"):
+            token = str(lane_meta.get(key, "")).strip()
+            if token:
+                item[key] = token
+        touched_files = [str(x).strip() for x in (lane_meta.get("touched_files") or []) if str(x).strip()]
+        if touched_files:
+            item["touched_files"] = touched_files
         subtask_ids = [str(x).strip() for x in (row.get("subtask_ids") or []) if str(x).strip()]
         if subtask_ids:
             item["subtask_ids"] = subtask_ids
@@ -549,6 +563,14 @@ def derive_lane_states(
             "status": status,
             "parallel": bool(row.get("parallel", True)),
         }
+        lane_meta = lane_role_rows.get((lane_id, role), {})
+        for key in ("request_id", "started_at", "last_event_at", "last_event_kind", "backend", "outcome_reason_code"):
+            token = str(lane_meta.get(key, "")).strip()
+            if token:
+                item[key] = token
+        touched_files = [str(x).strip() for x in (lane_meta.get("touched_files") or []) if str(x).strip()]
+        if touched_files:
+            item["touched_files"] = touched_files
         if depends:
             item["depends_on"] = depends
         if waiting_on:
@@ -1468,8 +1490,24 @@ def summarize_task_monitor(
     return "\n".join(lines)
 
 
-def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterable[str]], List[str]]) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
+def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterable[str]], List[str]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+
+    def _copy_observability_fields(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        for key in (
+            "request_id",
+            "started_at",
+            "last_event_at",
+            "last_event_kind",
+            "backend",
+            "outcome_reason_code",
+        ):
+            token = str(source.get(key, "")).strip()
+            if token:
+                target[key] = token
+        touched_files = [str(item).strip() for item in (source.get("touched_files") or []) if str(item).strip()]
+        if touched_files:
+            target["touched_files"] = touched_files
 
     role_states = data.get("role_states")
     if isinstance(role_states, list):
@@ -1487,6 +1525,7 @@ def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterabl
             phase2_stage = str(item.get("phase2_stage", "")).strip().lower()
             if phase2_stage:
                 row["phase2_stage"] = phase2_stage
+            _copy_observability_fields(row, item)
             rows.append(row)
 
     if rows:
@@ -1508,6 +1547,7 @@ def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterabl
             phase2_stage = str(item.get("phase2_stage", "")).strip().lower()
             if phase2_stage:
                 row["phase2_stage"] = phase2_stage
+            _copy_observability_fields(row, item)
             rows.append(row)
         if rows:
             return rows

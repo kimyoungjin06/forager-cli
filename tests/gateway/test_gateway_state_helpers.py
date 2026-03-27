@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Gateway state and workflow regression tests."""
 
+from datetime import datetime
+
 from _gateway_test_support import *  # noqa: F401,F403
 
 
@@ -4335,3 +4337,58 @@ def test_task_lifecycle_and_monitor_include_task_team_observatory_lines() -> Non
     assert "- obs R1 [review/Codex-Reviewer] waiting_on_dependencies" in lifecycle
     assert "observatory: stale=2 bottleneck=R1/waiting_on_dependencies" in monitor
     assert "inspect blocked lane R1 first: waiting on execution lane(s): L1" in monitor
+
+
+def test_task_team_observatory_prefers_lane_scoped_timestamps() -> None:
+    task = {
+        "request_id": "REQ-LANE",
+        "short_id": "T-011",
+        "status": "running",
+        "stage": "execution",
+        "created_at": "2026-03-20T09:00:00+09:00",
+        "updated_at": "2026-03-20T10:00:00+09:00",
+        "plan": {
+            "meta": {
+                "phase2_execution_plan": {
+                    "execution_lanes": [{"lane_id": "L1", "role": "Codex-Writer"}],
+                    "review_lanes": [{"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L1"]}],
+                }
+            }
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L1",
+                    "role": "Codex-Writer",
+                    "status": "running",
+                    "started_at": "2026-03-20T09:10:00+09:00",
+                    "last_event_at": "2026-03-20T09:55:00+09:00",
+                    "last_event_kind": "runtime.completed",
+                }
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "verifier",
+                    "status": "waiting_on_dependencies",
+                    "depends_on": ["L1"],
+                    "reason": "waiting on execution lane(s): L1",
+                    "started_at": "2026-03-20T09:12:00+09:00",
+                    "last_event_at": "2026-03-20T09:56:00+09:00",
+                    "last_event_kind": "dispatch.submitted",
+                }
+            ],
+        },
+    }
+
+    observatory = task_view.task_team_observatory_snapshot(
+        task,
+        now=datetime.fromisoformat("2026-03-20T10:30:00+09:00"),
+    )
+
+    assert observatory["freshness_scope"] == "lane"
+    assert observatory["lanes"][0]["last_event_kind"] == "runtime.completed"
+    assert observatory["lanes"][1]["last_event_kind"] == "dispatch.submitted"
+    assert observatory["lanes"][0]["idle_text"] == "35m"
+    assert observatory["lanes"][1]["idle_text"] == "34m"
