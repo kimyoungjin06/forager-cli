@@ -16,6 +16,7 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_operator_summary as operator_summary
+import aoe_tg_runtime_core as runtime_core
 import aoe_tg_runtime_read as runtime_read
 
 MANAGER_STATE_FILENAME = "orch_manager_state.json"
@@ -106,7 +107,7 @@ def resolve_control_paths(
     elif resolved_manager is not None:
         resolved_team_dir = resolved_manager.parent.resolve()
     else:
-        resolved_team_dir = (root / ".aoe-team").resolve()
+        resolved_team_dir = runtime_core.resolve_team_dir(root, None)
     if resolved_manager is None:
         resolved_manager = (resolved_team_dir / MANAGER_STATE_FILENAME).resolve()
     return ControlPaths(

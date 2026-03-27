@@ -299,7 +299,8 @@
   - note:
     - core resolver precedence 구현 완료
     - `AOE_STATE_DIR` + legacy `.aoe-team` migration-safe fallback 반영
-    - remaining: surface visibility, artifact root expansion, migration tooling
+    - resolved state root surface visibility 반영
+    - remaining: artifact root expansion, migration tooling
 - [ ] `doctor / setup / migration` discipline
   - bootstrap, health, upgrade, state-root migration guidance
 - [ ] compatibility / deprecation envelope

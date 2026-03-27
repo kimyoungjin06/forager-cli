@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List
 from aoe_tg_action_audit import load_latest_action_audit
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_operator_surface import append_operator_status_lines
+from aoe_tg_runtime_core import describe_resolved_team_dir
 from aoe_tg_scheduler_capacity import (
     _annotate_reports_with_provider_repeat_memory,
     _capacity_recovery_action,
@@ -107,6 +108,7 @@ def _handle_offdesk_command(
     if sub == "status":
         latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
+        state_root = describe_resolved_team_dir(getattr(args, "team_dir", ""))
         lines = [
             "offdesk mode",
             f"- enabled: {'yes' if off_enabled else 'no'}",
@@ -118,6 +120,7 @@ def _handle_offdesk_command(
             f"- one_shot_pending: {current_pending_mode}",
             f"- report_level: {current_report_level}",
             f"- room: {current_room}",
+            f"- state_root: {state_root.get('mode', '-')} | {state_root.get('path', '-')}",
             f"- auto_enabled: {'yes' if auto_enabled else 'no'}",
             f"- auto_command: {auto_cmd}",
             f"- auto_prefetch: {prefetch_display(auto_prefetch, auto_state.get('prefetch_since', ''), auto_replace_sync)}",
@@ -147,6 +150,7 @@ def _handle_offdesk_command(
     if sub in {"prepare", "preflight", "check"}:
         latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
+        state_root = describe_resolved_team_dir(getattr(args, "team_dir", ""))
         raw_target = ""
         for tok in tokens[1:]:
             low = str(tok or "").strip().lower()
@@ -169,6 +173,7 @@ def _handle_offdesk_command(
             return True
         if not targets:
             lines = ["offdesk prepare", "- no orch projects registered"]
+            lines.append(f"- state_root: {state_root.get('mode', '-')} | {state_root.get('path', '-')}")
             append_operator_status_lines(
                 lines,
                 latest_intent=latest_intent,
@@ -198,6 +203,7 @@ def _handle_offdesk_command(
             f"- ready: {ready_count}",
             f"- warn: {warn_count}",
             f"- blocked: {blocked_count}",
+            f"- state_root: {state_root.get('mode', '-')} | {state_root.get('path', '-')}",
         ]
         append_operator_status_lines(
             lines,
@@ -240,6 +246,7 @@ def _handle_offdesk_command(
     if sub == "review":
         latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
+        state_root = describe_resolved_team_dir(getattr(args, "team_dir", ""))
         raw_target = ""
         for tok in tokens[1:]:
             low = str(tok or "").strip().lower()
@@ -274,6 +281,7 @@ def _handle_offdesk_command(
                 prefetch_display=prefetch_display,
             )
             lines = ["offdesk review", "- no orch projects registered"]
+            lines.append(f"- state_root: {state_root.get('mode', '-')} | {state_root.get('path', '-')}")
             append_operator_status_lines(
                 lines,
                 latest_intent=latest_intent,
@@ -344,6 +352,7 @@ def _handle_offdesk_command(
             "offdesk review",
             f"- reviewed: {len(reports)}",
             f"- flagged: {len(flagged)}",
+            f"- state_root: {state_root.get('mode', '-')} | {state_root.get('path', '-')}",
         ]
         append_operator_status_lines(
             lines,
@@ -646,5 +655,4 @@ def _handle_offdesk_command(
     body += "next:\n- /offdesk status\n- /queue\n- /room tail 30\n- /auto status"
     send(body, context="offdesk-on", with_menu=True)
     return True
-
 

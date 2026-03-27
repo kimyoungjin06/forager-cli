@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from aoe_tg_action_audit import load_latest_action_audit
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_operator_surface import append_operator_status_lines
+from aoe_tg_runtime_core import describe_resolved_team_dir
 from aoe_tg_scheduler_capacity import (
     _PROVIDER_RECOVERY_GRACE_SEC,
     _capacity_recovery_action,
@@ -151,6 +152,7 @@ def _handle_auto_command(
     if sub == "status":
         latest_intent = load_latest_command_resolution(getattr(args, "team_dir", ""))
         latest_action = load_latest_action_audit(getattr(args, "team_dir", ""))
+        state_root = describe_resolved_team_dir(getattr(args, "team_dir", ""))
         recovery_action = _capacity_recovery_action(current, provider_state, manager_state)
         recovery_target = _capacity_recovery_target(
             current,
@@ -199,6 +201,7 @@ def _handle_auto_command(
             f"- idle_sec: {eff_idle}",
             f"- max_failures: {eff_max_fail}",
             f"- tmux_session: {session} ({'up' if sess_up else 'down'})",
+            f"- state_root: {state_root.get('mode', '-')} | {state_root.get('path', '-')}",
         ]
         if last_run:
             lines.append(f"- last_run_at: {last_run}")
@@ -527,5 +530,4 @@ def _handle_auto_command(
     body += "next:\n- /queue\n- /auto status"
     send(body, context="auto-on", with_menu=True)
     return True
-
 

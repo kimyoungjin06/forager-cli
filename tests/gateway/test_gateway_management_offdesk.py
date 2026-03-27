@@ -1283,6 +1283,7 @@ def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
     assert "- latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again" in text
+    assert f"- state_root: legacy | {team_dir.resolve()}" in text
 
 
 def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
@@ -1303,6 +1304,7 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
     assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
+    assert f"- state_root: legacy | {team_dir.resolve()}" in text
 
 
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:

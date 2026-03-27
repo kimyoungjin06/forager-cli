@@ -363,6 +363,9 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "Action Audit" in overview_text
     assert "O2 Alpha" in overview_text
     assert "next_retry_target" in overview_text
+    assert "state_root_mode" in overview_text
+    assert "legacy" in overview_text
+    assert str(team_dir.resolve()) in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -566,6 +569,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "O2 Alpha" in text
     assert "analysis-check" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
+    assert "state_root_mode" in text
+    assert str(team_dir.resolve()) in text
     assert "latest_intent_command" in text
     assert "offdesk" in text
     assert "offdesk_prepare" in text
@@ -610,6 +615,22 @@ def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_p
     assert paths.latest_intent_file == (custom_team_dir / "control" / "latest-intent.json").resolve()
     assert paths.gateway_events_file == (custom_team_dir / "logs" / "gateway_events.jsonl").resolve()
     assert paths.action_audit_file == (custom_team_dir / "dashboard" / "action-history.jsonl").resolve()
+
+
+def test_resolve_control_paths_uses_runtime_core_default_team_dir_when_state_root_enabled(
+    tmp_path: Path, monkeypatch
+) -> None:
+    control_root = tmp_path / "control"
+    state_root = tmp_path / "state-root"
+    control_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("AOE_TEAM_DIR", raising=False)
+    monkeypatch.setenv("AOE_STATE_DIR", str(state_root))
+
+    paths = dashboard_state.resolve_control_paths(control_root=control_root)
+
+    assert paths.team_dir == gw.resolve_team_dir(control_root, None)
+    assert paths.team_dir.parent == state_root.resolve()
+    assert paths.manager_state_file == (paths.team_dir / "orch_manager_state.json").resolve()
 
 
 def test_control_dashboard_prefers_latest_intent_snapshot_over_gateway_events(tmp_path: Path) -> None:

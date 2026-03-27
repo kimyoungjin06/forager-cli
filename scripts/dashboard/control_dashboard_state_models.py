@@ -44,6 +44,8 @@ class LaneObservatoryDTO:
 class ControlSummaryDTO:
     auto_mode: str
     offdesk_mode: str
+    state_root_mode: str
+    state_root_path: str
     provider_capacity_summary: str
     next_retry_at: str
     next_retry_target: str

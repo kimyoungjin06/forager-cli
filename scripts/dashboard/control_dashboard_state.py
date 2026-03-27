@@ -12,6 +12,7 @@ GW_DIR = ROOT / "scripts" / "gateway"
 if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
+import aoe_tg_runtime_core as runtime_core
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_history_search as history_search
 import aoe_tg_task_state as task_state
@@ -124,10 +125,13 @@ def load_dashboard_snapshot_result(
     if not auto_mode:
         auto_mode = "on" if bool(auto_state.get("enabled", False)) else "off"
     offdesk_mode = "on" if bool(auto_state.get("offdesk_enabled", auto_state.get("offdesk_mode") not in {None, "", "off"})) else "off"
+    state_root = runtime_core.describe_resolved_team_dir(paths.team_dir)
 
     summary = ControlSummaryDTO(
         auto_mode=auto_mode,
         offdesk_mode=offdesk_mode,
+        state_root_mode=str(state_root.get("mode", "")).strip() or "-",
+        state_root_path=str(state_root.get("path", "")).strip() or str(paths.team_dir),
         provider_capacity_summary=_provider_summary_text(provider_state),
         next_retry_at=str(provider_state.get("next_retry_at", "")).strip() or "-",
         next_retry_target=_next_retry_target_text(provider_state),

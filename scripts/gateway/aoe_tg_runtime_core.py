@@ -88,6 +88,22 @@ def resolve_centralized_team_dir(project_root: Path, state_root_dir: Path) -> Pa
     return Path(state_root_dir).expanduser().resolve() / stable_project_id(project_root)
 
 
+def describe_resolved_team_dir(team_dir: Path | str) -> Dict[str, str]:
+    resolved = Path(team_dir).expanduser().resolve()
+    explicit_env = str(os.environ.get("AOE_TEAM_DIR", "")).strip()
+    explicit_path = Path(explicit_env).expanduser().resolve() if explicit_env else None
+    state_root = _state_root_dir()
+    if explicit_path is not None and resolved == explicit_path:
+        mode = "explicit-env"
+    elif state_root is not None and (resolved == state_root or state_root in resolved.parents):
+        mode = "centralized"
+    elif resolved.name == ".aoe-team":
+        mode = "legacy"
+    else:
+        mode = "explicit"
+    return {"mode": mode, "path": str(resolved)}
+
+
 def resolve_default_team_dir(project_root: Path) -> Path:
     root = Path(project_root).expanduser().resolve()
     state_root = _state_root_dir()
