@@ -84,6 +84,22 @@
 - [ ] provider별 backoff level 세분화 정책 고도화
 
 ## 8. Current Priority Plan
+### 8.0 Rebased Execution Order
+- [x] current completion review and rebased execution order fixed
+  - 문서:
+    - `docs/CURRENT_COMPLETION_REVIEW_20260327.md`
+  - 핵심 판단:
+    - 다음 큰 축은 더 많은 shell/polish가 아니라 `Live Runtime Verification`
+    - 그 다음은 `Project Flow Compiler`를 통한 문서/런타임 수렴
+  - 우선순위:
+    1. `8.4 Live Runtime Verification`
+    2. `8.8 Document Registry + Dashboard Convergence`
+    3. `8.6 Retention and Storage`
+    4. `8.8 doctor / setup / migration` 후속 마무리
+    5. `8.8 compatibility / deprecation` 후속 마무리
+    6. `8.8 learned runbook extraction`
+    7. `8.7 Structural Debt` 후속
+
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료
   - 목표: 오래 열린 PR(`#37`, `#16`)를 닫고 현재 기준선만 남긴다.
@@ -253,11 +269,15 @@
 - [ ] 다음 분해 타깃 선정
   - 후보:
     - `scripts/gateway/aoe-telegram-gateway.py`
-    - `scripts/gateway/aoe_tg_run_handlers.py`
-    - `scripts/gateway/aoe_tg_scheduler_handlers.py`
+    - `scripts/gateway/aoe_tg_task_state.py`
+    - `scripts/gateway/aoe_tg_tf_exec.py`
+    - `scripts/gateway/aoe_tg_offdesk_flow.py`
+    - `scripts/gateway/aoe_tg_parse.py`
+    - `scripts/gateway/aoe_tg_orch_contract.py`
+    - `scripts/gateway/aoe_tg_scheduler_sync.py`
   - 원칙:
     - 새 기능보다 운영 병목이 큰 곳부터 자른다.
-    - 대시보드 MVP 후에 착수한다.
+    - verification / convergence work를 지원할 때 우선 분해한다.
 
 ### 8.8 Harness Adoption
 - [x] OMC benchmark / harness trend 정리
@@ -318,11 +338,21 @@
   - note:
     - standalone `doctor` script added for state-root, artifact, runtime-config, and binary health
     - standalone `setup guide` script added for bootstrap/env/migration/systemd/dashboard/doctor next-steps
-    - broader migration/deprecation workflow remains open
+    - state-root migration helper is already added
+    - broader upgrade/migration workflow remains open
 - [ ] compatibility / deprecation envelope
   - legacy surface retirements에 deterministic response envelope 추가
   - note:
     - shared deprecation envelope helper added
-    - initial retired surfaces: `mother-orch`, `swarm`
+    - code-centric retired surface inventory added
+    - retired surface set now includes:
+      - `mother-orch`
+      - `swarm`
+      - `orch map`
+      - `tasks` / `board`
+      - `lifecycle`
+      - `follow-up`
+      - `off-desk`
+      - `cleanup`
 - [ ] learned runbook extraction
   - repeated blocker / remediation를 durable runbook으로 승격
