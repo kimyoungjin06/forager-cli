@@ -65,6 +65,7 @@ def handle_text_message(
         project: str = "",
         request_id: str = "",
         task: Optional[Dict[str, Any]] = None,
+        task_short_id: str = "",
         stage: str = "",
         status: str = "",
         error_code: str = "",
@@ -72,6 +73,9 @@ def handle_text_message(
     ) -> None:
         if args.dry_run:
             return
+        task_row = task
+        if (not isinstance(task_row, dict)) and str(task_short_id or "").strip():
+            task_row = {"short_id": str(task_short_id).strip()}
         deps["log_gateway_event"](
             team_dir=log_ctx["team_dir"],
             mirror_team_dir=root_log_team_dir,
@@ -79,7 +83,7 @@ def handle_text_message(
             trace_id=message_trace_id,
             project=project,
             request_id=request_id,
-            task=task,
+            task=task_row,
             stage=stage,
             actor=f"telegram:{chat_id}",
             status=status,
@@ -95,7 +99,7 @@ def handle_text_message(
                 event=event,
                 project=project,
                 request_id=request_id,
-                task=task,
+                task=task_row,
                 stage=stage,
                 status=status,
                 error_code=error_code,

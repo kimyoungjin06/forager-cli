@@ -20,6 +20,18 @@
   - `data/D1_happy_path.md`
   - `review/R1_happy_path.md`
   - `mixed/M1_happy_path.md`
+- current execution status:
+  - `build/B1_happy_path.md`
+    - `executed_blocked`
+    - finding:
+      - `build` preset Phase2 lane graph drift blocked the happy path at planning gate
+      - visible project registration later exposed task lineage surface drift
+  - `data/D1_happy_path.md`
+    - `planned`
+  - `review/R1_happy_path.md`
+    - `planned`
+  - `mixed/M1_happy_path.md`
+    - `planned`
 
 ## Rule
 - Do not replace these artifacts with summaries detached from runtime evidence.

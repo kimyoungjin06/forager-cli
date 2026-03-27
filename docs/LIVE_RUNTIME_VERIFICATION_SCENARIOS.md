@@ -30,6 +30,11 @@
 #### B1. Happy Path
 - intent:
   - implement a bounded code/config change and leave verification evidence
+- current status:
+  - `executed_blocked`
+- current finding:
+  - invalid `build` Phase2 lane graph caused a planning-gate block
+  - visible project registration later exposed task/detail surface drift
 - prompt shape:
   - patch a focused defect or integration issue
   - require a test or verification note
