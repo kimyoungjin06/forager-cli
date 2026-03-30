@@ -194,6 +194,7 @@ def _artifact_contracts(outputs: List[str], *, target_column: str) -> Dict[str, 
                 "columns[].null_count",
                 "columns[].observed_non_null_count",
             ],
+            "inference_policy": _schema_inference_policy(),
             "acceptance_notes": [
                 "schema_report.json must cover every transformed output column, not a partial subset.",
             ],
@@ -253,6 +254,16 @@ def _month_bucket_policy(
     }
 
 
+def _schema_inference_policy() -> Dict[str, Any]:
+    return {
+        "allowed_inferred_types": ["string", "integer", "number", "boolean"],
+        "precedence_order": ["integer", "number", "boolean", "string"],
+        "mixed_type_resolution": "string",
+        "no_non_null_resolution": "string",
+        "type_rule_source": "observable-transformed-values",
+    }
+
+
 def data_request_contract_matches(prompt: str) -> bool:
     src = str(prompt or "")
     if not src.strip():
@@ -290,6 +301,7 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
     )
     output_artifacts = _data_output_artifacts(source_prompt)
     artifact_contracts = _artifact_contracts(output_artifacts, target_column=target_column)
+    schema_inference_policy = _schema_inference_policy() if "schema_report" in output_artifacts else {}
 
     missing_fields: List[str] = []
     if not source_path:
@@ -337,6 +349,7 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
             "zero_pad": "YYYY-MM" in normalize_to,
             "invalid_value_policy": invalid_value_policy,
             "month_bucket_policy": month_bucket_policy,
+            "schema_inference_policy": schema_inference_policy,
         },
         "required_outputs": [
             str((artifact_contracts.get(name) or {}).get("path", name)).strip() or name
@@ -421,6 +434,9 @@ def data_request_contract_acceptance_floor(
     month_bucket_policy = (
         fields.get("month_bucket_policy") if isinstance(fields.get("month_bucket_policy"), dict) else {}
     )
+    schema_inference_policy = (
+        fields.get("schema_inference_policy") if isinstance(fields.get("schema_inference_policy"), dict) else {}
+    )
     valid_patterns = [
         _trim(item, 32) for item in (month_bucket_policy.get("valid_patterns") or []) if _trim(item, 32)
     ] or accepted_formats
@@ -430,6 +446,22 @@ def data_request_contract_acceptance_floor(
     anomaly_buckets = [
         _trim(item, 48) for item in (month_bucket_policy.get("anomaly_buckets") or []) if _trim(item, 48)
     ]
+    allowed_inferred_types = [
+        _trim(item, 24) for item in (schema_inference_policy.get("allowed_inferred_types") or []) if _trim(item, 24)
+    ]
+    precedence_order = [
+        _trim(item, 24) for item in (schema_inference_policy.get("precedence_order") or []) if _trim(item, 24)
+    ]
+    mixed_type_resolution = _trim(schema_inference_policy.get("mixed_type_resolution", ""), 24) or "string"
+    no_non_null_resolution = _trim(schema_inference_policy.get("no_non_null_resolution", ""), 24) or "string"
+    type_rule_source = _trim(schema_inference_policy.get("type_rule_source", ""), 64) or "observable-transformed-values"
+    inference_policy_clause = ""
+    if allowed_inferred_types:
+        inference_policy_clause = (
+            "request-contract `schema_inference_policy`: "
+            + ">".join(precedence_order or allowed_inferred_types)
+            + f"; mixed/tie -> `{mixed_type_resolution}`; no-non-null -> `{no_non_null_resolution}`; rules from observed values."
+        )
 
     if combined_evidence:
         floor = []
@@ -439,7 +471,7 @@ def data_request_contract_acceptance_floor(
             )
         if schema_contract:
             floor.append(
-                f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; each type_rule states the observable inference rule and uses the request-contract `month_bucket_policy` shared with `{null_contract.get('path', 'null_summary.md') or 'null_summary.md'}`."
+                f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; it uses request-contract `month_bucket_policy` + request-contract `schema_inference_policy`."
             )
         if sample_contract:
             floor.append(
@@ -449,7 +481,8 @@ def data_request_contract_acceptance_floor(
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Type rules are observable, coverage is complete, and `null_count` follows the request-contract `month_bucket_policy` shared with `null_summary.md`.",
+            "Type rules are observable. `null_count` follows request-contract `month_bucket_policy`; schema inference follows "
+            + inference_policy_clause,
         ]
     elif explicit_null and null_contract:
         floor = [
@@ -525,7 +558,8 @@ def data_request_contract_acceptance_floor(
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Type rules are observable, coverage is complete, and `null_count` follows the request-contract `month_bucket_policy` shared with `null_summary.md`.",
+            "Type rules are observable. `null_count` follows request-contract `month_bucket_policy`; schema inference follows "
+            + inference_policy_clause,
         ]
     elif is_null and null_contract:
         floor = [
@@ -543,4 +577,4 @@ def data_request_contract_acceptance_floor(
             "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
         ]
 
-    return _dedupe_rows([_trim(item, 240) for item in floor], limit=3)
+    return _dedupe_rows([_trim(item, 480) for item in floor], limit=3)

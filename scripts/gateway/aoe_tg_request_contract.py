@@ -94,6 +94,9 @@ def _sanitize_artifact_contracts(raw: Any) -> Dict[str, Dict[str, Any]]:
         notes = _dedupe_rows(list(value.get("acceptance_notes") or []), limit=6, text_limit=240)
         if notes:
             row["acceptance_notes"] = notes
+        inference_policy = _sanitize_contract_fields(value.get("inference_policy"))
+        if inference_policy:
+            row["inference_policy"] = inference_policy
         if row:
             out[alias] = row
     return out

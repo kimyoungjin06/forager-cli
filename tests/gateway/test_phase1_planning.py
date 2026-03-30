@@ -939,7 +939,11 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["fields"]["month_bucket_policy"]["valid_year_rule"] == "4-digit-year"
     assert contract["fields"]["month_bucket_policy"]["valid_month_rule"] == "01-12"
     assert "literal-null" in contract["fields"]["month_bucket_policy"]["anomaly_buckets"]
+    assert contract["fields"]["schema_inference_policy"]["allowed_inferred_types"] == ["string", "integer", "number", "boolean"]
+    assert contract["fields"]["schema_inference_policy"]["precedence_order"] == ["integer", "number", "boolean", "string"]
+    assert contract["fields"]["schema_inference_policy"]["mixed_type_resolution"] == "string"
     assert contract["artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
+    assert contract["artifact_contracts"]["schema_report"]["inference_policy"]["type_rule_source"] == "observable-transformed-values"
     assert contract["artifact_contracts"]["null_summary"]["path"] == "null_summary.md"
     assert contract["artifact_contracts"]["sample_output"]["path"] == "sample_5.csv"
 
@@ -1032,6 +1036,8 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
     assert any("every transformed output column" in item for item in acceptance_by_id["S2"])
     assert any("Type rules are observable" in item for item in acceptance_by_id["S2"])
     assert any("request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S2"])
+    assert any("request-contract `schema_inference_policy`" in item for item in acceptance_by_id["S2"])
+    assert any("mixed/tie -> `string`" in item for item in acceptance_by_id["S2"])
     assert any("null_summary.md" in item for item in acceptance_by_id["S3"])
     assert any("invalid month examples" in item for item in acceptance_by_id["S3"])
     assert any("request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S3"])
@@ -1061,6 +1067,7 @@ def test_data_request_contract_combined_evidence_task_gets_file_specific_accepta
     assert any("null_summary.md" in item for item in floor)
     assert any("schema_report.json" in item for item in floor)
     assert any("request-contract `month_bucket_policy`" in item for item in floor)
+    assert any("request-contract `schema_inference_policy`" in item for item in floor)
     assert any("sample_5.csv" in item for item in floor)
 
 
