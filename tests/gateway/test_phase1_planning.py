@@ -962,6 +962,15 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["fields"]["sample_output_policy"]["row_unit"] == "data-row"
     assert contract["fields"]["sample_output_policy"]["order_basis"] == "transformed-output-order"
     assert contract["fields"]["sample_output_policy"]["shortfall_policy"] == "emit-all-available-and-note-shortfall"
+    assert contract["fields"]["sample_output_policy"]["shortfall_encoding"] == "append-note-row"
+    assert contract["fields"]["sample_output_policy"]["shortfall_note_position"] == "after-emitted-rows"
+    assert contract["fields"]["sample_output_policy"]["shortfall_note_marker_column"] == "__aoe_sample_note__"
+    assert contract["fields"]["sample_output_policy"]["shortfall_note_marker_value"] == "sample_shortfall"
+    assert contract["fields"]["sample_output_policy"]["shortfall_note_fields"] == [
+        "requested_rows",
+        "emitted_rows",
+        "missing_rows",
+    ]
     assert contract["artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
     assert contract["artifact_contracts"]["schema_report"]["inference_policy"]["type_rule_source"] == "observable-transformed-values"
     assert "month_anomalies[].bucket" in contract["artifact_contracts"]["schema_report"]["required_fields"]
@@ -1077,7 +1086,9 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
     assert any("sample_5.csv" in item for item in acceptance_by_id["S4"])
     assert any("`sample_output_policy`" in item for item in acceptance_by_id["S4"])
     assert any("head 5 data-rows by transformed-output-order" in item for item in acceptance_by_id["S4"])
-    assert any("emit-all-available-and-note-shortfall" in item for item in acceptance_by_id["S4"])
+    assert any("shortfall=append-note-row(after-emitted-rows" in item for item in acceptance_by_id["S4"])
+    assert any("__aoe_sample_note__=sample_shortfall" in item for item in acceptance_by_id["S4"])
+    assert any("req/emitted/missing" in item for item in acceptance_by_id["S4"])
 
 
 def test_data_request_contract_combined_evidence_task_gets_file_specific_acceptance_floor() -> None:

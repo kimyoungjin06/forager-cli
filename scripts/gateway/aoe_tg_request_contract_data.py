@@ -325,6 +325,11 @@ def _sample_output_policy() -> Dict[str, Any]:
         "row_unit": "data-row",
         "order_basis": "transformed-output-order",
         "shortfall_policy": "emit-all-available-and-note-shortfall",
+        "shortfall_encoding": "append-note-row",
+        "shortfall_note_position": "after-emitted-rows",
+        "shortfall_note_marker_column": "__aoe_sample_note__",
+        "shortfall_note_marker_value": "sample_shortfall",
+        "shortfall_note_fields": ["requested_rows", "emitted_rows", "missing_rows"],
     }
 
 
@@ -630,6 +635,23 @@ def data_request_contract_acceptance_floor(
         _trim(sample_output_policy.get("shortfall_policy", ""), 64)
         or "emit-all-available-and-note-shortfall"
     )
+    sample_shortfall_encoding = (
+        _trim(sample_output_policy.get("shortfall_encoding", ""), 48) or "append-note-row"
+    )
+    sample_shortfall_position = (
+        _trim(sample_output_policy.get("shortfall_note_position", ""), 48) or "after-emitted-rows"
+    )
+    sample_shortfall_marker_column = (
+        _trim(sample_output_policy.get("shortfall_note_marker_column", ""), 48) or "__aoe_sample_note__"
+    )
+    sample_shortfall_marker_value = (
+        _trim(sample_output_policy.get("shortfall_note_marker_value", ""), 48) or "sample_shortfall"
+    )
+    sample_shortfall_note_fields = [
+        _trim(item, 24)
+        for item in (sample_output_policy.get("shortfall_note_fields") or [])
+        if _trim(item, 24)
+    ]
     normalized_row_order_policy = (
         _trim(normalized_output_policy.get("row_order_policy", ""), 64)
         or "preserve-source-data-row-order"
@@ -642,7 +664,15 @@ def data_request_contract_acceptance_floor(
         "`sample_output_policy` "
         f"{sample_selection_policy} {sample_size} {sample_row_unit}s by {sample_order_basis}"
     )
-    if sample_shortfall_policy:
+    if sample_shortfall_encoding and sample_shortfall_note_fields:
+        shortfall_note_field_summary = "req/emitted/missing"
+        sample_policy_summary += (
+            "; shortfall="
+            f"{sample_shortfall_encoding}({sample_shortfall_position},"
+            f"{sample_shortfall_marker_column}={sample_shortfall_marker_value},"
+            f"{shortfall_note_field_summary})"
+        )
+    elif sample_shortfall_policy:
         sample_policy_summary += f"; {sample_shortfall_policy}"
     null_count_policy_clause = ""
     if null_like_buckets:
