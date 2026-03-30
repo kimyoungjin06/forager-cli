@@ -158,18 +158,28 @@
   - `done`
 
 ## 5. Surface Evidence
-  - `/task`:
+- `/task`:
   - `T-001`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
   - `T-002`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
   - `T-003`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
-    - `T-008`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
-    - `T-038`: `team_preset: phase1=data phase2=data`, `plan_convergence_status=ready`, final status `completed`
+  - `T-008`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-038`: `team_preset: phase1=data phase2=data`, `plan_convergence_status=ready`, final status `completed`
 - `/monitor`:
-  - not separately captured yet
+  - latest monitor row showed `T-038` at the top with `completed/integration/completed`
+  - row summary:
+    - `lanes E1/R2 [shape E:DataEngineer R:Codex-Reviewer,Claude-Reviewer | reqs E1/R2 linked=3 | backend local]`
+    - `observatory: stale=0 bottleneck=E1/pending idle=17m5s`
 - `/offdesk review`:
   - not separately captured yet
 - dashboard `Task Detail`:
-  - not yet captured for this temp runtime
+  - request route `/control/tasks/by-request/r_20260331055816_433edbd1` returns `200`
+  - detail page shows:
+    - `status=completed/completed`
+    - `preset=phase1=data phase2=data`
+    - `phase2_quality=critic=Codex-Reviewer | integration=DataEngineer`
+    - `Task Team Observatory`
+    - lifecycle lines through `integration: done`
+    - planning history line with `convergence=ready`
 - dashboard `Recovery`:
   - not yet captured for this temp runtime
 

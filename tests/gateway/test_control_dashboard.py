@@ -488,6 +488,30 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "/control/actions/task/retry" in text
     assert "data-dashboard-action" in text
     assert "data-action-confirm=\"true\"" in text
+
+
+def test_control_dashboard_task_detail_route_loads_hidden_project_by_request_id(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["projects"]["alpha"]["ops_hidden"] = True
+    state["projects"]["alpha"]["ops_hidden_reason"] = "internal fallback project"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    detail_status, detail_headers, detail_body = dashboard_app.build_dashboard_response("/control/tasks/by-request/REQ-1", config)
+    text = detail_body.decode("utf-8")
+
+    assert detail_status == 200
+    assert detail_headers["Content-Type"].startswith("text/html")
+    assert "Task T-001 | analysis-check" in text
     assert "action-section" in text
     assert "action-cluster-title" in text
     assert "/offdesk review" in text

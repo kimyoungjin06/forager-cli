@@ -169,7 +169,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
     target = str(request_id or "").strip()
     if not target:
         return None
-    for key, entry in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
+    for key, entry in projects.items():
+        if not isinstance(entry, dict):
+            continue
         task = task_state.get_task_record(entry, target)
         if not isinstance(task, dict):
             continue
@@ -250,4 +252,3 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             reference_lines=task_view.summarize_task_lifecycle(display, task).splitlines(),
         )
     return None
-
