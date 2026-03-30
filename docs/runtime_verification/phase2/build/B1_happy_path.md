@@ -14,6 +14,11 @@
   - `2026-03-30T10:55:45+09:00`
   - `2026-03-30T11:06:20+09:00`
   - `2026-03-30T11:17:05+09:00`
+  - `2026-03-30T11:35:30+09:00`
+  - `2026-03-30T11:44:44+09:00`
+  - `2026-03-30T11:56:08+09:00`
+  - `2026-03-30T12:09:41+09:00`
+  - `2026-03-30T12:21:28+09:00`
 - operator:
   - `Codex`
 
@@ -57,6 +62,21 @@
   - `r_20260330111705_c0b46401`
     - `T-005`
     - `plan_gate_reason=완료 조건이 실제 버그 지점을 고정하지 못한다. acceptance는 handleLoginFailure(session, reason)의 반환값만 규정하고 있어, 런타임에서 유지되는 세션 저장소/호출부 상태까지 정리해야 하는지 불명확하다. 이 상태로는 테스트가 통과해도 실제 로그인 실패 흐름의 세션 만료 누락이 남을 수 있다.`
+  - `r_20260330113530_84a51365`
+    - `T-006`
+    - `plan_gate_reason=phase2_execution_plan이 S1·S2·S3를 같은 execution lane에서 parallel=true로 dispatch한다. S2는 S1의 코드 수정 결과에, S3는 S2의 테스트 결과에 의존하므로 현재 정의로는 실행 순서와 산출물 의존성이 깨져 있다.`
+  - `r_20260330114444_f9ab93d1`
+    - `T-007`
+    - `plan_gate_reason=S1.owner_role=Codex-Analyst, S3.owner_role=Codex-Writer인데 worker_roles/team_roles/execution_lanes에는 이 역할들이 없어 dispatch 책임 매핑이 일관되지 않다.`
+  - `r_20260330115608_047460de`
+    - `T-008`
+    - `plan_gate_reason=src/session.js의 handleLoginFailure만이 실제 로그인 실패 경계라는 가정을 검증하는 단계가 없다. 호출 지점이나 저장소 정리 경로가 다른 곳에 있으면 실제 세션 만료 수정이 보장되지 않는다.`
+  - `r_20260330120941_a3fb68ae`
+    - `T-009`
+    - `plan_gate_reason=S2 acceptance가 helper 함수 한 곳만 바꾸는 방식으로 끝나지 않음을 강제하지만, 현재 레포의 공개 실패 경계는 handleLoginFailure 하나뿐이어서 정답 구현도 acceptance를 통과하지 못한다.`
+  - `r_20260330122128_cf40a458`
+    - `T-010`
+    - `plan_gate_reason=Phase2 execution lane이 단일 serial bucket(S1-S4)으로만 남아 dispatchable parallel work가 없다. detail은 log event 240-char limit에 걸려 잘렸지만, scope 확인/구현/테스트/evidence가 모두 한 lane에 뭉친 점이 첫 blocker였다.`
 - planning:
   - all runs used `phase1 ensemble rounds=3 providers=codex`
   - all runs remained `plan_gate_passed=false`
@@ -97,16 +117,24 @@
   - `runtime_adapter_bug_fixed`
   - `readonly_contract_fixed`
   - `phase1_prompt_guardrail_fixed`
+  - `single_lane_parallel_fixed`
+  - `execution_owner_drift_fixed`
+  - `auth_scope_prompt_refined`
 - mismatch notes:
   - initial live run first exposed a real runtime seam bug: `handle_text_message(...).log_event()` rejected `task_short_id`; this was fixed in `scripts/gateway/aoe_tg_message_handler.py`
   - first blocker after the seam fix was an invalid `build` Phase2 lane graph; contract normalization now repairs partial planner metadata so execution/review graph coverage is no longer the first failure
   - second blocker was `phase2_execution_plan.readonly=true` on a mutating build task; live dispatch planning now defaults to mutable execution unless `readonly` is explicitly requested
   - third blocker was a standalone `independent review` execution subtask; planner/critic prompts now explicitly forbid review/approval subtasks inside non-review execution plans
-  - current blocker is narrower and more legitimate: acceptance still does not pin the actual runtime/session-storage failure mode strongly enough for a safe build completion verdict
+  - fourth blocker exposed single-lane `parallel=true` drift for dependent subtasks; execution-plan normalization now coerces single-lane execution/review rows to `parallel=false`
+  - fifth blocker exposed `owner_role` drift inside a `build` preset; schema normalization now coerces non-mixed execution subtasks onto preset-aligned execution roles so `Codex-Analyst`/`Codex-Writer` owners do not survive into a pure build lane
+  - sixth blocker showed the original auth/session acceptance floor was directionally right but still too weak: the plan could patch a helper without proving it was the real failure boundary
+  - seventh blocker showed the first auth/session planner guidance overshot: it could make a verified helper-boundary fix impossible if the helper really was the only public boundary
+  - current blocker is narrower but still structural: after repairing graph/readonly/owner drift and refining auth/session scope wording, the build plan still collapses everything into a single serial execution lane, so the live planner is not yet producing a dispatchable build decomposition
   - later visible-project registration via `aoe orch add ... --set-active` introduced a second mismatch: selected task refs and task detail surfaces for `O2` drifted away from the original hidden/default task lineage and showed `manual_intervention` instead of the original planning gate block
 - next fix:
-  - strengthen planner acceptance guidance so build preset plans must name the persisted session-store or caller-visible state transition, not only the helper return value
-  - consider adding a deterministic acceptance-floor for `build` tasks that mention login/session/auth expiry flows
+  - decide whether `build` preset with only `Codex-Dev` available is allowed to remain serial, or whether planner/control-plane selection must add a companion execution lane for scope/evidence work
+  - if serial build plans are valid, relax the planner/critic rule that currently treats a single serial bucket as non-dispatchable
+  - if parallel build plans are required, expand build execution pool or companion-lane policy so scope/evidence subtasks can be assigned without drifting back into unsupported owner roles
   - investigate `orch add --set-active` task lineage copy/drift into visible project registry before using dashboard/task detail as canonical evidence for migrated runtimes
 
 ## 7. Raw References

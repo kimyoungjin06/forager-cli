@@ -43,6 +43,32 @@ def _dedupe_lines(rows: List[str], *, limit: int) -> List[str]:
     return out[: max(1, int(limit or 1))]
 
 
+def _auth_session_scope_guidance(user_prompt: str) -> str:
+    low = str(user_prompt or "").strip().lower()
+    markers = (
+        "login",
+        "log in",
+        "signin",
+        "sign in",
+        "auth",
+        "session",
+        "token",
+        "expiry",
+        "expired",
+        "로그인",
+        "인증",
+        "세션",
+        "토큰",
+        "만료",
+    )
+    if not any(marker in low for marker in markers):
+        return ""
+    return (
+        "- auth/session/login expiry류 요청이면 먼저 실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)를 추적하는 scope 확인 단계를 포함하라\n"
+        "- helper 함수 하나만으로 충분하다고 단정하지 말고, 그것이 유일한 공개 경계인지 확인하거나 다른 호출 지점/저장소 경로를 검토했음을 acceptance에 명시하라\n"
+    )
+
+
 def _planner_prompt(
     *,
     user_prompt: str,
@@ -54,6 +80,7 @@ def _planner_prompt(
     shared_feedback: str,
 ) -> str:
     feedback = f"\n공유된 이전 회차 피드백:\n{shared_feedback}\n" if shared_feedback else ""
+    scope_guidance = _auth_session_scope_guidance(user_prompt)
     return (
         "너는 TF Phase1 planner다. 지금은 실행이 아니라 계획 수립 단계다.\n"
         "같은 미션이 여러 planner(Codex/Claude)에게 병렬로 전달되고, 각 회차마다 서로의 비판 내용을 반영해 계획을 개선한다.\n"
@@ -75,6 +102,7 @@ def _planner_prompt(
         "- Codex-Reviewer/critic이 최종 검증할 수 있도록 acceptance를 구체적으로 쓴다\n"
         "- reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라\n"
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 Phase2 review lane이 담당하게 하라\n"
+        f"{scope_guidance}"
         "- approval_mode는 기본적으로 policy다. 최종 승인/복귀는 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
         "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 표현하라\n"
         "- 계획이 덜 완성됐으면 범위를 줄이고, ambiguity를 드러내라\n"
@@ -93,6 +121,7 @@ def _critic_prompt(
     total_rounds: int,
 ) -> str:
     payload = json.dumps(plan, ensure_ascii=False)
+    scope_guidance = _auth_session_scope_guidance(user_prompt)
     return (
         "너는 TF Phase1 critic이다. 아래 계획이 실제 실행 단계(Phase2)로 넘어갈 만큼 충분히 구체적인지 비판적으로 검토해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -110,6 +139,8 @@ def _critic_prompt(
         "- plans that are too broad or not parallelizable should not be approved\n"
         "- issues는 정말 dispatch를 막을 문제만 적는다\n\n"
         "- review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다. 그런 요구는 Phase2 review lane의 acceptance/evidence로 표현되어야 한다\n"
+        f"{scope_guidance}"
+        "- auth/session/login expiry류 계획이 helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다\n"
         "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
         "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"
         "- approval 필요성은 acceptance/evidence/manual follow-up으로 남겨라\n\n"

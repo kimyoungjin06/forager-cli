@@ -31,6 +31,112 @@ def _normalize_bool(raw: Any, default: bool = False) -> bool:
     return bool(default)
 
 
+def _contains_any(text: str, markers: List[str]) -> bool:
+    low = str(text or "").strip().lower()
+    if not low:
+        return False
+    return any(token in low for token in markers if token)
+
+
+def _is_build_like_role(role: str) -> bool:
+    low = str(role or "").strip().lower()
+    if not low:
+        return False
+    return any(token in low for token in ("dev", "engineer", "builder", "implement"))
+
+
+def _is_review_like_role(role: str) -> bool:
+    low = str(role or "").strip().lower()
+    if not low:
+        return False
+    return any(token in low for token in ("review", "critic", "verif", "qa"))
+
+
+def _role_matches_preset(role: str, preset: str) -> bool:
+    low = str(role or "").strip().lower()
+    normalized_preset = normalize_role_preset(preset)
+    if normalized_preset in {"general", "mixed"}:
+        return True
+    if normalized_preset == "build":
+        return _is_build_like_role(role)
+    if normalized_preset == "writer":
+        return any(token in low for token in ("writer", "doc", "scribe"))
+    if normalized_preset == "analysis":
+        return any(token in low for token in ("analyst", "analysis", "research"))
+    if normalized_preset == "data":
+        return "data" in low
+    if normalized_preset == "review":
+        return _is_review_like_role(role)
+    return False
+
+
+def _coerce_owner_role_for_preset(role: str, *, preset: str, worker_roles: List[str]) -> str:
+    normalized_preset = normalize_role_preset(preset)
+    if normalized_preset in {"general", "mixed"}:
+        return role
+
+    preferred = [item for item in worker_roles if _role_matches_preset(item, normalized_preset)]
+    if not preferred:
+        return role
+    if role in preferred:
+        return role
+    if normalized_preset != "review" and _is_review_like_role(role):
+        return preferred[0]
+    if not _role_matches_preset(role, normalized_preset):
+        return preferred[0]
+    return preferred[0]
+
+
+def _build_acceptance_floor(
+    *,
+    user_prompt: str,
+    preset: str,
+    role: str,
+    title: str,
+    goal: str,
+) -> List[str]:
+    normalized_preset = normalize_role_preset(preset)
+    if normalized_preset != "build":
+        return []
+    if not _is_build_like_role(role):
+        return []
+
+    auth_markers = [
+        "login",
+        "log in",
+        "signin",
+        "sign in",
+        "auth",
+        "session",
+        "token",
+        "expiry",
+        "expired",
+        "credential",
+        "세션",
+        "로그인",
+        "인증",
+        "토큰",
+        "만료",
+    ]
+    context = "\n".join((str(user_prompt or ""), str(title or ""), str(goal or "")))
+    if not _contains_any(context, auth_markers):
+        return []
+
+    return [
+        "Caller-visible or persisted auth/session state changes are explicit, not only helper return values.",
+        "Verification covers the failure path state after the login/session error, including stored token/session invalidation when applicable.",
+    ]
+
+
+def _merge_acceptance_floor(acceptance: List[str], floor: List[str]) -> List[str]:
+    out: List[str] = []
+    for item in list(acceptance or []) + list(floor or []):
+        token = str(item or "").strip()
+        if token and token not in out:
+            out.append(token[:240])
+    return out[:3]
+
+
 def default_plan_critic_payload() -> Dict[str, Any]:
     return {"approved": True, "issues": [], "recommendations": []}
 
@@ -91,6 +197,23 @@ def normalize_task_plan_payload(
     if isinstance(meta_overrides, dict):
         meta_in.update({str(key): value for key, value in meta_overrides.items()})
 
+    meta_worker_roles = meta_in.get("worker_roles")
+    worker_roles: List[str] = []
+    if isinstance(meta_worker_roles, list):
+        for row in meta_worker_roles:
+            token = str(row or "").strip()
+            if token and token not in worker_roles:
+                worker_roles.append(token[:64])
+    if not worker_roles:
+        worker_roles = worker_list[:]
+
+    phase1_role_preset = normalize_role_preset(
+        meta_in.get("phase1_role_preset") or classify_dispatch_role_preset(user_prompt, selected_roles=worker_roles)
+    )
+    phase2_team_preset = normalize_role_preset(meta_in.get("phase2_team_preset") or phase1_role_preset)
+    approval_mode = _normalize_approval_mode(meta_in.get("approval_mode", "policy"))
+    readonly = _normalize_bool(meta_in.get("readonly", False), False)
+
     normalized: List[Dict[str, Any]] = []
     for i, row in enumerate(raw_subtasks, start=1):
         if not isinstance(row, dict):
@@ -106,6 +229,7 @@ def normalize_task_plan_payload(
             role = role_raw
         else:
             role = worker_list[min(i - 1, len(worker_list) - 1)]
+        role = _coerce_owner_role_for_preset(role, preset=phase2_team_preset, worker_roles=worker_roles)
 
         acceptance: List[str] = []
         raw_acceptance = row.get("acceptance")
@@ -116,6 +240,16 @@ def normalize_task_plan_payload(
                     acceptance.append(token[:240])
         if not acceptance:
             acceptance = [f"{title} 결과가 사용자 요청과 직접 연결되어 설명된다."]
+        acceptance = _merge_acceptance_floor(
+            acceptance,
+            _build_acceptance_floor(
+                user_prompt=user_prompt,
+                preset=phase2_team_preset,
+                role=role,
+                title=title,
+                goal=goal,
+            ),
+        )
 
         normalized.append(
             {
@@ -142,23 +276,6 @@ def normalize_task_plan_payload(
 
     if not summary:
         summary = f"subtasks={len(normalized)}"
-
-    meta_worker_roles = meta_in.get("worker_roles")
-    worker_roles: List[str] = []
-    if isinstance(meta_worker_roles, list):
-        for row in meta_worker_roles:
-            token = str(row or "").strip()
-            if token and token not in worker_roles:
-                worker_roles.append(token[:64])
-    if not worker_roles:
-        worker_roles = worker_list[:]
-
-    phase1_role_preset = normalize_role_preset(
-        meta_in.get("phase1_role_preset") or classify_dispatch_role_preset(user_prompt, selected_roles=worker_roles)
-    )
-    phase2_team_preset = normalize_role_preset(meta_in.get("phase2_team_preset") or phase1_role_preset)
-    approval_mode = _normalize_approval_mode(meta_in.get("approval_mode", "policy"))
-    readonly = _normalize_bool(meta_in.get("readonly", False), False)
 
     plan_payload = {
         "summary": summary[:240],

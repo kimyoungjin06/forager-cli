@@ -923,6 +923,7 @@ def normalize_phase2_execution_plan(
         or (spec_subtask_ids and not spec_subtask_ids.issubset(_row_subtask_ids(exec_rows)))
     ):
         exec_rows = execution_groups
+    exec_parallel_default = len(exec_rows) > 1
     execution_lanes: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
         item = row if isinstance(row, dict) else {}
@@ -931,11 +932,14 @@ def normalize_phase2_execution_plan(
                 "lane_id": _trim_text(item.get("lane_id", item.get("group_id", f"L{idx}")), 16) or f"L{idx}",
                 "role": _trim_text(item.get("role", "Worker"), 64) or "Worker",
                 "subtask_ids": _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32),
-                "parallel": _normalize_bool(item.get("parallel", True), True),
+                "parallel": _normalize_bool(item.get("parallel", exec_parallel_default), exec_parallel_default),
             }
         )
     if not execution_lanes:
         execution_lanes = [{"lane_id": "L1", "role": "Worker", "subtask_ids": ["S1"], "parallel": False}]
+    if len(execution_lanes) <= 1:
+        for row in execution_lanes:
+            row["parallel"] = False
     execution_lane_ids = [
         str(row.get("lane_id", "")).strip()
         for row in execution_lanes
@@ -947,6 +951,7 @@ def normalize_phase2_execution_plan(
     if not isinstance(review_rows, list) or not review_rows:
         review_rows = review_groups
     review_lanes: List[Dict[str, Any]] = []
+    review_parallel_default = len(review_rows) > 1 if isinstance(review_rows, list) else len(review_groups) > 1
     for idx, row in enumerate(review_rows, start=1):
         item = row if isinstance(row, dict) else {}
         role = _trim_text(item.get("role", ""), 64)
@@ -962,9 +967,12 @@ def normalize_phase2_execution_plan(
                 "role": role,
                 "kind": _normalize_choice(item.get("kind"), ("critic", "verifier"), "verifier"),
                 "depends_on": depends_on,
-                "parallel": _normalize_bool(item.get("parallel", True), True),
+                "parallel": _normalize_bool(item.get("parallel", review_parallel_default), review_parallel_default),
             }
         )
+    if len(review_lanes) <= 1:
+        for row in review_lanes:
+            row["parallel"] = False
 
     execution_mode = _normalize_choice(data.get("execution_mode"), TEAM_EXECUTION_MODES, str(spec.get("execution_mode", "single") or "single"))
     review_mode = _normalize_choice(data.get("review_mode"), TEAM_REVIEW_MODES, str(spec.get("review_mode", "skip") or "skip"))

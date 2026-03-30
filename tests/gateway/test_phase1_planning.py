@@ -49,6 +49,8 @@ def test_phase1_planner_prompt_forbids_standalone_review_subtasks() -> None:
 
     assert "reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라" in prompt
     assert "Phase2 review lane이 담당하게 하라" in prompt
+    assert "실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)" in prompt
+    assert "helper 함수 하나만으로 충분하다고 단정하지 말고" in prompt
 
 
 def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> None:
@@ -69,6 +71,7 @@ def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> 
 
     assert "review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다" in prompt
     assert "Phase2 review lane의 acceptance/evidence로 표현되어야 한다" in prompt
+    assert "helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다" in prompt
 
 
 def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
@@ -754,6 +757,32 @@ def test_normalize_task_plan_payload_preserves_explicit_readonly_override() -> N
     assert plan["meta"]["phase2_execution_plan"]["readonly"] is True
 
 
+def test_build_auth_session_prompt_adds_acceptance_floor() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "login fix",
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "title": "Implement fix",
+                    "goal": "patch login failure session handling",
+                    "owner_role": "Codex-Dev",
+                    "acceptance": ["회귀 테스트 결과를 남긴다."],
+                },
+            ],
+        },
+        user_prompt="로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+        workers=["Codex-Dev", "Codex-Reviewer"],
+        max_subtasks=3,
+    )
+
+    acceptance = plan["subtasks"][0]["acceptance"]
+
+    assert plan["meta"]["phase2_team_preset"] == "build"
+    assert any("Caller-visible or persisted auth/session state changes" in item for item in acceptance)
+    assert any("stored token/session invalidation" in item for item in acceptance)
+
+
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
     plan = gw.normalize_task_plan_payload(
         {
@@ -884,6 +913,7 @@ def test_build_preset_repairs_partial_phase2_graph_from_planner_metadata() -> No
     spec = plan["meta"]["phase2_team_spec"]
     exec_plan = plan["meta"]["phase2_execution_plan"]
 
+    assert [row["owner_role"] for row in plan["subtasks"]] == ["Codex-Dev", "Codex-Dev", "Codex-Dev", "Codex-Dev"]
     assert [row["group_id"] for row in spec["execution_groups"]] == ["E1"]
     assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Dev"]
     assert spec["execution_groups"][0]["subtask_ids"] == ["S1", "S2", "S3", "S4"]
@@ -893,6 +923,42 @@ def test_build_preset_repairs_partial_phase2_graph_from_planner_metadata() -> No
     assert [row["role"] for row in exec_plan["execution_lanes"]] == ["Codex-Dev"]
     assert exec_plan["execution_lanes"][0]["subtask_ids"] == ["S1", "S2", "S3", "S4"]
     assert [row["depends_on"] for row in exec_plan["review_lanes"]] == [["E1"], ["E1"]]
+
+
+def test_single_execution_lane_coerces_parallel_false() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "login fix",
+            "subtasks": [
+                {"id": "S1", "title": "Trace bug", "goal": "inspect failure", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Patch handler", "goal": "fix session expiry", "owner_role": "Codex-Dev"},
+                {"id": "S3", "title": "Run tests", "goal": "capture regression evidence", "owner_role": "Codex-Dev"},
+            ],
+            "phase2_execution_plan": {
+                "execution_mode": "single",
+                "execution_lanes": [
+                    {"lane_id": "E1", "role": "Codex-Dev", "subtask_ids": ["S1", "S2", "S3"], "parallel": True},
+                ],
+                "review_mode": "single",
+                "review_lanes": [
+                    {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1"], "parallel": True},
+                ],
+            },
+        },
+        user_prompt="로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+        workers=["Codex-Dev", "Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={
+            "worker_roles": ["Codex-Dev", "Codex-Reviewer"],
+            "phase1_role_preset": "build",
+            "phase2_team_preset": "build",
+        },
+    )
+
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+
+    assert exec_plan["execution_lanes"][0]["parallel"] is False
+    assert exec_plan["review_lanes"][0]["parallel"] is False
 
 
 def test_normalize_task_plan_payload_with_companion_workers_derives_parallel_claude_lanes() -> None:
