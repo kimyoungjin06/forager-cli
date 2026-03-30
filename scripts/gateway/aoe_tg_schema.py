@@ -20,6 +20,17 @@ def _normalize_approval_mode(raw: Any) -> str:
     return "policy"
 
 
+def _normalize_bool(raw: Any, default: bool = False) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    token = str(raw or "").strip().lower()
+    if token in {"1", "true", "yes", "on", "y"}:
+        return True
+    if token in {"0", "false", "no", "off", "n"}:
+        return False
+    return bool(default)
+
+
 def default_plan_critic_payload() -> Dict[str, Any]:
     return {"approved": True, "issues": [], "recommendations": []}
 
@@ -147,6 +158,7 @@ def normalize_task_plan_payload(
     )
     phase2_team_preset = normalize_role_preset(meta_in.get("phase2_team_preset") or phase1_role_preset)
     approval_mode = _normalize_approval_mode(meta_in.get("approval_mode", "policy"))
+    readonly = _normalize_bool(meta_in.get("readonly", False), False)
 
     plan_payload = {
         "summary": summary[:240],
@@ -157,6 +169,7 @@ def normalize_task_plan_payload(
             "phase1_role_preset": phase1_role_preset,
             "phase2_team_preset": phase2_team_preset,
             "approval_mode": approval_mode,
+            "readonly": readonly,
         },
     }
 
@@ -182,7 +195,7 @@ def normalize_task_plan_payload(
     plan_payload["meta"]["phase2_execution_plan"] = normalize_phase2_execution_plan(
         raw_phase2_exec,
         team_spec=plan_payload["meta"]["phase2_team_spec"],
-        readonly=True,
+        readonly=readonly,
     )
     return plan_payload
 

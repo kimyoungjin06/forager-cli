@@ -36,6 +36,41 @@ pipeline_mod = _load_module(PIPELINE_FILE, "aoe_tg_plan_pipeline_mod")
 gw = _load_module(GW_FILE, "aoe_telegram_gateway_mod_phase1")
 
 
+def test_phase1_planner_prompt_forbids_standalone_review_subtasks() -> None:
+    prompt = ensemble_mod._planner_prompt(
+        user_prompt="로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+        provider="codex",
+        workers=["Codex-Dev", "Codex-Reviewer"],
+        max_subtasks=4,
+        round_no=1,
+        total_rounds=3,
+        shared_feedback="",
+    )
+
+    assert "reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라" in prompt
+    assert "Phase2 review lane이 담당하게 하라" in prompt
+
+
+def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> None:
+    prompt = ensemble_mod._critic_prompt(
+        user_prompt="로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+        provider="codex",
+        planner_provider="codex",
+        plan={
+            "summary": "login fix",
+            "subtasks": [
+                {"id": "S1", "title": "Implement fix", "goal": "patch handler", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Independent review", "goal": "independent review", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        round_no=1,
+        total_rounds=3,
+    )
+
+    assert "review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다" in prompt
+    assert "Phase2 review lane의 acceptance/evidence로 표현되어야 한다" in prompt
+
+
 def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
     prompts: list[str] = []
 
@@ -663,7 +698,7 @@ def test_normalize_task_plan_payload_derives_phase2_team_spec() -> None:
     assert [row["role"] for row in execution_plan["execution_lanes"]] == ["Codex-Dev", "Codex-Writer"]
     assert [row["role"] for row in execution_plan["review_lanes"]] == ["Codex-Reviewer"]
     assert execution_plan["parallel_workers"] is True
-    assert execution_plan["readonly"] is True
+    assert execution_plan["readonly"] is False
     assert plan["meta"]["phase1_role_preset"] == "mixed"
     assert plan["meta"]["phase2_team_preset"] == "mixed"
 
@@ -694,6 +729,29 @@ def test_normalize_task_plan_payload_preserves_explicit_role_preset_overrides() 
     assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Writer", "Claude-Writer"]
     assert [row["role"] for row in spec["review_groups"]] == ["Codex-Reviewer", "Claude-Reviewer"]
     assert [row["role"] for row in execution_plan["execution_lanes"]] == ["Codex-Writer", "Claude-Writer"]
+
+
+def test_normalize_task_plan_payload_preserves_explicit_readonly_override() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "reporting",
+            "subtasks": [
+                {"id": "S1", "title": "Draft", "goal": "write report", "owner_role": "Codex-Writer", "acceptance": ["done"]},
+            ],
+        },
+        user_prompt="결과를 요약하고 보고서를 작성해라",
+        workers=["Codex-Writer", "Codex-Reviewer"],
+        max_subtasks=3,
+        meta_overrides={
+            "worker_roles": ["Codex-Writer", "Codex-Reviewer"],
+            "phase1_role_preset": "writer",
+            "phase2_team_preset": "writer",
+            "readonly": True,
+        },
+    )
+
+    assert plan["meta"]["readonly"] is True
+    assert plan["meta"]["phase2_execution_plan"]["readonly"] is True
 
 
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
@@ -778,6 +836,63 @@ def test_build_planned_dispatch_prompt_includes_phase2_team_lanes() -> None:
     assert "lane E1 [Codex-Dev] -> S1" in prompt
     assert "Phase2 critic lanes: single" in prompt
     assert "review R1 [Codex-Reviewer/verifier]" in prompt
+
+
+def test_build_preset_repairs_partial_phase2_graph_from_planner_metadata() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "login fix",
+            "subtasks": [
+                {"id": "S1", "title": "Trace bug", "goal": "inspect session expiry path", "owner_role": "Codex-Analyst"},
+                {"id": "S2", "title": "Implement fix", "goal": "patch session handler", "owner_role": "Codex-Dev"},
+                {"id": "S3", "title": "Before after log", "goal": "record behavior delta", "owner_role": "Codex-Analyst"},
+                {"id": "S4", "title": "Review note", "goal": "write review evidence", "owner_role": "Codex-Analyst"},
+            ],
+            "phase2_team_spec": {
+                "execution_mode": "single",
+                "execution_groups": [
+                    {"group_id": "E2", "role": "Codex-Dev", "subtask_ids": ["S2"]},
+                ],
+                "review_mode": "parallel",
+                "review_groups": [
+                    {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1", "E3"]},
+                    {"group_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E3"]},
+                ],
+            },
+            "phase2_execution_plan": {
+                "execution_mode": "single",
+                "execution_lanes": [
+                    {"lane_id": "E2", "role": "Codex-Dev", "subtask_ids": ["S2"], "parallel": False},
+                ],
+                "review_mode": "parallel",
+                "review_lanes": [
+                    {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1", "E3"], "parallel": True},
+                    {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E3"], "parallel": True},
+                ],
+            },
+        },
+        user_prompt="로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+        workers=["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "worker_roles": ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "build",
+            "phase2_team_preset": "build",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+
+    assert [row["group_id"] for row in spec["execution_groups"]] == ["E1"]
+    assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Dev"]
+    assert spec["execution_groups"][0]["subtask_ids"] == ["S1", "S2", "S3", "S4"]
+    assert [row["depends_on"] for row in spec["review_groups"]] == [["E1"], ["E1"]]
+
+    assert [row["lane_id"] for row in exec_plan["execution_lanes"]] == ["E1"]
+    assert [row["role"] for row in exec_plan["execution_lanes"]] == ["Codex-Dev"]
+    assert exec_plan["execution_lanes"][0]["subtask_ids"] == ["S1", "S2", "S3", "S4"]
+    assert [row["depends_on"] for row in exec_plan["review_lanes"]] == [["E1"], ["E1"]]
 
 
 def test_normalize_task_plan_payload_with_companion_workers_derives_parallel_claude_lanes() -> None:

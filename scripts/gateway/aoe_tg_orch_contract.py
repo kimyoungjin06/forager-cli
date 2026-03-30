@@ -616,6 +616,18 @@ def _plan_subtask_payloads(plan: Dict[str, Any]) -> List[Dict[str, str]]:
     return [{"id": "S1", "title": "Execute task", "goal": "Execute the requested task with verifiable evidence."}]
 
 
+def _row_subtask_ids(rows: List[Dict[str, Any]]) -> set[str]:
+    out: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for item in (row.get("subtask_ids") or []):
+            token = str(item or "").strip()
+            if token:
+                out.add(token)
+    return out
+
+
 def _preset_execution_roles(preset: str, available_roles: List[str]) -> List[str]:
     ordered = PRESET_EXEC_ROLE_ORDER.get(_normalize_role_preset(preset), [])
     available = set(_dedupe_roles(available_roles, limit=16))
@@ -636,6 +648,7 @@ def _apply_execution_preset(
     preset_roles = _preset_execution_roles(normalized_preset, available_roles)
     if normalized_preset == "mixed":
         payloads = _plan_subtask_payloads(plan)
+        payload_ids = {row["id"] for row in payloads}
         worklike_roles = [role for role in _dedupe_roles(available_roles, limit=16) if not _is_review_role(role)]
         if not worklike_roles:
             return rows
@@ -646,7 +659,7 @@ def _apply_execution_preset(
             if isinstance(row, dict) and str(row.get("role", "")).strip()
         }
         mixed_rows = [row_map[role] for role in worklike_roles if role in row_map]
-        if mixed_rows:
+        if mixed_rows and payload_ids.issubset(_row_subtask_ids(mixed_rows)):
             return mixed_rows
 
         return [
@@ -669,7 +682,8 @@ def _apply_execution_preset(
         if isinstance(row, dict) and str(row.get("role", "")).strip()
     }
     ordered_matches = [row_map[role] for role in preset_roles if role in row_map]
-    if ordered_matches:
+    payload_ids = {row["id"] for row in _plan_subtask_payloads(plan)}
+    if ordered_matches and payload_ids.issubset(_row_subtask_ids(ordered_matches)):
         return ordered_matches
 
     payloads = _plan_subtask_payloads(plan)
@@ -784,8 +798,6 @@ def normalize_phase2_team_spec(
         verifier_roles=list(verifier_roles or []),
         require_verifier=require_verifier,
     )
-    default_depends = [str(row.get("group_id", "")).strip() for row in default_exec_groups if str(row.get("group_id", "")).strip()]
-
     data = raw if isinstance(raw, dict) else {}
     exec_rows = data.get("execution_groups")
     if not isinstance(exec_rows, list) or not exec_rows:
@@ -823,6 +835,12 @@ def normalize_phase2_team_spec(
         available_roles=available_roles,
     )
     execution_mode = "parallel" if len(execution_groups) > 1 else "single"
+    execution_group_ids = [
+        str(row.get("group_id", "")).strip()
+        for row in execution_groups
+        if str(row.get("group_id", "")).strip()
+    ]
+    default_depends = list(execution_group_ids)
 
     review_rows = data.get("review_groups")
     if not isinstance(review_rows, list) or not review_rows:
@@ -838,18 +856,23 @@ def normalize_phase2_team_spec(
         ]
 
     review_groups: List[Dict[str, Any]] = []
+    valid_depends = set(default_depends)
     for idx, row in enumerate(review_rows, start=1):
         item = row if isinstance(row, dict) else {}
         role = _trim_text(item.get("role", ""), 64)
         if not role:
             continue
+        depends_on = _normalize_text_list(item.get("depends_on", default_depends), limit=8, item_limit=16)
+        depends_on = [token for token in depends_on if token in valid_depends]
+        if not depends_on and default_depends:
+            depends_on = list(default_depends)
         review_groups.append(
             {
                 "group_id": _trim_text(item.get("group_id", f"R{idx}"), 16) or f"R{idx}",
                 "role": role,
                 "kind": _normalize_choice(item.get("kind"), ("critic", "verifier"), "verifier" if role in set(review_roles) else "critic"),
                 "scope": _trim_text(item.get("scope", "phase2_outputs"), 160) or "phase2_outputs",
-                "depends_on": _normalize_text_list(item.get("depends_on", default_depends), limit=8, item_limit=16),
+                "depends_on": depends_on,
             }
         )
     review_mode = "skip"
@@ -891,9 +914,14 @@ def normalize_phase2_execution_plan(
 
     execution_groups = spec.get("execution_groups") if isinstance(spec.get("execution_groups"), list) else []
     review_groups = spec.get("review_groups") if isinstance(spec.get("review_groups"), list) else []
+    spec_subtask_ids = _row_subtask_ids(execution_groups)
 
     exec_rows = data.get("execution_lanes")
-    if not isinstance(exec_rows, list) or not exec_rows:
+    if (
+        not isinstance(exec_rows, list)
+        or not exec_rows
+        or (spec_subtask_ids and not spec_subtask_ids.issubset(_row_subtask_ids(exec_rows)))
+    ):
         exec_rows = execution_groups
     execution_lanes: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
@@ -908,6 +936,12 @@ def normalize_phase2_execution_plan(
         )
     if not execution_lanes:
         execution_lanes = [{"lane_id": "L1", "role": "Worker", "subtask_ids": ["S1"], "parallel": False}]
+    execution_lane_ids = [
+        str(row.get("lane_id", "")).strip()
+        for row in execution_lanes
+        if str(row.get("lane_id", "")).strip()
+    ]
+    valid_depends = set(execution_lane_ids)
 
     review_rows = data.get("review_lanes")
     if not isinstance(review_rows, list) or not review_rows:
@@ -918,12 +952,16 @@ def normalize_phase2_execution_plan(
         role = _trim_text(item.get("role", ""), 64)
         if not role:
             continue
+        depends_on = _normalize_text_list(item.get("depends_on", execution_lane_ids), limit=8, item_limit=16)
+        depends_on = [token for token in depends_on if token in valid_depends]
+        if not depends_on and execution_lane_ids:
+            depends_on = list(execution_lane_ids)
         review_lanes.append(
             {
                 "lane_id": _trim_text(item.get("lane_id", item.get("group_id", f"R{idx}")), 16) or f"R{idx}",
                 "role": role,
                 "kind": _normalize_choice(item.get("kind"), ("critic", "verifier"), "verifier"),
-                "depends_on": _normalize_text_list(item.get("depends_on", []), limit=8, item_limit=16),
+                "depends_on": depends_on,
                 "parallel": _normalize_bool(item.get("parallel", True), True),
             }
         )
@@ -956,10 +994,16 @@ def attach_phase2_team_spec(
     roles: List[str] | None = None,
     verifier_roles: List[str] | None = None,
     require_verifier: bool = False,
+    readonly: bool | None = None,
 ) -> Dict[str, Any]:
     data = dict(plan or {}) if isinstance(plan, dict) else {}
     meta_in = data.get("meta")
     meta = dict(meta_in or {}) if isinstance(meta_in, dict) else {}
+    resolved_readonly = _normalize_bool(
+        meta.get("readonly", False) if readonly is None else readonly,
+        False,
+    )
+    meta["readonly"] = resolved_readonly
     team_spec = normalize_phase2_team_spec(
         meta.get("phase2_team_spec"),
         plan=data,
@@ -971,7 +1015,7 @@ def attach_phase2_team_spec(
     meta["phase2_execution_plan"] = normalize_phase2_execution_plan(
         meta.get("phase2_execution_plan"),
         team_spec=team_spec,
-        readonly=True,
+        readonly=resolved_readonly,
     )
     data["meta"] = meta
     return data
@@ -1044,6 +1088,7 @@ def normalize_tf_plan(
         roles=requested_roles,
         verifier_roles=review_roles if normalized["critic"]["required"] else [],
         require_verifier=bool(normalized["critic"]["required"]),
+        readonly=bool(spec.get("readonly", True)),
     )
 
 
