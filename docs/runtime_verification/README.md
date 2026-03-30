@@ -22,10 +22,10 @@
   - `mixed/M1_happy_path.md`
 - current execution status:
   - `build/B1_happy_path.md`
-    - `executed_planning_passed`
+    - `executed_done`
     - finding:
-      - `build` preset live verification now clears the planning gate after graph/readonly/owner/acceptance fixes
-      - execution-stage evidence is still pending capture
+      - `build` preset live verification now completes planning, execution, review, retry, and close on the live path
+      - final successful run (`T-012`) reached `planning_ready`, reran once under exec critic, and closed as `done`
       - visible project registration later exposed task lineage surface drift
   - `data/D1_happy_path.md`
     - `planned`

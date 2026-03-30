@@ -8,7 +8,7 @@
 - branch_target:
   - `done`
 - status:
-  - `executed_planning_passed`
+  - `executed_done`
 - executed_at:
   - `2026-03-27T20:09:20+09:00`
   - `2026-03-30T10:55:45+09:00`
@@ -84,26 +84,29 @@
   - `r_20260330132201_3680eb9c`
     - `T-012`
     - `plan_stage=ready`
-    - `note=auth/session acceptance floor와 single-serial build policy 완화 이후 최초 planning gate 통과`
+    - `exec_branch=done`
+    - `note=auth/session acceptance floor와 single-serial build policy 완화 이후 planning gate를 통과했고, retry 1회 후 integration/close까지 완료`
 - planning:
   - all runs used `phase1 ensemble rounds=3 providers=codex`
-  - all runs remained `plan_gate_passed=false`
+  - `T-002` ~ `T-011`은 `plan_gate_passed=false`
+  - `T-012`는 `plan_gate_passed=true`
 - stage progression:
   - planning:
     - `T-002` ~ `T-011` runs completed 3 planner/critic rounds before block
     - `T-012` reached `planning_ready`
   - execution:
-    - `not yet observed in captured live logs for T-012`
+    - `T-012` execution lane `E1` completed
   - verification:
-    - `not entered`
+    - `T-012` review lanes `R1`, `R2` completed with `success`
   - integration:
-    - `not entered`
+    - `T-012` completed after `exec_critic retry -> planning_reuse -> rerun_scope`
   - close:
-    - `failed`
+    - `T-012` completed
 - critic/verifier verdict:
-  - `critic issues remain after auto-replan`
+  - `T-002` ~ `T-011`: `critic issues remain after auto-replan`
+  - `T-012`: `plan gate passed`, `exec_critic: success (after retry 2/3)`
 - final branch:
-  - `planning_passed`
+  - `done`
 
 ## 5. Surface Evidence
 - `/task` before visible project registration:
@@ -116,10 +119,24 @@
   - reachable at `/control/tasks/by-request/r_20260327200920_c3e0106c`, but rendered a duplicated `manual_intervention` task under `O2` instead of the original blocked `O1/T-002` lineage
 - dashboard `Recovery` after visible project registration:
   - runtime `O2 demo-login-build` appeared, but reflected bootstrap-only state rather than the original blocked build task
+- `/task r_20260330132201_3680eb9c` after latest rerun:
+  - `status: completed`
+  - `team_phase: completed`
+  - `phase2_execution: single lanes=1`
+  - `phase2_review: parallel lanes=2`
+  - `phase2_lane_state: exec done=1 | review done=2 | review_verdict success=2`
+  - `exec_attempts: 2/3`
+  - `exec_reason: 세션 만료 분기 수정, 비만료 실패 회귀 테스트 추가, 테스트 통과 기록과 TF-012 증적 문서화까지 확인돼 사용자 요청을 충족한다.`
+- room/event evidence:
+  - `exec_critic_retry` at `2026-03-30T13:38:28+09:00`
+  - `todo_proposals_created` at `2026-03-30T13:43:08+09:00`
+  - `dispatch_completed` at `2026-03-30T13:43:25+09:00`
+- reviewer evidence:
+  - reviewer notes confirm `src/session.js`, `tests/session.test.js`, `report.md` and `npm test pass 3/fail 0`
 
 ## 6. Result
 - result:
-  - `planning_passed`
+  - `done`
 - mismatch class:
   - `planning_drift`
   - `surface_drift`
@@ -130,6 +147,7 @@
   - `execution_owner_drift_fixed`
   - `auth_scope_prompt_refined`
   - `single_serial_policy_relaxed`
+  - `build_happy_path_completed`
 - mismatch notes:
   - initial live run first exposed a real runtime seam bug: `handle_text_message(...).log_event()` rejected `task_short_id`; this was fixed in `scripts/gateway/aoe_tg_message_handler.py`
   - first blocker after the seam fix was an invalid `build` Phase2 lane graph; contract normalization now repairs partial planner metadata so execution/review graph coverage is no longer the first failure
@@ -141,11 +159,11 @@
   - seventh blocker showed the first auth/session planner guidance overshot: it could make a verified helper-boundary fix impossible if the helper really was the only public boundary
   - eighth blocker showed a policy conflict: single-role `build` plans were still being rejected just for remaining serial; planner/critic guidance now explicitly allows single serial execution lanes when `Codex-Dev` is the only execution role
   - ninth blocker showed the auth/session verifier still accepted empty-state expiry checks; acceptance floor now explicitly requires pre-existing auth/session state before the failure path
-  - latest live run `T-012` is the first B1 attempt that clears the planning gate; execution-stage evidence is still pending capture
+  - latest live run `T-012` clears the planning gate, reruns once under exec critic, and closes as `done`
+  - the remaining known issue on this path is not the build fix itself but runtime surface drift introduced by later visible-project registration (`orch add --set-active`)
   - later visible-project registration via `aoe orch add ... --set-active` introduced a second mismatch: selected task refs and task detail surfaces for `O2` drifted away from the original hidden/default task lineage and showed `manual_intervention` instead of the original planning gate block
 - next fix:
-  - capture `T-012` execution/runtime state so B1 can move from `planning_passed` to full happy-path or execution blocker evidence
-  - if the next blocker still concerns auth/session verification specificity, add an explicit prompt rule that failure-path verification must start from an already-authenticated state
+  - treat `B1` as complete and move to `D1`
   - investigate `orch add --set-active` task lineage copy/drift into visible project registry before using dashboard/task detail as canonical evidence for migrated runtimes
 
 ## 7. Raw References

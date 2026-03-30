@@ -31,10 +31,10 @@
 - intent:
   - implement a bounded code/config change and leave verification evidence
 - current status:
-  - `executed_planning_passed`
+  - `executed_done`
 - current finding:
   - initial `build` live runs exposed sequential planning-gate blockers: lane graph, readonly drift, standalone review subtask, owner-role drift, auth/session acceptance weakness, and single-serial policy conflict
-  - latest run reaches `planning_ready`; execution evidence is the next capture target
+  - latest successful run reaches `planning_ready`, reruns once under exec critic, and closes as `done`
   - visible project registration later exposed task/detail surface drift
 - prompt shape:
   - patch a focused defect or integration issue
