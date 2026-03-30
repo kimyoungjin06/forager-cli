@@ -935,12 +935,14 @@ def normalize_phase2_execution_plan(
     execution_lanes: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
         item = row if isinstance(row, dict) else {}
+        subtask_ids = _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32)
+        lane_parallel_default = exec_parallel_default if len(subtask_ids) <= 1 else False
         execution_lanes.append(
             {
                 "lane_id": _trim_text(item.get("lane_id", item.get("group_id", f"L{idx}")), 16) or f"L{idx}",
                 "role": _trim_text(item.get("role", "Worker"), 64) or "Worker",
-                "subtask_ids": _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32),
-                "parallel": _normalize_bool(item.get("parallel", exec_parallel_default), exec_parallel_default),
+                "subtask_ids": subtask_ids,
+                "parallel": False if len(subtask_ids) > 1 else _normalize_bool(item.get("parallel", lane_parallel_default), lane_parallel_default),
             }
         )
     if not execution_lanes:

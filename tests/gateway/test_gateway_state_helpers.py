@@ -2716,6 +2716,28 @@ def test_choose_auto_dispatch_roles_adds_claude_companion_for_explicit_review_ro
     assert roles == ["Codex-Reviewer", "Claude-Reviewer"]
 
 
+def test_choose_auto_dispatch_roles_prefers_review_pair_for_patch_risk_review(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    for role, mission in (
+        ("Codex-Dev", "Implement code changes and fix application bugs."),
+        ("Codex-Reviewer", "Find risks, regressions, and missing tests before merge."),
+        ("Claude-Reviewer", "Find risks, regressions, and missing tests before merge."),
+    ):
+        (team_dir / "agents" / role).mkdir(parents=True, exist_ok=True)
+        (team_dir / "agents" / role / "AGENTS.md").write_text(
+            f"# AGENTS.md - {role}\n\n## Mission\n{mission}\n",
+            encoding="utf-8",
+        )
+
+    roles = gw.choose_auto_dispatch_roles(
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘. 변경 파일과 테스트 공백, 확인이 필요한 불확실성을 명시하고 review 결과물만 남겨라.",
+        available_roles=["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"],
+        team_dir=team_dir,
+    )
+
+    assert roles == ["Codex-Reviewer", "Claude-Reviewer"]
+
+
 def test_choose_auto_dispatch_roles_builds_multi_role_tf_from_prompt_mix(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     (team_dir / "agents" / "Codex-Dev").mkdir(parents=True, exist_ok=True)

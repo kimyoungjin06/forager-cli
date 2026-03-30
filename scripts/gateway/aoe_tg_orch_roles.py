@@ -41,6 +41,10 @@ BUILD_SIGNAL_KEYS = (
     "implement", "implementation", "build", "code", "fix", "patch", "refactor", "develop",
     "개발", "구현", "수정", "패치", "리팩토링", "코드",
 )
+BUILD_ACTION_SIGNAL_KEYS = (
+    "implement", "implementation", "build", "fix", "refactor", "develop",
+    "개발", "구현", "수정", "리팩토링",
+)
 DOC_SIGNAL_KEYS = (
     "document", "documentation", "docs", "summary", "report", "writeup", "guide", "readme", "tutorial", "handoff",
     "문서", "요약", "보고", "보고서", "가이드", "튜토리얼", "인수인계", "작성",
@@ -307,6 +311,22 @@ def _role_score_from_text(prompt_lower: str, role: str, mission: str) -> int:
     return score
 
 
+def _prefer_review_over_build(
+    *,
+    prompt_lower: str,
+    has_review_signal: bool,
+    has_build_signal: bool,
+    has_data_signal: bool,
+    has_doc_signal: bool,
+    has_analysis_signal: bool,
+) -> bool:
+    if not has_review_signal or not has_build_signal:
+        return False
+    if any((has_data_signal, has_doc_signal, has_analysis_signal)):
+        return False
+    return not _has_any(prompt_lower, BUILD_ACTION_SIGNAL_KEYS)
+
+
 def _build_prompt_role_preset(
     *,
     prompt_lower: str,
@@ -316,13 +336,14 @@ def _build_prompt_role_preset(
     has_build_signal: bool,
     has_doc_signal: bool,
     has_analysis_signal: bool,
+    prefer_review_over_build: bool = False,
 ) -> List[str]:
     available_set = {str(role).strip() for role in available_roles if str(role).strip()}
     roles: List[str] = []
 
     if has_data_signal and "DataEngineer" in available_set:
         roles.append("DataEngineer")
-    if has_build_signal and "Codex-Dev" in available_set:
+    if has_build_signal and not prefer_review_over_build and "Codex-Dev" in available_set:
         roles.append("Codex-Dev")
     if has_doc_signal and "Codex-Writer" in available_set:
         roles.append("Codex-Writer")
@@ -393,12 +414,20 @@ def classify_dispatch_role_preset(
     has_doc_signal = _has_any(prompt_lower, DOC_SIGNAL_KEYS)
     has_analysis_signal = _has_any(prompt_lower, ANALYSIS_SIGNAL_KEYS)
     has_review_signal = _has_any(prompt_lower, REVIEW_SIGNAL_KEYS)
+    prefer_review_over_build = _prefer_review_over_build(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_build_signal=has_build_signal,
+        has_data_signal=has_data_signal,
+        has_doc_signal=has_doc_signal,
+        has_analysis_signal=has_analysis_signal,
+    )
 
     work_hits = [
         label
         for label, enabled in (
             ("data", has_data_signal),
-            ("build", has_build_signal),
+            ("build", has_build_signal and not prefer_review_over_build),
             ("writer", has_doc_signal),
             ("analysis", has_analysis_signal),
         )
@@ -436,9 +465,22 @@ def choose_auto_dispatch_roles(
     has_build_signal = _has_any(prompt_lower, BUILD_SIGNAL_KEYS)
     has_doc_signal = _has_any(prompt_lower, DOC_SIGNAL_KEYS)
     has_analysis_signal = _has_any(prompt_lower, ANALYSIS_SIGNAL_KEYS)
+    prefer_review_over_build = _prefer_review_over_build(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_build_signal=has_build_signal,
+        has_data_signal=has_data_signal,
+        has_doc_signal=has_doc_signal,
+        has_analysis_signal=has_analysis_signal,
+    )
+    effective_build_signal = has_build_signal and not prefer_review_over_build
 
     wants_multi = _has_any(prompt_lower, MULTI_SIGNAL_KEYS)
-    category_hits = sum(1 for flag in (has_review_signal, has_data_signal, has_build_signal, has_doc_signal, has_analysis_signal) if flag)
+    category_hits = sum(
+        1
+        for flag in (has_review_signal, has_data_signal, effective_build_signal, has_doc_signal, has_analysis_signal)
+        if flag
+    )
     if category_hits >= 2:
         wants_multi = True
 
@@ -472,9 +514,10 @@ def choose_auto_dispatch_roles(
         available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
         has_review_signal=has_review_signal,
         has_data_signal=has_data_signal,
-        has_build_signal=has_build_signal,
+        has_build_signal=effective_build_signal,
         has_doc_signal=has_doc_signal,
         has_analysis_signal=has_analysis_signal,
+        prefer_review_over_build=prefer_review_over_build,
     )
     if preset_roles:
         return preset_roles
@@ -498,7 +541,7 @@ def choose_auto_dispatch_roles(
             roles.append("Codex-Reviewer")
             if "Claude-Reviewer" in available_set:
                 roles.append("Claude-Reviewer")
-        if _has_any(prompt_lower, BUILD_SIGNAL_KEYS):
+        if effective_build_signal:
             roles.append("Codex-Dev")
         if _has_any(prompt_lower, DOC_SIGNAL_KEYS):
             roles.append("Codex-Writer")
@@ -517,7 +560,7 @@ def choose_auto_dispatch_roles(
             available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
             prompt_lower=prompt_lower,
         )
-        if wants_multi or any(flag for flag in (has_build_signal, has_doc_signal, has_analysis_signal, has_data_signal)):
+        if wants_multi or any(flag for flag in (effective_build_signal, has_doc_signal, has_analysis_signal, has_data_signal)):
             roles = _add_default_review_pair(
                 roles,
                 available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
@@ -537,7 +580,7 @@ def choose_auto_dispatch_roles(
         available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
         prompt_lower=prompt_lower,
     )
-    if wants_multi or any(flag for flag in (has_build_signal, has_doc_signal, has_analysis_signal)):
+    if wants_multi or any(flag for flag in (effective_build_signal, has_doc_signal, has_analysis_signal)):
         selected = _add_default_review_pair(
             selected,
             available_roles=[str(profile.get("role", "")).strip() for profile in profiles],

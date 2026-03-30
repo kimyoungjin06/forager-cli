@@ -134,6 +134,13 @@
 - must prove:
   - review-only completion is possible without fake execution work
   - findings/severity/evidence are present
+- current status:
+  - `executed_blocked`
+- latest finding:
+  - review-only patch/regression requests now stay on `review` preset with reviewer-only roles
+  - multi-subtask reviewer lanes no longer advertise `parallel: true`
+  - the remaining blocker is a reusable `review request contract` gap:
+    - canonical git diff-range selection policy is not typed yet, so `recent patch` scope can still drift on dirty worktrees or multiple nearby commits
 
 #### R2. Rerun Path
 - intent:

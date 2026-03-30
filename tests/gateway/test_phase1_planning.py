@@ -34,6 +34,7 @@ def _load_module(path: Path, name: str):
 ensemble_mod = _load_module(PLAN_FILE, "aoe_tg_plan_ensemble_mod")
 pipeline_mod = _load_module(PIPELINE_FILE, "aoe_tg_plan_pipeline_mod")
 gw = _load_module(GW_FILE, "aoe_telegram_gateway_mod_phase1")
+import aoe_tg_orch_contract as orch_contract_mod
 import aoe_tg_request_contract as request_contract_mod
 import aoe_tg_request_contract_data as request_contract_data_mod
 
@@ -1218,6 +1219,20 @@ def test_data_request_contract_quality_gate_extracts_explicit_null_heavy_thresho
     assert any("`schema_value_quality_policy` orders,revenue -> null_or_invalid_count via trim-empty/null-like/non-numeric" in item for item in null_floor)
 
 
+def test_review_risk_prompt_prefers_review_preset_over_build_context_words() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘. "
+        "변경 파일과 테스트 공백, 확인이 필요한 불확실성을 명시하고 review 결과물만 남겨라."
+    )
+
+    preset = request_contract_mod.resolve_request_contract_preset(
+        source_prompt=prompt,
+        selected_roles=[],
+    )
+
+    assert preset == "review"
+
+
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
     plan = gw.normalize_task_plan_payload(
         {
@@ -1242,6 +1257,41 @@ def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
     assert [row["role"] for row in spec["review_groups"]] == ["Codex-Reviewer", "Claude-Reviewer"]
     assert [row["role"] for row in execution_plan["execution_lanes"]] == ["Codex-Writer", "Claude-Writer"]
     assert execution_plan["review_mode"] == "parallel"
+
+
+def test_multi_subtask_execution_lanes_are_serialized_even_with_parallel_workers() -> None:
+    spec = {
+        "execution_mode": "parallel",
+        "execution_groups": [
+            {"group_id": "E1", "role": "Codex-Reviewer", "subtask_ids": ["S1", "S2", "S3"]},
+            {"group_id": "E1C", "role": "Claude-Reviewer", "subtask_ids": ["S1", "S2", "S3"]},
+        ],
+        "review_mode": "parallel",
+        "review_groups": [
+            {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1", "E1C"]},
+            {"group_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E1", "E1C"]},
+        ],
+    }
+
+    plan = orch_contract_mod.normalize_phase2_execution_plan(
+        {
+            "execution_mode": "parallel",
+            "execution_lanes": [
+                {"lane_id": "E1", "role": "Codex-Reviewer", "subtask_ids": ["S1", "S2", "S3"], "parallel": True},
+                {"lane_id": "E1C", "role": "Claude-Reviewer", "subtask_ids": ["S1", "S2", "S3"], "parallel": True},
+            ],
+            "review_mode": "parallel",
+            "review_lanes": [
+                {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1", "E1C"], "parallel": True},
+                {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E1", "E1C"], "parallel": True},
+            ],
+        },
+        team_spec=spec,
+        readonly=False,
+    )
+
+    assert [row["parallel"] for row in plan["execution_lanes"]] == [False, False]
+    assert plan["parallel_workers"] is True
 
 
 def test_phase2_mixed_preset_keeps_work_roles_out_of_reviewer_drift() -> None:
