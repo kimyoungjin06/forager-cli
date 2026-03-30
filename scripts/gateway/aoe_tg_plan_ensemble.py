@@ -287,6 +287,7 @@ def run_phase1_ensemble_planning(
     available_roles: List[str],
     selected_roles: Optional[List[str]] = None,
     role_preset: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
     normalize_task_plan_payload: Callable[..., Dict[str, Any]],
     parse_json_object_from_text: Callable[[str], Optional[Dict[str, Any]]],
     run_provider_execs: Dict[str, Callable[[str, int], str]],
@@ -374,6 +375,7 @@ def run_phase1_ensemble_planning(
                         "worker_roles": list(selected_roles or []),
                         "phase1_role_preset": role_preset,
                         "phase2_team_preset": role_preset,
+                        "request_contract": request_contract or {},
                     },
                 )
             except Exception as exc:

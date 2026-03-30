@@ -2229,6 +2229,156 @@ def test_handle_run_or_unknown_command_materializes_provisional_task_before_plan
     assert saved
 
 
+def test_handle_run_or_unknown_command_blocks_incomplete_data_contract_before_planning(tmp_path: Path) -> None:
+    project_root = tmp_path / "DataDemo"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "default": {
+                "name": "default",
+                "display_name": "default",
+                "project_alias": "O1",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "todos": [],
+            }
+        }
+    }
+    sent: list[tuple[str, str, dict | None]] = []
+    logged: list[dict] = []
+    saved: list[Path] = []
+
+    def _phase1_ensemble_planning(*args, **kwargs):
+        raise AssertionError("planner must not run when the request contract is incomplete")
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.",
+        rest="월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.",
+        orch_target="O1",
+        run_prompt="월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=None,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda path, manager_state: saved.append(path),
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["DataEngineer"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["DataEngineer", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=_phase1_ensemble_planning,
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "default",
+                manager_state["projects"]["default"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="DataEngineer,Codex-Reviewer",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run")),
+            create_request_id=lambda: "REQ-DATA-BLOCK",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-30T15:00:00+0900",
+            sync_task_lifecycle=lambda **kwargs: None,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert sent[-1][0] == "contract-incomplete"
+    assert "source_path" in sent[-1][1]
+    assert "target_column" in sent[-1][1]
+    task = manager_state["projects"]["default"]["tasks"]["REQ-DATA-BLOCK"]
+    assert task["request_contract_type"] == "data"
+    assert task["request_contract_status"] == "incomplete"
+    assert task["request_contract_missing_fields"] == [
+        "source_path",
+        "target_column",
+        "accepted_input_formats",
+        "normalize_to",
+    ]
+    assert task["tf_phase"] == "blocked"
+    assert task["stages"]["planning"] == "failed"
+    assert task["stages"]["close"] == "failed"
+    assert any(evt.get("event") == "contract_incomplete" for evt in logged)
+    assert saved
+
+
 def test_handle_run_or_unknown_command_reuses_provisional_request_id_for_dispatch(tmp_path: Path) -> None:
     project_root = tmp_path / "TwinPaper"
     team_dir = project_root / ".aoe-team"

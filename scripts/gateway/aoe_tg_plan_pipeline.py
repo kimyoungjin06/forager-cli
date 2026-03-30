@@ -159,6 +159,7 @@ def compute_dispatch_plan(
     args: Any,
     p_args: Any,
     prompt: str,
+    request_contract: Optional[Dict[str, Any]] = None,
     dispatch_mode: bool,
     run_control_mode: str,
     run_source_task: Optional[Dict[str, Any]],
@@ -174,6 +175,8 @@ def compute_dispatch_plan(
     phase1_ensemble_planning: Optional[Callable[..., Dict[str, Any]]] = None,
     report_progress: Optional[Callable[..., None]] = None,
 ) -> PlanMeta:
+    request_contract_meta = request_contract if isinstance(request_contract, dict) else {}
+    effective_prompt = str(prompt or "").strip()
     plan_data: Optional[Dict[str, Any]] = None
     plan_critic: Dict[str, Any] = default_plan_critic_payload()
     plan_roles: List[str] = []
@@ -190,7 +193,11 @@ def compute_dispatch_plan(
     phase1_mode = ""
     phase1_rounds = 0
     phase1_providers: List[str] = []
-    role_preset = classify_dispatch_role_preset(prompt, selected_roles=selected_roles)
+    role_preset = normalize_role_preset(
+        request_contract_meta.get("request_contract_preset")
+        or request_contract_meta.get("preset")
+        or classify_dispatch_role_preset(effective_prompt, selected_roles=selected_roles)
+    )
     team_preset = normalize_role_preset(role_preset)
     rate_limit: Dict[str, Any] = {}
 
@@ -202,13 +209,14 @@ def compute_dispatch_plan(
                 source_plan = run_source_task.get("plan")
                 plan_data = normalize_task_plan_payload(
                     source_plan if isinstance(source_plan, dict) else None,
-                    user_prompt=prompt,
+                    user_prompt=effective_prompt,
                     workers=available_worker_roles(available_roles),
                     max_subtasks=max(1, int(args.plan_max_subtasks)),
                     meta_overrides={
                         "worker_roles": list(selected_roles or []),
                         "phase1_role_preset": role_preset,
                         "phase2_team_preset": team_preset,
+                        "request_contract": request_contract_meta,
                     },
                 )
                 raw_critic = run_source_task.get("plan_critic")
@@ -222,10 +230,11 @@ def compute_dispatch_plan(
                 if bool(getattr(args, "plan_phase1_ensemble", True)) and callable(phase1_ensemble_planning):
                     ensemble = phase1_ensemble_planning(
                         p_args,
-                        prompt,
+                        effective_prompt,
                         available_roles,
                         selected_roles=selected_roles,
                         role_preset=role_preset,
+                        request_contract=request_contract_meta,
                         report_progress=report_progress,
                     )
                     plan_data = ensemble.get("plan_data")
@@ -244,9 +253,10 @@ def compute_dispatch_plan(
                         report_progress(phase="planner", detail="building execution plan")
                     plan_data = build_task_execution_plan(
                         p_args,
-                        user_prompt=prompt,
+                        user_prompt=effective_prompt,
                         available_roles=available_roles,
                         max_subtasks=max(1, int(args.plan_max_subtasks)),
+                        request_contract=request_contract_meta,
                     )
                     if isinstance(plan_data, dict):
                         meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}

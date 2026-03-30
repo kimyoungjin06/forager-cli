@@ -6,6 +6,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_exec_pipeline import project_alias as exec_project_alias
+from aoe_tg_request_contract import apply_request_contract_snapshot
 
 
 def _provision_planning_task(
@@ -33,6 +34,7 @@ def _provision_planning_task(
     run_intent_action: str = "",
     run_intent_class: str = "",
     run_intent_trace: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, Dict[str, Any]]:
     request_id = str(create_request_id() or "").strip()
     task = ensure_task_record(
@@ -69,6 +71,7 @@ def _provision_planning_task(
         task["phase1_role_preset"] = str(phase1_role_preset).strip()
     if phase2_team_preset:
         task["phase2_team_preset"] = str(phase2_team_preset).strip()
+    apply_request_contract_snapshot(task, request_contract or {})
     task["updated_at"] = now_iso()
     entry["last_request_id"] = request_id
     entry["updated_at"] = now_iso()

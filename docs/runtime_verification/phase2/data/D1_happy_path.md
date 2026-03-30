@@ -8,11 +8,18 @@
 - branch_target:
   - `done`
 - status:
-  - `planned`
+  - `executed_blocked`
 - executed_at:
-  - `-`
+  - `2026-03-30T13:54:16+09:00`
+  - `2026-03-30T14:06:24+09:00`
+  - `2026-03-30T14:15:59+09:00`
+  - `2026-03-30T14:23:42+09:00`
+  - `2026-03-30T14:40:01+09:00`
+  - `2026-03-30T15:55:41+09:00`
+  - `2026-03-30T15:57:07+09:00`
+  - `2026-03-30T16:01:04+09:00`
 - operator:
-  - `-`
+  - `Codex`
 
 ## 2. Input
 - request text:
@@ -20,7 +27,7 @@
 - normalized action:
   - `dispatch_task`
 - target runtime:
-  - `TBD`
+  - `O1 default`
 
 ## 3. Expected Contract
 - expected preset:
@@ -40,53 +47,114 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `-`
+  - `r_20260330135416_7a8246ca`
+- request_id progression:
+  - `r_20260330135416_7a8246ca`
+    - `T-001`
+    - `plan_gate_reason=S2의 schema_report.json acceptance가 columns 배열을 끝까지 고정하지 못해 orders/revenue/notes의 inferred_type/type_rule/null_count/observed_non_null_count가 비었다.`
+  - `r_20260330140624_0203f1d2`
+    - `T-002`
+    - `plan_gate_reason=입력 바인딩이 없다. 어떤 원본 CSV와 month 컬럼을 대상으로 하는지 명시되지 않아 실행 대상을 고정할 수 없다.`
+  - `r_20260330141559_8fa92577`
+    - `T-003`
+    - `plan_gate_reason=month 정규화 실행 규약이 없다. 허용 패턴, zero-padding, invalid/out-of-range 값 처리 규칙이 없어 핵심 변환을 일관되게 dispatch할 수 없다.`
+  - `r_20260330142342_1148c1a2`
+    - `T-004`
+    - `plan_gate_reason=S1 acceptance가 허용 입력 패턴, zero-pad 규칙, month 범위 판단, parse 불가/범위 외 값 처리 경계를 충분히 고정하지 못했다.`
+  - `r_20260330144001_a758ed72`
+    - `T-005`
+    - `plan_gate_reason=schema_report.json/null_summary.md/sample_5.csv 산출 계약이 비어 있어 S2-S4 acceptance가 동일 복사본으로 남았다.`
+  - `r_20260330155541_14e029db`
+    - `T-006`
+    - `plan_gate_reason=request_contract rollout seam: run_phase1_ensemble_planning wrapper가 request_contract를 받지 못했다.`
+  - `r_20260330155707_6efad77e`
+    - `T-007`
+    - `plan_gate_reason=same wrapper seam reproduced before facade parity fix.`
+  - `r_20260330160104_efad9db1`
+    - `T-008`
+    - `plan_gate_reason=S1가 계약보다 넓은 입력을 정상값으로 처리한다. YYYY/M, YYYY-M, YYYY.M까지 정상 변환해 계약상 비허용 값이 anomaly로 남지 않는다.`
 - task_short_id:
-  - `-`
+  - `T-001`
+  - `T-002`
+  - `T-003`
+  - `T-004`
+  - `T-005`
+  - `T-006`
+  - `T-007`
+  - `T-008`
 - planning:
-  - `-`
+  - `T-001` to `T-005` used `phase1 ensemble rounds=3 providers=codex`
+  - `T-008` used `phase1 ensemble rounds=3 providers=codex,claude`
+  - all substantive runs selected `phase1=data phase2=data`
 - stage progression:
   - planning:
-    - `-`
+    - `T-001` blocked after critic 3/3 on schema acceptance completeness
+    - `T-002` blocked after critic 3/3 on input binding
+    - `T-003` blocked after critic 3/3 on month normalization policy
+    - `T-004` blocked after critic 3/3 on transform policy propagation into S1 acceptance
+    - `T-005` blocked after critic 3/3 on artifact-specific output contracts
+    - `T-006` and `T-007` failed immediately on request-contract wrapper parity
+    - `T-008` blocked after critic 3/3 because the transform acceptance was still too permissive about allowed month formats
   - execution:
-    - `-`
+    - `not reached yet`
   - verification:
-    - `-`
+    - `not reached yet`
   - integration:
-    - `-`
+    - `not reached yet`
   - close:
-    - `-`
+    - all three runs closed as `failed`
 - critic/verifier verdict:
-  - `-`
+  - `T-001`: schema evidence acceptance truncated at column coverage
+  - `T-002`: prompt did not bind source file and target month column
+  - `T-003`: prompt still omitted normalization policy for invalid/unparseable month values
+  - `T-004`: explicit policy text still did not fully bind accepted formats and invalid handling into S1 acceptance
+  - `T-005`: output artifacts were named but not split into file-specific contracts
+  - `T-006`/`T-007`: request-contract plumbing hit a live facade seam before planner execution
+  - `T-008`: artifact contracts now exist, but accepted input formats remain too broad and allow non-contract month variants to normalize instead of becoming anomalies
 - final branch:
-  - `-`
+  - `blocked`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `-`
+  - `T-001`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-002`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-003`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-008`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
 - `/monitor`:
-  - `-`
+  - not separately captured yet
 - `/offdesk review`:
-  - `-`
+  - not separately captured yet
 - dashboard `Task Detail`:
-  - `-`
+  - not yet captured for this temp runtime
 - dashboard `Recovery`:
-  - `-`
+  - not yet captured for this temp runtime
 
 ## 6. Result
 - result:
-  - `planned`
+  - `blocked`
 - mismatch class:
-  - `-`
+  - `schema_acceptance_truncation`
+  - `prompt_input_binding_gap`
+  - `prompt_transform_policy_gap`
+  - `artifact_contract_gap`
+  - `request_contract_facade_seam`
+  - `accepted_format_boundary_gap`
 - mismatch notes:
-  - `-`
+  - first real D1 run proved the data preset path works, but `schema_report.json` acceptance could still be truncated into partial column coverage
+  - `scripts/gateway/aoe_tg_schema.py` now adds a data-specific acceptance floor and reserves slots for floor items so full-column schema evidence survives normalization
+  - after that code fix, the next blockers moved in order: explicit input binding, month normalization policy, propagation of that policy into S1 acceptance, and artifact-specific contract splitting
+  - `Request Contract` rollout exposed a live facade mismatch at `T-006`/`T-007`, which is now fixed
+  - `T-008` proves the artifact-specific contract floor is working; the current remaining blocker is narrower: S1 still accepts `YYYY/M`, `YYYY-M`, `YYYY.M` even though the contract only permits `YYYY/MM`, `YYYY-MM`, `YYYY.MM`
 - next fix:
-  - `-`
+  - tighten the data request-contract acceptance so only the declared input formats are normalized
+  - explicitly forbid `YYYY/M`, `YYYY-M`, and `YYYY.M` from being treated as valid month values under the current D1 contract
+  - rerun D1 after that boundary fix, then capture `/monitor`, `/offdesk review`, and dashboard evidence before moving to execution-stage verification
 
 ## 7. Raw References
 - runtime state refs:
-  - `-`
+  - `/tmp/aoe_lv_d1b_HQO9SX/demo-monthly-data/.aoe-team/orch_manager_state.json`
 - log refs:
-  - `-`
+  - `/tmp/aoe_lv_d1b_HQO9SX/demo-monthly-data/.aoe-team/logs/gateway_events.jsonl`
 - artifact refs:
-  - `-`
+  - `scripts/gateway/aoe_tg_schema.py`
+  - `tests/gateway/test_phase1_planning.py`

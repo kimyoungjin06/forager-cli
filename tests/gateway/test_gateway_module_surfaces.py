@@ -151,6 +151,36 @@ def test_orch_roles_module_matches_gateway_exports(tmp_path: Path) -> None:
     assert gw.available_worker_roles([]) == orch_roles.available_worker_roles([])
 
 
+def test_gateway_run_phase1_ensemble_planning_forwards_request_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def _fake_run_phase1_ensemble_planning(
+        args,
+        user_prompt,
+        available_roles,
+        *,
+        selected_roles,
+        role_preset,
+        request_contract=None,
+        report_progress,
+        **_,
+    ):
+        captured["request_contract"] = request_contract
+        return {"ok": True}
+
+    monkeypatch.setattr(gw.control_plane_mod, "run_phase1_ensemble_planning", _fake_run_phase1_ensemble_planning)
+
+    result = gw.run_phase1_ensemble_planning(
+        argparse.Namespace(),
+        "normalize the month column",
+        ["DataEngineer"],
+        request_contract={"contract_type": "data", "preset": "data"},
+    )
+
+    assert result == {"ok": True}
+    assert captured["request_contract"] == {"contract_type": "data", "preset": "data"}
+
+
 def test_orch_roles_canonicalize_legacy_local_roles(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     (team_dir / "agents" / "Local-Writer").mkdir(parents=True, exist_ok=True)

@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 
 from aoe_tg_orch_contract import normalize_phase2_execution_plan, normalize_phase2_team_spec
 from aoe_tg_orch_roles import classify_dispatch_role_preset, normalize_role_preset
+from aoe_tg_request_contract import normalize_request_contract_snapshot
+from aoe_tg_request_contract_data import data_request_contract_acceptance_floor
 
 
 def _trim_text(raw: Any, limit: int) -> str:
@@ -142,7 +144,9 @@ def _data_acceptance_floor(
     if not _role_matches_preset(role, "data"):
         return []
 
-    context = "\n".join((str(user_prompt or ""), str(title or ""), str(goal or "")))
+    prompt_context = str(user_prompt or "")
+    task_context = "\n".join((str(title or ""), str(goal or "")))
+    context = "\n".join((prompt_context, task_context))
     data_markers = [
         "csv",
         "schema",
@@ -161,11 +165,77 @@ def _data_acceptance_floor(
     if not _contains_any(context, data_markers):
         return []
 
-    return [
+    task_has_schema_signal = _contains_any(
+        task_context,
+        ["schema", "null", "sample", "report", "스키마", "결측", "샘플", "리포트", "요약"],
+    )
+    task_has_transform_signal = _contains_any(
+        task_context,
+        ["normalize", "normalized", "transform", "정규화", "변환", "표준화", "month", "월별", "month column", "컬럼"],
+    )
+    prompt_has_transform_policy = _contains_any(
+        prompt_context,
+        [
+            "yyyy/mm",
+            "yyyy-mm",
+            "yyyy.mm",
+            "zero-pad",
+            "zero pad",
+            "unparseable",
+            "out-of-range",
+            "parse 불가",
+            "범위를 벗어난",
+            "원본 행",
+            "원값",
+            "anomaly",
+            "month",
+        ],
+    )
+
+    transform_floor = [
+        "Transform acceptance binds the source CSV path and target month column explicitly.",
+        "Normalization rules enumerate the accepted month input formats and the exact YYYY-MM zero-pad output rule.",
+        "Failure handling defines how invalid, unparseable, or out-of-range month values are recorded and whether original rows and month values are preserved.",
+    ]
+    schema_floor = [
         "Schema evidence covers every output column with inferred_type and type_rule, not a partial column list.",
         "Schema or null evidence reports null_count and observed_non_null_count for every output column.",
         "Sample evidence is taken from the transformed output and is sufficient to inspect formatting and null handling.",
     ]
+
+    floor: List[str] = []
+    if task_has_schema_signal:
+        floor.extend(schema_floor)
+        if task_has_transform_signal or prompt_has_transform_policy:
+            floor.extend(transform_floor)
+    elif task_has_transform_signal or prompt_has_transform_policy:
+        floor.extend(transform_floor)
+        floor.extend(schema_floor)
+    else:
+        floor.extend(schema_floor)
+
+    out: List[str] = []
+    for item in floor:
+        token = str(item or "").strip()
+        if token and token not in out:
+            out.append(token[:240])
+    return out[:3]
+
+
+def _data_request_contract_floor(
+    *,
+    request_contract: Dict[str, Any] | None,
+    title: str,
+    goal: str,
+) -> List[str]:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if not snapshot:
+        return []
+    return data_request_contract_acceptance_floor(
+        request_contract=snapshot,
+        title=title,
+        goal=goal,
+    )
 
 
 def _merge_acceptance_floor(acceptance: List[str], floor: List[str]) -> List[str]:
@@ -255,6 +325,9 @@ def normalize_task_plan_payload(
     if isinstance(meta_overrides, dict):
         meta_in.update({str(key): value for key, value in meta_overrides.items()})
 
+    request_contract = normalize_request_contract_snapshot(meta_in.get("request_contract"))
+    contract_preset = normalize_role_preset(request_contract.get("preset", "")) if request_contract else ""
+
     meta_worker_roles = meta_in.get("worker_roles")
     worker_roles: List[str] = []
     if isinstance(meta_worker_roles, list):
@@ -266,7 +339,9 @@ def normalize_task_plan_payload(
         worker_roles = worker_list[:]
 
     phase1_role_preset = normalize_role_preset(
-        meta_in.get("phase1_role_preset") or classify_dispatch_role_preset(user_prompt, selected_roles=worker_roles)
+        contract_preset
+        or meta_in.get("phase1_role_preset")
+        or classify_dispatch_role_preset(user_prompt, selected_roles=worker_roles)
     )
     phase2_team_preset = normalize_role_preset(meta_in.get("phase2_team_preset") or phase1_role_preset)
     approval_mode = _normalize_approval_mode(meta_in.get("approval_mode", "policy"))
@@ -318,6 +393,14 @@ def normalize_task_plan_payload(
                 goal=goal,
             ),
         )
+        acceptance = _merge_acceptance_floor(
+            acceptance,
+            _data_request_contract_floor(
+                request_contract=request_contract,
+                title=title,
+                goal=goal,
+            ),
+        )
 
         normalized.append(
             {
@@ -357,6 +440,8 @@ def normalize_task_plan_payload(
             "readonly": readonly,
         },
     }
+    if request_contract:
+        plan_payload["meta"]["request_contract"] = request_contract
 
     raw_phase2 = meta_in.get("phase2_team_spec")
     if raw_phase2 is None and isinstance(parsed, dict):

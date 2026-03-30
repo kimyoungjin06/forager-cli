@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_orch_roles import classify_dispatch_role_preset
+from aoe_tg_request_contract import (
+    apply_request_contract_snapshot,
+    build_request_contract,
+    request_contract_block_reason,
+    request_contract_is_blocking,
+    request_contract_planning_appendix,
+    request_contract_summary,
+)
 from aoe_tg_run_dispatch_flow import (
     RunDispatchFlowContext,
     RunDispatchFlowDeps,
@@ -126,6 +134,7 @@ def execute_run_command_flow(
     setattr(p_args, "_aoe_source_request_id", str(run_source_request_id or "").strip())
 
     prompt, fallback_notes = helpers.apply_success_first_prompt_fallbacks(prompt)
+    source_prompt = str(prompt or "").strip()
     if fallback_notes:
         log_event(
             event="run_fallback_applied",
@@ -206,7 +215,26 @@ def execute_run_command_flow(
         if str(token).strip()
     ]
     selected_dispatch_roles = parse_roles_csv(dispatch_roles)
-    selected_role_preset = classify_dispatch_role_preset(prompt, selected_roles=selected_dispatch_roles)
+    request_contract = (
+        build_request_contract(
+            source_prompt=source_prompt,
+            selected_roles=selected_dispatch_roles,
+            run_control_mode=run_control_mode,
+            run_source_task=run_source_task if isinstance(run_source_task, dict) else None,
+            intent_action=run_intent_action,
+            project_key=key,
+        )
+        if dispatch_mode
+        else {}
+    )
+    selected_role_preset = (
+        str(request_contract.get("preset", "")).strip().lower()
+        or classify_dispatch_role_preset(source_prompt, selected_roles=selected_dispatch_roles)
+    )
+    planning_prompt = source_prompt
+    contract_appendix = request_contract_planning_appendix(request_contract)
+    if contract_appendix:
+        planning_prompt = f"{source_prompt}\n\n{contract_appendix}"
     provisional_req_id = ""
     provisional_task: Optional[Dict[str, Any]] = None
     if dispatch_mode and planning_requested and (not args.dry_run):
@@ -215,7 +243,7 @@ def execute_run_command_flow(
             manager_state=manager_state,
             chat_id=chat_id,
             key=key,
-            prompt=prompt,
+            prompt=source_prompt,
             selected_roles=selected_dispatch_roles,
             require_verifier=bool(args.require_verifier),
             create_request_id=create_request_id,
@@ -233,15 +261,83 @@ def execute_run_command_flow(
             run_intent_action=run_intent_action,
             run_intent_class=run_intent_class,
             run_intent_trace=run_intent_trace,
+            request_contract=request_contract,
         )
         save_manager_state(args.manager_state_file, manager_state)
+
+    if dispatch_mode and request_contract_is_blocking(request_contract):
+        contract_reason = request_contract_block_reason(request_contract)
+        if isinstance(provisional_task, dict):
+            apply_request_contract_snapshot(provisional_task, request_contract)
+            helpers.finalize_provisional_task(
+                task=provisional_task,
+                outcome="blocked",
+                reason=contract_reason,
+                lifecycle_set_stage=lifecycle_set_stage,
+                now_iso=now_iso,
+            )
+
+        if callable(record_outcome):
+            record_outcome(
+                {
+                    "kind": "run_contract",
+                    "status": "blocked",
+                    "reason_code": "contract_incomplete",
+                    "next_step": "/offdesk review",
+                    "detail": contract_reason,
+                }
+            )
+        send(
+            "request contract incomplete\n"
+            f"- preset: {selected_role_preset or '-'}\n"
+            f"- summary: {request_contract_summary(request_contract) or '-'}\n"
+            f"- reason: {contract_reason}\n"
+            "hint: 입력 파일, 대상 컬럼, 변환 규칙, artifact contract를 명시한 뒤 다시 실행하세요.",
+            context="contract-incomplete",
+            with_menu=True,
+        )
+        log_event(
+            event="contract_incomplete",
+            project=key,
+            request_id=provisional_req_id,
+            task=provisional_task if isinstance(provisional_task, dict) else None,
+            stage="planning",
+            status="failed",
+            detail=contract_reason[:280],
+        )
+        if not args.dry_run:
+            effective_todo_id = helpers.effective_todo_token(
+                entry=entry,
+                chat_id=chat_id,
+                todo_id=todo_id,
+                run_auto_source=run_auto_source,
+            )
+            helpers.cleanup_terminal_todo_gate(
+                entry=entry,
+                chat_id=chat_id,
+                todo_id=todo_id,
+                pending_todo_used=pending_todo_used,
+                run_auto_source=run_auto_source,
+                reason=contract_reason,
+                now_iso=now_iso,
+            )
+            helpers.maybe_send_manual_followup_alert(
+                entry=entry,
+                todo_id=effective_todo_id,
+                project_key=key,
+                send=send,
+                now_iso=now_iso,
+            )
+            save_manager_state(args.manager_state_file, manager_state)
+        return True
 
     if args.dry_run:
         selected_roles = list(selected_dispatch_roles)
         plan_meta = helpers.compute_dispatch_plan(
             args=args,
             p_args=p_args,
-            prompt=prompt,
+            prompt=planning_prompt,
+            request_contract=request_contract,
             dispatch_mode=dispatch_mode,
             run_control_mode=run_control_mode,
             run_source_task=run_source_task,
@@ -349,7 +445,8 @@ def execute_run_command_flow(
                 entry=entry,
                 manager_state=manager_state,
                 chat_id=chat_id,
-                prompt=prompt,
+                prompt=planning_prompt,
+                source_prompt=source_prompt,
                 dispatch_mode=dispatch_mode,
                 dispatch_roles=dispatch_roles,
                 available_roles=available_roles,
@@ -372,6 +469,7 @@ def execute_run_command_flow(
                 todo_id=todo_id,
                 pending_todo_used=pending_todo_used,
                 selected_role_preset=selected_role_preset,
+                request_contract=request_contract,
             ),
             deps=RunDispatchFlowDeps(
                 send=send,

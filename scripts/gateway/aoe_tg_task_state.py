@@ -10,6 +10,7 @@ from aoe_tg_operator_summary import runtime_latest_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
+from aoe_tg_request_contract import apply_request_contract_snapshot, normalize_request_contract_snapshot
 from aoe_tg_team_observatory import observatory_monitor_line, task_team_observatory_snapshot
 
 
@@ -813,6 +814,35 @@ def sanitize_task_record(
     todo_status = str(task.get("todo_status", "")).strip().lower()
     if todo_status:
         task["todo_status"] = todo_status[:32]
+
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        {
+            "version": task.get("request_contract_version"),
+            "contract_type": task.get("request_contract_type"),
+            "preset": task.get("request_contract_preset"),
+            "status": task.get("request_contract_status"),
+            "summary": task.get("request_contract_summary"),
+            "missing_fields": task.get("request_contract_missing_fields"),
+            "required_outputs": task.get("request_contract_required_outputs"),
+            "fields": task.get("request_contract_fields"),
+            "artifact_contracts": task.get("request_contract_artifact_contracts"),
+        }
+    )
+    if request_contract_snapshot:
+        apply_request_contract_snapshot(task, request_contract_snapshot)
+    else:
+        for key in (
+            "request_contract_version",
+            "request_contract_type",
+            "request_contract_status",
+            "request_contract_preset",
+            "request_contract_summary",
+            "request_contract_missing_fields",
+            "request_contract_required_outputs",
+            "request_contract_fields",
+            "request_contract_artifact_contracts",
+        ):
+            task.pop(key, None)
 
     plan = task.get("plan")
     if isinstance(plan, dict):
@@ -1735,6 +1765,26 @@ def sync_task_lifecycle(
         intent_class=intent_class,
         intent_trace=intent_trace,
     )
+    dispatch_metadata = (
+        request_data.get("dispatch_metadata")
+        if isinstance(request_data.get("dispatch_metadata"), dict)
+        else {}
+    )
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        {
+            "version": dispatch_metadata.get("request_contract_version"),
+            "contract_type": dispatch_metadata.get("request_contract_type"),
+            "preset": dispatch_metadata.get("request_contract_preset"),
+            "status": dispatch_metadata.get("request_contract_status"),
+            "summary": dispatch_metadata.get("request_contract_summary"),
+            "missing_fields": dispatch_metadata.get("request_contract_missing_fields"),
+            "required_outputs": dispatch_metadata.get("request_contract_required_outputs"),
+            "fields": dispatch_metadata.get("request_contract_fields"),
+            "artifact_contracts": dispatch_metadata.get("request_contract_artifact_contracts"),
+        }
+    )
+    if request_contract_snapshot:
+        apply_request_contract_snapshot(task, request_contract_snapshot)
 
     assignments = int(snap.get("assignments", 0) or 0)
     replies = int(snap.get("replies", 0) or 0)
@@ -1831,6 +1881,11 @@ def sync_task_lifecycle(
         "failed_roles": sorted(failed_roles),
         "pending_roles": sorted(pending_roles),
     }
+    if request_contract_snapshot:
+        task["result"]["request_contract_type"] = str(request_contract_snapshot.get("contract_type", "")).strip()
+        task["result"]["request_contract_status"] = str(request_contract_snapshot.get("status", "")).strip()
+        if str(request_contract_snapshot.get("summary", "")).strip():
+            task["result"]["request_contract_summary"] = str(request_contract_snapshot.get("summary", "")).strip()
     rate_limit = request_data.get("rate_limit") if isinstance(request_data.get("rate_limit"), dict) else {}
     if rate_limit:
         task["rate_limit"] = dict(rate_limit)

@@ -28,7 +28,10 @@
       - final successful run (`T-012`) reached `planning_ready`, reran once under exec critic, and closed as `done`
       - visible project registration later exposed task lineage surface drift
   - `data/D1_happy_path.md`
-    - `planned`
+    - `executed_blocked`
+    - finding:
+      - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, and then a request-contract wrapper seam
+      - latest `T-008` run proves artifact-specific data contracts are present; the remaining blocker is narrower and contract-driven: allowed month formats are still too permissive, so invalid variants do not stay anomalous
   - `review/R1_happy_path.md`
     - `planned`
   - `mixed/M1_happy_path.md`

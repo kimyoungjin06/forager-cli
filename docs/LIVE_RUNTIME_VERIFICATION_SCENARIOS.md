@@ -75,6 +75,11 @@
 #### D1. Happy Path
 - intent:
   - produce a transformed dataset, query result, or schema-bound report
+- current status:
+  - `executed_blocked`
+- current finding:
+  - live runs progressed through schema acceptance truncation, input binding, transform policy propagation, artifact-specific output contracts, and a request-contract facade seam
+  - latest `T-008` blocker is now narrower: the data contract still treats `YYYY/M`, `YYYY-M`, `YYYY.M` as normalizable even though D1 only allows `YYYY/MM`, `YYYY-MM`, `YYYY.MM`
 - prompt shape:
   - require schema/null/sample evidence
 - expected preset:

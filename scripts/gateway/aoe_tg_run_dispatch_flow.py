@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_orch_contract import attach_phase2_team_spec
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
+from aoe_tg_request_contract import request_contract_metadata
 from aoe_tg_task_state import apply_exec_critic_lifecycle
 
 
@@ -40,6 +41,8 @@ class RunDispatchFlowContext:
     todo_id: str = ""
     pending_todo_used: bool = False
     selected_role_preset: str = ""
+    source_prompt: str = ""
+    request_contract: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -99,6 +102,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
     manager_state = ctx.manager_state
     chat_id = ctx.chat_id
     prompt = ctx.prompt
+    source_prompt = str(ctx.source_prompt or prompt).strip() or prompt
     dispatch_mode = ctx.dispatch_mode
     dispatch_roles = ctx.dispatch_roles
     available_roles = list(ctx.available_roles or [])
@@ -121,6 +125,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
     todo_id = str(ctx.todo_id or "").strip()
     pending_todo_used = bool(ctx.pending_todo_used)
     selected_role_preset = str(ctx.selected_role_preset or "").strip()
+    request_contract = ctx.request_contract if isinstance(ctx.request_contract, dict) else {}
 
     send = deps.send
     log_event = deps.log_event
@@ -182,6 +187,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
             args=args,
             p_args=p_args,
             prompt=attempt_prompt,
+            request_contract=request_contract,
             dispatch_mode=dispatch_mode,
             run_control_mode=local_run_control_mode,
             run_source_task=local_run_source_task,
@@ -310,6 +316,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
                 )
 
         dispatch_metadata: Dict[str, Any] = {}
+        dispatch_metadata.update(request_contract_metadata(request_contract))
         if isinstance(plan_data, dict):
             current_plan_meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
             phase2_team_spec = current_plan_meta.get("phase2_team_spec")
@@ -369,7 +376,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
                 key=key,
                 entry=entry,
                 manager_state=manager_state,
-                prompt=prompt,
+                prompt=source_prompt,
                 selected_roles=selected_roles,
                 verifier_roles=verifier_roles,
                 require_verifier=bool(args.require_verifier),
@@ -530,7 +537,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
         try:
             critic = deps.critique_task_result(
                 p_args,
-                prompt,
+                source_prompt,
                 state,
                 task,
                 exec_attempt,
@@ -595,7 +602,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
             entry=entry,
             key=key,
             p_args=p_args,
-            prompt=prompt,
+            prompt=source_prompt,
             state=final_state,
             req_id=final_req_id,
             task=final_task,
@@ -654,7 +661,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
         entry=entry,
         key=key,
         p_args=p_args,
-        prompt=prompt,
+        prompt=source_prompt,
         state=final_state,
         req_id=final_req_id,
         task=final_task,
@@ -691,7 +698,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
         key=key,
         entry=entry,
         p_args=p_args,
-        prompt=prompt,
+        prompt=source_prompt,
         state=final_state,
         req_id=final_req_id,
         task=final_task,

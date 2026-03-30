@@ -1010,6 +1010,70 @@ def test_sync_task_lifecycle_records_intent_lineage_metadata(tmp_path: Path) -> 
     assert task["context"]["intent_action"] == "offdesk_review"
 
 
+def test_sync_task_lifecycle_persists_request_contract_snapshot(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    entry = {
+        "name": "demo_proj",
+        "project_alias": "O9",
+        "project_root": str(tmp_path),
+        "team_dir": str(team_dir),
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+    }
+    request_data = {
+        "request_id": "REQ-CONTRACT",
+        "role_states": [{"role": "DataEngineer", "status": "done"}],
+        "counts": {"assignments": 1, "replies": 1},
+        "complete": True,
+        "dispatch_metadata": {
+            "request_contract_version": "2026-03-30.v1",
+            "request_contract_type": "data",
+            "request_contract_status": "complete",
+            "request_contract_preset": "data",
+            "request_contract_summary": "data | source=data/monthly_raw.csv | column=month",
+            "request_contract_missing_fields": [],
+            "request_contract_required_outputs": ["schema_report.json", "null_summary.md", "sample_5.csv"],
+            "request_contract_fields": {
+                "source_path": "data/monthly_raw.csv",
+                "target_column": "month",
+                "accepted_input_formats": ["YYYY/MM", "YYYY-MM", "YYYY.MM"],
+                "normalize_to": "YYYY-MM",
+            },
+            "request_contract_artifact_contracts": {
+                "schema_report": {
+                    "path": "schema_report.json",
+                    "format": "json",
+                    "required_fields": ["columns[].name", "columns[].inferred_type"],
+                }
+            },
+        },
+    }
+
+    task = gw.sync_task_lifecycle(
+        entry=entry,
+        request_data=request_data,
+        prompt="normalize monthly csv",
+        mode="dispatch",
+        selected_roles=["DataEngineer"],
+        verifier_roles=[],
+        require_verifier=False,
+        verifier_candidates=[],
+    )
+
+    assert isinstance(task, dict)
+    assert task["request_contract_type"] == "data"
+    assert task["request_contract_status"] == "complete"
+    assert task["request_contract_preset"] == "data"
+    assert task["request_contract_fields"]["source_path"] == "data/monthly_raw.csv"
+    assert task["request_contract_fields"]["target_column"] == "month"
+    assert task["request_contract_artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
+    assert task["result"]["request_contract_type"] == "data"
+    assert task["result"]["request_contract_status"] == "complete"
+
+
 def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
     task = gw.sanitize_task_record(
         {

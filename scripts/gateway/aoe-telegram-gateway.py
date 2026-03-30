@@ -791,7 +791,22 @@ def default_manager_state(project_root: Path, team_dir: Path) -> Dict[str, Any]:
 
 
 def sanitize_task_record(raw_task: Dict[str, Any], req_id: str) -> Dict[str, Any]:
-    return runtime_read_mod.sanitize_task_record(raw_task, req_id)
+    return sanitize_task_record_state(
+        raw_task,
+        req_id,
+        dedupe_roles=dedupe_roles,
+        lifecycle_stages=LIFECYCLE_STAGES,
+        normalize_stage_status=normalize_stage_status,
+        normalize_task_status=normalize_task_status,
+        now_iso=now_iso,
+        history_limit=DEFAULT_TASK_HISTORY_LIMIT,
+        normalize_task_plan_schema=normalize_task_plan_payload,
+        normalize_plan_critic_payload=normalize_plan_critic_payload,
+        normalize_plan_replans_payload=normalize_plan_replans_payload,
+        plan_critic_primary_issue=plan_critic_primary_issue,
+        normalize_exec_critic_payload=normalize_exec_critic_payload,
+        build_task_context=build_task_context,
+    )
 
 
 def load_manager_state(path: Path, project_root: Path, team_dir: Path) -> Dict[str, Any]:
@@ -1603,6 +1618,7 @@ def run_phase1_ensemble_planning(
     available_roles: List[str],
     selected_roles: Optional[List[str]] = None,
     role_preset: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
     report_progress: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     return control_plane_mod.run_phase1_ensemble_planning(
@@ -1611,6 +1627,7 @@ def run_phase1_ensemble_planning(
         available_roles,
         selected_roles=selected_roles,
         role_preset=role_preset,
+        request_contract=request_contract,
         report_progress=report_progress,
         run_codex_exec_fn=lambda _args, prompt, timeout_sec: run_codex_exec(_args, prompt, timeout_sec=timeout_sec),
         run_claude_exec_fn=lambda _args, prompt, timeout_sec: run_claude_exec(_args, prompt, timeout_sec=timeout_sec),

@@ -375,6 +375,7 @@ def build_task_execution_plan(
     user_prompt: str,
     available_roles: List[str],
     max_subtasks: int,
+    request_contract: Optional[Dict[str, Any]] = None,
     *,
     available_worker_roles_fn: Callable[[List[str]], List[str]],
     run_control_plane_exec_fn: Callable[..., str],
@@ -449,7 +450,13 @@ def build_task_execution_plan(
         stage="planner",
     )
     parsed = parse_json_object_from_text_fn(raw)
-    return normalize_task_plan_payload_fn(parsed, user_prompt=user_prompt, workers=workers, max_subtasks=max_subtasks)
+    return normalize_task_plan_payload_fn(
+        parsed,
+        user_prompt=user_prompt,
+        workers=workers,
+        max_subtasks=max_subtasks,
+        meta_overrides={"request_contract": request_contract or {}},
+    )
 
 
 def critique_task_execution_plan(
@@ -629,6 +636,7 @@ def run_phase1_ensemble_planning(
     *,
     selected_roles: Optional[List[str]],
     role_preset: str,
+    request_contract: Optional[Dict[str, Any]] = None,
     report_progress: Optional[Callable[..., None]],
     run_codex_exec_fn: Callable[[Any, str, int], str],
     run_claude_exec_fn: Callable[[Any, str, int], str],
@@ -703,6 +711,7 @@ def run_phase1_ensemble_planning(
         available_roles=available_roles,
         selected_roles=selected_roles,
         role_preset=role_preset,
+        request_contract=request_contract,
         normalize_task_plan_payload=normalize_task_plan_payload_fn,
         parse_json_object_from_text=parse_json_object_from_text_fn,
         run_provider_execs=available_execs,
