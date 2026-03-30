@@ -500,6 +500,17 @@ def data_request_contract_acceptance_floor(
         )
         if enabled
     ]
+    semantic_title_targets = [
+        token
+        for token, enabled in (
+            ("normalized", bool(not explicit_artifact_targets and _contains_any(title, ["normalize", "transform", "정규화", "변환"]))),
+            ("schema", bool(not explicit_artifact_targets and _contains_any(title, ["schema", "스키마", "report"]))),
+            ("null", bool(not explicit_artifact_targets and _contains_any(title, ["null", "결측"]))),
+            ("sample", bool(not explicit_artifact_targets and _contains_any(title, ["sample", "샘플"]))),
+        )
+        if enabled
+    ]
+    dominant_semantic_target = semantic_title_targets[0] if len(semantic_title_targets) == 1 else ""
     low_task_context = task_context.lower()
     is_transform = bool(re.search(r"\b(normalize|transform)\b", low_task_context)) or _contains_any(
         task_context,
@@ -510,6 +521,8 @@ def data_request_contract_acceptance_floor(
     is_sample = _contains_any(task_context, ["sample", "샘플", "5행", "5 rows"])
     if explicit_artifact_targets:
         evidence_targets = list(explicit_artifact_targets)
+    elif semantic_title_targets:
+        evidence_targets = list(semantic_title_targets)
     else:
         evidence_targets = [
             token
@@ -525,6 +538,10 @@ def data_request_contract_acceptance_floor(
     explicit_schema = "schema" in explicit_artifact_targets
     explicit_null = "null" in explicit_artifact_targets
     explicit_sample = "sample" in explicit_artifact_targets
+    dominant_normalized = dominant_semantic_target == "normalized"
+    dominant_schema = dominant_semantic_target == "schema"
+    dominant_null = dominant_semantic_target == "null"
+    dominant_sample = dominant_semantic_target == "sample"
 
     floor: List[str] = []
     source_path = _trim(fields.get("source_path", ""), 200)
@@ -716,7 +733,7 @@ def data_request_contract_acceptance_floor(
             floor.append(
                 f"`{sample_contract.get('path', 'sample_5.csv')}` follows request-contract {sample_policy_summary}."
             )
-    elif explicit_schema and schema_contract and not (explicit_normalized or is_transform):
+    elif (explicit_schema or dominant_schema) and schema_contract and not (explicit_normalized or dominant_normalized or is_transform):
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column plus canonical anomaly evidence.",
@@ -728,7 +745,7 @@ def data_request_contract_acceptance_floor(
             + inference_policy_summary
             + ".",
         ]
-    elif explicit_null and null_contract:
+    elif (explicit_null or dominant_null) and null_contract:
         floor = [
             f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
             (
@@ -737,13 +754,13 @@ def data_request_contract_acceptance_floor(
             ),
             "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
         ]
-    elif explicit_sample and sample_contract:
+    elif (explicit_sample or dominant_sample) and sample_contract:
         floor = [
             f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",
             f"Sampling follows request-contract {sample_policy_summary}.",
             "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
         ]
-    elif explicit_normalized or is_transform:
+    elif explicit_normalized or dominant_normalized or is_transform:
         if source_path and target_column and normalized_path:
             floor.append(
                 f"Transform acceptance writes `{normalized_path}` from source `{source_path}`; row count + row/header order stay unchanged, non-target columns stay exact, and only target column `{target_column}` may change."
