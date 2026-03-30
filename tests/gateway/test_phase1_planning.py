@@ -938,10 +938,14 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["fields"]["month_bucket_policy"]["valid_patterns"] == ["YYYY/MM", "YYYY-MM", "YYYY.MM"]
     assert contract["fields"]["month_bucket_policy"]["valid_year_rule"] == "4-digit-year"
     assert contract["fields"]["month_bucket_policy"]["valid_month_rule"] == "01-12"
+    assert contract["fields"]["month_bucket_policy"]["trim_before_match"] is True
+    assert contract["fields"]["month_bucket_policy"]["match_order"][0] == "empty-string"
     assert "literal-null" in contract["fields"]["month_bucket_policy"]["anomaly_buckets"]
     assert contract["fields"]["schema_inference_policy"]["allowed_inferred_types"] == ["string", "integer", "number", "boolean"]
     assert contract["fields"]["schema_inference_policy"]["precedence_order"] == ["integer", "number", "boolean", "string"]
     assert contract["fields"]["schema_inference_policy"]["mixed_type_resolution"] == "string"
+    assert contract["fields"]["schema_null_count_policy"]["null_like_buckets"] == ["empty-string", "whitespace-only", "literal-null", "literal-nan"]
+    assert "malformed-value" in contract["fields"]["schema_null_count_policy"]["target_invalid_buckets_excluded"]
     assert contract["artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
     assert contract["artifact_contracts"]["schema_report"]["inference_policy"]["type_rule_source"] == "observable-transformed-values"
     assert contract["artifact_contracts"]["null_summary"]["path"] == "null_summary.md"
@@ -1028,18 +1032,21 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
     assert any("normalized.csv" in item for item in acceptance_by_id["S1"])
     assert any("request-contract valid month formats YYYY/MM, YYYY-MM, YYYY.MM" in item for item in acceptance_by_id["S1"])
     assert any("all other month buckets stay anomalies" in item for item in acceptance_by_id["S1"])
-    assert any("`month_bucket_policy` anomaly buckets" in item for item in acceptance_by_id["S1"])
+    assert any("Month bucket matching follows request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S1"])
+    assert any("trim-before-match" in item for item in acceptance_by_id["S1"])
+    assert any("empty-string -> whitespace-only -> literal-null" in item for item in acceptance_by_id["S1"])
     assert any("row count unchanged" in item for item in acceptance_by_id["S1"])
     assert any("preserves non-target columns exactly" in item for item in acceptance_by_id["S1"])
     assert any("schema_report.json" in item for item in acceptance_by_id["S2"])
     assert any("every transformed output column" in item for item in acceptance_by_id["S2"])
     assert any("Type rules are observable" in item for item in acceptance_by_id["S2"])
-    assert any("request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S2"])
-    assert any("request-contract `schema_inference_policy`" in item for item in acceptance_by_id["S2"])
-    assert any("mixed/tie -> `string`" in item for item in acceptance_by_id["S2"])
+    assert any("`schema_null_count_policy`" in item for item in acceptance_by_id["S2"])
+    assert any("exclude month invalid buckets" in item for item in acceptance_by_id["S2"])
+    assert any("`schema_inference_policy`" in item for item in acceptance_by_id["S2"])
+    assert any("integer>number>boolean>string" in item for item in acceptance_by_id["S2"])
     assert any("null_summary.md" in item for item in acceptance_by_id["S3"])
     assert any("invalid month examples" in item for item in acceptance_by_id["S3"])
-    assert any("request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S3"])
+    assert any("`schema_null_count_policy`" in item for item in acceptance_by_id["S3"])
     assert any("sample_5.csv" in item for item in acceptance_by_id["S4"])
     assert any("exactly five data rows taken in transformed-output order" in item for item in acceptance_by_id["S4"])
 
