@@ -1204,6 +1204,7 @@ def test_sanitize_task_record_preserves_plan_convergence_metadata() -> None:
             "plan_issue_history": [
                 {
                     "round": "1",
+                    "review_pass": "contract",
                     "status": "issues",
                     "primary_issue": "missing acceptance",
                     "issue_codes": ["acceptance_gap"],
@@ -1212,6 +1213,7 @@ def test_sanitize_task_record_preserves_plan_convergence_metadata() -> None:
                 },
                 {
                     "round": "2",
+                    "review_pass": "execution",
                     "status": "issues",
                     "primary_issue": "missing acceptance",
                     "issue_codes": ["acceptance_gap"],
@@ -1231,6 +1233,7 @@ def test_sanitize_task_record_preserves_plan_convergence_metadata() -> None:
     assert task["plan_review_count"] == 3
     assert task["plan_issue_codes"] == ["acceptance_gap", "artifact_contract_gap"]
     assert task["plan_issue_history"][0]["round"] == 1
+    assert task["plan_issue_history"][0]["review_pass"] == "contract"
     assert task["plan_issue_history"][0]["provider"] == "codex"
     assert task["plan_convergence_status"] == "stalled"
     assert task["plan_stalled_reason"] == "missing acceptance"
@@ -1285,6 +1288,15 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
             "plan_critic": {"approved": False, "issues": ["missing acceptance criteria"]},
             "plan_gate_passed": False,
             "plan_gate_reason": issue,
+            "plan_review_count": 3,
+            "plan_issue_history": [
+                {"round": 1, "review_pass": "contract", "status": "issues", "primary_issue": "missing acceptance criteria", "issue_codes": ["acceptance_gap"], "issue_count": 1},
+                {"round": 2, "review_pass": "execution", "status": "issues", "primary_issue": "missing acceptance criteria", "issue_codes": ["acceptance_gap"], "issue_count": 1},
+                {"round": 3, "review_pass": "verification", "status": "issues", "primary_issue": "missing acceptance criteria", "issue_codes": ["acceptance_gap"], "issue_count": 1},
+            ],
+            "plan_convergence_status": "stalled",
+            "plan_stalled_reason": "missing acceptance criteria",
+            "plan_last_round": 3,
             "exec_critic": {
                 "verdict": "retry",
                 "action": "replan",
@@ -1298,7 +1310,10 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
 
     assert "plan_gate: blocked" in summary
     assert "plan_gate_reason: missing acceptance criteria" in summary
-    assert "team_phase: blocked" in summary
+    assert "plan_convergence: stalled reviews=3 last_round=3" in summary
+    assert "plan_stalled_reason: missing acceptance criteria" in summary
+    assert "plan_review_focus: verification | missing acceptance criteria" in summary
+    assert "team_phase: manual_intervention" in summary
     assert "phase2_execution: single lanes=1" in summary
     assert "phase2_review: single lanes=1" in summary
     assert "phase2_exec_plan: single workers_parallel=no reviews_parallel=no readonly=yes" in summary

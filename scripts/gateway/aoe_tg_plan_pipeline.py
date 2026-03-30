@@ -73,6 +73,15 @@ def _normalize_plan_issue_code(issue: Any) -> str:
     return "critic_issue"
 
 
+def _review_pass_for_round(round_no: int) -> str:
+    idx = max(1, int(round_no or 1))
+    if idx <= 1:
+        return "contract"
+    if idx == 2:
+        return "execution"
+    return "verification"
+
+
 def _issue_codes_from_critic(critic: Dict[str, Any]) -> List[str]:
     codes: List[str] = []
     for issue in list((critic or {}).get("issues") or []):
@@ -94,6 +103,7 @@ def _build_issue_row(
     primary_issue = plan_critic_primary_issue(normalized, limit=240)
     row: Dict[str, Any] = {
         "round": max(1, int(round_no or 1)),
+        "review_pass": _review_pass_for_round(round_no),
         "status": "approved" if not list(normalized.get("issues") or []) else "issues",
         "issue_count": len(list(normalized.get("issues") or [])),
         "issue_codes": _issue_codes_from_critic(normalized),
@@ -630,6 +640,45 @@ def apply_plan_and_lineage(
     if task is None:
         return
 
+    task["plan_review_count"] = max(0, int(plan_review_count or 0))
+    if plan_issue_codes:
+        task["plan_issue_codes"] = [str(item).strip()[:64] for item in plan_issue_codes if str(item).strip()]
+    else:
+        task.pop("plan_issue_codes", None)
+    if plan_issue_history:
+        task["plan_issue_history"] = list(plan_issue_history)
+    else:
+        task.pop("plan_issue_history", None)
+    if plan_convergence_status:
+        task["plan_convergence_status"] = str(plan_convergence_status).strip().lower()[:32]
+    else:
+        task.pop("plan_convergence_status", None)
+    if plan_stalled_reason:
+        task["plan_stalled_reason"] = str(plan_stalled_reason).strip()[:240]
+    else:
+        task.pop("plan_stalled_reason", None)
+    if int(plan_last_round or 0) > 0:
+        task["plan_last_round"] = int(plan_last_round)
+    else:
+        task.pop("plan_last_round", None)
+    if phase1_mode:
+        task["phase1_mode"] = str(phase1_mode).strip()
+    if int(phase1_rounds or 0) > 0:
+        task["phase1_rounds"] = int(phase1_rounds)
+    if phase1_providers:
+        task["phase1_providers"] = [str(item).strip() for item in phase1_providers if str(item).strip()]
+    task["plan_gate_passed"] = not bool(plan_gate_blocked)
+    if plan_gate_reason:
+        task["plan_gate_reason"] = str(plan_gate_reason).strip()[:240]
+    elif isinstance(plan_critic, dict):
+        fallback_reason = plan_critic_primary_issue(plan_critic, limit=240)
+        if fallback_reason:
+            task["plan_gate_reason"] = fallback_reason
+        else:
+            task.pop("plan_gate_reason", None)
+    else:
+        task.pop("plan_gate_reason", None)
+
     if isinstance(plan_data, dict):
         meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
         role_preset = normalize_role_preset(meta.get("phase1_role_preset") or phase1_role_preset)
@@ -638,40 +687,8 @@ def apply_plan_and_lineage(
         task["plan_critic"] = plan_critic
         task["plan_roles"] = plan_roles
         task["plan_replans"] = plan_replans
-        task["plan_review_count"] = max(0, int(plan_review_count or 0))
-        if plan_issue_codes:
-            task["plan_issue_codes"] = [str(item).strip()[:64] for item in plan_issue_codes if str(item).strip()]
-        else:
-            task.pop("plan_issue_codes", None)
-        if plan_issue_history:
-            task["plan_issue_history"] = list(plan_issue_history)
-        else:
-            task.pop("plan_issue_history", None)
-        if plan_convergence_status:
-            task["plan_convergence_status"] = str(plan_convergence_status).strip().lower()[:32]
-        else:
-            task.pop("plan_convergence_status", None)
-        if plan_stalled_reason:
-            task["plan_stalled_reason"] = str(plan_stalled_reason).strip()[:240]
-        else:
-            task.pop("plan_stalled_reason", None)
-        if int(plan_last_round or 0) > 0:
-            task["plan_last_round"] = int(plan_last_round)
-        else:
-            task.pop("plan_last_round", None)
-        if phase1_mode:
-            task["phase1_mode"] = str(phase1_mode).strip()
-        if int(phase1_rounds or 0) > 0:
-            task["phase1_rounds"] = int(phase1_rounds)
-        if phase1_providers:
-            task["phase1_providers"] = [str(item).strip() for item in phase1_providers if str(item).strip()]
         task["phase1_role_preset"] = role_preset
         task["phase2_team_preset"] = team_preset
-        task["plan_gate_passed"] = not bool(plan_gate_blocked)
-        if plan_gate_reason:
-            task["plan_gate_reason"] = str(plan_gate_reason).strip()[:240]
-        else:
-            task["plan_gate_reason"] = plan_critic_primary_issue(plan_critic, limit=240)
         lifecycle_set_stage(
             task,
             "planning",

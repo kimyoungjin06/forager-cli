@@ -82,6 +82,9 @@ def _normalize_plan_issue_history(raw: Any, *, keep: int = 20) -> List[Dict[str,
         except Exception:
             round_no = 1
         row: Dict[str, Any] = {"round": round_no}
+        review_pass = str(item.get("review_pass", "")).strip().lower()
+        if review_pass in {"contract", "execution", "verification"}:
+            row["review_pass"] = review_pass
         status = str(item.get("status", "")).strip().lower()
         if status in {"approved", "issues"}:
             row["status"] = status

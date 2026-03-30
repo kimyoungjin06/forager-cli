@@ -111,6 +111,7 @@ def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
     assert result["plan_review_count"] == 3
     assert result["plan_convergence_status"] == "ready"
     assert len(result["plan_issue_history"]) == 3
+    assert [row["review_pass"] for row in result["plan_issue_history"]] == ["contract", "execution", "verification"]
     assert result["phase1_providers"] == ["codex", "claude"]
     assert len(result["plan_replans"]) == 3
     assert result["plan_data"]["subtasks"][0]["owner_role"] == "Codex-Writer"
@@ -170,6 +171,7 @@ def test_phase1_ensemble_marks_repeated_blocker_as_stalled() -> None:
     assert result["plan_stalled_reason"] == "missing artifact-specific acceptance"
     assert result["plan_review_count"] == 3
     assert len(result["plan_issue_history"]) == 3
+    assert [row["review_pass"] for row in result["plan_issue_history"]] == ["contract", "execution", "verification"]
     assert result["plan_issue_codes"] == ["acceptance_gap"]
 
 

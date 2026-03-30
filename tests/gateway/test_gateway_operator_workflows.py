@@ -2156,6 +2156,40 @@ def test_handle_run_or_unknown_command_materializes_provisional_task_before_plan
                 "plan_error": "",
                 "plan_gate_blocked": True,
                 "plan_gate_reason": "missing acceptance",
+                "plan_review_count": 3,
+                "plan_issue_codes": ["acceptance_gap"],
+                "plan_issue_history": [
+                    {
+                        "round": 1,
+                        "review_pass": "contract",
+                        "status": "issues",
+                        "primary_issue": "missing acceptance",
+                        "issue_codes": ["acceptance_gap"],
+                        "issue_count": 1,
+                        "provider": "codex",
+                    },
+                    {
+                        "round": 2,
+                        "review_pass": "execution",
+                        "status": "issues",
+                        "primary_issue": "missing acceptance",
+                        "issue_codes": ["acceptance_gap"],
+                        "issue_count": 1,
+                        "provider": "claude",
+                    },
+                    {
+                        "round": 3,
+                        "review_pass": "verification",
+                        "status": "issues",
+                        "primary_issue": "missing acceptance",
+                        "issue_codes": ["acceptance_gap"],
+                        "issue_count": 1,
+                        "provider": "codex",
+                    },
+                ],
+                "plan_convergence_status": "stalled",
+                "plan_stalled_reason": "missing acceptance",
+                "plan_last_round": 3,
                 "phase1_mode": "ensemble",
                 "phase1_rounds": 3,
                 "phase1_providers": ["codex", "claude"],
@@ -2218,6 +2252,12 @@ def test_handle_run_or_unknown_command_materializes_provisional_task_before_plan
     assert task["phase1_current_provider"] == "codex"
     assert task["phase1_candidate_roles"] == ["Codex-Dev"]
     assert task["plan_gate_reason"] == "missing acceptance"
+    assert task["plan_review_count"] == 3
+    assert task["plan_issue_codes"] == ["acceptance_gap"]
+    assert task["plan_issue_history"][-1]["review_pass"] == "verification"
+    assert task["plan_convergence_status"] == "stalled"
+    assert task["plan_stalled_reason"] == "missing acceptance"
+    assert task["plan_last_round"] == 3
     assert task["stages"]["planning"] == "failed"
     assert task["stages"]["close"] == "failed"
     assert manager_state["projects"]["twinpaper"]["last_request_id"] == "REQ-PLAN"

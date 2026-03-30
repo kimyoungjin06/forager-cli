@@ -506,6 +506,39 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
             if gate_reason:
                 lines.append("plan_gate_reason: " + gate_reason[:240])
 
+    try:
+        plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    except Exception:
+        plan_review_count = 0
+    plan_convergence_status = str(task.get("plan_convergence_status", "")).strip().lower()
+    try:
+        plan_last_round = max(0, int(task.get("plan_last_round", 0) or 0))
+    except Exception:
+        plan_last_round = 0
+    if plan_review_count or plan_convergence_status or plan_last_round:
+        lines.append(
+            "plan_convergence: {status} reviews={reviews} last_round={round_no}".format(
+                status=plan_convergence_status or "-",
+                reviews=plan_review_count or 0,
+                round_no=plan_last_round or plan_review_count or 0,
+            )
+        )
+    plan_stalled_reason = str(task.get("plan_stalled_reason", "")).strip()
+    if plan_stalled_reason:
+        lines.append("plan_stalled_reason: " + plan_stalled_reason[:240])
+    plan_issue_history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
+    if plan_issue_history:
+        latest_issue = plan_issue_history[-1] if isinstance(plan_issue_history[-1], dict) else {}
+        latest_pass = str(latest_issue.get("review_pass", "")).strip().lower()
+        latest_issue_text = str(latest_issue.get("primary_issue", "")).strip()
+        if latest_pass or latest_issue_text:
+            lines.append(
+                "plan_review_focus: {review_pass} | {issue}".format(
+                    review_pass=latest_pass or "-",
+                    issue=(latest_issue_text[:240] if latest_issue_text else "-"),
+                )
+            )
+
     replans = task.get("plan_replans")
     if isinstance(replans, list) and replans:
         lines.append(f"plan_replans: {len(replans)}")

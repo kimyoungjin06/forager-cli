@@ -100,11 +100,21 @@ def _detect_stalled_issue(rows: List[Dict[str, Any]]) -> str:
     return ""
 
 
+def _review_pass_for_round(round_no: int) -> str:
+    idx = max(1, int(round_no or 1))
+    if idx <= 1:
+        return "contract"
+    if idx == 2:
+        return "execution"
+    return "verification"
+
+
 def _issue_row(*, round_no: int, provider: str, critic: Dict[str, Any]) -> Dict[str, Any]:
     normalized = normalize_plan_critic_payload(critic or {}, max_items=8)
     primary_issue = plan_critic_primary_issue(normalized, limit=240)
     row: Dict[str, Any] = {
         "round": max(1, int(round_no or 1)),
+        "review_pass": _review_pass_for_round(round_no),
         "provider": str(provider or "").strip()[:64],
         "status": "approved" if not list(normalized.get("issues") or []) else "issues",
         "issue_count": len(list(normalized.get("issues") or [])),
