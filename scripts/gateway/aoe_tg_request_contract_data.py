@@ -223,6 +223,36 @@ def _artifact_contracts(outputs: List[str], *, target_column: str) -> Dict[str, 
     return contracts
 
 
+def _month_bucket_policy(
+    *,
+    accepted_formats: List[str],
+    normalize_to: str,
+    invalid_value_policy: Dict[str, bool],
+) -> Dict[str, Any]:
+    if not accepted_formats and not normalize_to and not any(bool(value) for value in invalid_value_policy.values()):
+        return {}
+    return {
+        "valid_patterns": _dedupe_rows(accepted_formats, limit=6),
+        "valid_year_rule": "4-digit-year",
+        "valid_month_rule": "01-12",
+        "normalize_to": _trim(normalize_to, 32),
+        "anomaly_buckets": [
+            "one-digit-month",
+            "bad-year",
+            "month-00",
+            "month-13-plus",
+            "whitespace-only",
+            "empty-string",
+            "literal-null",
+            "literal-nan",
+            "malformed-value",
+        ],
+        "preserve_row": bool(invalid_value_policy.get("preserve_row")),
+        "preserve_original_value": bool(invalid_value_policy.get("preserve_original_value")),
+        "record_anomaly": bool(invalid_value_policy.get("record_anomaly")),
+    }
+
+
 def data_request_contract_matches(prompt: str) -> bool:
     src = str(prompt or "")
     if not src.strip():
@@ -253,6 +283,11 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
     accepted_formats = _extract_accepted_formats(source_prompt)
     normalize_to = _extract_normalize_to(source_prompt)
     invalid_value_policy = _extract_invalid_value_policy(source_prompt)
+    month_bucket_policy = _month_bucket_policy(
+        accepted_formats=accepted_formats,
+        normalize_to=normalize_to,
+        invalid_value_policy=invalid_value_policy,
+    )
     output_artifacts = _data_output_artifacts(source_prompt)
     artifact_contracts = _artifact_contracts(output_artifacts, target_column=target_column)
 
@@ -301,6 +336,7 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
             "normalize_to": normalize_to,
             "zero_pad": "YYYY-MM" in normalize_to,
             "invalid_value_policy": invalid_value_policy,
+            "month_bucket_policy": month_bucket_policy,
         },
         "required_outputs": [
             str((artifact_contracts.get(name) or {}).get("path", name)).strip() or name
@@ -382,16 +418,28 @@ def data_request_contract_acceptance_floor(
     ]
     normalize_to = _trim(fields.get("normalize_to", ""), 32)
     invalid_policy = fields.get("invalid_value_policy") if isinstance(fields.get("invalid_value_policy"), dict) else {}
+    month_bucket_policy = (
+        fields.get("month_bucket_policy") if isinstance(fields.get("month_bucket_policy"), dict) else {}
+    )
+    valid_patterns = [
+        _trim(item, 32) for item in (month_bucket_policy.get("valid_patterns") or []) if _trim(item, 32)
+    ] or accepted_formats
+    bucket_normalize_to = _trim(month_bucket_policy.get("normalize_to", ""), 32) or normalize_to
+    bucket_year_rule = _trim(month_bucket_policy.get("valid_year_rule", ""), 64) or "4-digit-year"
+    bucket_month_rule = _trim(month_bucket_policy.get("valid_month_rule", ""), 32) or "01-12"
+    anomaly_buckets = [
+        _trim(item, 48) for item in (month_bucket_policy.get("anomaly_buckets") or []) if _trim(item, 48)
+    ]
 
     if combined_evidence:
         floor = []
         if null_contract:
             floor.append(
-                f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, and invalid month examples from the transformed output while preserving the requested row/value policy."
+                f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, and invalid month examples from the transformed output while preserving the requested row/value policy and the request-contract `month_bucket_policy`."
             )
         if schema_contract:
             floor.append(
-                f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; each type_rule states the observable inference rule and uses the same null/anomaly classification as `{null_contract.get('path', 'null_summary.md') or 'null_summary.md'}`."
+                f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; each type_rule states the observable inference rule and uses the request-contract `month_bucket_policy` shared with `{null_contract.get('path', 'null_summary.md') or 'null_summary.md'}`."
             )
         if sample_contract:
             floor.append(
@@ -401,14 +449,14 @@ def data_request_contract_acceptance_floor(
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Type rules are observable, coverage is complete, and `null_count` uses the same null/anomaly classification as `null_summary.md`.",
+            "Type rules are observable, coverage is complete, and `null_count` follows the request-contract `month_bucket_policy` shared with `null_summary.md`.",
         ]
     elif explicit_null and null_contract:
         floor = [
             f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
             (
                 "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output "
-                "using the same null/anomaly classification that `schema_report.json` uses for null_count."
+                "using the same request-contract `month_bucket_policy` that `schema_report.json` uses for null_count."
             ),
             "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
         ]
@@ -429,14 +477,17 @@ def data_request_contract_acceptance_floor(
                 f"Transform acceptance binds source `{source_path}` and target column `{target_column}` explicitly."
             )
         valid_rule = ""
-        if accepted_formats and normalize_to:
+        if valid_patterns and bucket_normalize_to:
             valid_rule = (
-                f"Only {', '.join(accepted_formats)} with a 4-digit year and month 01-12 normalize to {normalize_to}; "
-                "YYYY/M, YYYY-M, YYYY.M, bad years, and malformed variants stay anomalies."
+                f"Only request-contract valid month formats {', '.join(valid_patterns)} with {bucket_year_rule} and month {bucket_month_rule} normalize to {bucket_normalize_to}; all other month buckets stay anomalies."
             )
-        invalid_bucket_rule = (
-            "Whitespace-only, empty string, literal null/NaN, and month 00 or 13+ stay anomalies and preserve the original row/value."
-        )
+        invalid_bucket_rule = ""
+        if anomaly_buckets:
+            invalid_bucket_rule = (
+                "Request-contract anomaly buckets "
+                + ", ".join(anomaly_buckets)
+                + " preserve the original row/value and feed the same counts used by `schema_report.json` and `null_summary.md`."
+            )
         actions: List[str] = []
         if bool(invalid_policy.get("preserve_row")):
             actions.append("preserve the original row")
@@ -474,14 +525,14 @@ def data_request_contract_acceptance_floor(
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Type rules are observable, coverage is complete, and `null_count` uses the same null/anomaly classification as `null_summary.md`.",
+            "Type rules are observable, coverage is complete, and `null_count` follows the request-contract `month_bucket_policy` shared with `null_summary.md`.",
         ]
     elif is_null and null_contract:
         floor = [
             f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
             (
                 "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output "
-                "using the same null/anomaly classification that `schema_report.json` uses for null_count."
+                "using the same request-contract `month_bucket_policy` that `schema_report.json` uses for null_count."
             ),
             "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
         ]

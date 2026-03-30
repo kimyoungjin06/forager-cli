@@ -935,6 +935,10 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["fields"]["invalid_value_policy"]["preserve_row"] is True
     assert contract["fields"]["invalid_value_policy"]["preserve_original_value"] is True
     assert contract["fields"]["invalid_value_policy"]["record_anomaly"] is True
+    assert contract["fields"]["month_bucket_policy"]["valid_patterns"] == ["YYYY/MM", "YYYY-MM", "YYYY.MM"]
+    assert contract["fields"]["month_bucket_policy"]["valid_year_rule"] == "4-digit-year"
+    assert contract["fields"]["month_bucket_policy"]["valid_month_rule"] == "01-12"
+    assert "literal-null" in contract["fields"]["month_bucket_policy"]["anomaly_buckets"]
     assert contract["artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
     assert contract["artifact_contracts"]["null_summary"]["path"] == "null_summary.md"
     assert contract["artifact_contracts"]["sample_output"]["path"] == "sample_5.csv"
@@ -1018,18 +1022,19 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
 
     assert any("source `data/monthly_raw.csv`" in item for item in acceptance_by_id["S1"])
     assert any("normalized.csv" in item for item in acceptance_by_id["S1"])
-    assert any("Only YYYY/MM, YYYY-MM, YYYY.MM" in item for item in acceptance_by_id["S1"])
-    assert any("stay anomalies" in item for item in acceptance_by_id["S1"])
-    assert any("Whitespace-only, empty string, literal null/NaN, and month 00 or 13+" in item for item in acceptance_by_id["S1"])
+    assert any("request-contract valid month formats YYYY/MM, YYYY-MM, YYYY.MM" in item for item in acceptance_by_id["S1"])
+    assert any("all other month buckets stay anomalies" in item for item in acceptance_by_id["S1"])
+    assert any("Request-contract anomaly buckets" in item for item in acceptance_by_id["S1"])
+    assert any("literal-null" in item for item in acceptance_by_id["S1"])
     assert any("row count unchanged" in item for item in acceptance_by_id["S1"])
     assert any("preserves non-target columns exactly" in item for item in acceptance_by_id["S1"])
     assert any("schema_report.json" in item for item in acceptance_by_id["S2"])
     assert any("every transformed output column" in item for item in acceptance_by_id["S2"])
     assert any("Type rules are observable" in item for item in acceptance_by_id["S2"])
-    assert any("same null/anomaly classification as `null_summary.md`" in item for item in acceptance_by_id["S2"])
+    assert any("request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S2"])
     assert any("null_summary.md" in item for item in acceptance_by_id["S3"])
     assert any("invalid month examples" in item for item in acceptance_by_id["S3"])
-    assert any("same null/anomaly classification" in item for item in acceptance_by_id["S3"])
+    assert any("request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S3"])
     assert any("sample_5.csv" in item for item in acceptance_by_id["S4"])
     assert any("exactly five data rows taken in transformed-output order" in item for item in acceptance_by_id["S4"])
 
@@ -1055,7 +1060,7 @@ def test_data_request_contract_combined_evidence_task_gets_file_specific_accepta
     assert len(floor) == 3
     assert any("null_summary.md" in item for item in floor)
     assert any("schema_report.json" in item for item in floor)
-    assert any("same null/anomaly classification" in item for item in floor)
+    assert any("request-contract `month_bucket_policy`" in item for item in floor)
     assert any("sample_5.csv" in item for item in floor)
 
 
