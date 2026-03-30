@@ -62,6 +62,9 @@ Important policy:
 - planning must not rely on raw prompt wording when the same requirement is already expressible as a structured field
 - incomplete request contracts should fail closed with explicit `contract_*` reasons instead of hidden planner guesses
 - runtime/operator surfaces should preserve contract summary and missing-field evidence so blocker explanations stay stable across phrasing drift
+- `RequestContract` must be resolved before `OrchTaskSpec` is assembled
+- `OrchTaskSpec` remains the single planner-facing task object
+- implementation should treat `RequestContract -> OrchTaskSpec` as a mandatory assembly step, not an optional enrichment path
 
 ### 2.1 OrchTaskSpec
 
@@ -93,6 +96,7 @@ Important policy:
 - TF may read `source_ref`
 - TF must not rewrite queue state directly
 - TF should emit proposals instead of creating backlog rows
+- `OrchTaskSpec` should inherit normalized request truth from `RequestContract` rather than re-deriving it from raw prompt text
 - `approval_mode` semantics:
   - `policy`: operator approval/recovery is outside the Task Team; missing human approver/DRI is not a planning gate blocker
   - `confirm`: explicit operator confirmation is part of closure; approval-related critic issues may remain planning blockers

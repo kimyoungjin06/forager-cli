@@ -246,19 +246,27 @@
     - dashboard `Task Detail`
     - dashboard `Recovery`
   - 실행 순서:
-    1. happy-path 1개씩
-    2. rerun path 1개씩
-    3. manual-followup path 1개씩
+    1. `data` request contract 도입으로 `D1` blocker를 먼저 제거
+    2. 그 다음 happy-path 1개씩
+    3. rerun path 1개씩
+    4. manual-followup path 1개씩
 - [ ] `Request Contract` layer 도입
   - 목적:
     - `text -> request contract -> planning/runtime`
     - marker-only acceptance floor 의존 제거
   - 1단계:
     - `data` contract extractor
+    - `RequestContract -> OrchTaskSpec` assembly seam 명시화
     - `contract_incomplete` / `contract_ambiguous` fail-closed gate
+    - preset precedence 구현
+      - explicit override
+      - existing task lineage
+      - artifact/work shape
+      - role-preset inference
+      - fallback text heuristic
     - `aoe_tg_schema.py`의 data acceptance를 contract 기반으로 전환
-    - task/runtime state에 `request_contract_*` summary 저장
-    - `/task` / dashboard `Task Detail`에 contract summary 노출
+    - task/runtime state에 `request_contract_*` canonical subset 저장
+    - `/task` / dashboard `Task Detail`에 contract summary와 missing fields 노출
   - 2단계:
     - `build` contract extractor
     - auth/session persisted-state boundary를 contract 기반으로 전환

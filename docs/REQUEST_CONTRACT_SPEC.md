@@ -78,6 +78,22 @@ Operational meaning:
 - Planner output may enrich the contract, but must not erase required fields already present in the contract.
 - If the contract is incomplete for a preset-critical field, planning should fail closed with an explicit contract reason instead of silently guessing.
 
+### 5.3 Relation To OrchTaskSpec
+- `RequestContract` is not a second planner input beside `OrchTaskSpec`.
+- It is the canonical normalization layer that must be applied before `OrchTaskSpec` is assembled.
+- The enforced order is:
+  1. plain text intake
+  2. request contract extraction
+  3. contract completeness gate
+  4. `RequestContract -> OrchTaskSpec` assembly
+  5. TF planning
+
+Policy:
+- TF planner should receive `OrchTaskSpec` plus contract-derived metadata, not two competing truths.
+- `OrchTaskSpec` remains the planner-facing object.
+- `RequestContract` remains the intake-normalization truth that constrains how `OrchTaskSpec` is built.
+- When the two disagree, the implementation is wrong; planner code must not silently pick one.
+
 ## 6. Preset-Specific Shapes
 
 ### 6.1 DataRequestContract
@@ -163,6 +179,23 @@ Responsibilities:
 - emit `missing_fields[]` and `ambiguity_notes[]`
 - build deterministic `summary`
 
+### 7.2A Preset Decision Precedence
+The extractor must not leave preset selection as an implicit side effect of wording.
+
+Final precedence:
+1. explicit operator override
+   - slash/CLI request that already names a preset or preset-bound command family
+2. existing runtime lineage when the request is a retry/replan/followup of an existing task
+3. contract-extractable artifact/work shape
+   - explicit file transforms, schema outputs, review-only deliverables, build verification scope
+4. role-preset inference from selected worker roles
+5. fallback text heuristics
+
+Policy:
+- lower-precedence layers may suggest a preset but must not overrule a higher-precedence source
+- if competing high-confidence signals disagree, emit `contract_conflict`
+- if only weak fallback text heuristics are available, the result should prefer `ambiguous` over a confident but fragile preset lock
+
 ### 7.3 Contract Completeness Gate
 Files:
 - `scripts/gateway/aoe_tg_run_command_flow.py`
@@ -199,10 +232,24 @@ Required stored fields:
 - `request_contract_summary`
 - `request_contract_missing_fields[]`
 - `request_contract_version`
+- `request_contract_preset`
+- `request_contract_fields`
+- `request_contract_required_outputs[]`
 
 Optional later fields:
-- `request_contract_fields`
 - `request_contract_artifact_contracts`
+- `request_contract_ambiguity_notes[]`
+
+Persistence policy:
+- `request_contract_fields` may be trimmed to the preset-minimum canonical subset
+- for `data`, the persisted minimum subset must include:
+  - `source_path`
+  - `target_column`
+  - `accepted_input_formats`
+  - `normalize_to`
+  - `invalid_value_policy`
+- for `data`, file-producing tasks must also persist `request_contract_artifact_contracts`
+- rerun/recovery/history surfaces must never reconstruct these core fields from free-text summaries if a stored contract is available
 
 ### 7.6 Operator Surface Integration
 Files:
@@ -262,6 +309,8 @@ Exit criteria:
   - missing input binding
   - missing transform policy
   - duplicated artifact acceptance
+- `OrchTaskSpec` is assembled from `DataRequestContract` instead of raw prompt markers
+- `/task` and dashboard `Task Detail` show persisted data contract fields directly
 
 ### 10.2 Phase 2: Build Contract
 Goal:
