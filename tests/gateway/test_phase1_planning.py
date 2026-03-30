@@ -51,6 +51,7 @@ def test_phase1_planner_prompt_forbids_standalone_review_subtasks() -> None:
     assert "Phase2 review lane이 담당하게 하라" in prompt
     assert "실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)" in prompt
     assert "helper 함수 하나만으로 충분하다고 단정하지 말고" in prompt
+    assert "single serial lane도 허용된다" in prompt
 
 
 def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> None:
@@ -64,6 +65,7 @@ def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> 
                 {"id": "S1", "title": "Implement fix", "goal": "patch handler", "owner_role": "Codex-Dev"},
                 {"id": "S2", "title": "Independent review", "goal": "independent review", "owner_role": "Codex-Reviewer"},
             ],
+            "meta": {"worker_roles": ["Codex-Dev", "Codex-Reviewer"]},
         },
         round_no=1,
         total_rounds=3,
@@ -72,6 +74,7 @@ def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> 
     assert "review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다" in prompt
     assert "Phase2 review lane의 acceptance/evidence로 표현되어야 한다" in prompt
     assert "helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다" in prompt
+    assert "single serial lane 자체만으로 blocker를 만들지 마라" in prompt
 
 
 def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
@@ -781,6 +784,7 @@ def test_build_auth_session_prompt_adds_acceptance_floor() -> None:
     assert plan["meta"]["phase2_team_preset"] == "build"
     assert any("Caller-visible or persisted auth/session state changes" in item for item in acceptance)
     assert any("stored token/session invalidation" in item for item in acceptance)
+    assert any("existing auth/session state" in item for item in acceptance)
 
 
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:

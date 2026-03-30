@@ -31,9 +31,10 @@
 - intent:
   - implement a bounded code/config change and leave verification evidence
 - current status:
-  - `executed_blocked`
+  - `executed_planning_passed`
 - current finding:
-  - invalid `build` Phase2 lane graph caused a planning-gate block
+  - initial `build` live runs exposed sequential planning-gate blockers: lane graph, readonly drift, standalone review subtask, owner-role drift, auth/session acceptance weakness, and single-serial policy conflict
+  - latest run reaches `planning_ready`; execution evidence is the next capture target
   - visible project registration later exposed task/detail surface drift
 - prompt shape:
   - patch a focused defect or integration issue

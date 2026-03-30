@@ -383,6 +383,11 @@ def build_task_execution_plan(
     normalize_task_plan_payload_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     workers = available_worker_roles_fn(available_roles)
+    execution_workers = [
+        role
+        for role in workers
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
     prompt_lower = str(user_prompt or "").strip().lower()
     scope_guidance = ""
     if any(
@@ -408,6 +413,12 @@ def build_task_execution_plan(
             "- auth/session/login expiry류 요청이면 실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)를 먼저 추적하는 subtask를 포함하라\n"
             "- helper 함수 하나만으로 충분하다고 단정하지 말고, 그것이 유일한 공개 경계인지 확인하거나 다른 호출 지점/저장소 경로를 검토했음을 acceptance에 명시하라\n"
         )
+    serial_guidance = ""
+    if len(execution_workers) == 1:
+        serial_guidance = (
+            f"- 현재 execution role이 `{execution_workers[0]}` 하나뿐이면 single serial lane도 허용된다. 병렬 lane을 억지로 만들지 마라\n"
+            "- 대신 scope 확인, 구현, 테스트, evidence 단계의 순차 의존성과 각 단계 산출물을 명시해 dispatch 가능성을 보여라\n"
+        )
     planner_prompt = (
         "너는 작업 오케스트레이션 planner다. 사용자 요청을 실행 가능한 sub-task 계획으로 분해해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -426,6 +437,7 @@ def build_task_execution_plan(
         "- reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라\n"
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 reviewer lane이 담당하게 하라\n"
         f"{scope_guidance}"
+        f"{serial_guidance}"
         "- approval_mode는 기본적으로 policy다. 최종 승인/복귀 결정은 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
         "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 남겨라\n\n"
         f"사용자 요청:\n{user_prompt.strip()}\n"
@@ -451,6 +463,12 @@ def critique_task_execution_plan(
     normalize_plan_critic_payload_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     payload = json.dumps(plan, ensure_ascii=False)
+    plan_meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    critic_workers = [
+        role
+        for role in (plan_meta.get("worker_roles") or [])
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
     prompt_lower = str(user_prompt or "").strip().lower()
     scope_guidance = ""
     if any(
@@ -476,6 +494,12 @@ def critique_task_execution_plan(
             "- auth/session/login expiry류 계획이면 실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)를 검증하는 단계가 있는지 본다\n"
             "- helper 함수 하나만 실제 경계라고 가정한 계획은 blocker로 지적한다\n"
         )
+    serial_guidance = ""
+    if len(critic_workers) == 1:
+        serial_guidance = (
+            f"- execution role이 `{critic_workers[0]}` 하나뿐이면 single serial lane 자체만으로 blocker를 만들지 마라\n"
+            "- 대신 단계별 산출물, 순차 의존성, reviewer lane 연계가 명확한지 본다\n"
+        )
     critic_prompt = (
         "너는 task plan critic이다. 아래 계획의 누락/과도분해/검증불가 항목을 점검해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -490,6 +514,7 @@ def critique_task_execution_plan(
         "- recommendations는 실행 가능한 수정 제안만\n"
         "- review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다. 그런 요구는 reviewer lane의 acceptance/evidence로 표현되어야 한다\n"
         f"{scope_guidance}"
+        f"{serial_guidance}"
         "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
         "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"
         "- approval 필요성은 acceptance/evidence/manual follow-up으로 남겨라\n\n"
@@ -525,6 +550,11 @@ def repair_task_execution_plan(
     normalize_task_plan_payload_fn: Callable[..., Dict[str, Any]],
 ) -> Dict[str, Any]:
     workers = available_worker_roles_fn(available_roles)
+    execution_workers = [
+        role
+        for role in workers
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
     current_payload = json.dumps(current_plan, ensure_ascii=False)
     critic_payload = json.dumps(critic, ensure_ascii=False)
     prompt_lower = str(user_prompt or "").strip().lower()
@@ -551,6 +581,11 @@ def repair_task_execution_plan(
         scope_guidance = (
             "- auth/session/login expiry류 요청이면 helper 함수 가정에 머물지 말고 실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)를 확인하는 subtask/acceptance를 넣어라\n"
         )
+    serial_guidance = ""
+    if len(execution_workers) == 1:
+        serial_guidance = (
+            f"- execution role이 `{execution_workers[0]}` 하나뿐이면 single serial lane도 허용된다. 가짜 병렬 lane 대신 순차 단계와 산출물을 명확히 적어라\n"
+        )
     repair_prompt = (
         "너는 task planner다. critic 이슈를 반영해 계획을 고쳐라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -569,6 +604,7 @@ def repair_task_execution_plan(
         "- reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라\n"
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 reviewer lane이 담당하게 하라\n"
         f"{scope_guidance}"
+        f"{serial_guidance}"
         "- 최종 승인/복귀 판단은 Control Plane operator가 맡는다. Task Team 내부에 가짜 approver/DRI role을 만들지 마라\n"
         "- 사람 승인 필요는 manual follow-up 또는 evidence 항목으로 남겨라\n\n"
         f"attempt: {int(attempt_no)}\n"

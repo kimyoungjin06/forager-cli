@@ -69,6 +69,36 @@ def _auth_session_scope_guidance(user_prompt: str) -> str:
     )
 
 
+def _single_execution_role_guidance(workers: List[str]) -> str:
+    execution_roles = [
+        role
+        for role in (workers or [])
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
+    if len(execution_roles) != 1:
+        return ""
+    role = str(execution_roles[0]).strip()
+    return (
+        f"- 현재 execution role이 `{role}` 하나뿐이면 single serial lane도 허용된다. 병렬 lane을 억지로 만들지 마라\n"
+        "- 대신 scope 확인, 구현, 테스트, evidence 단계의 순차 의존성과 각 단계 산출물을 명시해 dispatch 가능성을 보여라\n"
+    )
+
+
+def _single_execution_role_critic_guidance(workers: List[str]) -> str:
+    execution_roles = [
+        role
+        for role in (workers or [])
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
+    if len(execution_roles) != 1:
+        return ""
+    role = str(execution_roles[0]).strip()
+    return (
+        f"- execution role이 `{role}` 하나뿐이면 single serial lane 자체만으로 blocker를 만들지 마라\n"
+        "- 대신 단계별 산출물, 순차 의존성, reviewer lane 연계가 명확한지 본다\n"
+    )
+
+
 def _planner_prompt(
     *,
     user_prompt: str,
@@ -81,6 +111,7 @@ def _planner_prompt(
 ) -> str:
     feedback = f"\n공유된 이전 회차 피드백:\n{shared_feedback}\n" if shared_feedback else ""
     scope_guidance = _auth_session_scope_guidance(user_prompt)
+    serial_guidance = _single_execution_role_guidance(workers)
     return (
         "너는 TF Phase1 planner다. 지금은 실행이 아니라 계획 수립 단계다.\n"
         "같은 미션이 여러 planner(Codex/Claude)에게 병렬로 전달되고, 각 회차마다 서로의 비판 내용을 반영해 계획을 개선한다.\n"
@@ -98,11 +129,12 @@ def _planner_prompt(
         f"- owner_role은 다음 중 하나만 사용: {', '.join(workers)}\n"
         f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
         "- 각 subtask는 겹치지 않는 산출물과 검증 기준을 가져야 한다\n"
-        "- 실행팀이 병렬로 일할 수 있도록 독립 가능한 단위로 분해한다\n"
+        "- 실행팀이 병렬로 일할 수 있으면 독립 가능한 단위로 분해한다\n"
         "- Codex-Reviewer/critic이 최종 검증할 수 있도록 acceptance를 구체적으로 쓴다\n"
         "- reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라\n"
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 Phase2 review lane이 담당하게 하라\n"
         f"{scope_guidance}"
+        f"{serial_guidance}"
         "- approval_mode는 기본적으로 policy다. 최종 승인/복귀는 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
         "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 표현하라\n"
         "- 계획이 덜 완성됐으면 범위를 줄이고, ambiguity를 드러내라\n"
@@ -122,6 +154,7 @@ def _critic_prompt(
 ) -> str:
     payload = json.dumps(plan, ensure_ascii=False)
     scope_guidance = _auth_session_scope_guidance(user_prompt)
+    serial_guidance = _single_execution_role_critic_guidance(list(plan.get("meta", {}).get("worker_roles") or []))
     return (
         "너는 TF Phase1 critic이다. 아래 계획이 실제 실행 단계(Phase2)로 넘어갈 만큼 충분히 구체적인지 비판적으로 검토해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -136,10 +169,11 @@ def _critic_prompt(
         f"- planner_provider: {planner_provider}\n"
         f"- round: {round_no}/{total_rounds}\n"
         "- execution gap, role mismatch, acceptance weakness, hidden dependency를 우선 지적한다\n"
-        "- plans that are too broad or not parallelizable should not be approved\n"
+        "- plans that are too broad or dispatch 책임이 모호하면 승인하지 마라\n"
         "- issues는 정말 dispatch를 막을 문제만 적는다\n\n"
         "- review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다. 그런 요구는 Phase2 review lane의 acceptance/evidence로 표현되어야 한다\n"
         f"{scope_guidance}"
+        f"{serial_guidance}"
         "- auth/session/login expiry류 계획이 helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다\n"
         "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
         "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"

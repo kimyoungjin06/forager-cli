@@ -124,7 +124,7 @@ def _build_acceptance_floor(
 
     return [
         "Caller-visible or persisted auth/session state changes are explicit, not only helper return values.",
-        "Verification covers the failure path state after the login/session error, including stored token/session invalidation when applicable.",
+        "Verification covers the failure path state after the login/session error, starting from an existing auth/session state and including stored token/session invalidation when applicable.",
     ]
 
 

@@ -8,7 +8,7 @@
 - branch_target:
   - `done`
 - status:
-  - `executed_blocked`
+  - `executed_planning_passed`
 - executed_at:
   - `2026-03-27T20:09:20+09:00`
   - `2026-03-30T10:55:45+09:00`
@@ -19,6 +19,7 @@
   - `2026-03-30T11:56:08+09:00`
   - `2026-03-30T12:09:41+09:00`
   - `2026-03-30T12:21:28+09:00`
+  - `2026-03-30T13:11:17+09:00`
 - operator:
   - `Codex`
 
@@ -77,14 +78,22 @@
   - `r_20260330122128_cf40a458`
     - `T-010`
     - `plan_gate_reason=Phase2 execution lane이 단일 serial bucket(S1-S4)으로만 남아 dispatchable parallel work가 없다. detail은 log event 240-char limit에 걸려 잘렸지만, scope 확인/구현/테스트/evidence가 모두 한 lane에 뭉친 점이 첫 blocker였다.`
+  - `r_20260330131117_4c7273de`
+    - `T-011`
+    - `plan_gate_reason=S2/S3 acceptance가 기존 세션이 이미 존재하는 상태를 선행조건으로 요구하지 않는다. 빈 상태에서 session_expired -> token:null만 확인해도 통과할 수 있어, 실제 버그인 기존 token/persisted session 정리 누락이 남아도 완료 판정이 가능하다.`
+  - `r_20260330132201_3680eb9c`
+    - `T-012`
+    - `plan_stage=ready`
+    - `note=auth/session acceptance floor와 single-serial build policy 완화 이후 최초 planning gate 통과`
 - planning:
   - all runs used `phase1 ensemble rounds=3 providers=codex`
   - all runs remained `plan_gate_passed=false`
 - stage progression:
   - planning:
-    - `all executed runs completed 3 planner/critic rounds before block`
+    - `T-002` ~ `T-011` runs completed 3 planner/critic rounds before block
+    - `T-012` reached `planning_ready`
   - execution:
-    - `not entered`
+    - `not yet observed in captured live logs for T-012`
   - verification:
     - `not entered`
   - integration:
@@ -94,7 +103,7 @@
 - critic/verifier verdict:
   - `critic issues remain after auto-replan`
 - final branch:
-  - `blocked`
+  - `planning_passed`
 
 ## 5. Surface Evidence
 - `/task` before visible project registration:
@@ -110,7 +119,7 @@
 
 ## 6. Result
 - result:
-  - `blocked`
+  - `planning_passed`
 - mismatch class:
   - `planning_drift`
   - `surface_drift`
@@ -120,6 +129,7 @@
   - `single_lane_parallel_fixed`
   - `execution_owner_drift_fixed`
   - `auth_scope_prompt_refined`
+  - `single_serial_policy_relaxed`
 - mismatch notes:
   - initial live run first exposed a real runtime seam bug: `handle_text_message(...).log_event()` rejected `task_short_id`; this was fixed in `scripts/gateway/aoe_tg_message_handler.py`
   - first blocker after the seam fix was an invalid `build` Phase2 lane graph; contract normalization now repairs partial planner metadata so execution/review graph coverage is no longer the first failure
@@ -129,12 +139,13 @@
   - fifth blocker exposed `owner_role` drift inside a `build` preset; schema normalization now coerces non-mixed execution subtasks onto preset-aligned execution roles so `Codex-Analyst`/`Codex-Writer` owners do not survive into a pure build lane
   - sixth blocker showed the original auth/session acceptance floor was directionally right but still too weak: the plan could patch a helper without proving it was the real failure boundary
   - seventh blocker showed the first auth/session planner guidance overshot: it could make a verified helper-boundary fix impossible if the helper really was the only public boundary
-  - current blocker is narrower but still structural: after repairing graph/readonly/owner drift and refining auth/session scope wording, the build plan still collapses everything into a single serial execution lane, so the live planner is not yet producing a dispatchable build decomposition
+  - eighth blocker showed a policy conflict: single-role `build` plans were still being rejected just for remaining serial; planner/critic guidance now explicitly allows single serial execution lanes when `Codex-Dev` is the only execution role
+  - ninth blocker showed the auth/session verifier still accepted empty-state expiry checks; acceptance floor now explicitly requires pre-existing auth/session state before the failure path
+  - latest live run `T-012` is the first B1 attempt that clears the planning gate; execution-stage evidence is still pending capture
   - later visible-project registration via `aoe orch add ... --set-active` introduced a second mismatch: selected task refs and task detail surfaces for `O2` drifted away from the original hidden/default task lineage and showed `manual_intervention` instead of the original planning gate block
 - next fix:
-  - decide whether `build` preset with only `Codex-Dev` available is allowed to remain serial, or whether planner/control-plane selection must add a companion execution lane for scope/evidence work
-  - if serial build plans are valid, relax the planner/critic rule that currently treats a single serial bucket as non-dispatchable
-  - if parallel build plans are required, expand build execution pool or companion-lane policy so scope/evidence subtasks can be assigned without drifting back into unsupported owner roles
+  - capture `T-012` execution/runtime state so B1 can move from `planning_passed` to full happy-path or execution blocker evidence
+  - if the next blocker still concerns auth/session verification specificity, add an explicit prompt rule that failure-path verification must start from an already-authenticated state
   - investigate `orch add --set-active` task lineage copy/drift into visible project registry before using dashboard/task detail as canonical evidence for migrated runtimes
 
 ## 7. Raw References

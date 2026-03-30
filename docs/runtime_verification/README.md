@@ -22,9 +22,10 @@
   - `mixed/M1_happy_path.md`
 - current execution status:
   - `build/B1_happy_path.md`
-    - `executed_blocked`
+    - `executed_planning_passed`
     - finding:
-      - `build` preset Phase2 lane graph drift blocked the happy path at planning gate
+      - `build` preset live verification now clears the planning gate after graph/readonly/owner/acceptance fixes
+      - execution-stage evidence is still pending capture
       - visible project registration later exposed task lineage surface drift
   - `data/D1_happy_path.md`
     - `planned`
