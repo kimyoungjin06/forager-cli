@@ -88,7 +88,7 @@ def _sanitize_artifact_contracts(raw: Any) -> Dict[str, Dict[str, Any]]:
         fmt = _trim(value.get("format", ""), 32)
         if fmt:
             row["format"] = fmt
-        required_fields = _dedupe_rows(list(value.get("required_fields") or []), limit=12, text_limit=120)
+        required_fields = _dedupe_rows(list(value.get("required_fields") or []), limit=20, text_limit=120)
         if required_fields:
             row["required_fields"] = required_fields
         notes = _dedupe_rows(list(value.get("acceptance_notes") or []), limit=6, text_limit=240)

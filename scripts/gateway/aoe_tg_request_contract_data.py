@@ -160,6 +160,21 @@ def _extract_invalid_value_policy(prompt: str) -> Dict[str, bool]:
     }
 
 
+def _extract_schema_column_expectations(prompt: str) -> Dict[str, str]:
+    src = str(prompt or "")
+    out: Dict[str, str] = {}
+    for match in re.finditer(
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:는|은|:|=)?\s*(integer|number|string|boolean)\b",
+        src,
+        flags=re.IGNORECASE,
+    ):
+        column = _trim(match.group(1), 80)
+        inferred_type = _trim(match.group(2).lower(), 24)
+        if column and inferred_type:
+            out[column] = inferred_type
+    return out
+
+
 def _data_output_artifacts(prompt: str) -> List[str]:
     src = str(prompt or "")
     outputs = ["normalized_csv"]
@@ -318,6 +333,26 @@ def _schema_anomaly_evidence_policy(*, target_column: str) -> Dict[str, Any]:
     }
 
 
+def _schema_value_quality_policy(schema_column_expectations: Dict[str, str]) -> Dict[str, Any]:
+    numeric_columns = [
+        _trim(column, 80)
+        for column, expected in (schema_column_expectations or {}).items()
+        if _trim(column, 80) and _trim(expected, 24) in {"integer", "number"}
+    ]
+    if not numeric_columns:
+        return {}
+    return {
+        "null_or_invalid_count_field": "null_or_invalid_count",
+        "null_like_match": "trim+casefold-exact",
+        "null_like_tokens": ["null", "nan"],
+        "empty_or_whitespace_counts_as_invalid": True,
+        "numeric_parse_failure_counts_as_invalid": True,
+        "scope_columns": _dedupe_rows(numeric_columns, limit=8),
+        "affected_columns_rule": "columns-with-count-at-or-above-threshold",
+        "reason_format": "column=count summary for rerun decision",
+    }
+
+
 def _sample_output_policy() -> Dict[str, Any]:
     return {
         "selection_policy": "head",
@@ -338,6 +373,115 @@ def _normalized_output_policy() -> Dict[str, Any]:
         "row_order_policy": "preserve-source-data-row-order",
         "header_policy": "preserve-source-header-order",
     }
+
+
+def _quality_gate_policy(
+    prompt: str,
+    *,
+    artifact_contracts: Dict[str, Dict[str, Any]],
+    schema_column_expectations: Dict[str, str] | None = None,
+) -> Dict[str, Any]:
+    src = str(prompt or "")
+    wants_rerun = _contains_any(
+        src,
+        ["rerun", "재실행", "다시 돌", "다시 실행", "retry"],
+    )
+    schema_drift_gate = _contains_any(
+        src,
+        ["schema drift", "schema-drift", "스키마 drift", "스키마 드리프트", "schema mismatch", "스키마 불일치"],
+    )
+    null_heavy_gate = _contains_any(
+        src,
+        ["null-heavy", "null heavy", "결측 폭증", "결측이 많", "null explosion", "null-heavy output"],
+    )
+    done_forbidden = _contains_any(
+        src,
+        [
+            "done으로 닫지 말",
+            "done으로 닫지마",
+            "done으로 끝내지 말",
+            "done으로 마감하지 말",
+            "done 금지",
+            "not done",
+            "do not close as done",
+        ],
+    )
+    if not (wants_rerun or schema_drift_gate or null_heavy_gate or done_forbidden):
+        return {}
+
+    null_heavy_threshold_match = re.search(r"(\d+)\s*행\s*이상", src, flags=re.IGNORECASE)
+    null_heavy_min_rows = int(null_heavy_threshold_match.group(1)) if null_heavy_threshold_match else 0
+    scope_columns = _dedupe_rows(list((schema_column_expectations or {}).keys()), limit=8)
+
+    evidence_artifacts: List[str] = []
+    if schema_drift_gate:
+        schema_path = _trim((artifact_contracts.get("schema_report") or {}).get("path", ""), 200)
+        if schema_path:
+            evidence_artifacts.append(schema_path)
+    if null_heavy_gate:
+        null_path = _trim((artifact_contracts.get("null_summary") or {}).get("path", ""), 200)
+        if null_path:
+            evidence_artifacts.append(null_path)
+
+    required_decisions: List[str] = []
+    if schema_drift_gate:
+        required_decisions.extend(["schema_drift_status", "schema_drift_rerun_required"])
+    if null_heavy_gate:
+        required_decisions.extend(["null_heavy_status", "null_heavy_rerun_required"])
+    required_decisions.append("done_forbidden_when_quality_gate_fails")
+
+    return {
+        "branch_on_failure": "rerun",
+        "schema_drift_gate": bool(schema_drift_gate),
+        "null_heavy_gate": bool(null_heavy_gate),
+        "done_forbidden_on_failure": bool(done_forbidden or schema_drift_gate or null_heavy_gate),
+        "evidence_artifacts": _dedupe_rows(evidence_artifacts, limit=4),
+        "schema_drift_rule": "explicit-output-schema-status",
+        "null_heavy_rule": "explicit-column-count-threshold-or-rationale",
+        "null_heavy_scope_columns": scope_columns,
+        "null_heavy_count_basis": "null-or-invalid-row-count",
+        "null_heavy_min_rows_per_column": str(null_heavy_min_rows) if null_heavy_min_rows > 0 else "",
+        "null_heavy_comparison": ">=" if null_heavy_min_rows > 0 else "",
+        "required_decisions": _dedupe_rows(required_decisions, limit=8),
+    }
+
+
+def _apply_quality_gate_artifact_requirements(
+    artifact_contracts: Dict[str, Dict[str, Any]],
+    *,
+    quality_gate_policy: Dict[str, Any],
+) -> None:
+    if not isinstance(artifact_contracts, dict) or not isinstance(quality_gate_policy, dict):
+        return
+
+    if quality_gate_policy.get("schema_drift_gate") and isinstance(artifact_contracts.get("schema_report"), dict):
+        required = list(artifact_contracts["schema_report"].get("required_fields") or [])
+        required.extend(
+            [
+                "schema_drift.status",
+                "schema_drift.affected_columns[]",
+                "schema_drift.rerun_required",
+            ]
+        )
+        artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(required, limit=16)
+        notes = list(artifact_contracts["schema_report"].get("acceptance_notes") or [])
+        notes.append("schema_report.json declares whether schema drift blocks done and requires rerun.")
+        artifact_contracts["schema_report"]["acceptance_notes"] = _dedupe_rows(notes, limit=8, )
+
+    if quality_gate_policy.get("null_heavy_gate") and isinstance(artifact_contracts.get("null_summary"), dict):
+        required = list(artifact_contracts["null_summary"].get("required_fields") or [])
+        required.extend(
+            [
+                "null_heavy.status",
+                "null_heavy.affected_columns[]",
+                "null_heavy.rerun_required",
+                "null_heavy.reason",
+            ]
+        )
+        artifact_contracts["null_summary"]["required_fields"] = _dedupe_rows(required, limit=16)
+        notes = list(artifact_contracts["null_summary"].get("acceptance_notes") or [])
+        notes.append("null_summary.md declares whether null-heavy output blocks done and requires rerun.")
+        artifact_contracts["null_summary"]["acceptance_notes"] = _dedupe_rows(notes, limit=8)
 
 
 def data_request_contract_matches(prompt: str) -> bool:
@@ -367,6 +511,7 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
 
     source_path = _extract_source_path(source_prompt)
     target_column = _extract_target_column(source_prompt)
+    schema_column_expectations = _extract_schema_column_expectations(source_prompt)
     accepted_formats = _extract_accepted_formats(source_prompt)
     normalize_to = _extract_normalize_to(source_prompt)
     invalid_value_policy = _extract_invalid_value_policy(source_prompt)
@@ -377,7 +522,24 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
     )
     output_artifacts = _data_output_artifacts(source_prompt)
     artifact_contracts = _artifact_contracts(output_artifacts, target_column=target_column)
+    if schema_column_expectations and isinstance(artifact_contracts.get("schema_report"), dict):
+        required = list(artifact_contracts["schema_report"].get("required_fields") or [])
+        required.extend(["columns[].expected_type", "schema_drift.violations[]"])
+        artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(required, limit=16)
+        notes = list(artifact_contracts["schema_report"].get("acceptance_notes") or [])
+        notes.append("schema_report.json compares declared schema expectations against observed output types.")
+        artifact_contracts["schema_report"]["acceptance_notes"] = _dedupe_rows(notes, limit=8)
+    quality_gate_policy = _quality_gate_policy(
+        source_prompt,
+        artifact_contracts=artifact_contracts,
+        schema_column_expectations=schema_column_expectations,
+    )
+    _apply_quality_gate_artifact_requirements(
+        artifact_contracts,
+        quality_gate_policy=quality_gate_policy,
+    )
     schema_inference_policy = _schema_inference_policy() if "schema_report" in output_artifacts else {}
+    schema_value_quality_policy = _schema_value_quality_policy(schema_column_expectations)
     schema_null_count_policy = (
         _schema_null_count_policy(target_column=target_column)
         if any(name in output_artifacts for name in ("schema_report", "null_summary"))
@@ -402,6 +564,10 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
         missing_fields.append("normalize_to")
     if not any(bool(value) for value in invalid_value_policy.values()):
         missing_fields.append("invalid_value_policy")
+    if quality_gate_policy.get("schema_drift_gate") and "schema_report" not in output_artifacts:
+        missing_fields.append("schema_report_output")
+    if quality_gate_policy.get("null_heavy_gate") and "null_summary" not in output_artifacts:
+        missing_fields.append("null_summary_output")
 
     status = "complete" if not missing_fields else "incomplete"
     summary_parts = [
@@ -421,6 +587,21 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
                 for name in output_artifacts
             )
         )
+    if quality_gate_policy.get("schema_drift_gate") or quality_gate_policy.get("null_heavy_gate"):
+        quality_bits: List[str] = []
+        if quality_gate_policy.get("schema_drift_gate"):
+            quality_bits.append("schema-drift")
+        if quality_gate_policy.get("null_heavy_gate"):
+            quality_bits.append("null-heavy")
+        summary_parts.append("quality=" + ",".join(quality_bits))
+    if schema_column_expectations:
+        expectation_summary = ",".join(
+            f"{_trim(column, 80)}:{_trim(expected, 24)}"
+            for column, expected in list(schema_column_expectations.items())[:4]
+            if _trim(column, 80) and _trim(expected, 24)
+        )
+        if expectation_summary:
+            summary_parts.append("schema=" + expectation_summary)
 
     return {
         "version": "2026-03-30.v1",
@@ -439,9 +620,12 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
             "month_bucket_policy": month_bucket_policy,
             "normalized_output_policy": normalized_output_policy,
             "schema_inference_policy": schema_inference_policy,
+            "schema_column_expectations": schema_column_expectations,
+            "schema_value_quality_policy": schema_value_quality_policy,
             "schema_null_count_policy": schema_null_count_policy,
             "schema_anomaly_evidence_policy": schema_anomaly_evidence_policy,
             "sample_output_policy": sample_output_policy,
+            "quality_gate_policy": quality_gate_policy,
         },
         "required_outputs": [
             str((artifact_contracts.get(name) or {}).get("path", name)).strip() or name
@@ -557,6 +741,16 @@ def data_request_contract_acceptance_floor(
     schema_inference_policy = (
         fields.get("schema_inference_policy") if isinstance(fields.get("schema_inference_policy"), dict) else {}
     )
+    schema_column_expectations = (
+        fields.get("schema_column_expectations")
+        if isinstance(fields.get("schema_column_expectations"), dict)
+        else {}
+    )
+    schema_value_quality_policy = (
+        fields.get("schema_value_quality_policy")
+        if isinstance(fields.get("schema_value_quality_policy"), dict)
+        else {}
+    )
     schema_null_count_policy = (
         fields.get("schema_null_count_policy") if isinstance(fields.get("schema_null_count_policy"), dict) else {}
     )
@@ -567,6 +761,9 @@ def data_request_contract_acceptance_floor(
     )
     sample_output_policy = (
         fields.get("sample_output_policy") if isinstance(fields.get("sample_output_policy"), dict) else {}
+    )
+    quality_gate_policy = (
+        fields.get("quality_gate_policy") if isinstance(fields.get("quality_gate_policy"), dict) else {}
     )
     normalized_output_policy = (
         fields.get("normalized_output_policy")
@@ -669,6 +866,45 @@ def data_request_contract_acceptance_floor(
         for item in (sample_output_policy.get("shortfall_note_fields") or [])
         if _trim(item, 24)
     ]
+    quality_gate_evidence = [
+        _trim(item, 200)
+        for item in (quality_gate_policy.get("evidence_artifacts") or [])
+        if _trim(item, 200)
+    ]
+    quality_gate_scope_columns = [
+        _trim(item, 80)
+        for item in (quality_gate_policy.get("null_heavy_scope_columns") or [])
+        if _trim(item, 80)
+    ]
+    quality_gate_null_count_basis = _trim(quality_gate_policy.get("null_heavy_count_basis", ""), 64)
+    quality_gate_null_min_rows = _trim(quality_gate_policy.get("null_heavy_min_rows_per_column", ""), 16)
+    quality_gate_null_comparison = _trim(quality_gate_policy.get("null_heavy_comparison", ""), 8)
+    quality_gate_required_decisions = [
+        _trim(item, 48)
+        for item in (quality_gate_policy.get("required_decisions") or [])
+        if _trim(item, 48)
+    ]
+    quality_gate_summary_bits: List[str] = []
+    if quality_gate_policy.get("schema_drift_gate"):
+        quality_gate_summary_bits.append("schema_drift")
+    if quality_gate_policy.get("null_heavy_gate"):
+        quality_gate_summary_bits.append("null_heavy")
+    if quality_gate_policy.get("done_forbidden_on_failure"):
+        quality_gate_summary_bits.append("done_forbidden")
+    quality_gate_summary = ""
+    if quality_gate_summary_bits:
+        quality_gate_summary = "`quality_gate_policy` " + "/".join(quality_gate_summary_bits)
+        if quality_gate_evidence:
+            quality_gate_summary += " via " + ",".join(quality_gate_evidence)
+        if quality_gate_null_min_rows and quality_gate_scope_columns:
+            quality_gate_summary += (
+                " threshold "
+                + ",".join(quality_gate_scope_columns)
+                + f" {quality_gate_null_comparison or '>='} {quality_gate_null_min_rows}"
+                + f" by {quality_gate_null_count_basis or 'null-or-invalid-row-count'}"
+            )
+        if quality_gate_required_decisions:
+            quality_gate_summary += " with " + "/".join(quality_gate_required_decisions)
     normalized_row_order_policy = (
         _trim(normalized_output_policy.get("row_order_policy", ""), 64)
         or "preserve-source-data-row-order"
@@ -718,42 +954,100 @@ def data_request_contract_acceptance_floor(
             "`schema_inference_policy` "
             + ">".join(precedence_order or allowed_inferred_types)
         )
+    schema_expectation_summary = ""
+    if schema_column_expectations:
+        expectation_bits = [
+            f"{_trim(column, 80)}={_trim(expected, 24)}"
+            for column, expected in schema_column_expectations.items()
+            if _trim(column, 80) and _trim(expected, 24)
+        ]
+        if expectation_bits:
+            schema_expectation_summary = "`schema_column_expectations` " + ", ".join(expectation_bits[:6])
+    value_quality_scope = [
+        _trim(item, 80)
+        for item in (schema_value_quality_policy.get("scope_columns") or [])
+        if _trim(item, 80)
+    ]
+    value_quality_summary = ""
+    if value_quality_scope:
+        value_quality_summary = (
+            "`schema_value_quality_policy` "
+            + ",".join(value_quality_scope)
+            + " -> "
+            + (_trim(schema_value_quality_policy.get("null_or_invalid_count_field", ""), 48) or "null_or_invalid_count")
+            + " via trim-empty/null-like/non-numeric"
+        )
 
     if combined_evidence:
         floor = []
         if "null" in evidence_targets and null_contract:
-            floor.append(
+            null_line = (
                 f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, and invalid month examples from the transformed output while preserving the requested row/value policy and the request-contract `month_bucket_policy`."
             )
+            if quality_gate_policy.get("null_heavy_gate"):
+                null_line = (
+                    f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, invalid month examples, and the rerun-required decision for null-heavy output under request-contract `quality_gate_policy` while preserving the requested row/value policy and the request-contract `month_bucket_policy`."
+                )
+            floor.append(null_line)
         if "schema" in evidence_targets and schema_contract:
-            floor.append(
+            schema_line = (
                 f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; it uses request-contract `month_bucket_policy` + request-contract `schema_inference_policy`."
             )
+            if quality_gate_policy.get("schema_drift_gate"):
+                schema_line = (
+                    f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, observed_non_null_count, and the schema-drift rerun-required decision under request-contract `quality_gate_policy`; it uses request-contract `month_bucket_policy` + request-contract `schema_inference_policy`."
+                )
+                if schema_expectation_summary:
+                    schema_line += " It explicitly compares " + schema_expectation_summary + "."
+            floor.append(schema_line)
         if "sample" in evidence_targets and sample_contract:
             floor.append(
                 f"`{sample_contract.get('path', 'sample_5.csv')}` follows request-contract {sample_policy_summary}."
             )
     elif (explicit_schema or dominant_schema) and schema_contract and not (explicit_normalized or dominant_normalized or is_transform):
-        floor = [
-            f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
-            "Schema evidence covers every transformed output column plus canonical anomaly evidence.",
-            "Policies: "
-            + anomaly_policy_summary
-            + "; "
-            + null_count_policy_summary
-            + "; "
-            + inference_policy_summary
-            + ".",
-        ]
+        floor = [f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON."]
+        if quality_gate_policy.get("schema_drift_gate"):
+            floor.append(
+                "Schema evidence covers every transformed output column plus canonical anomaly evidence and explicitly marks whether schema drift requires rerun instead of `done`."
+            )
+        else:
+            floor.append("Schema evidence covers every transformed output column plus canonical anomaly evidence.")
+        policy_line = "Policies: " + anomaly_policy_summary + "; " + null_count_policy_summary + "; " + inference_policy_summary
+        if schema_expectation_summary:
+            policy_line += "; " + schema_expectation_summary
+        if quality_gate_summary:
+            policy_line += "; " + quality_gate_summary
+        floor.append(policy_line + ".")
     elif (explicit_null or dominant_null) and null_contract:
-        floor = [
-            f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
-            (
+        floor = [f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown."]
+        if quality_gate_policy.get("null_heavy_gate"):
+            threshold_clause = ""
+            if quality_gate_null_min_rows and quality_gate_scope_columns:
+                threshold_clause = (
+                    " using threshold "
+                    + ",".join(quality_gate_scope_columns)
+                    + f" {quality_gate_null_comparison or '>='} {quality_gate_null_min_rows}"
+                    + f" by {quality_gate_null_count_basis or 'null-or-invalid-row-count'}"
+                )
+            floor.append(
+                "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
+                f"`{anomaly_field_path or 'target_anomalies[]'}`, marks whether output is null-heavy{threshold_clause} under request-contract `quality_gate_policy`, and leaves the rerun-required decision instead of claiming `done`."
+            )
+            if value_quality_summary:
+                floor.append(
+                    "Null-heavy evidence computes per-column invalid counts from "
+                    + value_quality_summary
+                    + " and reports `affected_columns` plus `reason` using the same rule."
+                )
+        else:
+            floor.append(
                 "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
                 f"`{anomaly_field_path or 'target_anomalies[]'}` and summarizes the same transformed-output counts."
-            ),
-            "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
-        ]
+            )
+        tail_line = "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence."
+        if quality_gate_summary:
+            tail_line = tail_line[:-1] + "; " + quality_gate_summary + "."
+        floor.append(tail_line)
     elif (explicit_sample or dominant_sample) and sample_contract:
         floor = [
             f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",
@@ -819,26 +1113,49 @@ def data_request_contract_acceptance_floor(
         elif invalid_rule:
             floor.append(invalid_rule)
     elif is_schema and schema_contract:
-        floor = [
-            f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
-            "Schema evidence covers every transformed output column plus canonical anomaly evidence.",
-            "Policies: "
-            + anomaly_policy_summary
-            + "; "
-            + null_count_policy_summary
-            + "; "
-            + inference_policy_summary
-            + ".",
-        ]
+        floor = [f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON."]
+        if quality_gate_policy.get("schema_drift_gate"):
+            floor.append(
+                "Schema evidence covers every transformed output column plus canonical anomaly evidence and explicitly marks whether schema drift requires rerun instead of `done`."
+            )
+        else:
+            floor.append("Schema evidence covers every transformed output column plus canonical anomaly evidence.")
+        policy_line = "Policies: " + anomaly_policy_summary + "; " + null_count_policy_summary + "; " + inference_policy_summary
+        if schema_expectation_summary:
+            policy_line += "; " + schema_expectation_summary
+        if quality_gate_summary:
+            policy_line += "; " + quality_gate_summary
+        floor.append(policy_line + ".")
     elif is_null and null_contract:
-        floor = [
-            f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
-            (
+        floor = [f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown."]
+        if quality_gate_policy.get("null_heavy_gate"):
+            threshold_clause = ""
+            if quality_gate_null_min_rows and quality_gate_scope_columns:
+                threshold_clause = (
+                    " using threshold "
+                    + ",".join(quality_gate_scope_columns)
+                    + f" {quality_gate_null_comparison or '>='} {quality_gate_null_min_rows}"
+                    + f" by {quality_gate_null_count_basis or 'null-or-invalid-row-count'}"
+                )
+            floor.append(
+                "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
+                f"`{anomaly_field_path or 'target_anomalies[]'}`, marks whether output is null-heavy{threshold_clause} under request-contract `quality_gate_policy`, and leaves the rerun-required decision instead of claiming `done`."
+            )
+            if value_quality_summary:
+                floor.append(
+                    "Null-heavy evidence computes per-column invalid counts from "
+                    + value_quality_summary
+                    + " and reports `affected_columns` plus `reason` using the same rule."
+                )
+        else:
+            floor.append(
                 "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
                 f"`{anomaly_field_path or 'target_anomalies[]'}` and summarizes the same transformed-output counts."
-            ),
-            "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
-        ]
+            )
+        tail_line = "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence."
+        if quality_gate_summary:
+            tail_line = tail_line[:-1] + "; " + quality_gate_summary + "."
+        floor.append(tail_line)
     elif is_sample and sample_contract:
         floor = [
             f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",

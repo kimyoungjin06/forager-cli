@@ -97,6 +97,11 @@
 #### D2. Rerun Path
 - intent:
   - transform runs but schema drift, null explosion, or broken pipeline step appears
+- current status:
+  - `executed_blocked`
+- current finding:
+  - live runs promoted reusable `data` rerun abstractions: `quality_gate_policy`, `schema_column_expectations`, numeric null-heavy thresholds, and `schema_value_quality_policy`
+  - after those core promotions, the remaining blocker stayed scenario-specific: `null_summary.md` rerun evidence formatting still needed stricter scenario prompt discipline rather than more generic core logic
 - expected branch:
   - `rerun`
 - must prove:

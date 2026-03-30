@@ -981,6 +981,43 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert "shortfall_note_when_needed" in contract["artifact_contracts"]["sample_output"]["required_fields"]
 
 
+def test_data_request_contract_extracts_quality_gate_policy_for_rerun_requests() -> None:
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=(
+            "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+            "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+            "orders는 integer, revenue는 number 스키마를 유지해야 한다. "
+            "schema drift가 남거나 null-heavy output이면 done으로 닫지 말고 rerun으로 남겨라. "
+            "parse 불가하거나 범위를 벗어난 값은 원본 행을 유지하고 month 원값을 그대로 두며 anomaly로 기록한다. "
+            "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
+        ),
+        selected_roles=["DataEngineer", "Codex-Reviewer"],
+        project_key="demo-data",
+    )
+
+    assert contract["fields"]["quality_gate_policy"]["branch_on_failure"] == "rerun"
+    assert contract["fields"]["quality_gate_policy"]["schema_drift_gate"] is True
+    assert contract["fields"]["quality_gate_policy"]["null_heavy_gate"] is True
+    assert contract["fields"]["quality_gate_policy"]["done_forbidden_on_failure"] is True
+    assert contract["fields"]["quality_gate_policy"]["evidence_artifacts"] == ["schema_report.json", "null_summary.md"]
+    assert contract["fields"]["quality_gate_policy"]["null_heavy_scope_columns"] == ["orders", "revenue"]
+    assert contract["fields"]["quality_gate_policy"]["null_heavy_count_basis"] == "null-or-invalid-row-count"
+    assert "schema_drift_status" in contract["fields"]["quality_gate_policy"]["required_decisions"]
+    assert "null_heavy_status" in contract["fields"]["quality_gate_policy"]["required_decisions"]
+    assert "done_forbidden_when_quality_gate_fails" in contract["fields"]["quality_gate_policy"]["required_decisions"]
+    assert contract["fields"]["schema_column_expectations"]["orders"] == "integer"
+    assert contract["fields"]["schema_column_expectations"]["revenue"] == "number"
+    assert contract["fields"]["schema_value_quality_policy"]["scope_columns"] == ["orders", "revenue"]
+    assert contract["fields"]["schema_value_quality_policy"]["null_or_invalid_count_field"] == "null_or_invalid_count"
+    assert contract["fields"]["schema_value_quality_policy"]["numeric_parse_failure_counts_as_invalid"] is True
+    assert "schema_drift.status" in contract["artifact_contracts"]["schema_report"]["required_fields"]
+    assert "schema_drift.rerun_required" in contract["artifact_contracts"]["schema_report"]["required_fields"]
+    assert "columns[].expected_type" in contract["artifact_contracts"]["schema_report"]["required_fields"]
+    assert "schema_drift.violations[]" in contract["artifact_contracts"]["schema_report"]["required_fields"]
+    assert "null_heavy.status" in contract["artifact_contracts"]["null_summary"]["required_fields"]
+    assert "null_heavy.rerun_required" in contract["artifact_contracts"]["null_summary"]["required_fields"]
+
+
 def test_data_request_contract_treats_original_preserve_phrase_as_row_and_value_policy() -> None:
     contract = request_contract_mod.build_request_contract(
         source_prompt=(
@@ -1117,6 +1154,68 @@ def test_data_request_contract_combined_evidence_task_gets_file_specific_accepta
     assert any("request-contract `month_bucket_policy`" in item for item in floor)
     assert any("request-contract `schema_inference_policy`" in item for item in floor)
     assert any("sample_5.csv" in item for item in floor)
+
+
+def test_data_request_contract_quality_gate_floor_marks_rerun_evidence() -> None:
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=(
+            "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+            "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+            "orders는 integer, revenue는 number 스키마를 유지해야 한다. "
+            "schema drift가 남거나 null-heavy output이면 done으로 닫지 말고 rerun으로 남겨라. "
+            "parse 불가하거나 범위를 벗어난 값은 원본 행을 유지하고 month 원값을 그대로 두며 anomaly로 기록한다. "
+            "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
+        ),
+        selected_roles=["DataEngineer", "Codex-Reviewer"],
+        project_key="demo-data",
+    )
+
+    schema_floor = request_contract_data_mod.data_request_contract_acceptance_floor(
+        request_contract=contract,
+        title="Write schema report",
+        goal="capture schema_report.json for the transformed output",
+    )
+    null_floor = request_contract_data_mod.data_request_contract_acceptance_floor(
+        request_contract=contract,
+        title="Write null summary",
+        goal="summarize null_summary.md for the transformed output",
+    )
+
+    assert any("schema drift requires rerun instead of `done`" in item for item in schema_floor)
+    assert any("`quality_gate_policy`" in item for item in schema_floor)
+    assert any("`schema_column_expectations` orders=integer, revenue=number" in item for item in schema_floor)
+    assert any("marks whether output is null-heavy" in item for item in null_floor)
+    assert any("rerun-required decision instead of claiming `done`" in item for item in null_floor)
+    assert any("`quality_gate_policy`" in item for item in null_floor)
+    assert any("`schema_value_quality_policy` orders,revenue -> null_or_invalid_count via trim-empty/null-like/non-numeric" in item for item in null_floor)
+
+
+def test_data_request_contract_quality_gate_extracts_explicit_null_heavy_threshold() -> None:
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=(
+            "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+            "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+            "orders는 integer, revenue는 number 스키마를 유지해야 한다. "
+            "orders 또는 revenue에서 null 또는 비수치 값이 2행 이상이면 null-heavy=true로 판정하고 done으로 닫지 말고 rerun으로 남겨라. "
+            "schema_report.json에는 orders/revenue의 expected_type, observed_inferred_type, schema_drift, rerun_required, violations를 남기고, "
+            "null_summary.md에는 affected_columns, null_or_invalid_count, null_heavy, rerun_required, reason을 남겨라."
+        ),
+        selected_roles=["DataEngineer", "Codex-Reviewer"],
+        project_key="demo-data",
+    )
+
+    assert contract["fields"]["quality_gate_policy"]["null_heavy_min_rows_per_column"] == "2"
+    assert contract["fields"]["quality_gate_policy"]["null_heavy_comparison"] == ">="
+    assert contract["fields"]["quality_gate_policy"]["null_heavy_scope_columns"] == ["orders", "revenue"]
+    assert contract["fields"]["schema_value_quality_policy"]["scope_columns"] == ["orders", "revenue"]
+
+    null_floor = request_contract_data_mod.data_request_contract_acceptance_floor(
+        request_contract=contract,
+        title="Write null summary",
+        goal="summarize null_summary.md for the transformed output",
+    )
+    assert any("threshold orders,revenue >= 2 by null-or-invalid-row-count" in item for item in null_floor)
+    assert any("`schema_value_quality_policy` orders,revenue -> null_or_invalid_count via trim-empty/null-like/non-numeric" in item for item in null_floor)
 
 
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
