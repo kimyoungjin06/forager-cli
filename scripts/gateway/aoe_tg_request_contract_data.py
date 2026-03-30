@@ -409,15 +409,18 @@ def data_request_contract_acceptance_floor(
     is_schema = _contains_any(task_context, ["schema", "스키마", "report", "리포트"])
     is_null = _contains_any(task_context, ["null", "결측", "anomaly", "요약", "summary"])
     is_sample = _contains_any(task_context, ["sample", "샘플", "5행", "5 rows"])
-    evidence_targets = [
-        token
-        for token, enabled in (
-            ("schema", ("schema" in explicit_artifact_targets) or is_schema),
-            ("null", ("null" in explicit_artifact_targets) or is_null),
-            ("sample", ("sample" in explicit_artifact_targets) or is_sample),
-        )
-        if enabled
-    ]
+    if explicit_artifact_targets:
+        evidence_targets = list(explicit_artifact_targets)
+    else:
+        evidence_targets = [
+            token
+            for token, enabled in (
+                ("schema", is_schema),
+                ("null", is_null),
+                ("sample", is_sample),
+            )
+            if enabled
+        ]
     combined_evidence = len(evidence_targets) >= 2
     explicit_schema = "schema" in explicit_artifact_targets
     explicit_null = "null" in explicit_artifact_targets
@@ -517,9 +520,7 @@ def data_request_contract_acceptance_floor(
         invalid_bucket_rule = ""
         if anomaly_buckets:
             invalid_bucket_rule = (
-                "Request-contract anomaly buckets "
-                + ", ".join(anomaly_buckets)
-                + " preserve the original row/value and feed the same counts used by `schema_report.json` and `null_summary.md`."
+                "Request-contract `month_bucket_policy` anomaly buckets preserve the original row/value and feed the same counts used by `schema_report.json` and `null_summary.md`."
             )
         actions: List[str] = []
         if bool(invalid_policy.get("preserve_row")):
