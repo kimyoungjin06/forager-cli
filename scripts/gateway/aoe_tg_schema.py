@@ -128,12 +128,70 @@ def _build_acceptance_floor(
     ]
 
 
+def _data_acceptance_floor(
+    *,
+    user_prompt: str,
+    preset: str,
+    role: str,
+    title: str,
+    goal: str,
+) -> List[str]:
+    normalized_preset = normalize_role_preset(preset)
+    if normalized_preset != "data":
+        return []
+    if not _role_matches_preset(role, "data"):
+        return []
+
+    context = "\n".join((str(user_prompt or ""), str(title or ""), str(goal or "")))
+    data_markers = [
+        "csv",
+        "schema",
+        "null",
+        "sample",
+        "dataset",
+        "table",
+        "column",
+        "데이터",
+        "스키마",
+        "결측",
+        "샘플",
+        "컬럼",
+        "정규화",
+    ]
+    if not _contains_any(context, data_markers):
+        return []
+
+    return [
+        "Schema evidence covers every output column with inferred_type and type_rule, not a partial column list.",
+        "Schema or null evidence reports null_count and observed_non_null_count for every output column.",
+        "Sample evidence is taken from the transformed output and is sufficient to inspect formatting and null handling.",
+    ]
+
+
 def _merge_acceptance_floor(acceptance: List[str], floor: List[str]) -> List[str]:
-    out: List[str] = []
-    for item in list(acceptance or []) + list(floor or []):
+    base: List[str] = []
+    for item in list(acceptance or []):
         token = str(item or "").strip()
-        if token and token not in out:
-            out.append(token[:240])
+        if token and token not in base:
+            base.append(token[:240])
+
+    floor_rows: List[str] = []
+    for item in list(floor or []):
+        token = str(item or "").strip()
+        if token and token not in floor_rows:
+            floor_rows.append(token[:240])
+
+    if not floor_rows:
+        return base[:3]
+
+    keep_slots = max(0, 3 - len(floor_rows))
+    out: List[str] = []
+    for item in base[:keep_slots]:
+        if item not in out:
+            out.append(item)
+    for item in floor_rows:
+        if item not in out:
+            out.append(item)
     return out[:3]
 
 
@@ -243,6 +301,16 @@ def normalize_task_plan_payload(
         acceptance = _merge_acceptance_floor(
             acceptance,
             _build_acceptance_floor(
+                user_prompt=user_prompt,
+                preset=phase2_team_preset,
+                role=role,
+                title=title,
+                goal=goal,
+            ),
+        )
+        acceptance = _merge_acceptance_floor(
+            acceptance,
+            _data_acceptance_floor(
                 user_prompt=user_prompt,
                 preset=phase2_team_preset,
                 role=role,

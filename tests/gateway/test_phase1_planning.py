@@ -787,6 +787,38 @@ def test_build_auth_session_prompt_adds_acceptance_floor() -> None:
     assert any("existing auth/session state" in item for item in acceptance)
 
 
+def test_data_schema_prompt_adds_acceptance_floor_and_prioritizes_floor() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "normalize csv",
+            "subtasks": [
+                {
+                    "id": "S2",
+                    "title": "Write schema report",
+                    "goal": "capture schema_report.json for normalized monthly csv",
+                    "owner_role": "DataEngineer",
+                    "acceptance": [
+                        "schema_report.json columns month, region, orders, revenue, notes with inferred_type/type_rule/null_count/observed_non_null_count and sample linkage are recorded in one long sentence that would otherwise dominate acceptance",
+                        "null summary exists",
+                        "sample rows exist",
+                    ],
+                },
+            ],
+        },
+        user_prompt="월별 집계 CSV를 정규화하고 스키마 점검, null 요약, 샘플 5행을 만들어줘.",
+        workers=["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=3,
+    )
+
+    acceptance = plan["subtasks"][0]["acceptance"]
+
+    assert plan["meta"]["phase2_team_preset"] == "data"
+    assert len(acceptance) == 3
+    assert any("every output column with inferred_type and type_rule" in item for item in acceptance)
+    assert any("null_count and observed_non_null_count for every output column" in item for item in acceptance)
+    assert any("Sample evidence is taken from the transformed output" in item for item in acceptance)
+
+
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:
     plan = gw.normalize_task_plan_payload(
         {
