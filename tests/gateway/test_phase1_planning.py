@@ -935,10 +935,19 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["fields"]["invalid_value_policy"]["preserve_row"] is True
     assert contract["fields"]["invalid_value_policy"]["preserve_original_value"] is True
     assert contract["fields"]["invalid_value_policy"]["record_anomaly"] is True
+    assert contract["fields"]["normalized_output_policy"]["row_order_policy"] == "preserve-source-data-row-order"
+    assert contract["fields"]["normalized_output_policy"]["header_policy"] == "preserve-source-header-order"
     assert contract["fields"]["month_bucket_policy"]["valid_patterns"] == ["YYYY/MM", "YYYY-MM", "YYYY.MM"]
     assert contract["fields"]["month_bucket_policy"]["valid_year_rule"] == "4-digit-year"
     assert contract["fields"]["month_bucket_policy"]["valid_month_rule"] == "01-12"
     assert contract["fields"]["month_bucket_policy"]["trim_before_match"] is True
+    assert contract["fields"]["month_bucket_policy"]["null_like_match"] == "trim+casefold-exact"
+    assert contract["fields"]["month_bucket_policy"]["null_like_tokens"] == ["null", "nan"]
+    assert contract["fields"]["month_bucket_policy"]["allowed_separators"] == ["/", "-", "."]
+    assert contract["fields"]["month_bucket_policy"]["year_width_mismatch_bucket"] == "bad-year"
+    assert contract["fields"]["month_bucket_policy"]["separator_mismatch_bucket"] == "malformed-value"
+    assert contract["fields"]["month_bucket_policy"]["token_count_mismatch_bucket"] == "malformed-value"
+    assert contract["fields"]["month_bucket_policy"]["one_digit_month_bucket"] == "one-digit-month"
     assert contract["fields"]["month_bucket_policy"]["match_order"][0] == "empty-string"
     assert "literal-null" in contract["fields"]["month_bucket_policy"]["anomaly_buckets"]
     assert contract["fields"]["schema_inference_policy"]["allowed_inferred_types"] == ["string", "integer", "number", "boolean"]
@@ -946,10 +955,21 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["fields"]["schema_inference_policy"]["mixed_type_resolution"] == "string"
     assert contract["fields"]["schema_null_count_policy"]["null_like_buckets"] == ["empty-string", "whitespace-only", "literal-null", "literal-nan"]
     assert "malformed-value" in contract["fields"]["schema_null_count_policy"]["target_invalid_buckets_excluded"]
+    assert contract["fields"]["schema_anomaly_evidence_policy"]["field_path"] == "month_anomalies[]"
+    assert contract["fields"]["schema_anomaly_evidence_policy"]["required_fields"] == ["bucket", "count", "examples[]"]
+    assert contract["fields"]["sample_output_policy"]["selection_policy"] == "head"
+    assert contract["fields"]["sample_output_policy"]["sample_size"] == "5"
+    assert contract["fields"]["sample_output_policy"]["row_unit"] == "data-row"
+    assert contract["fields"]["sample_output_policy"]["order_basis"] == "transformed-output-order"
+    assert contract["fields"]["sample_output_policy"]["shortfall_policy"] == "emit-all-available-and-note-shortfall"
     assert contract["artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
     assert contract["artifact_contracts"]["schema_report"]["inference_policy"]["type_rule_source"] == "observable-transformed-values"
+    assert "month_anomalies[].bucket" in contract["artifact_contracts"]["schema_report"]["required_fields"]
+    assert "month_anomalies[].examples[]" in contract["artifact_contracts"]["schema_report"]["required_fields"]
     assert contract["artifact_contracts"]["null_summary"]["path"] == "null_summary.md"
     assert contract["artifact_contracts"]["sample_output"]["path"] == "sample_5.csv"
+    assert "first_5_data_rows" in contract["artifact_contracts"]["sample_output"]["required_fields"]
+    assert "shortfall_note_when_needed" in contract["artifact_contracts"]["sample_output"]["required_fields"]
 
 
 def test_data_request_contract_treats_original_preserve_phrase_as_row_and_value_policy() -> None:
@@ -1030,25 +1050,34 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
 
     assert any("source `data/monthly_raw.csv`" in item for item in acceptance_by_id["S1"])
     assert any("normalized.csv" in item for item in acceptance_by_id["S1"])
+    assert any("preserves source data-row order + source header order" in item for item in acceptance_by_id["S1"])
     assert any("request-contract valid month formats YYYY/MM, YYYY-MM, YYYY.MM" in item for item in acceptance_by_id["S1"])
     assert any("all other month buckets stay anomalies" in item for item in acceptance_by_id["S1"])
     assert any("Month bucket matching follows request-contract `month_bucket_policy`" in item for item in acceptance_by_id["S1"])
     assert any("trim-before-match" in item for item in acceptance_by_id["S1"])
-    assert any("empty-string -> whitespace-only -> literal-null" in item for item in acceptance_by_id["S1"])
+    assert any("null-like=null/nan via trim+casefold-exact" in item for item in acceptance_by_id["S1"])
+    assert any("allowed-separators=/-.;" in item for item in acceptance_by_id["S1"])
+    assert any("non-4-digit-year=bad-year" in item for item in acceptance_by_id["S1"])
+    assert any("one-digit-month=one-digit-month" in item for item in acceptance_by_id["S1"])
     assert any("row count unchanged" in item for item in acceptance_by_id["S1"])
     assert any("preserves non-target columns exactly" in item for item in acceptance_by_id["S1"])
     assert any("schema_report.json" in item for item in acceptance_by_id["S2"])
     assert any("every transformed output column" in item for item in acceptance_by_id["S2"])
-    assert any("Type rules are observable" in item for item in acceptance_by_id["S2"])
+    assert any("canonical anomaly evidence" in item for item in acceptance_by_id["S2"])
+    assert any("Policies:" in item for item in acceptance_by_id["S2"])
+    assert any("`schema_anomaly_evidence_policy`" in item for item in acceptance_by_id["S2"])
+    assert any("month_anomalies[]" in item for item in acceptance_by_id["S2"])
     assert any("`schema_null_count_policy`" in item for item in acceptance_by_id["S2"])
-    assert any("exclude month invalid buckets" in item for item in acceptance_by_id["S2"])
+    assert any("exclude month invalids" in item for item in acceptance_by_id["S2"])
     assert any("`schema_inference_policy`" in item for item in acceptance_by_id["S2"])
     assert any("integer>number>boolean>string" in item for item in acceptance_by_id["S2"])
     assert any("null_summary.md" in item for item in acceptance_by_id["S3"])
-    assert any("invalid month examples" in item for item in acceptance_by_id["S3"])
-    assert any("`schema_null_count_policy`" in item for item in acceptance_by_id["S3"])
+    assert any("canonical anomaly buckets/count/examples" in item for item in acceptance_by_id["S3"])
+    assert any("month_anomalies[]" in item for item in acceptance_by_id["S3"])
     assert any("sample_5.csv" in item for item in acceptance_by_id["S4"])
-    assert any("exactly five data rows taken in transformed-output order" in item for item in acceptance_by_id["S4"])
+    assert any("`sample_output_policy`" in item for item in acceptance_by_id["S4"])
+    assert any("head 5 data-rows by transformed-output-order" in item for item in acceptance_by_id["S4"])
+    assert any("emit-all-available-and-note-shortfall" in item for item in acceptance_by_id["S4"])
 
 
 def test_data_request_contract_combined_evidence_task_gets_file_specific_acceptance_floor() -> None:

@@ -184,6 +184,9 @@ def _artifact_contracts(outputs: List[str], *, target_column: str) -> Dict[str, 
             ],
         }
     if "schema_report" in outputs:
+        anomaly_field_path = (
+            f"{_trim(target_column, 80)}_anomalies[]" if _trim(target_column, 80) else "target_anomalies[]"
+        )
         contracts["schema_report"] = {
             "path": "schema_report.json",
             "format": "json",
@@ -193,10 +196,14 @@ def _artifact_contracts(outputs: List[str], *, target_column: str) -> Dict[str, 
                 "columns[].type_rule",
                 "columns[].null_count",
                 "columns[].observed_non_null_count",
+                f"{anomaly_field_path}.bucket",
+                f"{anomaly_field_path}.count",
+                f"{anomaly_field_path}.examples[]",
             ],
             "inference_policy": _schema_inference_policy(),
             "acceptance_notes": [
                 "schema_report.json must cover every transformed output column, not a partial subset.",
+                "schema_report.json is the canonical anomaly evidence source for downstream null summaries.",
             ],
         }
     if "null_summary" in outputs:
@@ -216,9 +223,9 @@ def _artifact_contracts(outputs: List[str], *, target_column: str) -> Dict[str, 
         contracts["sample_output"] = {
             "path": "sample_5.csv",
             "format": "csv",
-            "required_fields": ["5_rows", "transformed_output_sample"],
+            "required_fields": ["first_5_data_rows", "transformed_output_sample", "shortfall_note_when_needed"],
             "acceptance_notes": [
-                "sample_5.csv contains exactly five rows sampled from the transformed output.",
+                "sample_5.csv follows the request-contract sample output policy.",
             ],
         }
     return contracts
@@ -238,6 +245,13 @@ def _month_bucket_policy(
         "valid_month_rule": "01-12",
         "normalize_to": _trim(normalize_to, 32),
         "trim_before_match": True,
+        "null_like_match": "trim+casefold-exact",
+        "null_like_tokens": ["null", "nan"],
+        "allowed_separators": ["/", "-", "."],
+        "year_width_mismatch_bucket": "bad-year",
+        "separator_mismatch_bucket": "malformed-value",
+        "token_count_mismatch_bucket": "malformed-value",
+        "one_digit_month_bucket": "one-digit-month",
         "match_order": [
             "empty-string",
             "whitespace-only",
@@ -292,6 +306,35 @@ def _schema_null_count_policy(*, target_column: str) -> Dict[str, Any]:
     }
 
 
+def _schema_anomaly_evidence_policy(*, target_column: str) -> Dict[str, Any]:
+    column = _trim(target_column, 80)
+    if not column:
+        return {}
+    return {
+        "target_column": column,
+        "field_path": f"{column}_anomalies[]",
+        "required_fields": ["bucket", "count", "examples[]"],
+        "source_policy": "month_bucket_policy",
+    }
+
+
+def _sample_output_policy() -> Dict[str, Any]:
+    return {
+        "selection_policy": "head",
+        "sample_size": 5,
+        "row_unit": "data-row",
+        "order_basis": "transformed-output-order",
+        "shortfall_policy": "emit-all-available-and-note-shortfall",
+    }
+
+
+def _normalized_output_policy() -> Dict[str, Any]:
+    return {
+        "row_order_policy": "preserve-source-data-row-order",
+        "header_policy": "preserve-source-header-order",
+    }
+
+
 def data_request_contract_matches(prompt: str) -> bool:
     src = str(prompt or "")
     if not src.strip():
@@ -335,6 +378,13 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
         if any(name in output_artifacts for name in ("schema_report", "null_summary"))
         else {}
     )
+    schema_anomaly_evidence_policy = (
+        _schema_anomaly_evidence_policy(target_column=target_column)
+        if any(name in output_artifacts for name in ("schema_report", "null_summary"))
+        else {}
+    )
+    sample_output_policy = _sample_output_policy() if "sample_output" in output_artifacts else {}
+    normalized_output_policy = _normalized_output_policy()
 
     missing_fields: List[str] = []
     if not source_path:
@@ -382,8 +432,11 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
             "zero_pad": "YYYY-MM" in normalize_to,
             "invalid_value_policy": invalid_value_policy,
             "month_bucket_policy": month_bucket_policy,
+            "normalized_output_policy": normalized_output_policy,
             "schema_inference_policy": schema_inference_policy,
             "schema_null_count_policy": schema_null_count_policy,
+            "schema_anomaly_evidence_policy": schema_anomaly_evidence_policy,
+            "sample_output_policy": sample_output_policy,
         },
         "required_outputs": [
             str((artifact_contracts.get(name) or {}).get("path", name)).strip() or name
@@ -477,6 +530,19 @@ def data_request_contract_acceptance_floor(
     schema_null_count_policy = (
         fields.get("schema_null_count_policy") if isinstance(fields.get("schema_null_count_policy"), dict) else {}
     )
+    schema_anomaly_evidence_policy = (
+        fields.get("schema_anomaly_evidence_policy")
+        if isinstance(fields.get("schema_anomaly_evidence_policy"), dict)
+        else {}
+    )
+    sample_output_policy = (
+        fields.get("sample_output_policy") if isinstance(fields.get("sample_output_policy"), dict) else {}
+    )
+    normalized_output_policy = (
+        fields.get("normalized_output_policy")
+        if isinstance(fields.get("normalized_output_policy"), dict)
+        else {}
+    )
     valid_patterns = [
         _trim(item, 32) for item in (month_bucket_policy.get("valid_patterns") or []) if _trim(item, 32)
     ] or accepted_formats
@@ -490,6 +556,17 @@ def data_request_contract_acceptance_floor(
         _trim(item, 32) for item in (month_bucket_policy.get("match_order") or []) if _trim(item, 32)
     ]
     trim_before_match = bool(month_bucket_policy.get("trim_before_match"))
+    null_like_match = _trim(month_bucket_policy.get("null_like_match", ""), 40) or "trim+casefold-exact"
+    null_like_tokens = [
+        _trim(item, 16) for item in (month_bucket_policy.get("null_like_tokens") or []) if _trim(item, 16)
+    ]
+    allowed_separators = [
+        _trim(item, 8) for item in (month_bucket_policy.get("allowed_separators") or []) if _trim(item, 8)
+    ]
+    year_width_mismatch_bucket = _trim(month_bucket_policy.get("year_width_mismatch_bucket", ""), 32) or "bad-year"
+    separator_mismatch_bucket = _trim(month_bucket_policy.get("separator_mismatch_bucket", ""), 32) or "malformed-value"
+    token_count_mismatch_bucket = _trim(month_bucket_policy.get("token_count_mismatch_bucket", ""), 32) or "malformed-value"
+    one_digit_month_bucket = _trim(month_bucket_policy.get("one_digit_month_bucket", ""), 32) or "one-digit-month"
     allowed_inferred_types = [
         _trim(item, 24) for item in (schema_inference_policy.get("allowed_inferred_types") or []) if _trim(item, 24)
     ]
@@ -514,6 +591,51 @@ def data_request_contract_acceptance_floor(
         for item in (schema_null_count_policy.get("target_invalid_buckets_excluded") or [])
         if _trim(item, 32)
     ]
+    anomaly_field_path = _trim(schema_anomaly_evidence_policy.get("field_path", ""), 80)
+    anomaly_required_fields = [
+        _trim(item, 32)
+        for item in (schema_anomaly_evidence_policy.get("required_fields") or [])
+        if _trim(item, 32)
+    ]
+    anomaly_policy_clause = ""
+    if anomaly_field_path and anomaly_required_fields:
+        anomaly_policy_clause = (
+            "`schema_anomaly_evidence_policy`: "
+            + anomaly_field_path
+            + " has "
+            + "/".join(anomaly_required_fields)
+            + "."
+        )
+    anomaly_policy_summary = ""
+    if anomaly_field_path and anomaly_required_fields:
+        anomaly_policy_summary = (
+            "`schema_anomaly_evidence_policy` "
+            + anomaly_field_path
+            + " "
+            + "/".join(anomaly_required_fields).replace("examples[]", "examples")
+        )
+    sample_selection_policy = _trim(sample_output_policy.get("selection_policy", ""), 24) or "head"
+    sample_size = int(sample_output_policy.get("sample_size") or 5)
+    sample_row_unit = _trim(sample_output_policy.get("row_unit", ""), 24) or "data-row"
+    sample_order_basis = _trim(sample_output_policy.get("order_basis", ""), 48) or "transformed-output-order"
+    sample_shortfall_policy = (
+        _trim(sample_output_policy.get("shortfall_policy", ""), 64)
+        or "emit-all-available-and-note-shortfall"
+    )
+    normalized_row_order_policy = (
+        _trim(normalized_output_policy.get("row_order_policy", ""), 64)
+        or "preserve-source-data-row-order"
+    )
+    normalized_header_policy = (
+        _trim(normalized_output_policy.get("header_policy", ""), 64)
+        or "preserve-source-header-order"
+    )
+    sample_policy_summary = (
+        "`sample_output_policy` "
+        f"{sample_selection_policy} {sample_size} {sample_row_unit}s by {sample_order_basis}"
+    )
+    if sample_shortfall_policy:
+        sample_policy_summary += f"; {sample_shortfall_policy}"
     null_count_policy_clause = ""
     if null_like_buckets:
         null_count_policy_clause = (
@@ -523,6 +645,24 @@ def data_request_contract_acceptance_floor(
         if excluded_invalid_buckets:
             null_count_policy_clause += "; exclude month invalid buckets"
         null_count_policy_clause += "."
+    null_count_policy_summary = ""
+    if null_like_buckets:
+        null_aliases = {
+            "empty-string": "empty",
+            "whitespace-only": "space",
+            "literal-null": "null",
+            "literal-nan": "nan",
+        }
+        summarized_buckets = [null_aliases.get(item, item) for item in null_like_buckets]
+        null_count_policy_summary = "`schema_null_count_policy` " + "/".join(summarized_buckets)
+        if excluded_invalid_buckets:
+            null_count_policy_summary += ", exclude month invalids"
+    inference_policy_summary = ""
+    if precedence_order or allowed_inferred_types:
+        inference_policy_summary = (
+            "`schema_inference_policy` "
+            + ">".join(precedence_order or allowed_inferred_types)
+        )
 
     if combined_evidence:
         floor = []
@@ -536,37 +676,40 @@ def data_request_contract_acceptance_floor(
             )
         if "sample" in evidence_targets and sample_contract:
             floor.append(
-                f"`{sample_contract.get('path', 'sample_5.csv')}` contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall."
+                f"`{sample_contract.get('path', 'sample_5.csv')}` follows request-contract {sample_policy_summary}."
             )
     elif explicit_schema and schema_contract:
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
-            "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Type rules are observable. null_count follows "
-            + null_count_policy_clause
-            + " schema follows "
-            + inference_policy_clause,
+            "Schema evidence covers every transformed output column plus canonical anomaly evidence.",
+            "Policies: "
+            + anomaly_policy_summary
+            + "; "
+            + null_count_policy_summary
+            + "; "
+            + inference_policy_summary
+            + ".",
         ]
     elif explicit_null and null_contract:
         floor = [
             f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
             (
-                "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output "
-                "using the same request-contract `month_bucket_policy` that `schema_report.json` uses for null_count."
+                "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
+                f"`{anomaly_field_path or 'target_anomalies[]'}` and summarizes the same transformed-output counts."
             ),
             "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
         ]
     elif explicit_sample and sample_contract:
         floor = [
             f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",
-            "Sample evidence contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall.",
+            f"Sampling follows request-contract {sample_policy_summary}.",
             "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
         ]
     elif is_transform:
         normalized_path = _trim(normalized_contract.get("path", ""), 200)
         if source_path and target_column and normalized_path:
             floor.append(
-                f"Transform acceptance writes `{normalized_path}` from source `{source_path}`, keeps row count unchanged, preserves non-target columns exactly, and only mutates target column `{target_column}`."
+                f"Transform acceptance writes `{normalized_path}` from source `{source_path}`, keeps row count unchanged, preserves source data-row order + source header order, preserves non-target columns exactly, and only mutates target column `{target_column}`."
             )
         elif source_path and target_column:
             floor.append(
@@ -579,10 +722,22 @@ def data_request_contract_acceptance_floor(
             )
         match_rule = ""
         if bucket_match_order:
+            extras: List[str] = []
+            if null_like_tokens:
+                extras.append("null-like=" + "/".join(null_like_tokens) + f" via {null_like_match}")
+            extras.append(f"non-4-digit-year={year_width_mismatch_bucket}")
+            extras.append(f"one-digit-month={one_digit_month_bucket}")
+            mismatch_bucket = separator_mismatch_bucket
+            if token_count_mismatch_bucket and token_count_mismatch_bucket != separator_mismatch_bucket:
+                mismatch_bucket = f"{separator_mismatch_bucket}/{token_count_mismatch_bucket}"
+            if allowed_separators:
+                extras.append(
+                    "allowed-separators=" + "".join(allowed_separators) + f"; separator/token mismatch={mismatch_bucket}"
+                )
             match_rule = (
                 "Month bucket matching follows request-contract `month_bucket_policy`: "
                 + ("trim-before-match; " if trim_before_match else "")
-                + " -> ".join(bucket_match_order)
+                + "; ".join(extras)
                 + "."
             )
         invalid_bucket_rule = ""
@@ -603,7 +758,7 @@ def data_request_contract_acceptance_floor(
         if normalized_path and target_column:
             final_rule = (
                 f"`{normalized_path}` keeps the input row count unchanged, preserves every non-target column exactly, "
-                f"normalizes only valid `{target_column}` values, and preserves invalid/null/empty/out-of-range `{target_column}` values exactly as requested"
+                f"preserves {normalized_row_order_policy} + {normalized_header_policy}, normalizes only valid `{target_column}` values, and preserves invalid/null/empty/out-of-range `{target_column}` values exactly as requested"
             )
         invalid_rule = ""
         if actions:
@@ -629,25 +784,28 @@ def data_request_contract_acceptance_floor(
     elif is_schema and schema_contract:
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
-            "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Type rules are observable. null_count follows "
-            + null_count_policy_clause
-            + " schema follows "
-            + inference_policy_clause,
+            "Schema evidence covers every transformed output column plus canonical anomaly evidence.",
+            "Policies: "
+            + anomaly_policy_summary
+            + "; "
+            + null_count_policy_summary
+            + "; "
+            + inference_policy_summary
+            + ".",
         ]
     elif is_null and null_contract:
         floor = [
             f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
             (
-                "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output "
-                "using request-contract `month_bucket_policy` for month buckets and request-contract `schema_null_count_policy` for null_count."
+                "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
+                f"`{anomaly_field_path or 'target_anomalies[]'}` and summarizes the same transformed-output counts."
             ),
             "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
         ]
     elif is_sample and sample_contract:
         floor = [
             f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",
-            "Sample evidence contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall.",
+            f"Sampling follows request-contract {sample_policy_summary}.",
             "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
         ]
 
