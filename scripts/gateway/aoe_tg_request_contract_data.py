@@ -476,23 +476,30 @@ def data_request_contract_acceptance_floor(
         else {}
     )
     task_context = "\n".join((str(title or ""), str(goal or "")))
+    title_context = str(title or "").lower()
     schema_contract = artifact_contracts.get("schema_report") if isinstance(artifact_contracts.get("schema_report"), dict) else {}
     null_contract = artifact_contracts.get("null_summary") if isinstance(artifact_contracts.get("null_summary"), dict) else {}
     sample_contract = artifact_contracts.get("sample_output") if isinstance(artifact_contracts.get("sample_output"), dict) else {}
     normalized_contract = artifact_contracts.get("normalized_csv") if isinstance(artifact_contracts.get("normalized_csv"), dict) else {}
+    normalized_path = _trim(normalized_contract.get("path", ""), 200)
     schema_path = _trim(schema_contract.get("path", ""), 200)
     null_path = _trim(null_contract.get("path", ""), 200)
     sample_path = _trim(sample_contract.get("path", ""), 200)
     explicit_artifact_targets = [
         token
         for token, enabled in (
-            ("schema", bool(schema_path and schema_path.lower() in task_context.lower())),
-            ("null", bool(null_path and null_path.lower() in task_context.lower())),
-            ("sample", bool(sample_path and sample_path.lower() in task_context.lower())),
+            ("normalized", bool(normalized_path and normalized_path.lower() in title_context)),
+            ("schema", bool(schema_path and schema_path.lower() in title_context)),
+            ("null", bool(null_path and null_path.lower() in title_context)),
+            ("sample", bool(sample_path and sample_path.lower() in title_context)),
         )
         if enabled
     ]
-    is_transform = _contains_any(task_context, ["normalize", "normalized", "정규화", "변환", "month", "월별"])
+    low_task_context = task_context.lower()
+    is_transform = bool(re.search(r"\b(normalize|transform)\b", low_task_context)) or _contains_any(
+        task_context,
+        ["정규화", "변환"],
+    )
     is_schema = _contains_any(task_context, ["schema", "스키마", "report", "리포트"])
     is_null = _contains_any(task_context, ["null", "결측", "anomaly", "요약", "summary"])
     is_sample = _contains_any(task_context, ["sample", "샘플", "5행", "5 rows"])
@@ -508,7 +515,8 @@ def data_request_contract_acceptance_floor(
             )
             if enabled
         ]
-    combined_evidence = len(evidence_targets) >= 2
+    combined_evidence = len([token for token in evidence_targets if token != "normalized"]) >= 2
+    explicit_normalized = "normalized" in explicit_artifact_targets
     explicit_schema = "schema" in explicit_artifact_targets
     explicit_null = "null" in explicit_artifact_targets
     explicit_sample = "sample" in explicit_artifact_targets
@@ -678,7 +686,7 @@ def data_request_contract_acceptance_floor(
             floor.append(
                 f"`{sample_contract.get('path', 'sample_5.csv')}` follows request-contract {sample_policy_summary}."
             )
-    elif explicit_schema and schema_contract:
+    elif explicit_schema and schema_contract and not (explicit_normalized or is_transform):
         floor = [
             f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column plus canonical anomaly evidence.",
@@ -705,11 +713,10 @@ def data_request_contract_acceptance_floor(
             f"Sampling follows request-contract {sample_policy_summary}.",
             "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
         ]
-    elif is_transform:
-        normalized_path = _trim(normalized_contract.get("path", ""), 200)
+    elif explicit_normalized or is_transform:
         if source_path and target_column and normalized_path:
             floor.append(
-                f"Transform acceptance writes `{normalized_path}` from source `{source_path}`, keeps row count unchanged, preserves source data-row order + source header order, preserves non-target columns exactly, and only mutates target column `{target_column}`."
+                f"Transform acceptance writes `{normalized_path}` from source `{source_path}`; row count + row/header order stay unchanged, non-target columns stay exact, and only target column `{target_column}` may change."
             )
         elif source_path and target_column:
             floor.append(
@@ -722,28 +729,13 @@ def data_request_contract_acceptance_floor(
             )
         match_rule = ""
         if bucket_match_order:
-            extras: List[str] = []
-            if null_like_tokens:
-                extras.append("null-like=" + "/".join(null_like_tokens) + f" via {null_like_match}")
-            extras.append(f"non-4-digit-year={year_width_mismatch_bucket}")
-            extras.append(f"one-digit-month={one_digit_month_bucket}")
-            mismatch_bucket = separator_mismatch_bucket
-            if token_count_mismatch_bucket and token_count_mismatch_bucket != separator_mismatch_bucket:
-                mismatch_bucket = f"{separator_mismatch_bucket}/{token_count_mismatch_bucket}"
-            if allowed_separators:
-                extras.append(
-                    "allowed-separators=" + "".join(allowed_separators) + f"; separator/token mismatch={mismatch_bucket}"
-                )
             match_rule = (
-                "Month bucket matching follows request-contract `month_bucket_policy`: "
-                + ("trim-before-match; " if trim_before_match else "")
-                + "; ".join(extras)
+                "Month bucket policy: "
+                + ("trim-before-match only for classification; " if trim_before_match else "")
+                + f"null-like={'/'.join(null_like_tokens) or 'null/nan'} via {null_like_match}; "
+                + f"bad-year={year_width_mismatch_bucket}; one-digit-month={one_digit_month_bucket}; "
+                + "invalid/null-like/whitespace/out-of-range keep original row + month bytes"
                 + "."
-            )
-        invalid_bucket_rule = ""
-        if anomaly_buckets:
-            invalid_bucket_rule = (
-                "Request-contract `month_bucket_policy` anomaly buckets preserve the original row/value and feed the same counts used by `schema_report.json` and `null_summary.md`."
             )
         actions: List[str] = []
         if bool(invalid_policy.get("preserve_row")):
@@ -767,8 +759,6 @@ def data_request_contract_acceptance_floor(
             floor.append(valid_rule)
         if match_rule:
             floor.append(match_rule)
-        elif invalid_bucket_rule:
-            floor.append(invalid_bucket_rule)
         if actions and final_rule:
             floor.append(final_rule + ".")
             if not bool(invalid_policy.get("preserve_row")) or not bool(invalid_policy.get("preserve_original_value")):
