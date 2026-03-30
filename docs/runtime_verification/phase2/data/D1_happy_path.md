@@ -18,6 +18,8 @@
   - `2026-03-30T15:55:41+09:00`
   - `2026-03-30T15:57:07+09:00`
   - `2026-03-30T16:01:04+09:00`
+  - `2026-03-31T01:08:54+09:00`
+  - `2026-03-31T01:21:22+09:00`
 - operator:
   - `Codex`
 
@@ -73,6 +75,12 @@
   - `r_20260330160104_efad9db1`
     - `T-008`
     - `plan_gate_reason=S1가 계약보다 넓은 입력을 정상값으로 처리한다. YYYY/M, YYYY-M, YYYY.M까지 정상 변환해 계약상 비허용 값이 anomaly로 남지 않는다.`
+  - `r_20260331010854_039968a2`
+    - `T-020`
+    - `plan_gate_reason=\`null_count\`와 anomaly 분류 기준이 S1의 transform 설명에만 걸려 있고 S2/S3 acceptance에 명시되지 않아 schema_report.json과 null_summary.md가 같은 집계 규칙을 쓴다고 dispatch 시점에 보장할 수 없다.`
+  - `r_20260331012122_207393a0`
+    - `T-021`
+    - `plan_gate_reason=S1이 month 분류 규칙을 실행 가능한 수준으로 닫지 못했다. out-of-range의 범위, whitespace/empty, literal null/NaN 같은 입력 bucket이 비어 있어 S2/S3의 공통 기준이 남지 않았다.`
 - task_short_id:
   - `T-001`
   - `T-002`
@@ -82,9 +90,11 @@
   - `T-006`
   - `T-007`
   - `T-008`
+  - `T-020`
+  - `T-021`
 - planning:
   - `T-001` to `T-005` used `phase1 ensemble rounds=3 providers=codex`
-  - `T-008` used `phase1 ensemble rounds=3 providers=codex,claude`
+  - `T-008`, `T-020`, and `T-021` used `phase1 ensemble rounds=3 providers=codex,claude`
   - all substantive runs selected `phase1=data phase2=data`
 - stage progression:
   - planning:
@@ -95,6 +105,8 @@
     - `T-005` blocked after critic 3/3 on artifact-specific output contracts
     - `T-006` and `T-007` failed immediately on request-contract wrapper parity
     - `T-008` blocked after critic 3/3 because the transform acceptance was still too permissive about allowed month formats
+    - `T-020` blocked after critic 3/3 because schema/null artifact acceptance still lacked a shared null/anomaly classification rule
+    - `T-021` blocked after critic 3/3 because S1 still did not define bucket boundaries for whitespace, empty string, literal `null`/`NaN`, and out-of-range values
   - execution:
     - `not reached yet`
   - verification:
@@ -111,6 +123,8 @@
   - `T-005`: output artifacts were named but not split into file-specific contracts
   - `T-006`/`T-007`: request-contract plumbing hit a live facade seam before planner execution
   - `T-008`: artifact contracts now exist, but accepted input formats remain too broad and allow non-contract month variants to normalize instead of becoming anomalies
+  - `T-020`: schema/null artifact floors exist, but they still do not explicitly force the same null/anomaly classification across `schema_report.json` and `null_summary.md`
+  - `T-021`: transform acceptance now carries the artifact sync rule, but month bucket definitions are still underspecified for whitespace, empty string, literal `null`/`NaN`, and out-of-range handling
 - final branch:
   - `blocked`
 
@@ -139,16 +153,20 @@
   - `artifact_contract_gap`
   - `request_contract_facade_seam`
   - `accepted_format_boundary_gap`
+  - `shared_null_classification_gap`
+  - `month_bucket_definition_gap`
 - mismatch notes:
   - first real D1 run proved the data preset path works, but `schema_report.json` acceptance could still be truncated into partial column coverage
   - `scripts/gateway/aoe_tg_schema.py` now adds a data-specific acceptance floor and reserves slots for floor items so full-column schema evidence survives normalization
   - after that code fix, the next blockers moved in order: explicit input binding, month normalization policy, propagation of that policy into S1 acceptance, and artifact-specific contract splitting
   - `Request Contract` rollout exposed a live facade mismatch at `T-006`/`T-007`, which is now fixed
-  - `T-008` proves the artifact-specific contract floor is working; the current remaining blocker is narrower: S1 still accepts `YYYY/M`, `YYYY-M`, `YYYY.M` even though the contract only permits `YYYY/MM`, `YYYY-MM`, `YYYY.MM`
+  - `T-008` proved the artifact-specific contract floor was working, then the blocker narrowed again into exact transform policy
+  - `T-020` showed that artifact ownership alone was not enough: `schema_report.json` and `null_summary.md` also needed an explicit shared null/anomaly classification rule
+  - `T-021` showed the remaining contract gap had moved back into S1: the transform lane still needed concrete bucket definitions for whitespace, empty string, literal `null`/`NaN`, and out-of-range handling
 - next fix:
-  - tighten the data request-contract acceptance so only the declared input formats are normalized
-  - explicitly forbid `YYYY/M`, `YYYY-M`, and `YYYY.M` from being treated as valid month values under the current D1 contract
-  - rerun D1 after that boundary fix, then capture `/monitor`, `/offdesk review`, and dashboard evidence before moving to execution-stage verification
+  - encode exact S1 month buckets so only 4-digit-year `YYYY/MM`, `YYYY-MM`, `YYYY.MM` with month `01-12` normalize
+  - keep whitespace-only, empty string, literal `null`/`NaN`, malformed year, and month `00/13+` in the anomaly bucket with original row/value preservation
+  - rerun D1 after that bucket-definition fix, then capture `/monitor`, `/offdesk review`, and dashboard evidence before moving to execution-stage verification
 
 ## 7. Raw References
 - runtime state refs:

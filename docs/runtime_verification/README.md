@@ -30,8 +30,8 @@
   - `data/D1_happy_path.md`
     - `executed_blocked`
     - finding:
-      - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, and then a request-contract wrapper seam
-      - latest `T-008` run proves artifact-specific data contracts are present; the remaining blocker is narrower and contract-driven: allowed month formats are still too permissive, so invalid variants do not stay anomalous
+      - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, request-contract plumbing, and then exact transform-policy seams
+      - latest confirmed blockers (`T-020`, `T-021`) are now very narrow: shared null/anomaly classification between schema/null artifacts and exact month bucket definitions in S1
   - `review/R1_happy_path.md`
     - `planned`
   - `mixed/M1_happy_path.md`

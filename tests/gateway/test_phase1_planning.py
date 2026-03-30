@@ -35,6 +35,7 @@ ensemble_mod = _load_module(PLAN_FILE, "aoe_tg_plan_ensemble_mod")
 pipeline_mod = _load_module(PIPELINE_FILE, "aoe_tg_plan_pipeline_mod")
 gw = _load_module(GW_FILE, "aoe_telegram_gateway_mod_phase1")
 import aoe_tg_request_contract as request_contract_mod
+import aoe_tg_request_contract_data as request_contract_data_mod
 
 
 def test_phase1_planner_prompt_forbids_standalone_review_subtasks() -> None:
@@ -939,6 +940,24 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert contract["artifact_contracts"]["sample_output"]["path"] == "sample_5.csv"
 
 
+def test_data_request_contract_treats_original_preserve_phrase_as_row_and_value_policy() -> None:
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=(
+            "입력 csv는 data/monthly_raw.csv이고 대상 컬럼은 month야. "
+            "허용 포맷 YYYY/MM, YYYY-MM, YYYY.MM만 YYYY-MM으로 정규화하고 "
+            "invalid/null/empty/out-of-range 값은 원본 유지하면서 normalized.csv, "
+            "schema_report.json, null_summary.md, sample_5.csv를 만들어줘."
+        ),
+        selected_roles=["DataEngineer", "Codex-Reviewer"],
+        project_key="demo-data",
+    )
+
+    assert contract["contract_type"] == "data"
+    assert contract["fields"]["invalid_value_policy"]["preserve_row"] is True
+    assert contract["fields"]["invalid_value_policy"]["preserve_original_value"] is True
+    assert contract["fields"]["invalid_value_policy"]["record_anomaly"] is True
+
+
 def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None:
     contract = request_contract_mod.build_request_contract(
         source_prompt=(
@@ -958,7 +977,7 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
                 {
                     "id": "S1",
                     "title": "Normalize month column",
-                    "goal": "transform month values in the csv",
+                    "goal": "transform month values in the csv and write anomaly summary",
                     "owner_role": "DataEngineer",
                     "acceptance": ["normalized CSV is produced"],
                 },
@@ -999,15 +1018,45 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
 
     assert any("source `data/monthly_raw.csv`" in item for item in acceptance_by_id["S1"])
     assert any("normalized.csv" in item for item in acceptance_by_id["S1"])
-    assert any("accepted month input formats" in item for item in acceptance_by_id["S1"])
+    assert any("Only YYYY/MM, YYYY-MM, YYYY.MM" in item for item in acceptance_by_id["S1"])
     assert any("stay anomalies" in item for item in acceptance_by_id["S1"])
+    assert any("Whitespace-only, empty string, literal null/NaN, and month 00 or 13+" in item for item in acceptance_by_id["S1"])
     assert any("row count unchanged" in item for item in acceptance_by_id["S1"])
+    assert any("preserves non-target columns exactly" in item for item in acceptance_by_id["S1"])
     assert any("schema_report.json" in item for item in acceptance_by_id["S2"])
     assert any("every transformed output column" in item for item in acceptance_by_id["S2"])
+    assert any("Type rules are observable" in item for item in acceptance_by_id["S2"])
+    assert any("same null/anomaly classification as `null_summary.md`" in item for item in acceptance_by_id["S2"])
     assert any("null_summary.md" in item for item in acceptance_by_id["S3"])
     assert any("invalid month examples" in item for item in acceptance_by_id["S3"])
+    assert any("same null/anomaly classification" in item for item in acceptance_by_id["S3"])
     assert any("sample_5.csv" in item for item in acceptance_by_id["S4"])
-    assert any("exactly five rows" in item for item in acceptance_by_id["S4"])
+    assert any("exactly five data rows taken in transformed-output order" in item for item in acceptance_by_id["S4"])
+
+
+def test_data_request_contract_combined_evidence_task_gets_file_specific_acceptance_floor() -> None:
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=(
+            "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+            "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+            "parse 불가하거나 범위를 벗어난 값은 원본 행을 유지하고 month 원값을 그대로 두며 anomaly로 기록한다. "
+            "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
+        ),
+        selected_roles=["DataEngineer", "Codex-Reviewer"],
+        project_key="demo-data",
+    )
+
+    floor = request_contract_data_mod.data_request_contract_acceptance_floor(
+        request_contract=contract,
+        title="Evidence outputs",
+        goal="Produce null_summary.md, schema_report.json, and sample_5.csv from the transformed output",
+    )
+
+    assert len(floor) == 3
+    assert any("null_summary.md" in item for item in floor)
+    assert any("schema_report.json" in item for item in floor)
+    assert any("same null/anomaly classification" in item for item in floor)
+    assert any("sample_5.csv" in item for item in floor)
 
 
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:

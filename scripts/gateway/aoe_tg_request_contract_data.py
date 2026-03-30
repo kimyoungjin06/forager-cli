@@ -112,11 +112,51 @@ def _extract_normalize_to(prompt: str) -> str:
 def _extract_invalid_value_policy(prompt: str) -> Dict[str, bool]:
     src = str(prompt or "")
     low = src.lower()
+    preserve_any_original = _contains_any(
+        low,
+        [
+            "preserve original",
+            "keep original",
+            "leave unchanged",
+            "unchanged",
+            "원본 유지",
+            "원본 그대로 유지",
+            "원본 보존",
+        ],
+    )
+    invalid_scope = _contains_any(
+        low,
+        [
+            "invalid",
+            "null",
+            "empty",
+            "out-of-range",
+            "parse 불가",
+            "범위를 벗어난",
+            "비정상",
+            "결측",
+            "anomaly",
+        ],
+    )
+    drop_row = _contains_any(low, ["drop row", "row drop", "행 삭제", "행 제거"])
+    preserve_row = _contains_any(low, ["preserve row", "원본 행", "행 유지", "row 유지"])
+    preserve_original_value = _contains_any(
+        low,
+        ["original value", "원값", "원본 값", "그대로 둔다", "그대로 두"],
+    )
+
+    # Data requests often compress the policy into "원본 유지" instead of spelling out
+    # row/value separately. When that phrasing appears in an invalid-value context and
+    # the prompt does not explicitly ask to drop rows, keep both row and original value.
+    if preserve_any_original and invalid_scope and not drop_row:
+        preserve_row = True
+        preserve_original_value = True
+
     return {
-        "preserve_row": _contains_any(low, ["preserve row", "원본 행", "행 유지", "row 유지"]),
-        "preserve_original_value": _contains_any(low, ["original value", "원값", "원본 값", "그대로 둔다", "그대로 두"]),
+        "preserve_row": preserve_row,
+        "preserve_original_value": preserve_original_value,
         "record_anomaly": _contains_any(low, ["anomaly", "이상치", "기록", "요약", "summary"]),
-        "drop_row": _contains_any(low, ["drop row", "row drop", "행 삭제", "행 제거"]),
+        "drop_row": drop_row,
     }
 
 
@@ -300,10 +340,39 @@ def data_request_contract_acceptance_floor(
         else {}
     )
     task_context = "\n".join((str(title or ""), str(goal or "")))
-    is_transform = _contains_any(task_context, ["normalize", "transform", "정규화", "변환", "month", "월별"])
+    schema_contract = artifact_contracts.get("schema_report") if isinstance(artifact_contracts.get("schema_report"), dict) else {}
+    null_contract = artifact_contracts.get("null_summary") if isinstance(artifact_contracts.get("null_summary"), dict) else {}
+    sample_contract = artifact_contracts.get("sample_output") if isinstance(artifact_contracts.get("sample_output"), dict) else {}
+    normalized_contract = artifact_contracts.get("normalized_csv") if isinstance(artifact_contracts.get("normalized_csv"), dict) else {}
+    schema_path = _trim(schema_contract.get("path", ""), 200)
+    null_path = _trim(null_contract.get("path", ""), 200)
+    sample_path = _trim(sample_contract.get("path", ""), 200)
+    explicit_artifact_targets = [
+        token
+        for token, enabled in (
+            ("schema", bool(schema_path and schema_path.lower() in task_context.lower())),
+            ("null", bool(null_path and null_path.lower() in task_context.lower())),
+            ("sample", bool(sample_path and sample_path.lower() in task_context.lower())),
+        )
+        if enabled
+    ]
+    is_transform = _contains_any(task_context, ["normalize", "normalized", "정규화", "변환", "month", "월별"])
     is_schema = _contains_any(task_context, ["schema", "스키마", "report", "리포트"])
     is_null = _contains_any(task_context, ["null", "결측", "anomaly", "요약", "summary"])
     is_sample = _contains_any(task_context, ["sample", "샘플", "5행", "5 rows"])
+    evidence_targets = [
+        token
+        for token, enabled in (
+            ("schema", ("schema" in explicit_artifact_targets) or is_schema),
+            ("null", ("null" in explicit_artifact_targets) or is_null),
+            ("sample", ("sample" in explicit_artifact_targets) or is_sample),
+        )
+        if enabled
+    ]
+    combined_evidence = len(evidence_targets) >= 2
+    explicit_schema = "schema" in explicit_artifact_targets
+    explicit_null = "null" in explicit_artifact_targets
+    explicit_sample = "sample" in explicit_artifact_targets
 
     floor: List[str] = []
     source_path = _trim(fields.get("source_path", ""), 200)
@@ -314,23 +383,60 @@ def data_request_contract_acceptance_floor(
     normalize_to = _trim(fields.get("normalize_to", ""), 32)
     invalid_policy = fields.get("invalid_value_policy") if isinstance(fields.get("invalid_value_policy"), dict) else {}
 
-    if is_transform:
-        normalized_contract = artifact_contracts.get("normalized_csv") if isinstance(artifact_contracts.get("normalized_csv"), dict) else {}
+    if combined_evidence:
+        floor = []
+        if null_contract:
+            floor.append(
+                f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, and invalid month examples from the transformed output while preserving the requested row/value policy."
+            )
+        if schema_contract:
+            floor.append(
+                f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; each type_rule states the observable inference rule and uses the same null/anomaly classification as `{null_contract.get('path', 'null_summary.md') or 'null_summary.md'}`."
+            )
+        if sample_contract:
+            floor.append(
+                f"`{sample_contract.get('path', 'sample_5.csv')}` contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall."
+            )
+    elif explicit_schema and schema_contract:
+        floor = [
+            f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
+            "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
+            "Type rules are observable, coverage is complete, and `null_count` uses the same null/anomaly classification as `null_summary.md`.",
+        ]
+    elif explicit_null and null_contract:
+        floor = [
+            f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
+            (
+                "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output "
+                "using the same null/anomaly classification that `schema_report.json` uses for null_count."
+            ),
+            "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
+        ]
+    elif explicit_sample and sample_contract:
+        floor = [
+            f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",
+            "Sample evidence contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall.",
+            "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
+        ]
+    elif is_transform:
         normalized_path = _trim(normalized_contract.get("path", ""), 200)
         if source_path and target_column and normalized_path:
             floor.append(
-                f"Transform acceptance writes `{normalized_path}` from source `{source_path}` and only mutates target column `{target_column}`."
+                f"Transform acceptance writes `{normalized_path}` from source `{source_path}`, keeps row count unchanged, preserves non-target columns exactly, and only mutates target column `{target_column}`."
             )
         elif source_path and target_column:
             floor.append(
                 f"Transform acceptance binds source `{source_path}` and target column `{target_column}` explicitly."
             )
+        valid_rule = ""
         if accepted_formats and normalize_to:
-            floor.append(
-                "Normalization rules enumerate the only accepted month input formats "
-                f"{', '.join(accepted_formats)} and normalize them to {normalize_to}; "
-                "variants such as YYYY/M, YYYY-M, and YYYY.M stay anomalies instead of being normalized."
+            valid_rule = (
+                f"Only {', '.join(accepted_formats)} with a 4-digit year and month 01-12 normalize to {normalize_to}; "
+                "YYYY/M, YYYY-M, YYYY.M, bad years, and malformed variants stay anomalies."
             )
+        invalid_bucket_rule = (
+            "Whitespace-only, empty string, literal null/NaN, and month 00 or 13+ stay anomalies and preserve the original row/value."
+        )
         actions: List[str] = []
         if bool(invalid_policy.get("preserve_row")):
             actions.append("preserve the original row")
@@ -343,32 +449,46 @@ def data_request_contract_acceptance_floor(
         final_rule = ""
         if normalized_path and target_column:
             final_rule = (
-                f"`{normalized_path}` keeps the input row count unchanged, normalizes only valid `{target_column}` values, "
-                f"and preserves invalid/null/empty/out-of-range `{target_column}` values exactly as requested"
+                f"`{normalized_path}` keeps the input row count unchanged, preserves every non-target column exactly, "
+                f"normalizes only valid `{target_column}` values, and preserves invalid/null/empty/out-of-range `{target_column}` values exactly as requested"
             )
+        invalid_rule = ""
+        if actions:
+            invalid_rule = "Invalid/null/empty/out-of-range handling must " + ", ".join(actions) + "."
+        if valid_rule:
+            floor.append(valid_rule)
+        floor.append(invalid_bucket_rule)
         if actions and final_rule:
-            floor.append(final_rule + "; invalid handling must " + ", ".join(actions) + ".")
+            floor.append(final_rule + ".")
+            if not bool(invalid_policy.get("preserve_row")) or not bool(invalid_policy.get("preserve_original_value")):
+                floor.append(invalid_rule)
         elif final_rule:
             floor.append(final_rule + ".")
-        elif actions:
-            floor.append("Invalid, unparseable, or out-of-range month handling must " + ", ".join(actions) + ".")
-
-    if is_schema and isinstance(artifact_contracts.get("schema_report"), dict):
+            if invalid_rule and not (
+                bool(invalid_policy.get("preserve_row")) and bool(invalid_policy.get("preserve_original_value"))
+            ):
+                floor.append(invalid_rule)
+        elif invalid_rule:
+            floor.append(invalid_rule)
+    elif is_schema and schema_contract:
         floor = [
-            f"Schema report writes `{artifact_contracts['schema_report'].get('path', 'schema_report.json')}` as JSON.",
+            f"Schema report writes `{schema_contract.get('path', 'schema_report.json')}` as JSON.",
             "Schema evidence covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count.",
-            "Schema coverage is for the transformed output, not a partial column subset.",
+            "Type rules are observable, coverage is complete, and `null_count` uses the same null/anomaly classification as `null_summary.md`.",
         ]
-    elif is_null and isinstance(artifact_contracts.get("null_summary"), dict):
+    elif is_null and null_contract:
         floor = [
-            f"Null summary writes `{artifact_contracts['null_summary'].get('path', 'null_summary.md')}` as markdown.",
-            "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output.",
+            f"Null summary writes `{null_contract.get('path', 'null_summary.md')}` as markdown.",
+            (
+                "Null/anomaly evidence summarizes affected columns, null counts, and invalid month examples from the transformed output "
+                "using the same null/anomaly classification that `schema_report.json` uses for null_count."
+            ),
             "Null/anomaly handling preserves the requested row/value policy instead of silently rewriting evidence.",
         ]
-    elif is_sample and isinstance(artifact_contracts.get("sample_output"), dict):
+    elif is_sample and sample_contract:
         floor = [
-            f"Sample output writes `{artifact_contracts['sample_output'].get('path', 'sample_5.csv')}` as CSV.",
-            "Sample evidence contains exactly five rows sampled from the transformed output.",
+            f"Sample output writes `{sample_contract.get('path', 'sample_5.csv')}` as CSV.",
+            "Sample evidence contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall.",
             "Sample rows are sufficient to inspect normalized month formatting and null/anomaly handling.",
         ]
 

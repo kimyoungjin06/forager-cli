@@ -1275,6 +1275,16 @@ def run_aoe_orch(
         effective_priority = "P2"
     effective_timeout = max(1, int(args.orch_timeout_sec if timeout_override is None else timeout_override))
     effective_no_wait = bool(args.no_wait if no_wait_override is None else no_wait_override)
+    coordinator_role = ""
+    try:
+        cfg = Path(str(args.team_dir)) / "orchestrator.json"
+        if cfg.exists():
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            coordinator = data.get("coordinator")
+            if isinstance(coordinator, dict):
+                coordinator_role = str(coordinator.get("role", "")).strip()
+    except Exception:
+        coordinator_role = ""
 
     def cleanup_request_artifacts(request_id: str, tf_meta: Dict[str, Any]) -> None:
         try:
@@ -1313,15 +1323,27 @@ def run_aoe_orch(
             run_command=run_command,
         )
         try:
-            preview_roles = resolve_dispatch_roles_from_preview(
-                args,
-                stage_prompt,
-                request_id=request_id,
-                roles_override=stage_roles_csv,
-                priority=effective_priority,
-                timeout_sec=effective_timeout,
-                run_command=run_command,
-            )
+            try:
+                preview_roles = resolve_dispatch_roles_from_preview(
+                    args,
+                    stage_prompt,
+                    request_id=request_id,
+                    roles_override=stage_roles_csv,
+                    priority=effective_priority,
+                    timeout_sec=effective_timeout,
+                    run_command=run_command,
+                )
+            except Exception as exc:
+                low = str(exc or "").strip().lower()
+                if "no target roles found for orchestration" in low:
+                    requested_roles = [str(role).strip() for role in str(stage_roles_csv or "").split(",") if str(role).strip()]
+                    detail = f"requested_roles={','.join(requested_roles) or '-'}"
+                    if coordinator_role and requested_roles and all(role == coordinator_role for role in requested_roles):
+                        detail += f" coordinator_role={coordinator_role} (coordinator-only role cannot be dispatched as a worker)"
+                    raise RuntimeError(
+                        f"aoe-orch preview found no target roles for {stage_name}: {detail}"
+                    ) from exc
+                raise
             worker_roles = merge_worker_roles_with_lane_summary(preview_roles, stage_lane_summary)
             if not worker_roles:
                 raise RuntimeError(f"aoe-orch run preview resolved no worker roles for {stage_name}")

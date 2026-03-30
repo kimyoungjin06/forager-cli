@@ -79,7 +79,7 @@
   - `executed_blocked`
 - current finding:
   - live runs progressed through schema acceptance truncation, input binding, transform policy propagation, artifact-specific output contracts, and a request-contract facade seam
-  - latest `T-008` blocker is now narrower: the data contract still treats `YYYY/M`, `YYYY-M`, `YYYY.M` as normalizable even though D1 only allows `YYYY/MM`, `YYYY-MM`, `YYYY.MM`
+  - latest confirmed blockers (`T-020`, `T-021`) are narrower and fully contract-driven: schema/null artifacts need one shared null/anomaly classification rule, and S1 still needs exact bucket definitions for whitespace, empty string, literal `null`/`NaN`, malformed year, and month `00/13+`
 - prompt shape:
   - require schema/null/sample evidence
 - expected preset:
