@@ -45,6 +45,11 @@
 1. `Learned Runbook Extraction`
 2. `Artifact-First Runtime Monitors`
 
+### 3.4 Core Runtime Prerequisite
+1. `Request Contract Layer`
+- This item is not benchmark-driven OMC shell adoption.
+- It is a core runtime hardening step required because live verification has now shown the limit of text-only execution inference.
+
 ## 4. Package A: Session Search
 
 ### 4.1 Goal
@@ -284,6 +289,33 @@ without grepping raw logs manually.
 
 ### 6A.8 Detailed Contract
 - `docs/PROJECT_FLOW_COMPILER_SPEC.md`
+
+## 6B. Core Runtime Prerequisite: Request Contract Layer
+
+### 6B.1 Goal
+- Move the system from text-only execution inference to contract-driven planning.
+
+### 6B.2 Why This Is Separate From Harness Adoption
+- `Session Search`, `Observatory`, `AOE_STATE_DIR`, `doctor`, and compatibility work were mostly harness maturity imports.
+- `Request Contract` is different:
+  - it is a core execution-truth change inside our own runtime model.
+- The immediate trigger came from live runtime verification, especially `data` preset drift.
+
+### 6B.3 What Changes
+- intake routing keeps using shallow text heuristics
+- planning stops treating prompt phrasing as the execution truth
+- request extraction emits structured preset-specific fields
+- acceptance generation and plan gating use those structured fields
+- task/runtime/surface summaries store contract completeness and missing fields
+
+### 6B.4 Execution Order
+1. `data` request contract
+2. `build` request contract
+3. `review` request contract
+4. `mixed` request contract
+
+### 6B.5 Canonical Spec
+- `docs/REQUEST_CONTRACT_SPEC.md`
 
 ## 7. Package D: Doctor / Setup / Migration Discipline
 

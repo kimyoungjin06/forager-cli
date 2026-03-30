@@ -211,6 +211,13 @@
 - [x] `Live Runtime Verification` spec
   - 문서:
     - `docs/LIVE_RUNTIME_VERIFICATION_SPEC.md`
+- [x] `Request Contract` architecture spec
+  - 문서:
+    - `docs/REQUEST_CONTRACT_SPEC.md`
+  - 핵심 판단:
+    - 평문은 intake UI로 남긴다
+    - planning truth는 `Request Contract`로 전환한다
+    - `D1` 이후 `data -> build -> review -> mixed` 순서로 extractor를 도입한다
 - [x] preset verification scenario inventory
   - 문서:
     - `docs/LIVE_RUNTIME_VERIFICATION_SCENARIOS.md`
@@ -242,6 +249,24 @@
     1. happy-path 1개씩
     2. rerun path 1개씩
     3. manual-followup path 1개씩
+- [ ] `Request Contract` layer 도입
+  - 목적:
+    - `text -> request contract -> planning/runtime`
+    - marker-only acceptance floor 의존 제거
+  - 1단계:
+    - `data` contract extractor
+    - `contract_incomplete` / `contract_ambiguous` fail-closed gate
+    - `aoe_tg_schema.py`의 data acceptance를 contract 기반으로 전환
+    - task/runtime state에 `request_contract_*` summary 저장
+    - `/task` / dashboard `Task Detail`에 contract summary 노출
+  - 2단계:
+    - `build` contract extractor
+    - auth/session persisted-state boundary를 contract 기반으로 전환
+  - 3단계:
+    - `review` / `mixed` contract extractor
+    - handoff/review/work separation을 contract 기반으로 전환
+  - note:
+    - `D1`에서 드러난 input binding / transform policy / artifact contract drift를 우선 해결한다
 
 ### 8.5 Recovery Summary
 - [x] nightly session summary spec 고정

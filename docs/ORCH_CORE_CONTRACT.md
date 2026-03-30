@@ -31,6 +31,38 @@ Mother-Orch control-plane actions are defined separately in:
 
 ## 2. Contract Objects
 
+### 2.0 RequestContract
+
+This is the canonical normalized input between plain-language intake and TF planning.
+
+Required fields:
+
+- `version`
+- `contract_type`
+- `status`
+- `objective`
+- `intent_action`
+- `source_prompt`
+- `preset`
+- `fields`
+- `required_outputs`
+- `required_evidence`
+- `missing_fields`
+- `summary`
+
+Operational meaning:
+
+- plain text remains the operator-facing UI
+- `RequestContract` becomes the planning-facing truth once extracted
+- planner/critic logic should depend on structured fields before it depends on prompt wording
+
+Important policy:
+
+- routing may still use lightweight text heuristics at the intake boundary
+- planning must not rely on raw prompt wording when the same requirement is already expressible as a structured field
+- incomplete request contracts should fail closed with explicit `contract_*` reasons instead of hidden planner guesses
+- runtime/operator surfaces should preserve contract summary and missing-field evidence so blocker explanations stay stable across phrasing drift
+
 ### 2.1 OrchTaskSpec
 
 This is the only task input Orch should hand to a TF planner.
