@@ -468,15 +468,15 @@ def data_request_contract_acceptance_floor(
 
     if combined_evidence:
         floor = []
-        if null_contract:
+        if "null" in evidence_targets and null_contract:
             floor.append(
                 f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, and invalid month examples from the transformed output while preserving the requested row/value policy and the request-contract `month_bucket_policy`."
             )
-        if schema_contract:
+        if "schema" in evidence_targets and schema_contract:
             floor.append(
                 f"`{schema_contract.get('path', 'schema_report.json')}` covers every transformed output column with name, inferred_type, type_rule, null_count, and observed_non_null_count; it uses request-contract `month_bucket_policy` + request-contract `schema_inference_policy`."
             )
-        if sample_contract:
+        if "sample" in evidence_targets and sample_contract:
             floor.append(
                 f"`{sample_contract.get('path', 'sample_5.csv')}` contains exactly five data rows taken in transformed-output order; if fewer than five rows exist, emit every available row and state the shortfall."
             )

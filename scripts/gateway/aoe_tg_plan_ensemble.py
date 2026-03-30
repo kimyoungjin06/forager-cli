@@ -181,6 +181,23 @@ def _single_execution_role_critic_guidance(workers: List[str]) -> str:
     )
 
 
+def _request_contract_output_guidance(request_contract: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(request_contract, dict):
+        return ""
+    outputs = [
+        str(item).strip()
+        for item in (request_contract.get("required_outputs") or [])
+        if str(item).strip()
+    ]
+    if not outputs:
+        return ""
+    return (
+        "- request_contract.required_outputs 밖의 새 intermediate artifact를 invent하지 마라\n"
+        "- 각 execution subtask는 request_contract에 선언된 산출물만 직접 소유하고, 추가 산출물이 필요하면 기존 산출물 내부 규칙/메타데이터로 표현하라\n"
+        f"- 이번 요청에서 직접 소유 가능한 산출물은 다음만 허용된다: {', '.join(outputs)}\n"
+    )
+
+
 def _planner_prompt(
     *,
     user_prompt: str,
@@ -190,10 +207,12 @@ def _planner_prompt(
     round_no: int,
     total_rounds: int,
     shared_feedback: str,
+    request_contract: Optional[Dict[str, Any]] = None,
 ) -> str:
     feedback = f"\n공유된 이전 회차 피드백:\n{shared_feedback}\n" if shared_feedback else ""
     scope_guidance = _auth_session_scope_guidance(user_prompt)
     serial_guidance = _single_execution_role_guidance(workers)
+    contract_output_guidance = _request_contract_output_guidance(request_contract)
     return (
         "너는 TF Phase1 planner다. 지금은 실행이 아니라 계획 수립 단계다.\n"
         "같은 미션이 여러 planner(Codex/Claude)에게 병렬로 전달되고, 각 회차마다 서로의 비판 내용을 반영해 계획을 개선한다.\n"
@@ -217,6 +236,7 @@ def _planner_prompt(
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 Phase2 review lane이 담당하게 하라\n"
         f"{scope_guidance}"
         f"{serial_guidance}"
+        f"{contract_output_guidance}"
         "- approval_mode는 기본적으로 policy다. 최종 승인/복귀는 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
         "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 표현하라\n"
         "- 계획이 덜 완성됐으면 범위를 줄이고, ambiguity를 드러내라\n"
@@ -441,6 +461,7 @@ def run_phase1_ensemble_planning(
                 round_no=round_no,
                 total_rounds=rounds,
                 shared_feedback=shared_feedback,
+                request_contract=request_contract,
             )
             try:
                 raw_plan, executed_provider, used_fallback = _run_provider_with_rate_limit_fallback(

@@ -420,6 +420,18 @@ def build_task_execution_plan(
             f"- 현재 execution role이 `{execution_workers[0]}` 하나뿐이면 single serial lane도 허용된다. 병렬 lane을 억지로 만들지 마라\n"
             "- 대신 scope 확인, 구현, 테스트, evidence 단계의 순차 의존성과 각 단계 산출물을 명시해 dispatch 가능성을 보여라\n"
         )
+    contract_outputs = [
+        str(item).strip()
+        for item in ((request_contract or {}).get("required_outputs") or [])
+        if str(item).strip()
+    ]
+    contract_output_guidance = ""
+    if contract_outputs:
+        contract_output_guidance = (
+            "- request_contract.required_outputs 밖의 새 intermediate artifact를 invent하지 마라\n"
+            "- 각 execution subtask는 request_contract에 선언된 산출물만 직접 소유하고, 추가 산출물이 필요하면 기존 산출물 내부 규칙/메타데이터로 표현하라\n"
+            f"- 이번 요청에서 직접 소유 가능한 산출물은 다음만 허용된다: {', '.join(contract_outputs)}\n"
+        )
     planner_prompt = (
         "너는 작업 오케스트레이션 planner다. 사용자 요청을 실행 가능한 sub-task 계획으로 분해해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -439,6 +451,7 @@ def build_task_execution_plan(
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 reviewer lane이 담당하게 하라\n"
         f"{scope_guidance}"
         f"{serial_guidance}"
+        f"{contract_output_guidance}"
         "- approval_mode는 기본적으로 policy다. 최종 승인/복귀 결정은 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
         "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 남겨라\n\n"
         f"사용자 요청:\n{user_prompt.strip()}\n"
@@ -593,6 +606,23 @@ def repair_task_execution_plan(
         serial_guidance = (
             f"- execution role이 `{execution_workers[0]}` 하나뿐이면 single serial lane도 허용된다. 가짜 병렬 lane 대신 순차 단계와 산출물을 명확히 적어라\n"
         )
+    request_contract = (
+        current_plan.get("meta", {}).get("request_contract")
+        if isinstance(current_plan.get("meta"), dict)
+        else {}
+    )
+    contract_outputs = [
+        str(item).strip()
+        for item in ((request_contract or {}).get("required_outputs") or [])
+        if str(item).strip()
+    ]
+    contract_output_guidance = ""
+    if contract_outputs:
+        contract_output_guidance = (
+            "- request_contract.required_outputs 밖의 새 intermediate artifact를 invent하지 마라\n"
+            "- 각 execution subtask는 request_contract에 선언된 산출물만 직접 소유하고, 추가 산출물이 필요하면 기존 산출물 내부 규칙/메타데이터로 표현하라\n"
+            f"- 이번 요청에서 직접 소유 가능한 산출물은 다음만 허용된다: {', '.join(contract_outputs)}\n"
+        )
     repair_prompt = (
         "너는 task planner다. critic 이슈를 반영해 계획을 고쳐라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -612,6 +642,7 @@ def repair_task_execution_plan(
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 reviewer lane이 담당하게 하라\n"
         f"{scope_guidance}"
         f"{serial_guidance}"
+        f"{contract_output_guidance}"
         "- 최종 승인/복귀 판단은 Control Plane operator가 맡는다. Task Team 내부에 가짜 approver/DRI role을 만들지 마라\n"
         "- 사람 승인 필요는 manual follow-up 또는 evidence 항목으로 남겨라\n\n"
         f"attempt: {int(attempt_no)}\n"
