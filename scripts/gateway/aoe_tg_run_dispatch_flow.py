@@ -211,6 +211,12 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
         plan_error = str(plan_meta.plan_error or "")
         plan_gate_blocked = bool(plan_meta.plan_gate_blocked)
         plan_gate_reason = str(plan_meta.plan_gate_reason or "")
+        plan_review_count = max(0, int(plan_meta.plan_review_count or 0))
+        plan_issue_codes = [str(item).strip() for item in (plan_meta.plan_issue_codes or []) if str(item).strip()]
+        plan_issue_history = list(plan_meta.plan_issue_history or [])
+        plan_convergence_status = str(plan_meta.plan_convergence_status or "").strip().lower()
+        plan_stalled_reason = str(plan_meta.plan_stalled_reason or "").strip()
+        plan_last_round = max(0, int(plan_meta.plan_last_round or 0))
         planning_enabled = bool(plan_meta.planning_enabled)
         reuse_source_plan = bool(plan_meta.reuse_source_plan)
         phase1_mode = str(plan_meta.phase1_mode or "")
@@ -473,6 +479,14 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
             plan_roles=plan_roles,
             plan_replans=plan_replans,
             plan_error=plan_error,
+            plan_gate_blocked=plan_gate_blocked,
+            plan_gate_reason=plan_gate_reason,
+            plan_review_count=plan_review_count,
+            plan_issue_codes=plan_issue_codes,
+            plan_issue_history=plan_issue_history,
+            plan_convergence_status=plan_convergence_status,
+            plan_stalled_reason=plan_stalled_reason,
+            plan_last_round=plan_last_round,
             phase1_mode=phase1_mode,
             phase1_rounds=phase1_rounds,
             phase1_providers=phase1_providers,

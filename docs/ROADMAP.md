@@ -211,6 +211,13 @@
 - [x] `Live Runtime Verification` spec
   - 문서:
     - `docs/LIVE_RUNTIME_VERIFICATION_SPEC.md`
+- [x] `Planning Convergence` spec
+  - 문서:
+    - `docs/PLANNING_CONVERGENCE_SPEC.md`
+  - 핵심 판단:
+    - `planning_ready`는 최소 `3`회 비판 검토를 통과해야 한다
+    - `contract_incomplete` / unsafe / invalid dependency는 즉시 `blocked` 가능
+    - 반복 blocker는 `stalled`로 분리한다
 - [x] `Request Contract` architecture spec
   - 문서:
     - `docs/REQUEST_CONTRACT_SPEC.md`
@@ -246,10 +253,34 @@
     - dashboard `Task Detail`
     - dashboard `Recovery`
   - 실행 순서:
-    1. `data` request contract 도입으로 `D1` blocker를 먼저 제거
-    2. 그 다음 happy-path 1개씩
-    3. rerun path 1개씩
-    4. manual-followup path 1개씩
+    1. `Planning Convergence` 정책을 runtime에 먼저 연결
+    2. `data` request contract + convergence loop로 `D1` blocker를 먼저 제거
+    3. 그 다음 happy-path 1개씩
+    4. rerun path 1개씩
+    5. manual-followup path 1개씩
+- [ ] `Planning Convergence` loop 도입
+  - 목적:
+    - planner one-shot 가정을 제거
+    - `planning_ready`를 최소 `3`회 비판 검토의 결과로 강제
+  - 1단계:
+    - `plan_review_count`
+    - `plan_issue_codes`
+    - `plan_issue_history`
+    - `plan_convergence_status`
+    - `plan_stalled_reason`
+    저장
+  - 2단계:
+    - review pass focus 분리
+      - contract/scope
+      - ownership/dependency/artifact
+      - verification/surface explainability
+  - 3단계:
+    - `ready`
+    - `blocked`
+    - `stalled`
+    판정 구현
+  - note:
+    - `D1`의 반복 blocker 이력을 issue taxonomy 초기 corpus로 재사용한다
 - [ ] `Request Contract` layer 도입
   - 목적:
     - `text -> request contract -> planning/runtime`
@@ -274,7 +305,7 @@
     - `review` / `mixed` contract extractor
     - handoff/review/work separation을 contract 기반으로 전환
   - note:
-    - `D1`에서 드러난 input binding / transform policy / artifact contract drift를 우선 해결한다
+    - `Planning Convergence` loop가 먼저 planning truth를 안정화한 뒤 `D1` blocker를 재공략한다
 
 ### 8.5 Recovery Summary
 - [x] nightly session summary spec 고정

@@ -291,3 +291,26 @@ def test_derive_tf_phase_reason_uses_gate_then_exec_then_stage_failure() -> None
     )
     assert mod.derive_tf_phase_reason({"exec_critic": {"reason": "need evidence"}}) == "need evidence"
     assert mod.derive_tf_phase_reason({"stages": {"verification": "failed"}}) == "verification failed"
+
+
+def test_derive_tf_phase_uses_stalled_convergence_as_manual_intervention() -> None:
+    stalled = mod.derive_tf_phase(
+        {
+            "status": "failed",
+            "stages": {"planning": "done", "execution": "pending"},
+            "plan_convergence_status": "stalled",
+            "plan_stalled_reason": "repeated acceptance gap",
+            "plan_gate_reason": "repeated acceptance gap",
+        }
+    )
+    assert stalled == "manual_intervention"
+    assert (
+        mod.derive_tf_phase_reason(
+            {
+                "plan_convergence_status": "stalled",
+                "plan_stalled_reason": "repeated acceptance gap",
+                "plan_gate_reason": "repeated acceptance gap",
+            }
+        )
+        == "repeated acceptance gap"
+    )

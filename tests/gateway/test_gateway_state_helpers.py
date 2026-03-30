@@ -1195,6 +1195,48 @@ def test_sanitize_task_record_normalizes_nested_schema_fields() -> None:
     assert task["tf_phase_reason"] == "missing acceptance"
 
 
+def test_sanitize_task_record_preserves_plan_convergence_metadata() -> None:
+    task = gw.sanitize_task_record(
+        {
+            "prompt": "do work",
+            "plan_review_count": "3",
+            "plan_issue_codes": ["acceptance_gap", "acceptance_gap", "artifact_contract_gap"],
+            "plan_issue_history": [
+                {
+                    "round": "1",
+                    "status": "issues",
+                    "primary_issue": "missing acceptance",
+                    "issue_codes": ["acceptance_gap"],
+                    "issue_count": "1",
+                    "provider": "codex",
+                },
+                {
+                    "round": "2",
+                    "status": "issues",
+                    "primary_issue": "missing acceptance",
+                    "issue_codes": ["acceptance_gap"],
+                    "issue_count": "1",
+                    "provider": "codex",
+                },
+            ],
+            "plan_convergence_status": "stalled",
+            "plan_stalled_reason": "missing acceptance",
+            "plan_last_round": "2",
+            "plan_gate_passed": False,
+            "plan_gate_reason": "missing acceptance",
+        },
+        "REQ-010",
+    )
+
+    assert task["plan_review_count"] == 3
+    assert task["plan_issue_codes"] == ["acceptance_gap", "artifact_contract_gap"]
+    assert task["plan_issue_history"][0]["round"] == 1
+    assert task["plan_issue_history"][0]["provider"] == "codex"
+    assert task["plan_convergence_status"] == "stalled"
+    assert task["plan_stalled_reason"] == "missing acceptance"
+    assert task["plan_last_round"] == 2
+
+
 def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> None:
     issue = schema.plan_critic_primary_issue({"approved": False, "issues": ["  missing acceptance criteria  "]})
     assert issue == "missing acceptance criteria"

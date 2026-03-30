@@ -207,7 +207,11 @@ Responsibilities:
   - `contract_missing.source_path`
   - `contract_missing.target_column`
   - `contract_missing.artifact_contract`
-- decide whether the run can proceed to planner or must stop early
+- decide whether the run can proceed to the planning convergence loop or must stop early
+
+Policy:
+- a complete contract does not mean immediate execution readiness
+- after the contract gate passes, the plan must still survive the bounded planning convergence loop before it may become `planning_ready`
 
 ### 7.4 Planner / Critic / Acceptance Generation
 Files:

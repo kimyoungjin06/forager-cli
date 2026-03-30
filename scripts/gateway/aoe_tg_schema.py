@@ -194,7 +194,10 @@ def _data_acceptance_floor(
 
     transform_floor = [
         "Transform acceptance binds the source CSV path and target month column explicitly.",
-        "Normalization rules enumerate the accepted month input formats and the exact YYYY-MM zero-pad output rule.",
+        (
+            "Normalization rules enumerate the only accepted month input formats and the exact YYYY-MM zero-pad output rule; "
+            "similar variants such as YYYY/M, YYYY-M, and YYYY.M must stay anomalies instead of being normalized."
+        ),
         "Failure handling defines how invalid, unparseable, or out-of-range month values are recorded and whether original rows and month values are preserved.",
     ]
     schema_floor = [

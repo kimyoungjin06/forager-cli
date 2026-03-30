@@ -258,6 +258,8 @@ def derive_tf_phase(task: Any) -> str:
 
     plan_gate_passed = data.get("plan_gate_passed")
     plan_gate_reason = _trim_text(data.get("plan_gate_reason", ""), 240)
+    plan_convergence_status = str(data.get("plan_convergence_status", "")).strip().lower()
+    plan_stalled_reason = _trim_text(data.get("plan_stalled_reason", ""), 240)
     exec_critic = data.get("exec_critic") if isinstance(data.get("exec_critic"), dict) else {}
     exec_verdict = _normalize_choice(exec_critic.get("verdict"), VERDICT_STATUSES, "")
     rate_limit = data.get("rate_limit") if isinstance(data.get("rate_limit"), dict) else {}
@@ -267,6 +269,8 @@ def derive_tf_phase(task: Any) -> str:
         return "completed"
     if rate_limit_mode == "blocked":
         return "rate_limited"
+    if plan_convergence_status == "stalled":
+        return "manual_intervention"
     if plan_gate_passed is False or plan_gate_reason:
         return "blocked"
     if exec_verdict == "retry":
@@ -303,6 +307,8 @@ def derive_tf_phase_reason(task: Any) -> str:
     exec_critic = data.get("exec_critic") if isinstance(data.get("exec_critic"), dict) else {}
     exec_reason = _trim_text(exec_critic.get("reason", exec_critic.get("fix", "")), 240)
     plan_gate_reason = _trim_text(data.get("plan_gate_reason", ""), 240)
+    plan_convergence_status = str(data.get("plan_convergence_status", "")).strip().lower()
+    plan_stalled_reason = _trim_text(data.get("plan_stalled_reason", ""), 240)
     rate_limit = data.get("rate_limit") if isinstance(data.get("rate_limit"), dict) else {}
     if str(rate_limit.get("mode", "")).strip().lower() == "blocked":
         providers = [str(x).strip() for x in (rate_limit.get("limited_providers") or []) if str(x).strip()]
@@ -316,6 +322,8 @@ def derive_tf_phase_reason(task: Any) -> str:
         if retry_at:
             parts.append(f"retry_at={retry_at}")
         return "provider capacity unavailable" + (f" ({' '.join(parts)})" if parts else "")
+    if plan_convergence_status == "stalled":
+        return plan_stalled_reason or "planning stalled"
     if plan_gate_reason:
         return plan_gate_reason
     if exec_reason:

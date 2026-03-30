@@ -43,6 +43,78 @@ def _dedupe_lines(rows: List[str], *, limit: int) -> List[str]:
     return out[: max(1, int(limit or 1))]
 
 
+def _normalize_plan_issue_code(issue: Any) -> str:
+    low = str(issue or "").strip().lower()
+    if not low:
+        return ""
+    if "missing required contract fields" in low or "contract_incomplete" in low:
+        return "contract_incomplete"
+    if "contract ambiguity" in low or "contract_ambiguous" in low:
+        return "contract_ambiguous"
+    if "acceptance" in low or "완료조건" in low or "검증 기준" in low:
+        return "acceptance_gap"
+    if "artifact" in low or "산출물" in low or any(token in low for token in (".json", ".md", ".csv")):
+        return "artifact_contract_gap"
+    if "readonly" in low or "read-only" in low:
+        return "readonly_drift"
+    if "depends_on" in low or "dependency" in low or "의존" in low:
+        return "invalid_dependency"
+    if "owner" in low or "lane" in low or "role" in low or "소유" in low:
+        return "ownership_gap"
+    if "approval" in low or "dri" in low or "승인" in low:
+        return "approval_gap"
+    return "critic_issue"
+
+
+def _issue_codes_from_critic(critic: Dict[str, Any]) -> List[str]:
+    codes: List[str] = []
+    for issue in list((critic or {}).get("issues") or []):
+        code = _normalize_plan_issue_code(issue)
+        if code and code not in codes:
+            codes.append(code)
+    return codes[:8]
+
+
+def _dedupe_issue_codes(rows: List[Dict[str, Any]]) -> List[str]:
+    out: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for code in list(row.get("issue_codes") or []):
+            token = str(code or "").strip().lower()
+            if token and token not in out:
+                out.append(token[:64])
+    return out[:12]
+
+
+def _detect_stalled_issue(rows: List[Dict[str, Any]]) -> str:
+    primaries = [
+        str(row.get("primary_issue", "")).strip()
+        for row in rows
+        if isinstance(row, dict) and str(row.get("primary_issue", "")).strip()
+    ]
+    if len(primaries) < 2:
+        return ""
+    if primaries[-1] and primaries[-1] == primaries[-2]:
+        return primaries[-1][:240]
+    return ""
+
+
+def _issue_row(*, round_no: int, provider: str, critic: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = normalize_plan_critic_payload(critic or {}, max_items=8)
+    primary_issue = plan_critic_primary_issue(normalized, limit=240)
+    row: Dict[str, Any] = {
+        "round": max(1, int(round_no or 1)),
+        "provider": str(provider or "").strip()[:64],
+        "status": "approved" if not list(normalized.get("issues") or []) else "issues",
+        "issue_count": len(list(normalized.get("issues") or [])),
+        "issue_codes": _issue_codes_from_critic(normalized),
+    }
+    if primary_issue:
+        row["primary_issue"] = primary_issue
+    return row
+
+
 def _auth_session_scope_guidance(user_prompt: str) -> str:
     low = str(user_prompt or "").strip().lower()
     markers = (
@@ -314,6 +386,12 @@ def run_phase1_ensemble_planning(
             "plan_error": "no planning providers available",
             "plan_gate_blocked": True,
             "plan_gate_reason": "no planning providers available",
+            "plan_review_count": 0,
+            "plan_issue_codes": ["critic_issue"],
+            "plan_issue_history": [],
+            "plan_convergence_status": "blocked",
+            "plan_stalled_reason": "",
+            "plan_last_round": 0,
             "phase1_rounds": 0,
             "phase1_mode": "ensemble",
             "phase1_providers": [],
@@ -329,6 +407,7 @@ def run_phase1_ensemble_planning(
     best_roles: List[str] = []
     shared_feedback = ""
     plan_replans: List[Dict[str, Any]] = []
+    plan_issue_history: List[Dict[str, Any]] = []
     degraded_by: List[str] = []
     retry_after_sec = 60
     provider_capacity_state = load_provider_capacity_state(getattr(args, "team_dir", ""))
@@ -494,6 +573,12 @@ def run_phase1_ensemble_planning(
                     if limited
                     else f"phase1 round {round_no}: no valid planner output"
                 ),
+                "plan_review_count": len(plan_issue_history),
+                "plan_issue_codes": _dedupe_issue_codes(plan_issue_history),
+                "plan_issue_history": list(plan_issue_history),
+                "plan_convergence_status": "blocked",
+                "plan_stalled_reason": "",
+                "plan_last_round": round_no,
                 "phase1_rounds": round_no,
                 "phase1_mode": "ensemble",
                 "phase1_providers": providers,
@@ -516,6 +601,13 @@ def run_phase1_ensemble_planning(
         best_plan = best_candidate["plan"]
         best_critic = best_candidate["critic"]
         best_roles = plan_roles_from_subtasks(best_plan)
+        plan_issue_history.append(
+            _issue_row(
+                round_no=round_no,
+                provider=str(best_candidate.get("provider", "")).strip(),
+                critic=best_critic,
+            )
+        )
         plan_replans.append(
             {
                 "attempt": round_no,
@@ -530,6 +622,16 @@ def run_phase1_ensemble_planning(
 
     plan_gate_blocked = bool(getattr(args, "plan_block_on_critic", True)) and bool(best_critic.get("issues") or [])
     plan_gate_reason = plan_critic_primary_issue(best_critic, limit=240) if plan_gate_blocked else ""
+    plan_review_count = len(plan_issue_history)
+    plan_issue_codes = _dedupe_issue_codes(plan_issue_history)
+    plan_stalled_reason = _detect_stalled_issue(plan_issue_history)
+    plan_convergence_status = "ready"
+    if plan_gate_blocked:
+        plan_convergence_status = "stalled" if plan_stalled_reason else "blocked"
+    elif plan_review_count < 3:
+        plan_gate_blocked = True
+        plan_gate_reason = f"planning convergence requires at least 3 critical reviews (got {plan_review_count})"
+        plan_convergence_status = "blocked"
     return {
         "plan_data": best_plan,
         "plan_critic": best_critic,
@@ -538,6 +640,12 @@ def run_phase1_ensemble_planning(
         "plan_error": "",
         "plan_gate_blocked": plan_gate_blocked,
         "plan_gate_reason": plan_gate_reason,
+        "plan_review_count": plan_review_count,
+        "plan_issue_codes": plan_issue_codes,
+        "plan_issue_history": plan_issue_history,
+        "plan_convergence_status": plan_convergence_status,
+        "plan_stalled_reason": plan_stalled_reason,
+        "plan_last_round": rounds,
         "phase1_rounds": rounds,
         "phase1_mode": "ensemble",
         "phase1_providers": providers,

@@ -108,12 +108,69 @@ def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
 
     assert result["phase1_mode"] == "ensemble"
     assert result["phase1_rounds"] == 3
+    assert result["plan_review_count"] == 3
+    assert result["plan_convergence_status"] == "ready"
+    assert len(result["plan_issue_history"]) == 3
     assert result["phase1_providers"] == ["codex", "claude"]
     assert len(result["plan_replans"]) == 3
     assert result["plan_data"]["subtasks"][0]["owner_role"] == "Codex-Writer"
     assert result["plan_gate_blocked"] is False
     assert any(item.startswith("codex:") for item in prompts)
     assert any(item.startswith("claude:") for item in prompts)
+
+
+def test_phase1_ensemble_marks_repeated_blocker_as_stalled() -> None:
+    def _runner(prompt: str, timeout_sec: int) -> str:
+        if "critic이다" in prompt:
+            return json.dumps(
+                {
+                    "approved": False,
+                    "issues": ["missing artifact-specific acceptance"],
+                    "recommendations": [],
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "summary": "plan from codex",
+                "subtasks": [
+                    {
+                        "id": "S1",
+                        "title": "Draft",
+                        "goal": "Write the plan",
+                        "owner_role": "Codex-Writer",
+                        "acceptance": ["has a concise plan"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    args = SimpleNamespace(
+        plan_phase1_providers="codex",
+        plan_phase1_rounds=3,
+        plan_max_subtasks=3,
+        orch_command_timeout_sec=120,
+        plan_block_on_critic=True,
+    )
+
+    result = ensemble_mod.run_phase1_ensemble_planning(
+        args=args,
+        user_prompt="Prepare a stable execution plan",
+        available_roles=["Codex-Writer", "Codex-Reviewer"],
+        normalize_task_plan_payload=gw.normalize_task_plan_payload,
+        parse_json_object_from_text=gw.parse_json_object_from_text,
+        run_provider_execs={"codex": _runner},
+        plan_roles_from_subtasks=gw.plan_roles_from_subtasks,
+        report_progress=None,
+    )
+
+    assert result["plan_gate_blocked"] is True
+    assert result["plan_convergence_status"] == "stalled"
+    assert result["plan_stalled_reason"] == "missing artifact-specific acceptance"
+    assert result["plan_review_count"] == 3
+    assert len(result["plan_issue_history"]) == 3
+    assert result["plan_issue_codes"] == ["acceptance_gap"]
 
 
 def test_phase1_ensemble_launches_round1_planners_in_parallel() -> None:
@@ -849,6 +906,7 @@ def test_data_transform_prompt_adds_transform_policy_floor() -> None:
     assert len(acceptance) == 3
     assert any("source CSV path and target month column explicitly" in item for item in acceptance)
     assert any("accepted month input formats" in item for item in acceptance)
+    assert any("must stay anomalies" in item for item in acceptance)
     assert any("invalid, unparseable, or out-of-range month values" in item for item in acceptance)
 
 
@@ -938,7 +996,10 @@ def test_data_request_contract_adds_artifact_specific_acceptance_floor() -> None
     acceptance_by_id = {row["id"]: row["acceptance"] for row in plan["subtasks"]}
 
     assert any("source `data/monthly_raw.csv`" in item for item in acceptance_by_id["S1"])
+    assert any("normalized.csv" in item for item in acceptance_by_id["S1"])
     assert any("accepted month input formats" in item for item in acceptance_by_id["S1"])
+    assert any("stay anomalies" in item for item in acceptance_by_id["S1"])
+    assert any("row count unchanged" in item for item in acceptance_by_id["S1"])
     assert any("schema_report.json" in item for item in acceptance_by_id["S2"])
     assert any("every transformed output column" in item for item in acceptance_by_id["S2"])
     assert any("null_summary.md" in item for item in acceptance_by_id["S3"])

@@ -116,17 +116,24 @@ Required fields:
 - `critic`
 - `evidence_required`
 - `blocking_issues`
+- `plan_review_count`
+- `plan_issue_history`
+- `plan_convergence_status`
 
 States:
 
 - `draft`
+- `reviewing`
 - `ready`
 - `blocked`
+- `stalled`
 
 Important policy:
 
 - `blocked` must always explain why it cannot proceed
+- `stalled` must explain why repeated critical reviews failed to converge
 - `ready` must name a critic role and minimum evidence requirements
+- `ready` requires at least `3` critical review passes
 - role assignments are role-scoped, not backend-scoped
 - `meta.phase2_team_spec` must make Phase2 execution lanes and critic lanes explicit
 
@@ -307,10 +314,13 @@ Default policy:
 
 - TF is the default execution path for real work
 - planning is mandatory before execution
-- Phase1 runs an ensemble planner loop
-- target loop count is at least `3`
+- Phase1 runs a bounded planning convergence loop
+- target critical review count is at least `3`
 - Codex and Claude receive the same planning mission each round
 - each round shares criticism and improved plan candidates back into the next round
+- `planning_ready` is only valid after the minimum critical review count is met
+- `contract_incomplete`, unsafe mutation, or invalid dependency graph may short-circuit directly to `blocked`
+- repeated unresolved blockers may terminate as `stalled`
 
 The output of Phase1 is:
 
@@ -318,6 +328,10 @@ The output of Phase1 is:
 - critic issues reduced to a dispatchable level
 - explicit execution team shape for Phase2
 - explicit `phase1_role_preset` and `phase2_team_preset` values for downstream observability
+- explicit convergence metadata:
+  - `plan_review_count`
+  - `plan_issue_history`
+  - `plan_convergence_status`
 
 ### 3.2 Phase2: execution
 
@@ -353,6 +367,7 @@ Current runtime field:
 Current mapping rule:
 
 - `plan_gate blocked` -> `blocked`
+- `planning stalled` -> `manual_intervention`
 - `planning in progress` -> `planning`
 - `execution/staffing active` -> `running`
 - `verification/integration active` -> `critic_review`

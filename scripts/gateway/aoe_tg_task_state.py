@@ -16,6 +16,7 @@ from aoe_tg_team_observatory import observatory_monitor_line, task_team_observat
 
 LANE_STATES = ("pending", "running", "done", "failed", "waiting_on_dependencies")
 LANE_VERDICTS = ("success", "retry", "fail", "intervention")
+PLAN_CONVERGENCE_STATUSES = ("ready", "blocked", "stalled", "failed", "pending")
 
 
 def _normalize_lane_status(raw: Any, default: str = "pending") -> str:
@@ -50,6 +51,57 @@ def _normalize_lane_verdict(raw: Any, default: str = "") -> str:
     if token in {"escalate"}:
         return "intervention"
     return default
+
+
+def _normalize_plan_convergence_status(raw: Any, default: str = "") -> str:
+    token = str(raw or "").strip().lower()
+    if token in PLAN_CONVERGENCE_STATUSES:
+        return token
+    return default
+
+
+def _normalize_plan_issue_codes(raw: Any, *, limit: int = 12) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    normalized: List[str] = []
+    for row in rows:
+        token = str(row or "").strip().lower()
+        if not token or token in normalized:
+            continue
+        normalized.append(token[:64])
+    return normalized[: max(1, int(limit or 1))]
+
+
+def _normalize_plan_issue_history(raw: Any, *, keep: int = 20) -> List[Dict[str, Any]]:
+    rows = raw if isinstance(raw, list) else []
+    normalized: List[Dict[str, Any]] = []
+    for item in rows[-max(1, int(keep or 1)) :]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            round_no = max(1, int(item.get("round", 0) or 0))
+        except Exception:
+            round_no = 1
+        row: Dict[str, Any] = {"round": round_no}
+        status = str(item.get("status", "")).strip().lower()
+        if status in {"approved", "issues"}:
+            row["status"] = status
+        primary_issue = str(item.get("primary_issue", "")).strip()
+        if primary_issue:
+            row["primary_issue"] = primary_issue[:240]
+        issue_codes = _normalize_plan_issue_codes(item.get("issue_codes"), limit=8)
+        if issue_codes:
+            row["issue_codes"] = issue_codes
+        try:
+            issue_count = max(0, int(item.get("issue_count", 0) or 0))
+        except Exception:
+            issue_count = 0
+        row["issue_count"] = issue_count
+        for key in ("provider", "planner_provider", "critic_provider"):
+            token = str(item.get(key, "")).strip()
+            if token:
+                row[key] = token[:64]
+        normalized.append(row)
+    return normalized
 
 
 def _normalize_lane_state_rows(raw_rows: Any, *, kind: str) -> List[Dict[str, Any]]:
@@ -874,6 +926,50 @@ def sanitize_task_record(
     plan_replans = task.get("plan_replans")
     if isinstance(plan_replans, list):
         task["plan_replans"] = normalize_plan_replans_payload(plan_replans, keep=history_limit)
+    try:
+        plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    except Exception:
+        plan_review_count = 0
+    if plan_review_count > 0:
+        task["plan_review_count"] = plan_review_count
+    else:
+        task.pop("plan_review_count", None)
+    plan_issue_history = _normalize_plan_issue_history(task.get("plan_issue_history"), keep=history_limit)
+    if plan_issue_history:
+        task["plan_issue_history"] = plan_issue_history
+    else:
+        task.pop("plan_issue_history", None)
+    plan_issue_codes = _normalize_plan_issue_codes(task.get("plan_issue_codes"))
+    if not plan_issue_codes and plan_issue_history:
+        merged_codes: List[str] = []
+        for row in plan_issue_history:
+            for code in list(row.get("issue_codes") or []):
+                token = str(code or "").strip().lower()
+                if token and token not in merged_codes:
+                    merged_codes.append(token[:64])
+        plan_issue_codes = merged_codes[:12]
+    if plan_issue_codes:
+        task["plan_issue_codes"] = plan_issue_codes
+    else:
+        task.pop("plan_issue_codes", None)
+    convergence_status = _normalize_plan_convergence_status(task.get("plan_convergence_status"))
+    if convergence_status:
+        task["plan_convergence_status"] = convergence_status
+    else:
+        task.pop("plan_convergence_status", None)
+    plan_stalled_reason = str(task.get("plan_stalled_reason", "")).strip()
+    if plan_stalled_reason:
+        task["plan_stalled_reason"] = plan_stalled_reason[:240]
+    else:
+        task.pop("plan_stalled_reason", None)
+    try:
+        plan_last_round = max(0, int(task.get("plan_last_round", 0) or 0))
+    except Exception:
+        plan_last_round = 0
+    if plan_last_round > 0:
+        task["plan_last_round"] = plan_last_round
+    else:
+        task.pop("plan_last_round", None)
     if isinstance(task.get("plan_gate_passed"), bool):
         task["plan_gate_passed"] = bool(task.get("plan_gate_passed"))
     plan_gate_reason = str(task.get("plan_gate_reason", "")).strip()

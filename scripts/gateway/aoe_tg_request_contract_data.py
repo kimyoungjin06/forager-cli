@@ -315,27 +315,43 @@ def data_request_contract_acceptance_floor(
     invalid_policy = fields.get("invalid_value_policy") if isinstance(fields.get("invalid_value_policy"), dict) else {}
 
     if is_transform:
-        if source_path and target_column:
+        normalized_contract = artifact_contracts.get("normalized_csv") if isinstance(artifact_contracts.get("normalized_csv"), dict) else {}
+        normalized_path = _trim(normalized_contract.get("path", ""), 200)
+        if source_path and target_column and normalized_path:
+            floor.append(
+                f"Transform acceptance writes `{normalized_path}` from source `{source_path}` and only mutates target column `{target_column}`."
+            )
+        elif source_path and target_column:
             floor.append(
                 f"Transform acceptance binds source `{source_path}` and target column `{target_column}` explicitly."
             )
         if accepted_formats and normalize_to:
             floor.append(
-                "Normalization rules enumerate accepted month input formats "
-                f"{', '.join(accepted_formats)} and normalize them to {normalize_to}."
+                "Normalization rules enumerate the only accepted month input formats "
+                f"{', '.join(accepted_formats)} and normalize them to {normalize_to}; "
+                "variants such as YYYY/M, YYYY-M, and YYYY.M stay anomalies instead of being normalized."
             )
-        if invalid_policy:
-            actions: List[str] = []
-            if bool(invalid_policy.get("preserve_row")):
-                actions.append("preserve the original row")
-            if bool(invalid_policy.get("preserve_original_value")):
-                actions.append("preserve the original month value")
-            if bool(invalid_policy.get("record_anomaly")):
-                actions.append("record an anomaly summary")
-            if bool(invalid_policy.get("drop_row")):
-                actions.append("drop invalid rows")
-            if actions:
-                floor.append("Invalid, unparseable, or out-of-range month handling must " + ", ".join(actions) + ".")
+        actions: List[str] = []
+        if bool(invalid_policy.get("preserve_row")):
+            actions.append("preserve the original row")
+        if bool(invalid_policy.get("preserve_original_value")):
+            actions.append("preserve the original month value")
+        if bool(invalid_policy.get("record_anomaly")):
+            actions.append("record an anomaly summary")
+        if bool(invalid_policy.get("drop_row")):
+            actions.append("drop invalid rows")
+        final_rule = ""
+        if normalized_path and target_column:
+            final_rule = (
+                f"`{normalized_path}` keeps the input row count unchanged, normalizes only valid `{target_column}` values, "
+                f"and preserves invalid/null/empty/out-of-range `{target_column}` values exactly as requested"
+            )
+        if actions and final_rule:
+            floor.append(final_rule + "; invalid handling must " + ", ".join(actions) + ".")
+        elif final_rule:
+            floor.append(final_rule + ".")
+        elif actions:
+            floor.append("Invalid, unparseable, or out-of-range month handling must " + ", ".join(actions) + ".")
 
     if is_schema and isinstance(artifact_contracts.get("schema_report"), dict):
         floor = [
