@@ -76,10 +76,10 @@
 - intent:
   - produce a transformed dataset, query result, or schema-bound report
 - current status:
-  - `executed_blocked`
+  - `executed_done`
 - current finding:
-  - live runs progressed through schema acceptance truncation, input binding, transform policy propagation, artifact-specific output contracts, and a request-contract facade seam
-  - latest confirmed blockers (`T-020`, `T-021`) are narrower and fully contract-driven: schema/null artifacts need one shared null/anomaly classification rule, and S1 still needs exact bucket definitions for whitespace, empty string, literal `null`/`NaN`, malformed year, and month `00/13+`
+  - live runs progressed through schema acceptance truncation, input binding, transform policy propagation, artifact-specific output contracts, request-contract facade seams, typed month/schema/null/sample policies, and artifact-intent routing
+  - final successful run (`T-038`) proved the `data` preset happy path can reach `planning_ready` and `dispatch_completed` with `normalized.csv`, `schema_report.json`, `null_summary.md`, and `sample_5.csv`
 - prompt shape:
   - require schema/null/sample evidence
 - expected preset:

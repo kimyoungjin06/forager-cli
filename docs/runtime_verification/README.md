@@ -28,10 +28,10 @@
       - final successful run (`T-012`) reached `planning_ready`, reran once under exec critic, and closed as `done`
       - visible project registration later exposed task lineage surface drift
   - `data/D1_happy_path.md`
-    - `executed_blocked`
+    - `executed_done`
     - finding:
-      - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, request-contract plumbing, and then exact transform-policy seams
-      - latest confirmed blockers (`T-020`, `T-021`) are now very narrow: shared null/anomaly classification between schema/null artifacts and exact month bucket definitions in S1
+      - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, request-contract plumbing, typed month/schema/null/sample policies, and artifact-intent routing
+      - final successful run (`T-038`) reached `planning_ready` and `dispatch_completed` with all four expected artifacts and verifier success evidence
   - `review/R1_happy_path.md`
     - `planned`
   - `mixed/M1_happy_path.md`

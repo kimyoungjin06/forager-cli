@@ -8,7 +8,7 @@
 - branch_target:
   - `done`
 - status:
-  - `executed_blocked`
+  - `executed_done`
 - executed_at:
   - `2026-03-30T13:54:16+09:00`
   - `2026-03-30T14:06:24+09:00`
@@ -20,6 +20,11 @@
   - `2026-03-30T16:01:04+09:00`
   - `2026-03-31T01:08:54+09:00`
   - `2026-03-31T01:21:22+09:00`
+  - `2026-03-31T05:12:05+09:00`
+  - `2026-03-31T05:24:55+09:00`
+  - `2026-03-31T05:39:11+09:00`
+  - `2026-03-31T05:49:16+09:00`
+  - `2026-03-31T05:58:16+09:00`
 - operator:
   - `Codex`
 
@@ -81,6 +86,21 @@
   - `r_20260331012122_207393a0`
     - `T-021`
     - `plan_gate_reason=S1이 month 분류 규칙을 실행 가능한 수준으로 닫지 못했다. out-of-range의 범위, whitespace/empty, literal null/NaN 같은 입력 bucket이 비어 있어 S2/S3의 공통 기준이 남지 않았다.`
+  - `r_20260331051205_32ce46c8`
+    - `T-031`
+    - `plan_gate_reason=sample_5.csv의 source row order 보존과 shortfall rule이 고정되지 않아 sample artifact가 deterministic하지 않았다.`
+  - `r_20260331052455_22f88f81`
+    - `T-035`
+    - `plan_gate_reason=sample_5.csv shortfall 표현이 note row / extra column / sentinel row 중 무엇인지 결정되지 않아 Phase2 artifact contract가 모호했다.`
+  - `r_20260331053911_604b6293`
+    - `T-036`
+    - `plan_gate_reason=S2/S3 acceptance가 서로의 산출물을 중복 요구해 schema_report/null_summary 책임 경계가 무너졌다.`
+  - `r_20260331054916_749337aa`
+    - `T-037`
+    - `plan_gate_reason=S3 acceptance가 S2 복사본으로 남아 null_summary.md 자체의 완료 조건이 비었다.`
+  - `r_20260331055816_433edbd1`
+    - `T-038`
+    - `planning_ready -> dispatch_completed`
 - task_short_id:
   - `T-001`
   - `T-002`
@@ -107,14 +127,19 @@
     - `T-008` blocked after critic 3/3 because the transform acceptance was still too permissive about allowed month formats
     - `T-020` blocked after critic 3/3 because schema/null artifact acceptance still lacked a shared null/anomaly classification rule
     - `T-021` blocked after critic 3/3 because S1 still did not define bucket boundaries for whitespace, empty string, literal `null`/`NaN`, and out-of-range values
+    - `T-031` blocked after critic 3/3 because normalized output row/header order and sample determinism were not typed in contract policy
+    - `T-035` blocked after critic 3/3 because `sample_5.csv` shortfall encoding was not typed and planners had to invent CSV-internal notation
+    - `T-036` blocked after critic 3/3 because schema/null evidence ownership bled across artifact boundaries
+    - `T-037` blocked after critic 3/3 because null-summary acceptance still fell back to schema-report wording
+    - `T-038` passed planning after title-intent evidence routing, typed sample shortfall policy, and typed month/null/schema policies converged
   - execution:
-    - `not reached yet`
+    - `T-038` dispatch completed and generated the expected output/evidence set
   - verification:
-    - `not reached yet`
+    - `T-038` verified 10-row preservation, `month` normalization to `YYYY-MM`, `sample_5.csv` head-5 consistency, and schema/null report consistency
   - integration:
-    - `not reached yet`
+    - `T-038` reached integration with success summary
   - close:
-    - all three runs closed as `failed`
+    - `T-038` closed as `completed`
 - critic/verifier verdict:
   - `T-001`: schema evidence acceptance truncated at column coverage
   - `T-002`: prompt did not bind source file and target month column
@@ -125,15 +150,20 @@
   - `T-008`: artifact contracts now exist, but accepted input formats remain too broad and allow non-contract month variants to normalize instead of becoming anomalies
   - `T-020`: schema/null artifact floors exist, but they still do not explicitly force the same null/anomaly classification across `schema_report.json` and `null_summary.md`
   - `T-021`: transform acceptance now carries the artifact sync rule, but month bucket definitions are still underspecified for whitespace, empty string, literal `null`/`NaN`, and out-of-range handling
+  - `T-031`: row-order and header-order preservation had to move from planner guesswork into typed `normalized_output_policy`
+  - `T-035`: sample shortfall handling had to move from prose into typed `sample_output_policy`
+  - `T-036`: schema/null evidence tasks required artifact-intent separation rather than generic combined-evidence fallback
+  - `T-037`: null-summary tasks required title-dominant artifact routing so `goal` references to `schema_report.json` would not overwrite the main artifact contract
 - final branch:
-  - `blocked`
+  - `done`
 
 ## 5. Surface Evidence
-- `/task`:
+  - `/task`:
   - `T-001`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
   - `T-002`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
   - `T-003`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
-  - `T-008`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+    - `T-008`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+    - `T-038`: `team_preset: phase1=data phase2=data`, `plan_convergence_status=ready`, final status `completed`
 - `/monitor`:
   - not separately captured yet
 - `/offdesk review`:
@@ -145,7 +175,7 @@
 
 ## 6. Result
 - result:
-  - `blocked`
+  - `done`
 - mismatch class:
   - `schema_acceptance_truncation`
   - `prompt_input_binding_gap`
@@ -155,6 +185,9 @@
   - `accepted_format_boundary_gap`
   - `shared_null_classification_gap`
   - `month_bucket_definition_gap`
+  - `sample_shortfall_encoding_gap`
+  - `evidence_task_overlap_gap`
+  - `artifact_title_intent_gap`
 - mismatch notes:
   - first real D1 run proved the data preset path works, but `schema_report.json` acceptance could still be truncated into partial column coverage
   - `scripts/gateway/aoe_tg_schema.py` now adds a data-specific acceptance floor and reserves slots for floor items so full-column schema evidence survives normalization
@@ -163,10 +196,10 @@
   - `T-008` proved the artifact-specific contract floor was working, then the blocker narrowed again into exact transform policy
   - `T-020` showed that artifact ownership alone was not enough: `schema_report.json` and `null_summary.md` also needed an explicit shared null/anomaly classification rule
   - `T-021` showed the remaining contract gap had moved back into S1: the transform lane still needed concrete bucket definitions for whitespace, empty string, literal `null`/`NaN`, and out-of-range handling
+  - `T-038` proved the generic fixes were enough: typed month bucket policy, typed schema/null evidence policies, typed sample shortfall policy, and title-dominant artifact routing produced a plan that both passed planning convergence and completed dispatch/integration
 - next fix:
-  - encode exact S1 month buckets so only 4-digit-year `YYYY/MM`, `YYYY-MM`, `YYYY.MM` with month `01-12` normalize
-  - keep whitespace-only, empty string, literal `null`/`NaN`, malformed year, and month `00/13+` in the anomaly bucket with original row/value preservation
-  - rerun D1 after that bucket-definition fix, then capture `/monitor`, `/offdesk review`, and dashboard evidence before moving to execution-stage verification
+  - capture `/monitor`, `/offdesk review`, and dashboard task/recovery evidence for the same success path
+  - then move to `D2` rerun-path verification
 
 ## 7. Raw References
 - runtime state refs:
