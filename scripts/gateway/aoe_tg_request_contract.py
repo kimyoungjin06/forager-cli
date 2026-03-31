@@ -11,6 +11,10 @@ from aoe_tg_request_contract_data import (
     data_request_contract_matches,
     extract_data_request_contract,
 )
+from aoe_tg_request_contract_mixed import (
+    extract_mixed_request_contract,
+    mixed_request_contract_matches,
+)
 from aoe_tg_request_contract_review import (
     extract_review_request_contract,
     review_request_contract_matches,
@@ -194,6 +198,8 @@ def resolve_request_contract_preset(
     )
     if data_request_contract_matches(source_prompt):
         return "data"
+    if mixed_request_contract_matches(source_prompt) and inferred in {"mixed", "review", "writer", "build", "general", ""}:
+        return "mixed"
     if review_request_contract_matches(source_prompt) and inferred in {"", "general", "review"}:
         return "review"
     if inferred == "data" and not data_request_contract_matches(source_prompt):
@@ -232,6 +238,28 @@ def build_request_contract(
             "missing_fields": ["source_path", "target_column", "accepted_input_formats", "normalize_to"],
             "ambiguity_notes": [],
             "summary": "data | incomplete",
+            "artifact_contracts": {},
+        }
+    elif resolved_preset == "mixed":
+        contract = extract_mixed_request_contract(source_prompt) or {
+            "version": REQUEST_CONTRACT_VERSION,
+            "contract_type": "mixed",
+            "preset": "mixed",
+            "status": "complete",
+            "objective": _trim(source_prompt, 240),
+            "source_prompt": _trim(source_prompt, 2000),
+            "fields": {
+                "deliverable_policy": {
+                    "work_result_required": True,
+                    "writer_outputs": [],
+                    "review_outputs": [],
+                }
+            },
+            "required_outputs": ["work_result"],
+            "required_evidence": ["implementation_delta"],
+            "missing_fields": [],
+            "ambiguity_notes": [],
+            "summary": "mixed | text-first",
             "artifact_contracts": {},
         }
     elif resolved_preset == "review":

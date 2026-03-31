@@ -2883,6 +2883,29 @@ def test_choose_auto_dispatch_roles_orders_build_before_review_companions(tmp_pa
     assert roles == ["Codex-Dev", "Codex-Reviewer", "Claude-Reviewer"]
 
 
+def test_choose_auto_dispatch_roles_keeps_mixed_prompt_from_collapsing_to_reviewer_only(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    for role, mission in (
+        ("Codex-Dev", "Implement code changes and fix application bugs."),
+        ("Codex-Writer", "Write concise project documents and handoff notes."),
+        ("Codex-Reviewer", "Find risks, regressions, and missing tests before merge."),
+        ("Claude-Reviewer", "Cross-check review output before merge."),
+    ):
+        (team_dir / "agents" / role).mkdir(parents=True, exist_ok=True)
+        (team_dir / "agents" / role / "AGENTS.md").write_text(
+            f"# AGENTS.md - {role}\n\n## Mission\n{mission}\n",
+            encoding="utf-8",
+        )
+
+    roles = gw.choose_auto_dispatch_roles(
+        "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 회귀 테스트를 추가해줘. operator handoff 문서와 reviewer note를 함께 남기고 구현/문서/리뷰 결과를 분리해줘.",
+        available_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        team_dir=team_dir,
+    )
+
+    assert roles == ["Codex-Dev", "Codex-Writer", "Codex-Reviewer", "Claude-Reviewer"]
+
+
 def test_available_worker_roles_uses_expanded_default_pool() -> None:
     assert gw.available_worker_roles([]) == [
         "DataEngineer",

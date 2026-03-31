@@ -43,7 +43,15 @@
       - live progression moved through reusable review seams: review-only routing, reviewer-only role defaults, readonly review contracts, canonical diff-range policy, auth/session scope tracing, and section-specific acceptance for severity findings vs test gaps vs uncertainties
       - final successful run (`T-022`) reached `planning_ready`, triggered one integration retry for dirty-path evidence precision, and then closed as `done`
   - `mixed/M1_happy_path.md`
-    - `planned`
+    - `executed_done`
+    - finding:
+      - live runs promoted reusable `mixed` abstractions:
+        - reviewer_note lane ownership and reviewer-output contracts
+        - request-contract parity for `scope_inventory`
+        - execution-lane deliverables/acceptance metadata
+        - writer-owned handoff labeling
+        - typed auth/session scope inventory and boundary policy
+      - final successful run (`T-038`) reached `planning_ready`, completed execution/review/integration, and closed as `done` with `/task`, `/monitor`, and dashboard task detail evidence
 
 ## Rule
 - Do not replace these artifacts with summaries detached from runtime evidence.

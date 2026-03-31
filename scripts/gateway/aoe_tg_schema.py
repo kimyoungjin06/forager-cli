@@ -40,6 +40,17 @@ def _contains_any(text: str, markers: List[str]) -> bool:
     return any(token in low for token in markers if token)
 
 
+def _normalize_text_list(rows: Any, *, limit: int = 8, item_limit: int = 120) -> List[str]:
+    if not isinstance(rows, list):
+        return []
+    out: List[str] = []
+    for item in rows:
+        token = _trim_text(item, item_limit)
+        if token and token not in out:
+            out.append(token)
+    return out[: max(1, int(limit))]
+
+
 def _is_build_like_role(role: str) -> bool:
     low = str(role or "").strip().lower()
     if not low:
@@ -72,10 +83,38 @@ def _role_matches_preset(role: str, preset: str) -> bool:
     return False
 
 
+def _role_family(role: str) -> str:
+    token = str(role or "").strip()
+    if not token:
+        return ""
+    low = token.lower()
+    if _is_review_like_role(token):
+        return "review"
+    if any(marker in low for marker in ("writer", "doc", "scribe")):
+        return "writer"
+    if any(marker in low for marker in ("analyst", "analysis", "research")):
+        return "analysis"
+    if "data" in low:
+        return "data"
+    if _is_build_like_role(token):
+        return "build"
+    return "other"
+
+
 def _coerce_owner_role_for_preset(role: str, *, preset: str, worker_roles: List[str]) -> str:
     normalized_preset = normalize_role_preset(preset)
     if normalized_preset in {"general", "mixed"}:
-        return role
+        if role in worker_roles:
+            return role
+        family = _role_family(role)
+        same_family = [item for item in worker_roles if _role_family(item) == family]
+        if same_family:
+            return same_family[0]
+        if family == "analysis":
+            buildlike = [item for item in worker_roles if _role_family(item) in {"build", "data"}]
+            if buildlike:
+                return buildlike[0]
+        return worker_roles[0] if worker_roles else role
 
     preferred = [item for item in worker_roles if _role_matches_preset(item, normalized_preset)]
     if not preferred:
@@ -87,6 +126,66 @@ def _coerce_owner_role_for_preset(role: str, *, preset: str, worker_roles: List[
     if not _role_matches_preset(role, normalized_preset):
         return preferred[0]
     return preferred[0]
+
+
+def _mixed_review_output_tokens(request_contract: Dict[str, Any] | None) -> List[str]:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if normalize_role_preset(snapshot.get("preset", "")) != "mixed":
+        return []
+    fields = snapshot.get("fields") if isinstance(snapshot.get("fields"), dict) else {}
+    deliverable_policy = fields.get("deliverable_policy") if isinstance(fields.get("deliverable_policy"), dict) else {}
+    review_outputs = _normalize_text_list(deliverable_policy.get("review_outputs", []), limit=8, item_limit=64)
+    artifact_contracts = snapshot.get("artifact_contracts") if isinstance(snapshot.get("artifact_contracts"), dict) else {}
+    tokens: List[str] = []
+    for output in review_outputs:
+        low = output.lower()
+        if low and low not in tokens:
+            tokens.append(low)
+        artifact = artifact_contracts.get(output)
+        if isinstance(artifact, dict):
+            path = str(artifact.get("path", "")).strip().lower()
+            if path and path not in tokens:
+                tokens.append(path)
+    tokens.extend(["reviewer note", "reviewer_note", "review-lane", "review lane", "리뷰 노트", "검토 노트"])
+    out: List[str] = []
+    for token in tokens:
+        item = str(token or "").strip().lower()
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
+def _preferred_mixed_review_role(worker_roles: List[str]) -> str:
+    reviewers = [item for item in worker_roles if _is_review_like_role(item)]
+    if reviewers:
+        return reviewers[0]
+    return worker_roles[-1] if worker_roles else "Reviewer"
+
+
+def _repair_mixed_review_owned_subtask(
+    *,
+    title: str,
+    goal: str,
+    role: str,
+    worker_roles: List[str],
+    request_contract: Dict[str, Any] | None,
+) -> tuple[str, str, str]:
+    tokens = _mixed_review_output_tokens(request_contract)
+    if not tokens:
+        return title, goal, role
+    context = "\n".join((str(title or ""), str(goal or ""))).lower()
+    if not any(token in context for token in tokens if token):
+        return title, goal, role
+
+    repaired_role = _preferred_mixed_review_role(worker_roles)
+    repaired_title = title
+    if _contains_any(context, ["reviewer_note", "reviewer note", "review-lane", "review lane", "리뷰 노트", "검토 노트", "작성", "draft", "write"]):
+        repaired_title = "Draft reviewer note"
+    repaired_goal = (
+        "Write docs/reviews/reviewer_note.md from docs/analysis/auth_scope_inventory.md, work_result, and "
+        "docs/handoff/operator_handoff.md. Record severity findings, regression risks, test gaps, and uncertainties."
+    )
+    return repaired_title, repaired_goal, repaired_role
 
 
 def _build_acceptance_floor(
@@ -285,6 +384,93 @@ def _review_request_contract_floor(
     return floor
 
 
+def _mixed_request_contract_floor(
+    *,
+    request_contract: Dict[str, Any] | None,
+    role: str,
+    title: str,
+    goal: str,
+) -> List[str]:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if normalize_role_preset(snapshot.get("preset", "")) != "mixed":
+        return []
+    context = "\n".join((str(title or ""), str(goal or ""))).lower()
+    artifact_contracts = snapshot.get("artifact_contracts") if isinstance(snapshot.get("artifact_contracts"), dict) else {}
+    fields = snapshot.get("fields") if isinstance(snapshot.get("fields"), dict) else {}
+    auth_failure_policy = fields.get("auth_failure_policy") if isinstance(fields.get("auth_failure_policy"), dict) else {}
+    scope_contract = artifact_contracts.get("scope_inventory") if isinstance(artifact_contracts.get("scope_inventory"), dict) else {}
+    scope_path = _trim_text(scope_contract.get("path", "docs/analysis/auth_scope_inventory.md"), 200) or "docs/analysis/auth_scope_inventory.md"
+    floor: List[str] = []
+    strong_implementation_context = _contains_any(
+        context,
+        ["fix", "patch", "implement", "implementation", "code", "test", "regression", "구현", "패치", "테스트", "회귀"],
+    )
+    scope_context = _contains_any(
+        context,
+        ["trace", "scope", "boundary", "entrypoint", "inventory", "경계", "추적", "범위", "inventory"],
+    )
+    handoff_context = "handoff_doc" in artifact_contracts and _contains_any(
+        context,
+        ["handoff", "operator", "docs", "document", "문서", "인수인계", "checklist", "체크리스트", "운영자 handoff", "운영 인계"],
+    )
+    implementation_context = strong_implementation_context or (_contains_any(context, ["수정"]) and not scope_context)
+    if "work_result" in artifact_contracts and implementation_context and not handoff_context:
+        floor.append(
+            "Execution-owned work_result records the implementation delta, changed auth or session paths, and concrete regression test evidence that downstream handoff and review lanes will cite."
+        )
+        target_codes = _normalize_text_list(auth_failure_policy.get("target_failure_codes", []), limit=6, item_limit=48)
+        if auth_failure_policy:
+            floor.append(
+                f"Implementation cites {scope_path} as the canonical auth/session scope inventory and covers every listed public failure entrypoint, caller-visible auth state surface, and persisted token/session store path."
+            )
+        if target_codes:
+            floor.append(
+                f"For every inventory entry, implementation and regression evidence prove invalidation is limited to {', '.join(target_codes)} and that non-target auth failures preserve the listed caller-visible auth state and persisted store path."
+            )
+        floor.append(
+            f"Implementation subtasks explicitly show which {scope_path} entries reset caller-visible auth state, which listed persisted token or session store paths are cleared, and which regression tests prove each inventory entry."
+        )
+    if not _is_review_like_role(role) and scope_context and _contains_any(
+        context,
+        ["login", "auth", "session", "token", "entrypoint", "scope", "boundary", "trace", "로그인", "인증", "세션", "토큰", "경계", "추적"],
+    ):
+        floor.append(
+            f"Auth/session scope evidence writes {scope_path} before implementation starts."
+        )
+        floor.append(
+            f"{scope_path} records public failure entrypoints, caller-visible auth state surfaces, persisted token/session store paths, and excluded paths with reasons."
+        )
+        target_codes = _normalize_text_list(auth_failure_policy.get("target_failure_codes", []), limit=6, item_limit=48)
+        if target_codes:
+            floor.append(
+                f"{scope_path} proves whether one helper is the only boundary; {', '.join(target_codes)} is in-scope, and non-target auth failures preserve existing auth state."
+            )
+        else:
+            floor.append(
+                f"{scope_path} proves whether one helper is the only boundary and records that no alternate public entrypoint or persisted store path remains in scope."
+            )
+    if handoff_context and not _is_review_like_role(role):
+        floor.append(
+            "Operator handoff updates docs/handoff/operator_handoff.md with change summary, validation status, and concrete operator follow-up or rollback notes."
+        )
+    if "reviewer_note" in artifact_contracts and _is_review_like_role(role):
+        floor.append(
+            "Review-owned reviewer_note updates docs/reviews/reviewer_note.md from docs/analysis/auth_scope_inventory.md, work_result, and docs/handoff/operator_handoff.md with severity findings, regression risks, test gaps, and uncertainties."
+        )
+    if "reviewer_note" in artifact_contracts and not handoff_context and _contains_any(
+        context,
+        ["review", "reviewer", "risk", "note", "리뷰", "검토", "리스크"],
+    ):
+        floor.append(
+            "Execution subtasks prepare implementation, test, or handoff evidence for the review lane; the review lane, not execution, writes reviewer_note.md from that evidence."
+        )
+    if "reviewer_note" in artifact_contracts and "handoff_doc" in artifact_contracts and not implementation_context:
+        floor.append(
+            "Reviewer note is review-owned output, while operator handoff remains execution or writer-owned evidence; do not collapse them into one artifact."
+        )
+    return floor
+
+
 def _merge_acceptance_floor(acceptance: List[str], floor: List[str]) -> List[str]:
     base: List[str] = []
     for item in list(acceptance or []):
@@ -411,6 +597,14 @@ def normalize_task_plan_payload(
         else:
             role = worker_list[min(i - 1, len(worker_list) - 1)]
         role = _coerce_owner_role_for_preset(role, preset=phase2_team_preset, worker_roles=worker_roles)
+        if phase2_team_preset == "mixed":
+            title, goal, role = _repair_mixed_review_owned_subtask(
+                title=title,
+                goal=goal,
+                role=role,
+                worker_roles=worker_roles,
+                request_contract=request_contract,
+            )
 
         acceptance: List[str] = []
         raw_acceptance = row.get("acceptance")
@@ -457,16 +651,34 @@ def normalize_task_plan_payload(
                 goal=goal,
             ),
         )
-
-        normalized.append(
-            {
-                "id": sid[:32],
-                "title": title[:160],
-                "goal": goal[:400],
-                "owner_role": role[:64],
-                "acceptance": acceptance[:3],
-            }
+        acceptance = _merge_acceptance_floor(
+            acceptance,
+            _mixed_request_contract_floor(
+                request_contract=request_contract,
+                role=role,
+                title=title,
+                goal=goal,
+            ),
         )
+
+        depends_on = [
+            str(item).strip()[:32]
+            for item in (row.get("depends_on") or [])
+            if str(item).strip()
+        ]
+        if depends_on:
+            depends_on = [token for token in depends_on if token != sid[:32]]
+
+        item = {
+            "id": sid[:32],
+            "title": title[:160],
+            "goal": goal[:400],
+            "owner_role": role[:64],
+            "acceptance": acceptance[:3],
+        }
+        if depends_on:
+            item["depends_on"] = depends_on[:4]
+        normalized.append(item)
 
     limit = max(1, int(max_subtasks or 1))
     normalized = normalized[:limit]

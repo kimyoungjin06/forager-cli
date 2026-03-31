@@ -379,16 +379,71 @@ def stage_review_prompt(base_prompt: str, execution_state: Dict[str, Any], revie
         suffix = f" after {', '.join(depends_on)}" if depends_on else ""
         lane_lines.append(f"- {lane_id} [{role}/{kind}]{suffix}")
     lane_block = "\n".join(lane_lines) if lane_lines else "- reviewer lane"
+    evidence_lines = _stage_review_evidence_lines(execution_state)
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- linked execution evidence not captured"
     return (
         str(base_prompt or "").rstrip()
         + "\n\n"
         + "Phase2 review-only pass.\n"
         + "Review the completed execution outputs. Do not start new implementation work.\n"
         + (f"Execution request: {exec_request_id}\n" if exec_request_id else "")
+        + "The current review workspace may not contain execution changes. Use the linked execution evidence paths below before judging the result.\n"
         + "Review lanes:\n"
         + lane_block
         + "\n"
+        + "Execution evidence:\n"
+        + evidence_block
+        + "\n"
     )
+
+
+def _stage_review_evidence_lines(execution_state: Dict[str, Any], *, max_items: int = 4, max_paths: int = 4) -> List[str]:
+    if not isinstance(execution_state, dict):
+        return []
+    replies = execution_state.get("reply_messages")
+    if not isinstance(replies, list) or not replies:
+        replies = execution_state.get("replies")
+    if not isinstance(replies, list):
+        return []
+
+    lines: List[str] = []
+    seen: set[str] = set()
+    for row in replies:
+        if not isinstance(row, dict):
+            continue
+        body = str(row.get("body", "")).strip()
+        if not body:
+            continue
+        actor = (
+            str(row.get("from", "")).strip()
+            or str(row.get("role", "")).strip()
+            or str(row.get("actor", "")).strip()
+            or "worker"
+        )
+        request_id = str(row.get("request_id", "")).strip()
+        path_hits: List[str] = []
+        for token in re.findall(r"\]\((/[^)\s]+)\)", body):
+            norm = str(token).strip()
+            if norm and norm not in path_hits:
+                path_hits.append(norm)
+        if not path_hits:
+            for token in re.findall(r"(/tmp/[^\s`\"')]+)", body):
+                norm = str(token).strip()
+                if norm and norm not in path_hits:
+                    path_hits.append(norm)
+        if not path_hits:
+            continue
+        key = f"{actor}|{request_id}|{'|'.join(path_hits[:max_paths])}"
+        if key in seen:
+            continue
+        seen.add(key)
+        label = actor
+        if request_id:
+            label += f" {request_id}"
+        lines.append(f"- {label}: {', '.join(path_hits[:max_paths])}")
+        if len(lines) >= max_items:
+            break
+    return lines
 
 
 def merge_request_states(execution_state: Dict[str, Any], review_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:

@@ -191,10 +191,44 @@ def _request_contract_output_guidance(request_contract: Optional[Dict[str, Any]]
     ]
     if not outputs:
         return ""
+    deliverable_policy = request_contract.get("fields", {}).get("deliverable_policy", {})
+    review_outputs = [
+        str(item).strip()
+        for item in ((deliverable_policy or {}).get("review_outputs") or [])
+        if str(item).strip()
+    ]
+    artifact_contracts = request_contract.get("artifact_contracts", {}) if isinstance(request_contract.get("artifact_contracts"), dict) else {}
+    execution_outputs = [item for item in outputs if item not in review_outputs]
+    review_guidance = ""
+    if review_outputs:
+        review_contract_rows: List[str] = []
+        for output in review_outputs:
+            artifact = artifact_contracts.get(output)
+            if not isinstance(artifact, dict):
+                continue
+            path = str(artifact.get("path", "")).strip()
+            required_fields = [
+                str(item).strip()
+                for item in (artifact.get("required_fields") or [])
+                if str(item).strip()
+            ]
+            if path and required_fields:
+                review_contract_rows.append(
+                    f"- review lane은 {path}를 직접 작성해야 하고, acceptance에는 최소 다음 필드를 직접 고정해야 한다: {', '.join(required_fields)}"
+                )
+        review_guidance = (
+            "- 다음 산출물은 execution subtask가 아니라 Phase2 review lane이 직접 갱신해야 한다: "
+            + ", ".join(review_outputs)
+            + "\n"
+            + "- execution subtask의 title/goal/acceptance에 review_outputs를 직접 쓰지 말고, review lane이 인용할 implementation/test/handoff evidence만 준비하라\n"
+            + "- review_output마다 최소 하나의 reviewer-owned subtask 또는 reviewer-lane acceptance가 있어야 한다. generic verifier만 두고 끝내면 안 된다\n"
+            + ("\n".join(review_contract_rows) + "\n" if review_contract_rows else "")
+        )
     return (
         "- request_contract.required_outputs 밖의 새 intermediate artifact를 invent하지 마라\n"
-        "- 각 execution subtask는 request_contract에 선언된 산출물만 직접 소유하고, 추가 산출물이 필요하면 기존 산출물 내부 규칙/메타데이터로 표현하라\n"
-        f"- 이번 요청에서 직접 소유 가능한 산출물은 다음만 허용된다: {', '.join(outputs)}\n"
+        + review_guidance
+        + "- execution subtask는 execution-owned output만 직접 소유하고, 추가 산출물이 필요하면 기존 산출물 내부 규칙/메타데이터로 표현하라\n"
+        + f"- 이번 요청에서 execution subtask가 직접 소유 가능한 산출물은 다음만 허용된다: {', '.join(execution_outputs or outputs)}\n"
     )
 
 
@@ -221,7 +255,7 @@ def _planner_prompt(
         "{\n"
         '  "summary": "한 줄 요약",\n'
         '  "subtasks": [\n'
-        '    {"id":"S1", "title":"...", "goal":"...", "owner_role":"ROLE", "acceptance":["..."]}\n'
+        '    {"id":"S1", "title":"...", "goal":"...", "owner_role":"ROLE", "acceptance":["..."], "depends_on":["S0"]}\n'
         "  ]\n"
         "}\n"
         "규칙:\n"
@@ -231,6 +265,7 @@ def _planner_prompt(
         f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
         "- 각 subtask는 겹치지 않는 산출물과 검증 기준을 가져야 한다\n"
         "- 실행팀이 병렬로 일할 수 있으면 독립 가능한 단위로 분해한다\n"
+        "- 선행 단계 결과가 필요한 subtask는 depends_on에 선행 subtask id를 넣어라\n"
         "- Codex-Reviewer/critic이 최종 검증할 수 있도록 acceptance를 구체적으로 쓴다\n"
         "- reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라\n"
         "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 Phase2 review lane이 담당하게 하라\n"
@@ -257,6 +292,9 @@ def _critic_prompt(
     payload = json.dumps(plan, ensure_ascii=False)
     scope_guidance = _auth_session_scope_guidance(user_prompt)
     serial_guidance = _single_execution_role_critic_guidance(list(plan.get("meta", {}).get("worker_roles") or []))
+    review_contract_guidance = _request_contract_output_guidance(
+        plan.get("meta", {}).get("request_contract") if isinstance(plan.get("meta"), dict) else None
+    )
     return (
         "너는 TF Phase1 critic이다. 아래 계획이 실제 실행 단계(Phase2)로 넘어갈 만큼 충분히 구체적인지 비판적으로 검토해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -274,8 +312,10 @@ def _critic_prompt(
         "- plans that are too broad or dispatch 책임이 모호하면 승인하지 마라\n"
         "- issues는 정말 dispatch를 막을 문제만 적는다\n\n"
         "- review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다. 그런 요구는 Phase2 review lane의 acceptance/evidence로 표현되어야 한다\n"
+        "- review_output이 required인데 reviewer-owned subtask나 concrete acceptance 없이 generic verifier만 있으면 blocker로 지적한다\n"
         f"{scope_guidance}"
         f"{serial_guidance}"
+        f"{review_contract_guidance}"
         "- auth/session/login expiry류 계획이 helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다\n"
         "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
         "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"

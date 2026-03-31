@@ -521,6 +521,23 @@ def choose_auto_dispatch_roles(
     explicit = dedupe_roles(exact_explicit or explicit)
     if explicit:
         chosen = _ordered_roles(explicit)
+        explicit_review_only = bool(chosen) and all(
+            any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+            for role in chosen
+        )
+        if explicit_review_only and any((has_data_signal, effective_build_signal, has_doc_signal, has_analysis_signal)):
+            prompt_roles = _build_prompt_role_preset(
+                prompt_lower=prompt_lower,
+                available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
+                has_review_signal=has_review_signal,
+                has_data_signal=has_data_signal,
+                has_build_signal=effective_build_signal,
+                has_doc_signal=has_doc_signal,
+                has_analysis_signal=has_analysis_signal,
+                prefer_review_over_build=prefer_review_over_build,
+            )
+            if prompt_roles:
+                chosen = _ordered_roles(prompt_roles + chosen)
         if not (review_only_requested and not _explicit_multi_review_requested(prompt_lower)):
             chosen = _add_companion_roles(
                 chosen,

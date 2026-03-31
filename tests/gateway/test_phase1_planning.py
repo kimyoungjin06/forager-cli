@@ -38,6 +38,7 @@ import aoe_tg_orch_contract as orch_contract_mod
 import aoe_tg_request_contract as request_contract_mod
 import aoe_tg_request_contract_data as request_contract_data_mod
 import aoe_tg_request_contract_review as request_contract_review_mod
+import aoe_tg_tf_exec as tf_exec_mod
 
 
 def test_phase1_planner_prompt_forbids_standalone_review_subtasks() -> None:
@@ -79,6 +80,59 @@ def test_phase1_critic_prompt_blocks_review_subtasks_inside_execution_plan() -> 
     assert "Phase2 review lane의 acceptance/evidence로 표현되어야 한다" in prompt
     assert "helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다" in prompt
     assert "single serial lane 자체만으로 blocker를 만들지 마라" in prompt
+
+
+def test_phase1_planner_prompt_requires_concrete_review_output_contracts() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+
+    rendered = ensemble_mod._planner_prompt(
+        user_prompt=prompt,
+        provider="codex",
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=5,
+        round_no=1,
+        total_rounds=3,
+        shared_feedback="",
+        request_contract=contract,
+    )
+
+    assert "review_output마다 최소 하나의 reviewer-owned subtask" in rendered
+    assert "docs/reviews/reviewer_note.md" in rendered
+    assert "severity findings, regression risks, test gaps, uncertainties" in rendered
+
+
+def test_phase1_critic_prompt_blocks_generic_review_verifier_without_contract() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+
+    rendered = ensemble_mod._critic_prompt(
+        user_prompt=prompt,
+        provider="codex",
+        planner_provider="claude",
+        plan={
+            "summary": "mixed plan",
+            "subtasks": [
+                {"id": "S1", "title": "Patch login flow", "goal": "clear stale token", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Draft operator handoff", "goal": "write handoff", "owner_role": "Codex-Writer"},
+            ],
+            "meta": {
+                "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+                "request_contract": contract,
+            },
+        },
+        round_no=1,
+        total_rounds=3,
+    )
+
+    assert "generic verifier만 있으면 blocker로 지적한다" in rendered
+    assert "docs/reviews/reviewer_note.md" in rendered
 
 
 def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
@@ -215,6 +269,50 @@ def test_phase1_ensemble_launches_round1_planners_in_parallel() -> None:
 
     assert set(start_times) == {"codex", "claude"}
     assert abs(start_times["codex"] - start_times["claude"]) < 0.15
+
+
+def test_stage_review_prompt_includes_execution_evidence_paths() -> None:
+    prompt = tf_exec_mod.stage_review_prompt(
+        "원사용자 요청:\nsession_expired를 수정해줘.",
+        {
+            "request_id": "r_exec_123",
+            "reply_messages": [
+                {
+                    "from": "Codex-Dev",
+                    "request_id": "r_exec_123-execution-E1",
+                    "body": (
+                        "구현 결과는 "
+                        "[src/session.js](/tmp/demo/e1/src/session.js#L1), "
+                        "[tests/session.test.js](/tmp/demo/e1/tests/session.test.js#L1), "
+                        "[work_result](/tmp/demo/e1/work_result#L1)에 남겼다."
+                    ),
+                },
+                {
+                    "from": "Codex-Writer",
+                    "request_id": "r_exec_123-execution-E2",
+                    "body": (
+                        "handoff는 "
+                        "[operator_handoff.md](/tmp/demo/e2/docs/handoff/operator_handoff.md#L1)에 작성했다."
+                    ),
+                },
+            ],
+        },
+        {
+            "review_lanes": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "verifier",
+                    "depends_on": ["E1", "E2"],
+                }
+            ]
+        },
+    )
+
+    assert "Execution request: r_exec_123" in prompt
+    assert "The current review workspace may not contain execution changes." in prompt
+    assert "/tmp/demo/e1/src/session.js#L1" in prompt
+    assert "/tmp/demo/e2/docs/handoff/operator_handoff.md#L1" in prompt
 
 
 def test_phase1_ensemble_falls_back_to_codex_when_claude_is_rate_limited() -> None:
@@ -1331,6 +1429,138 @@ def test_review_request_contract_adds_artifact_specific_acceptance_floor() -> No
     assert any("Test gaps and uncertainties are separated explicitly" in item for item in s3)
 
 
+def test_mixed_request_contract_extracts_handoff_and_reviewer_note_outputs() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+    )
+
+    assert contract["preset"] == "mixed"
+    assert contract["required_outputs"] == ["work_result", "scope_inventory", "handoff_doc", "reviewer_note"]
+    deliverable_policy = contract["fields"]["deliverable_policy"]
+    assert deliverable_policy["execution_outputs"] == ["scope_inventory", "work_result"]
+    assert deliverable_policy["writer_outputs"] == ["handoff_doc"]
+    assert deliverable_policy["review_outputs"] == ["reviewer_note"]
+    assert contract["fields"]["auth_failure_policy"]["target_failure_codes"] == ["session_expired"]
+    assert contract["fields"]["auth_failure_policy"]["require_negative_case_evidence"] is True
+    assert "auth_scope_inventory" in contract["required_evidence"]
+    assert contract["artifact_contracts"]["scope_inventory"]["path"] == "docs/analysis/auth_scope_inventory.md"
+    assert contract["artifact_contracts"]["work_result"]["format"] == "implementation_delta"
+    assert contract["artifact_contracts"]["handoff_doc"]["path"] == "docs/handoff/operator_handoff.md"
+    assert contract["artifact_contracts"]["reviewer_note"]["path"] == "docs/reviews/reviewer_note.md"
+
+
+def test_mixed_request_contract_adds_handoff_and_reviewer_note_acceptance_floor() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed deliverables",
+            "subtasks": [
+                {"id": "S0", "title": "Trace login session scope", "goal": "trace session_expired entrypoints and persisted token paths", "owner_role": "Codex-Dev", "acceptance": ["done"]},
+                {"id": "S1", "title": "Implement token reset", "goal": "patch login flow and add regression tests", "owner_role": "Codex-Dev", "acceptance": ["done"]},
+                {"id": "S2", "title": "Draft operator handoff", "goal": "write operator handoff", "owner_role": "Codex-Writer", "acceptance": ["done"]},
+                {"id": "S3", "title": "Summarize reviewer note", "goal": "package reviewer note for review lane", "owner_role": "Codex-Writer", "acceptance": ["done"]},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "mixed", "phase2_team_preset": "mixed"},
+    )
+
+    scope_acceptance = plan["subtasks"][0]["acceptance"]
+    impl_acceptance = plan["subtasks"][1]["acceptance"]
+    handoff_acceptance = plan["subtasks"][2]["acceptance"]
+    review_acceptance = plan["subtasks"][3]["acceptance"]
+    assert any("docs/analysis/auth_scope_inventory.md" in item for item in scope_acceptance)
+    assert any("before implementation starts" in item for item in scope_acceptance)
+    assert any("excluded paths with reasons" in item for item in scope_acceptance)
+    assert any("proves whether one helper is the only boundary" in item for item in scope_acceptance)
+    assert any("session_expired is in-scope" in item for item in scope_acceptance)
+    assert not any("Implementation subtasks explicitly show" in item for item in scope_acceptance)
+    assert any("work_result" in item for item in impl_acceptance)
+    assert any("docs/analysis/auth_scope_inventory.md" in item for item in impl_acceptance)
+    assert any("limited to session_expired" in item for item in impl_acceptance)
+    assert any("For every inventory entry" in item for item in impl_acceptance)
+    assert not any("Scope-tracing subtasks hand downstream lanes a concrete scope inventory" in item for item in impl_acceptance)
+    assert not any("review lane" in item.lower() and "reviewer_note.md" in item for item in impl_acceptance)
+    assert any("docs/handoff/operator_handoff.md" in item for item in handoff_acceptance)
+    assert not any("Auth/session scope evidence enumerates login entrypoints" in item for item in handoff_acceptance)
+    assert plan["subtasks"][3]["owner_role"] == "Codex-Reviewer"
+    assert plan["subtasks"][3]["title"] == "Draft reviewer note"
+    assert any("docs/reviews/reviewer_note.md" in item for item in review_acceptance)
+
+
+def test_mixed_scope_task_with_fix_boundary_language_keeps_scope_acceptance() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed scope-first repair",
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "title": "로그인 실패 경계 및 저장소 범위 확정",
+                    "goal": "session_expired가 실제로 관찰되는 로그인/auth 진입점과 persisted token store를 전수 확인해 수정 범위를 고정한다.",
+                    "owner_role": "Codex-Dev",
+                    "acceptance": ["done"],
+                }
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "mixed", "phase2_team_preset": "mixed"},
+    )
+
+    acceptance = plan["subtasks"][0]["acceptance"]
+    assert any("docs/analysis/auth_scope_inventory.md" in item for item in acceptance)
+    assert any("before implementation starts" in item for item in acceptance)
+    assert any("session_expired is in-scope" in item for item in acceptance)
+    assert not any("Execution-owned work_result records" in item for item in acceptance)
+
+
+def test_mixed_handoff_task_with_implementation_evidence_language_keeps_handoff_acceptance() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed handoff-first repair",
+            "subtasks": [
+                {
+                    "id": "S3",
+                    "title": "운영자 handoff 문서 작성",
+                    "goal": "운영자가 바로 판단할 수 있도록 canonical handoff 문서를 작성하고, 구현 근거와 검증 상태를 함께 정리한다.",
+                    "owner_role": "Codex-Writer",
+                    "acceptance": ["done"],
+                }
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "mixed", "phase2_team_preset": "mixed"},
+    )
+
+    acceptance = plan["subtasks"][0]["acceptance"]
+    assert any("docs/handoff/operator_handoff.md" in item for item in acceptance)
+    assert not any("Execution-owned work_result records" in item for item in acceptance)
+
+
 def test_review_request_contract_module_matches_review_prompt() -> None:
     prompt = "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘."
     assert request_contract_review_mod.review_request_contract_matches(prompt) is True
@@ -1432,6 +1662,399 @@ def test_phase2_mixed_preset_keeps_work_roles_out_of_reviewer_drift() -> None:
 
     assert execution_roles == ["Codex-Dev", "Codex-Writer", "Claude-Writer"]
     assert review_roles == ["Codex-Reviewer", "Claude-Reviewer"]
+
+
+def test_phase2_mixed_preset_preserves_execution_lane_dependencies() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 handoff와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed execution with dependency graph",
+            "subtasks": [
+                {"id": "S1", "title": "Confirm failure boundary", "goal": "trace entrypoint and persisted store", "owner_role": "Codex-Dev"},
+                {
+                    "id": "S2",
+                    "title": "Patch login flow",
+                    "goal": "clear stale token on session_expired",
+                    "owner_role": "Codex-Writer",
+                    "depends_on": ["S1"],
+                },
+                {
+                    "id": "S3",
+                    "title": "Add regression note",
+                    "goal": "record before/after operator handoff note",
+                    "owner_role": "Claude-Writer",
+                    "depends_on": ["S1"],
+                },
+                {
+                    "id": "S4",
+                    "title": "Summarize reviewer note",
+                    "goal": "package implementation and handoff evidence for review",
+                    "owner_role": "Codex-Writer",
+                    "depends_on": ["S2", "S3"],
+                },
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "request_contract": contract,
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    subtasks = {row["id"]: row for row in plan["subtasks"]}
+    assert subtasks["S2"]["depends_on"] == ["S1"]
+    assert subtasks["S3"]["depends_on"] == ["S1"]
+    assert subtasks["S4"]["depends_on"] == ["S2", "S3"]
+
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+
+    assert subtasks["S4"]["owner_role"] == "Codex-Reviewer"
+    assert subtasks["S4"]["title"] == "Draft reviewer note"
+
+    assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Dev", "Codex-Writer", "Claude-Writer"]
+    assert spec["execution_groups"][0]["subtask_ids"] == ["S1"]
+    assert spec["execution_groups"][1]["subtask_ids"] == ["S2"]
+    assert spec["execution_groups"][2]["subtask_ids"] == ["S3"]
+    assert spec["execution_groups"][1]["depends_on"] == ["E1"]
+    assert spec["execution_groups"][2]["depends_on"] == ["E1"]
+    assert spec["review_groups"][0]["role"] == "Codex-Reviewer"
+    assert spec["review_groups"][0]["subtask_ids"] == ["S4"]
+    assert spec["review_groups"][0]["outputs"] == ["reviewer_note"]
+
+    assert [row["lane_id"] for row in exec_plan["execution_lanes"]] == ["E1", "E2", "E3"]
+    assert exec_plan["execution_lanes"][1]["depends_on"] == ["E1"]
+    assert exec_plan["execution_lanes"][2]["depends_on"] == ["E1"]
+
+
+def test_phase2_mixed_preset_assigns_review_outputs_to_first_review_lane() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed execution with review deliverable",
+            "subtasks": [
+                {"id": "S1", "title": "Patch login flow", "goal": "clear stale token on session_expired", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Draft operator handoff", "goal": "write operator handoff", "owner_role": "Codex-Writer", "depends_on": ["S1"]},
+                {"id": "S3", "title": "Prepare reviewer evidence", "goal": "package implementation and handoff evidence for review lane", "owner_role": "Claude-Writer", "depends_on": ["S1", "S2"]},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "request_contract": contract,
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+
+    assert plan["subtasks"][2]["owner_role"] == "Codex-Reviewer"
+    assert plan["subtasks"][2]["title"] == "Draft reviewer note"
+    assert spec["review_groups"][0]["outputs"] == ["reviewer_note"]
+    assert spec["review_groups"][0]["deliverables"][0]["path"] == "docs/reviews/reviewer_note.md"
+    assert "severity findings" in spec["review_groups"][0]["deliverables"][0]["required_fields"]
+    assert any("docs/reviews/reviewer_note.md" in item for item in spec["review_groups"][0]["acceptance"])
+    assert all(not row.get("outputs") for row in spec["review_groups"][1:])
+    assert spec["critic_role"] == "Codex-Reviewer"
+    assert exec_plan["review_lanes"][0]["outputs"] == ["reviewer_note"]
+    assert exec_plan["review_lanes"][0]["deliverables"][0]["path"] == "docs/reviews/reviewer_note.md"
+    assert any("docs/reviews/reviewer_note.md" in item for item in exec_plan["review_lanes"][0]["acceptance"])
+    assert all(not row.get("outputs") for row in exec_plan["review_lanes"][1:])
+
+
+def test_phase2_mixed_preset_repairs_review_owned_subtask_into_evidence_prep() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed review-owned artifact repair",
+            "subtasks": [
+                {"id": "S1", "title": "Patch login flow", "goal": "clear stale token on session_expired", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Draft operator handoff", "goal": "write operator handoff", "owner_role": "Codex-Writer", "depends_on": ["S1"]},
+                {
+                    "id": "S3",
+                    "title": "review-lane reviewer_note 작성",
+                    "goal": "Phase2 review lane에서 docs/reviews/reviewer_note.md를 작성해 구현 위험과 테스트 공백을 남긴다.",
+                    "owner_role": "Codex-Reviewer",
+                    "depends_on": ["S1"],
+                },
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "request_contract": contract,
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    s3 = plan["subtasks"][2]
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+
+    assert s3["owner_role"] == "Codex-Reviewer"
+    assert s3["title"] == "Draft reviewer note"
+    assert "docs/reviews/reviewer_note.md" in s3["goal"]
+    assert not any(row["role"] == "Codex-Reviewer" for row in spec["execution_groups"])
+    assert spec["review_groups"][0]["subtask_ids"] == ["S3"]
+    assert spec["review_groups"][0]["outputs"] == ["reviewer_note"]
+    assert spec["review_groups"][0]["deliverables"][0]["path"] == "docs/reviews/reviewer_note.md"
+    assert exec_plan["review_lanes"][0]["outputs"] == ["reviewer_note"]
+    assert exec_plan["review_lanes"][0]["deliverables"][0]["path"] == "docs/reviews/reviewer_note.md"
+
+
+def test_phase2_review_lane_preserves_explicit_outputs() -> None:
+    plan = orch_contract_mod.normalize_phase2_execution_plan(
+        {
+            "execution_mode": "parallel",
+            "execution_lanes": [
+                {"lane_id": "E1", "role": "Codex-Dev", "subtask_ids": ["S1"], "parallel": False},
+                {"lane_id": "E2", "role": "Codex-Writer", "subtask_ids": ["S2"], "parallel": False},
+            ],
+            "review_mode": "parallel",
+            "review_lanes": [
+                {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1", "E2"], "outputs": ["reviewer_note"], "parallel": True},
+                {"lane_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E1", "E2"], "parallel": True},
+            ],
+        },
+        team_spec={
+            "execution_mode": "parallel",
+            "execution_groups": [
+                {"group_id": "E1", "role": "Codex-Dev", "subtask_ids": ["S1"]},
+                {"group_id": "E2", "role": "Codex-Writer", "subtask_ids": ["S2"]},
+            ],
+            "review_mode": "parallel",
+            "review_groups": [
+                {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["E1", "E2"], "outputs": ["reviewer_note"]},
+                {"group_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E1", "E2"], "outputs": []},
+            ],
+        },
+        readonly=False,
+    )
+
+    assert plan["review_lanes"][0]["outputs"] == ["reviewer_note"]
+    assert plan["review_lanes"][1]["outputs"] == []
+
+
+def test_phase2_mixed_preset_keeps_single_writer_owner_for_canonical_handoff_output() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed canonical handoff owner",
+            "subtasks": [
+                {"id": "S1", "title": "Implement fix", "goal": "clear stale token", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Draft operator handoff", "goal": "write operator handoff", "owner_role": "Codex-Writer", "depends_on": ["S1"]},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "request_contract": contract,
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+    dev_groups = [row for row in spec["execution_groups"] if row["role"] == "Codex-Dev"]
+    dev_lanes = [row for row in exec_plan["execution_lanes"] if row["role"] == "Codex-Dev"]
+    writer_groups = [row for row in spec["execution_groups"] if "writer" in row["role"].lower()]
+    writer_lanes = [row for row in exec_plan["execution_lanes"] if "writer" in row["role"].lower()]
+
+    assert len(dev_groups) == 1
+    assert dev_groups[0]["outputs"] == ["scope_inventory", "work_result"]
+    assert dev_groups[0]["deliverables"][0]["path"] == "docs/analysis/auth_scope_inventory.md"
+    assert "single_helper_boundary_proof_when_used" in dev_groups[0]["deliverables"][0]["required_fields"]
+    assert any("docs/analysis/auth_scope_inventory.md" in item for item in dev_groups[0]["acceptance"])
+    assert len(dev_lanes) == 1
+    assert dev_lanes[0]["outputs"] == ["scope_inventory", "work_result"]
+    assert dev_lanes[0]["deliverables"][0]["path"] == "docs/analysis/auth_scope_inventory.md"
+    assert any("docs/analysis/auth_scope_inventory.md" in item for item in dev_lanes[0]["acceptance"])
+    assert len(writer_groups) == 1
+    assert writer_groups[0]["role"] == "Codex-Writer"
+    assert writer_groups[0]["outputs"] == ["handoff_doc"]
+    assert any("Writer lane directly writes docs/handoff/operator_handoff.md" in item for item in writer_groups[0]["acceptance"])
+    assert len(writer_lanes) == 1
+    assert writer_lanes[0]["role"] == "Codex-Writer"
+    assert writer_lanes[0]["outputs"] == ["handoff_doc"]
+    assert any("Writer lane directly writes docs/handoff/operator_handoff.md" in item for item in writer_lanes[0]["acceptance"])
+
+
+def test_phase2_mixed_preset_repairs_cyclic_execution_dependencies_from_planner_metadata() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Claude-Analyst", "Codex-Dev", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed execution with cyclic planner graph",
+            "subtasks": [
+                {"id": "S1", "title": "Trace scope", "goal": "identify session_expired entrypoints", "owner_role": "Claude-Analyst"},
+                {"id": "S2", "title": "Implement fix", "goal": "clear stale token", "owner_role": "Codex-Dev", "depends_on": ["S1"]},
+                {"id": "S3", "title": "Write handoff", "goal": "write operator handoff", "owner_role": "Claude-Writer", "depends_on": ["S1", "S2"]},
+            ],
+            "phase2_team_spec": {
+                "execution_mode": "parallel",
+                "execution_groups": [
+                    {"group_id": "E2", "role": "Codex-Dev", "subtask_ids": ["S2"], "depends_on": ["E1"]},
+                    {"group_id": "E3", "role": "Claude-Writer", "subtask_ids": ["S3"], "depends_on": ["E1", "E2"]},
+                    {"group_id": "E1", "role": "Claude-Analyst", "subtask_ids": ["S1"], "depends_on": ["E2"]},
+                ],
+            },
+            "phase2_execution_plan": {
+                "execution_mode": "parallel",
+                "execution_lanes": [
+                    {"lane_id": "E2", "role": "Codex-Dev", "subtask_ids": ["S2"], "depends_on": ["E1"], "parallel": True},
+                    {"lane_id": "E3", "role": "Claude-Writer", "subtask_ids": ["S3"], "depends_on": ["E1", "E2"], "parallel": True},
+                    {"lane_id": "E1", "role": "Claude-Analyst", "subtask_ids": ["S1"], "depends_on": ["E2"], "parallel": True},
+                ],
+            },
+        },
+        user_prompt=prompt,
+        workers=["Claude-Analyst", "Codex-Dev", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "request_contract": contract,
+            "worker_roles": ["Claude-Analyst", "Codex-Dev", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+    spec_groups = {row["group_id"]: row for row in spec["execution_groups"]}
+    exec_lanes = {row["lane_id"]: row for row in exec_plan["execution_lanes"]}
+
+    assert spec_groups["E2"]["depends_on"] == ["E1"]
+    assert spec_groups["E3"]["depends_on"] == ["E1", "E2"]
+    assert "depends_on" not in spec_groups["E1"]
+
+    assert exec_lanes["E2"]["depends_on"] == ["E1"]
+    assert exec_lanes["E3"]["depends_on"] == ["E1", "E2"]
+    assert "depends_on" not in exec_lanes["E1"]
+
+
+def test_phase2_mixed_preset_repairs_repeated_execution_subtask_assignments() -> None:
+    prompt = "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘."
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed repeated execution assignments",
+            "subtasks": [
+                {"id": "S1", "title": "Implement fix", "goal": "clear stale token on session_expired", "owner_role": "Codex-Dev"},
+                {"id": "S2", "title": "Draft operator handoff", "goal": "write operator handoff", "owner_role": "Codex-Writer", "depends_on": ["S1"]},
+                {"id": "S3", "title": "Prepare reviewer evidence", "goal": "prepare reviewer note evidence", "owner_role": "Codex-Writer", "depends_on": ["S1", "S2"]},
+            ],
+            "phase2_team_spec": {
+                "execution_mode": "parallel",
+                "execution_groups": [
+                    {"group_id": "E1", "role": "Codex-Dev", "subtask_ids": ["S1", "S2", "S3"]},
+                    {"group_id": "E2", "role": "Codex-Writer", "subtask_ids": ["S1", "S2", "S3"]},
+                ],
+            },
+            "phase2_execution_plan": {
+                "execution_mode": "parallel",
+                "execution_lanes": [
+                    {"lane_id": "E1", "role": "Codex-Dev", "subtask_ids": ["S1", "S2", "S3"], "parallel": True},
+                    {"lane_id": "E2", "role": "Codex-Writer", "subtask_ids": ["S1", "S2", "S3"], "parallel": True},
+                ],
+            },
+        },
+        user_prompt=prompt,
+        workers=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "request_contract": contract,
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    spec = plan["meta"]["phase2_team_spec"]
+    exec_plan = plan["meta"]["phase2_execution_plan"]
+    spec_groups = {row["group_id"]: row for row in spec["execution_groups"]}
+    exec_lanes = {row["lane_id"]: row for row in exec_plan["execution_lanes"]}
+
+    assert spec_groups["E1"]["subtask_ids"] == ["S1"]
+    assert spec_groups["E1"]["outputs"] == ["scope_inventory", "work_result"]
+    assert spec_groups["E1"]["deliverables"][0]["path"] == "docs/analysis/auth_scope_inventory.md"
+    assert spec_groups["E2"]["subtask_ids"] == ["S2"]
+    assert spec_groups["E2"]["outputs"] == ["handoff_doc"]
+    assert any("Writer lane directly writes docs/handoff/operator_handoff.md" in item for item in spec_groups["E2"]["acceptance"])
+    assert spec["review_groups"][0]["subtask_ids"] == ["S3"]
+    assert spec["review_groups"][0]["outputs"] == ["reviewer_note"]
+
+    assert exec_lanes["E1"]["subtask_ids"] == ["S1"]
+    assert exec_lanes["E1"]["outputs"] == ["scope_inventory", "work_result"]
+    assert exec_lanes["E1"]["deliverables"][0]["path"] == "docs/analysis/auth_scope_inventory.md"
+    assert exec_lanes["E2"]["subtask_ids"] == ["S2"]
+    assert exec_lanes["E2"]["outputs"] == ["handoff_doc"]
+    assert any("Writer lane directly writes docs/handoff/operator_handoff.md" in item for item in exec_lanes["E2"]["acceptance"])
+    assert exec_plan["review_lanes"][0]["outputs"] == ["reviewer_note"]
+
+
+def test_phase2_mixed_preset_repairs_owner_role_outside_worker_roles() -> None:
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "mixed owner role repair",
+            "subtasks": [
+                {"id": "S1", "title": "Trace scope", "goal": "identify session_expired entrypoints", "owner_role": "Claude-Analyst"},
+                {"id": "S2", "title": "Implement fix", "goal": "clear stale token", "owner_role": "Codex-Dev"},
+                {"id": "S3", "title": "Write handoff", "goal": "write operator handoff", "owner_role": "Claude-Writer"},
+            ],
+        },
+        user_prompt="session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘.",
+        workers=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        max_subtasks=6,
+        meta_overrides={
+            "worker_roles": ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+            "phase1_role_preset": "mixed",
+            "phase2_team_preset": "mixed",
+        },
+    )
+
+    assert [row["owner_role"] for row in plan["subtasks"]] == ["Codex-Dev", "Codex-Dev", "Claude-Writer"]
+    assert plan["meta"]["worker_roles"] == ["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"]
 
 
 def test_build_planned_dispatch_prompt_includes_phase2_team_lanes() -> None:

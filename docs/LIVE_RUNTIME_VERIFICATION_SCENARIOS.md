@@ -182,6 +182,17 @@
 - must prove:
   - work/review split remains intact
   - evidence from both sides is present
+- current status:
+  - `executed_done`
+- current finding:
+  - live runs promoted reusable `mixed` seams:
+    - reviewer_note review-lane ownership
+    - request-contract parity for `scope_inventory`
+    - execution-lane deliverables/acceptance metadata
+    - writer-owned handoff labeling
+    - typed auth/session scope inventory and boundary policy
+    - mixed review-lane output contracts
+  - final successful run (`T-038`) reached `planning_ready`, completed execution/review/integration, and closed as `done` with `/task`, `/monitor`, and dashboard task detail evidence
 
 #### M2. Rerun Path
 - intent:
