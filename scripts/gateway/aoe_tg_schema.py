@@ -241,6 +241,50 @@ def _data_request_contract_floor(
     )
 
 
+def _review_request_contract_floor(
+    *,
+    request_contract: Dict[str, Any] | None,
+    title: str,
+    goal: str,
+) -> List[str]:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if normalize_role_preset(snapshot.get("preset", "")) != "review":
+        return []
+    context = "\n".join((str(title or ""), str(goal or ""))).lower()
+    floor = [
+        "Review-only flow stays readonly, and review_report.md is the only canonical persisted output artifact.",
+    ]
+    diff_range_policy = snapshot.get("fields", {}).get("diff_range_policy", {})
+    if isinstance(diff_range_policy, dict) and diff_range_policy and _contains_any(
+        context,
+        ["diff", "scope", "range", "entrypoint", "로그인", "범위", "경계"],
+    ):
+        floor.append(
+            "Canonical diff scope records recent matching candidates, one selected range with selection rationale, excluded candidates, and any dirty-worktree exclusions separately."
+        )
+    auth_scope_policy = snapshot.get("fields", {}).get("auth_scope_policy", {})
+    if isinstance(auth_scope_policy, dict) and auth_scope_policy and _contains_any(
+        context,
+        ["login", "auth", "session", "token", "entrypoint", "scope", "로그인", "인증", "세션", "토큰", "경계"],
+    ):
+        floor.append(
+            "Auth/session scope evidence enumerates login entrypoints, caller-visible state transitions, persisted session or token-store paths, excluded caller or storage paths with reasons, or proof that one helper is the only reachable boundary."
+        )
+    if _contains_any(context, ["severity", "risk", "impact", "심각도", "리스크", "영향"]):
+        floor.append(
+            "Each severity finding records severity, affected files or paths, user-visible impact, and the exact diff or code evidence used for the judgment."
+        )
+    if _contains_any(context, ["test gap", "uncertainty", "coverage", "테스트 공백", "불확실성", "커버리지"]):
+        floor.append(
+            "Test gaps and uncertainties are separated explicitly: each gap names the missing coverage or unchecked path, and each uncertainty names the unresolved assumption or excluded path with reason."
+        )
+    if _contains_any(context, ["report", "review_report", "정리", "final", "최종"]):
+        floor.append(
+            "Final review_report.md keeps canonical sections for changed files, severity findings, test gaps, and uncertainties without duplicating them into separate output artifacts."
+        )
+    return floor
+
+
 def _merge_acceptance_floor(acceptance: List[str], floor: List[str]) -> List[str]:
     base: List[str] = []
     for item in list(acceptance or []):
@@ -348,7 +392,8 @@ def normalize_task_plan_payload(
     )
     phase2_team_preset = normalize_role_preset(meta_in.get("phase2_team_preset") or phase1_role_preset)
     approval_mode = _normalize_approval_mode(meta_in.get("approval_mode", "policy"))
-    readonly = _normalize_bool(meta_in.get("readonly", False), False)
+    contract_readonly = _normalize_bool(request_contract.get("readonly", False), False) if request_contract else False
+    readonly = _normalize_bool(meta_in.get("readonly", contract_readonly), contract_readonly)
 
     normalized: List[Dict[str, Any]] = []
     for i, row in enumerate(raw_subtasks, start=1):
@@ -399,6 +444,14 @@ def normalize_task_plan_payload(
         acceptance = _merge_acceptance_floor(
             acceptance,
             _data_request_contract_floor(
+                request_contract=request_contract,
+                title=title,
+                goal=goal,
+            ),
+        )
+        acceptance = _merge_acceptance_floor(
+            acceptance,
+            _review_request_contract_floor(
                 request_contract=request_contract,
                 title=title,
                 goal=goal,

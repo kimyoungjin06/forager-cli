@@ -183,6 +183,28 @@ def test_normalize_phase2_team_spec_expands_claude_companion_execution_and_revie
     assert "Claude-Reviewer" in spec["team_roles"]
 
 
+def test_normalize_phase2_team_spec_review_preset_keeps_single_execution_owner() -> None:
+    spec = mod.normalize_phase2_team_spec(
+        None,
+        plan={
+            "summary": "review only",
+            "meta": {"phase2_team_preset": "review"},
+            "subtasks": [
+                {"id": "S1", "title": "Scope diff", "goal": "pick canonical diff range", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "Write report", "goal": "summarize findings", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        roles=["Codex-Reviewer", "Claude-Reviewer"],
+        verifier_roles=["Codex-Reviewer", "Claude-Reviewer"],
+        require_verifier=True,
+    )
+
+    assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Reviewer"]
+    assert spec["execution_mode"] == "single"
+    assert [row["role"] for row in spec["review_groups"]] == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert spec["review_mode"] == "parallel"
+
+
 def test_normalize_tf_verdict_coerces_retry_and_manual_followup() -> None:
     verdict = mod.normalize_tf_verdict(
         {

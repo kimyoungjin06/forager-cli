@@ -11,6 +11,10 @@ from aoe_tg_request_contract_data import (
     data_request_contract_matches,
     extract_data_request_contract,
 )
+from aoe_tg_request_contract_review import (
+    extract_review_request_contract,
+    review_request_contract_matches,
+)
 
 
 REQUEST_CONTRACT_VERSION = "2026-03-30.v1"
@@ -185,12 +189,13 @@ def resolve_request_contract_preset(
     if lineage and lineage != "general":
         return lineage
 
-    if data_request_contract_matches(source_prompt):
-        return "data"
-
     inferred = normalize_role_preset(
         classify_dispatch_role_preset(source_prompt, selected_roles=list(selected_roles or []))
     )
+    if data_request_contract_matches(source_prompt):
+        return "data"
+    if review_request_contract_matches(source_prompt) and inferred in {"", "general", "review"}:
+        return "review"
     if inferred == "data" and not data_request_contract_matches(source_prompt):
         return "general"
     return inferred or "general"
@@ -227,6 +232,22 @@ def build_request_contract(
             "missing_fields": ["source_path", "target_column", "accepted_input_formats", "normalize_to"],
             "ambiguity_notes": [],
             "summary": "data | incomplete",
+            "artifact_contracts": {},
+        }
+    elif resolved_preset == "review":
+        contract = extract_review_request_contract(source_prompt) or {
+            "version": REQUEST_CONTRACT_VERSION,
+            "contract_type": "review",
+            "preset": "review",
+            "status": "complete",
+            "objective": _trim(source_prompt, 240),
+            "source_prompt": _trim(source_prompt, 2000),
+            "fields": {},
+            "required_outputs": ["review_report"],
+            "required_evidence": ["git_diff_scope"],
+            "missing_fields": [],
+            "ambiguity_notes": [],
+            "summary": "review | text-first",
             "artifact_contracts": {},
         }
     else:

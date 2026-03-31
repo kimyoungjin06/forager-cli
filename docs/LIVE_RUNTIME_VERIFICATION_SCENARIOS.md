@@ -135,12 +135,16 @@
   - review-only completion is possible without fake execution work
   - findings/severity/evidence are present
 - current status:
-  - `executed_blocked`
+  - `executed_done`
 - latest finding:
-  - review-only patch/regression requests now stay on `review` preset with reviewer-only roles
-  - multi-subtask reviewer lanes no longer advertise `parallel: true`
-  - the remaining blocker is a reusable `review request contract` gap:
-    - canonical git diff-range selection policy is not typed yet, so `recent patch` scope can still drift on dirty worktrees or multiple nearby commits
+  - live runs promoted reusable `review` abstractions:
+    - review-only preset routing over build-context words
+    - reviewer-only role defaults for pure review requests
+    - serial multi-subtask reviewer execution lanes
+    - typed canonical diff-range policy
+    - typed auth/session boundary tracing policy
+    - section-specific acceptance for severity findings, test gaps, and uncertainties
+  - final successful run (`T-022`) reached `planning_ready`, completed execution/review, reran once under exec critic to replace dirty-path glob summaries with concrete excluded paths, and then closed as `done`
 
 #### R2. Rerun Path
 - intent:

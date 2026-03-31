@@ -37,6 +37,7 @@ gw = _load_module(GW_FILE, "aoe_telegram_gateway_mod_phase1")
 import aoe_tg_orch_contract as orch_contract_mod
 import aoe_tg_request_contract as request_contract_mod
 import aoe_tg_request_contract_data as request_contract_data_mod
+import aoe_tg_request_contract_review as request_contract_review_mod
 
 
 def test_phase1_planner_prompt_forbids_standalone_review_subtasks() -> None:
@@ -1231,6 +1232,119 @@ def test_review_risk_prompt_prefers_review_preset_over_build_context_words() -> 
     )
 
     assert preset == "review"
+
+
+def test_review_request_contract_extracts_diff_range_policy() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘. "
+        "변경 파일과 테스트 공백, 확인이 필요한 불확실성을 명시하고 review 결과물만 남겨라."
+    )
+
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer", "Claude-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    assert contract["contract_type"] == "review"
+    assert contract["preset"] == "review"
+    assert contract["readonly"] is True
+    assert contract["required_outputs"] == ["review_report", "changed_files", "severity_findings", "test_gaps", "uncertainties"]
+    assert contract["required_evidence"] == ["git_diff_scope", "severity_rationale", "test_coverage_gap", "open_uncertainties"]
+    assert contract["fields"]["diff_range_policy"]["scope_source"] == "git-history"
+    assert contract["fields"]["diff_range_policy"]["dirty_worktree_policy"] == "exclude-uncommitted-from-canonical-range-and-record-separately"
+    assert contract["fields"]["diff_range_policy"]["record_excluded_candidates"] is True
+    assert contract["fields"]["auth_scope_policy"]["entrypoint_required"] is True
+    assert contract["fields"]["auth_scope_policy"]["caller_visible_state_required"] is True
+    assert contract["fields"]["auth_scope_policy"]["persisted_store_required"] is True
+    assert contract["fields"]["auth_scope_policy"]["record_excluded_paths"] is True
+    assert contract["fields"]["auth_scope_policy"]["helper_only_boundary_requires_proof"] is True
+    assert contract["fields"]["scope_anchor_terms"] == ["login"]
+    assert contract["artifact_contracts"]["review_report"]["path"] == "review_report.md"
+
+
+def test_review_request_contract_defaults_task_plan_to_readonly() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘. "
+        "변경 파일과 테스트 공백, 확인이 필요한 불확실성을 명시하고 review 결과물만 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review only",
+            "subtasks": [
+                {"id": "S1", "title": "Scope range", "goal": "pick canonical diff range", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "Write report", "goal": "finalize review report", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    assert plan["meta"]["readonly"] is True
+    assert plan["meta"]["phase2_execution_plan"]["readonly"] is True
+    assert any("Review-only flow stays readonly" in item for item in plan["subtasks"][0]["acceptance"])
+    assert any("Canonical diff scope records recent matching candidates" in item for item in plan["subtasks"][0]["acceptance"])
+    assert any("Auth/session scope evidence enumerates login entrypoints" in item for item in plan["subtasks"][0]["acceptance"])
+
+
+def test_review_request_contract_adds_artifact_specific_acceptance_floor() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘. "
+        "변경 파일과 테스트 공백, 확인이 필요한 불확실성을 명시하고 review 결과물만 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review only",
+            "subtasks": [
+                {"id": "S1", "title": "Canonical Diff 범위와 인증 경계 고정", "goal": "pick canonical diff range and auth scope", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "변경 파일별 회귀 리스크 판정", "goal": "write severity findings with impact and evidence", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "테스트 공백과 잔여 불확실성 정리", "goal": "separate test gaps and uncertainties", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    s1 = plan["subtasks"][0]["acceptance"]
+    s2 = plan["subtasks"][1]["acceptance"]
+    s3 = plan["subtasks"][2]["acceptance"]
+
+    assert any("Canonical diff scope records recent matching candidates" in item for item in s1)
+    assert any("Auth/session scope evidence enumerates login entrypoints" in item for item in s1)
+    assert any("Each severity finding records severity" in item for item in s2)
+    assert any("Test gaps and uncertainties are separated explicitly" in item for item in s3)
+
+
+def test_review_request_contract_module_matches_review_prompt() -> None:
+    prompt = "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행하고 severity와 근거를 정리해줘."
+    assert request_contract_review_mod.review_request_contract_matches(prompt) is True
+
+
+def test_review_request_contract_does_not_override_build_fix_request() -> None:
+    prompt = "로그인 버그를 수정하고 회귀 리스크도 같이 검토해줘."
+
+    preset = request_contract_mod.resolve_request_contract_preset(
+        source_prompt=prompt,
+        selected_roles=["Codex-Dev", "Codex-Reviewer"],
+    )
+
+    assert preset == "build"
 
 
 def test_phase2_team_preset_overrides_planner_owner_role_drift() -> None:

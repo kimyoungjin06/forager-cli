@@ -2713,7 +2713,7 @@ def test_choose_auto_dispatch_roles_adds_claude_companion_for_explicit_review_ro
         team_dir=team_dir,
     )
 
-    assert roles == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert roles == ["Codex-Reviewer"]
 
 
 def test_choose_auto_dispatch_roles_prefers_review_pair_for_patch_risk_review(tmp_path: Path) -> None:
@@ -2735,7 +2735,7 @@ def test_choose_auto_dispatch_roles_prefers_review_pair_for_patch_risk_review(tm
         team_dir=team_dir,
     )
 
-    assert roles == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert roles == ["Codex-Reviewer"]
 
 
 def test_choose_auto_dispatch_roles_builds_multi_role_tf_from_prompt_mix(tmp_path: Path) -> None:

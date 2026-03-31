@@ -761,7 +761,10 @@ def _expand_execution_groups_with_companions(
     rows: List[Dict[str, Any]],
     *,
     available_roles: List[str],
+    preset: str = "general",
 ) -> List[Dict[str, Any]]:
+    if _normalize_role_preset(preset) == "review":
+        return rows
     available = set(_dedupe_roles(available_roles, limit=16))
     out: List[Dict[str, Any]] = []
     existing_roles = {str(row.get("role", "")).strip() for row in rows if str(row.get("role", "")).strip()}
@@ -841,6 +844,7 @@ def normalize_phase2_team_spec(
     execution_groups = _expand_execution_groups_with_companions(
         execution_groups,
         available_roles=available_roles,
+        preset=phase2_team_preset,
     )
     execution_mode = "parallel" if len(execution_groups) > 1 else "single"
     execution_group_ids = [

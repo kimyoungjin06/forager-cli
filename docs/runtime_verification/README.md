@@ -38,11 +38,10 @@
       - live rerun-path work surfaced reusable contracts for `quality_gate_policy`, `schema_column_expectations`, numeric `null-heavy` thresholds, and `schema_value_quality_policy`
       - after those generic promotions, the remaining blocker stayed scenario-specific: `null_summary.md` evidence formatting for rerun review remained too custom to justify more core growth
   - `review/R1_happy_path.md`
-    - `executed_blocked`
+    - `executed_done`
     - finding:
-      - generic review routing now keeps review-only patch/regression requests on `review` preset with reviewer roles
-      - multi-subtask reviewer lanes are now serialized instead of being emitted as `parallel: true`
-      - latest clean rerun (`T-015`) still blocks on missing canonical diff-range selection policy for review scope
+      - live progression moved through reusable review seams: review-only routing, reviewer-only role defaults, readonly review contracts, canonical diff-range policy, auth/session scope tracing, and section-specific acceptance for severity findings vs test gaps vs uncertainties
+      - final successful run (`T-022`) reached `planning_ready`, triggered one integration retry for dirty-path evidence precision, and then closed as `done`
   - `mixed/M1_happy_path.md`
     - `planned`
 

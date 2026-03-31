@@ -8,9 +8,9 @@
 - branch_target:
   - `done`
 - status:
-  - `executed_blocked`
+  - `executed_done`
 - executed_at:
-  - `2026-03-31 08:30 KST`
+  - `2026-03-31 11:21 KST`
 - operator:
   - `Codex`
 
@@ -40,53 +40,62 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `r_20260331082223_f60a9627`
+  - `r_20260331105921_fe4c512a`
 - task_short_id:
-  - `T-015`
+  - `T-022`
 - planning:
-  - `phase1 ensemble 3 rounds / 3 critical reviews / convergence=blocked`
+  - `phase1 ensemble 3 rounds / 3 critical reviews / convergence=ready`
 - stage progression:
   - planning:
-    - `intake -> phase1 round1 -> round2 -> round3 -> planning_blocked`
+    - `intake -> phase1 round1 -> round2 -> round3 -> planning_ready`
   - execution:
-    - `not started`
+    - `done`
   - verification:
-    - `not started`
+    - `done`
   - integration:
-    - `not started`
+    - `exec_critic_retry once -> done`
   - close:
-    - `failed`
+    - `done`
 - critic/verifier verdict:
-  - `critic blocker after auto-replan`
+  - `planning critic approved; exec critic requested one retry for dirty-path evidence precision`
 - final branch:
-  - `planning_blocked`
+  - `done`
 
 ## 5. Surface Evidence
 - `/task`:
+  - `status=completed`
   - `phase1=review phase2=review`
+  - `phase2_lane_state: exec done=1 | review done=1 | review_verdict retry=1`
+  - `plan_convergence: ready reviews=3 last_round=3`
 - `/monitor`:
-  - `not captured; terminal blocker confirmed in gateway events`
+  - `T-022 | completed/planning/completed | Codex-Reviewer`
+  - `lanes E1/R1 [exec done=1 | review done=1 | review_verdict retry=1 | backend local]`
 - `/offdesk review`:
   - `not captured`
 - dashboard `Task Detail`:
-  - `not captured`
+  - `request route 200`
+  - `Task Team Observatory visible`
+  - `phase2_lane_state: exec done=1 | review done=1 | review_verdict retry=1`
+  - `plan_convergence: ready reviews=3 last_round=3`
 - dashboard `Recovery`:
-  - `not captured`
+  - `not captured; task completed without recovery branch`
 
 ## 6. Result
 - result:
-  - `executed_blocked`
+  - `executed_done`
 - mismatch class:
-  - `generic_contract_gap`
+  - `resolved_generic_contract_gap`
 - mismatch notes:
-  - `T-013` first run misrouted to `build` preset and blocked on reviewer-result ownership after review lanes.
-  - generic fix 1: review-only requests mentioning patch/code context now prefer `review` preset and reviewer roles.
-  - `T-014` second run entered `review` preset but blocked because multi-subtask reviewer lanes were emitted with `parallel: true`.
-  - generic fix 2: execution lanes that own multiple subtasks are now forced serial even when the overall preset still uses parallel workers.
-  - `T-015` latest clean rerun stayed in `review` preset and moved the blocker down to canonical diff-range policy:
-    - `최근 로그인 패치`의 git 기준 range, dirty worktree 포함/제외, multi-candidate commit selection rule이 contract에 없어 severity scope가 흔들릴 수 있음.
+  - `T-013` misrouted review-only patch/regression intent to `build`; fixed by preferring `review` preset for reviewer-result requests even when code-change context words appear.
+  - `T-014` kept `review` preset but emitted a multi-subtask reviewer lane with `parallel: true`; fixed by forcing multi-subtask lanes to serial.
+  - `T-019` through `T-021` exposed reusable `review request contract` gaps:
+    - canonical diff-range selection policy
+    - auth/session boundary tracing policy
+    - section-specific acceptance for severity findings vs test gaps vs uncertainties
+  - `T-022` passed planning, then integration critic required one retry so excluded dirty paths were listed as concrete paths rather than a glob summary.
+  - final happy-path completed after one integration retry without widening the preset or leaving review-only mode.
 - next fix:
-  - `review request contract`에 canonical diff-range selection policy를 typed field로 추가
+  - `R2` rerun-path verification should confirm that review retries remain bounded and lane-specific
 
 ## 7. Raw References
 - runtime state refs:
@@ -94,4 +103,5 @@
 - log refs:
   - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/logs/gateway_events.jsonl`
 - artifact refs:
-  - `none; planning gate blocked before execution`
+  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/tf_runs/r_20260331105921_fe4c512a/logs/worker_Codex-Reviewer_r_20260331105921_fe4c512a.log`
+  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/tf_runs/r_20260331111809_c972ada4/logs/worker_Codex-Reviewer_r_20260331111809_c972ada4.log`
