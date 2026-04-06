@@ -164,6 +164,7 @@ def build_nightly_session_summary(
                 "active_task_background_run_runner_target": detail.active_task_background_run_runner_target,
                 "active_task_background_run_ticket_id": detail.active_task_background_run_ticket_id,
                 "active_task_background_run_evidence_bundle": detail.active_task_background_run_evidence_bundle,
+                "active_task_background_run_evidence_artifacts": detail.active_task_background_run_evidence_artifacts,
                 "background_worker_status": detail.background_worker_status,
                 "background_worker_summary": detail.background_worker_summary,
                 "background_queue_summary": detail.background_queue_summary,
