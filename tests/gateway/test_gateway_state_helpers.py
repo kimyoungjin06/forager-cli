@@ -1299,6 +1299,8 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
             "background_run_status": "running",
             "background_run_runner_target": "local_background",
             "background_run_launch_mode": "offdesk_manual",
+            "background_run_runtime_handle": "aoe_bg_bgt_001",
+            "background_run_runtime_summary": "tmux_session=aoe_bg_bgt_001",
             "background_run_evidence_bundle": "status=pending | outcome=awaiting_review",
             "background_run_evidence_artifacts": ["review_evidence/git_diff_scope.md"],
             "background_run_launch_spec_summary": "gateway_dispatch | mode=in_process_callback | entry=aoe-telegram-gateway | externalizable=no | requires in-process callback registry",
@@ -1328,6 +1330,7 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
     assert "execution_brief_blocked: acceptance_gap" in summary
     assert "background_run: running" in summary
     assert "background_run_detail: runner=local_background | ticket=BGT-001 | launch=offdesk_manual" in summary
+    assert "background_run_runtime: handle=aoe_bg_bgt_001 | tmux_session=aoe_bg_bgt_001" in summary
     assert "background_run_evidence: status=pending | outcome=awaiting_review" in summary
     assert "background_run_artifacts: review_evidence/git_diff_scope.md" in summary
     assert "background_run_launch_spec: gateway_dispatch | mode=in_process_callback | entry=aoe-telegram-gateway | externalizable=no" in summary

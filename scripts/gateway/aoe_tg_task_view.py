@@ -537,6 +537,15 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
             detail_parts.append(f"launch={background_launch}")
         if detail_parts:
             lines.append("background_run_detail: " + " | ".join(detail_parts)[:240])
+    background_runtime_handle = str(task.get("background_run_runtime_handle", "")).strip()
+    background_runtime_summary = str(task.get("background_run_runtime_summary", "")).strip()
+    if background_runtime_handle or background_runtime_summary:
+        runtime_parts: List[str] = []
+        if background_runtime_handle:
+            runtime_parts.append(f"handle={background_runtime_handle}")
+        if background_runtime_summary:
+            runtime_parts.append(background_runtime_summary)
+        lines.append("background_run_runtime: " + " | ".join(runtime_parts)[:240])
     background_evidence = str(task.get("background_run_evidence_bundle", "")).strip()
     if background_evidence:
         lines.append("background_run_evidence: " + background_evidence[:240])

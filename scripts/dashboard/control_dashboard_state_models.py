@@ -161,6 +161,8 @@ class TaskDetailDTO:
     background_run_runner_target: str = ""
     background_run_ticket_id: str = ""
     background_run_launch_mode: str = ""
+    background_run_runtime_handle: str = ""
+    background_run_runtime_summary: str = ""
     background_run_evidence_bundle: str = ""
     background_run_evidence_artifacts: str = ""
     background_run_launch_spec_summary: str = ""
@@ -221,6 +223,8 @@ class RuntimeDetailDTO:
     active_task_background_run_runner_target: str
     active_task_background_run_ticket_id: str
     active_task_background_run_launch_mode: str
+    active_task_background_run_runtime_handle: str
+    active_task_background_run_runtime_summary: str
     active_task_background_run_evidence_bundle: str
     active_task_background_run_launch_spec_summary: str
     background_worker_status: str

@@ -102,5 +102,7 @@ def launch_local_tmux_background_ticket(
         launch_mode=launch_mode,
         created_by=claimed_by,
         source_surface=source_surface,
+        runtime_handle=session_name,
+        runtime_summary=f"tmux_session={session_name}",
         evidence_bundle=f"status=running | outcome=tmux_session_started | session={session_name}",
     )

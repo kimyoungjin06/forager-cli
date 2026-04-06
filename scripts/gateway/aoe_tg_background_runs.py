@@ -385,6 +385,8 @@ def advance_background_run_ticket(
     created_by: str = "",
     source_surface: str = "",
     execution_brief_status: str = "",
+    runtime_handle: str = "",
+    runtime_summary: str = "",
     evidence_bundle: str = "",
     evidence_artifacts: List[Any] | None = None,
 ) -> Dict[str, Any]:
@@ -407,6 +409,10 @@ def advance_background_run_ticket(
         updated["source_surface"] = str(source_surface or "").strip()
     if str(execution_brief_status or "").strip():
         updated["execution_brief_status"] = str(execution_brief_status or "").strip()
+    if str(runtime_handle or "").strip():
+        updated["runtime_handle"] = str(runtime_handle or "").strip()
+    if str(runtime_summary or "").strip():
+        updated["runtime_summary"] = str(runtime_summary or "").strip()
     if str(evidence_bundle or "").strip():
         updated["evidence_bundle"] = str(evidence_bundle or "").strip()
     if evidence_artifacts is not None:

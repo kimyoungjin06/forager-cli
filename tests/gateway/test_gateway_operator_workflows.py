@@ -3963,6 +3963,8 @@ def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monk
     )
 
     assert result["status"] == "running"
+    assert result["runtime_handle"] == build_local_tmux_session_name("BGT-TMUX-001")
+    assert result["runtime_summary"] == f"tmux_session={build_local_tmux_session_name('BGT-TMUX-001')}"
     assert "tmux_session_started" in result["evidence_bundle"]
     assert build_local_tmux_session_name("BGT-TMUX-001") in result["evidence_bundle"]
     assert launched["cmd"][:4] == ["tmux", "new-session", "-d", "-s"]
