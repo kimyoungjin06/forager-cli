@@ -110,6 +110,9 @@
   - `argv=["worker-run","--runner","local_tmux"]`
   - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR","AOE_ORCH_ALIAS"]`
   - `externalizable=true`
+  - minimal executable payload:
+    - `command_argv[]`
+    - `command_cwd`
 - `github_runner`
   - `kind=background_dispatch`
   - `mode=github_action_json`
@@ -212,6 +215,16 @@
    must not enter `dispatching` unless `launch_spec.externalizable=true`.
 
 ## 8. Rollout Plan
+
+### Phase 1.5: local_tmux Launcher
+- Add a minimal tmux launcher for externalizable tickets that already carry executable payload.
+- Scope:
+  - claim `local_tmux` queued ticket
+  - validate `command_argv[]` / `command_cwd`
+  - start detached tmux session
+  - mark ticket `running` with session evidence
+- Non-goal:
+  - reconstruct in-process callback runs as external tmux work
 
 ### Phase 1: Local Background Queue
 - Launch off-desk work without tying it to the foreground gateway session.

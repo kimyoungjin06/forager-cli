@@ -2,6 +2,7 @@
 """Gateway operator workflow regression tests."""
 
 import json
+import subprocess
 import time
 
 from _gateway_test_support import *  # noqa: F401,F403
@@ -29,6 +30,10 @@ from aoe_tg_local_background_worker import (
     register_local_background_run,
     run_local_background_ticket,
     stop_local_background_daemon,
+)
+from aoe_tg_tmux_background_worker import (
+    build_local_tmux_session_name,
+    launch_local_tmux_background_ticket,
 )
 from aoe_tg_request_contract import (
     background_run_evidence_artifacts_from_task,
@@ -3638,6 +3643,116 @@ def test_select_background_runner_target_allows_externalizable_local_tmux_only()
         launch_spec=github_spec,
         allow_external_targets=True,
     ) == "github_runner"
+
+
+def test_local_tmux_launch_spec_can_embed_command_payload() -> None:
+    spec = build_local_tmux_background_launch_spec(
+        request_id="REQ-TMUX-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+        command_argv=["python3", "-c", "print('ok')"],
+        command_cwd="/tmp/twinpaper",
+    )
+
+    assert spec["command_argv"] == ["python3", "-c", "print('ok')"]
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+
+
+def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-001",
+            request_id="REQ-TMUX-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="queued",
+            launch_spec=build_local_tmux_background_launch_spec(
+                request_id="REQ-TMUX-001",
+                project_key="twinpaper",
+                project_root=str(tmp_path),
+                team_dir=str(tmp_path / ".aoe-team"),
+                manager_state_file=str(tmp_path / ".aoe-team" / "orch_manager_state.json"),
+                launch_mode="offdesk_manual",
+                source_surface="offdesk_review",
+                created_by="telegram:939062873",
+                command_argv=["python3", "-c", "print('tmux')"],
+                command_cwd=str(tmp_path),
+            ),
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    launched = {}
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: launched.update({"cmd": cmd}) or subprocess.CompletedProcess(cmd, 0, "", ""))
+
+    result = launch_local_tmux_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-TMUX-001",
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+        claimed_by="worker:local_tmux",
+        source_surface="background_queue",
+        launch_mode="offdesk_manual",
+    )
+
+    assert result["status"] == "running"
+    assert "tmux_session_started" in result["evidence_bundle"]
+    assert build_local_tmux_session_name("BGT-TMUX-001") in result["evidence_bundle"]
+    assert launched["cmd"][:4] == ["tmux", "new-session", "-d", "-s"]
+
+
+def test_launch_local_tmux_background_ticket_fails_without_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-002",
+            request_id="REQ-TMUX-002",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="queued",
+            launch_spec=build_local_tmux_background_launch_spec(
+                request_id="REQ-TMUX-002",
+                project_key="twinpaper",
+                project_root=str(tmp_path),
+                team_dir=str(tmp_path / ".aoe-team"),
+                manager_state_file=str(tmp_path / ".aoe-team" / "orch_manager_state.json"),
+                launch_mode="offdesk_manual",
+                source_surface="offdesk_review",
+                created_by="telegram:939062873",
+            ),
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+
+    result = launch_local_tmux_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-TMUX-002",
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+        claimed_by="worker:local_tmux",
+        source_surface="background_queue",
+        launch_mode="offdesk_manual",
+    )
+
+    assert result["status"] == "failed"
+    assert result["evidence_bundle"] == "status=failed | reason=launch_spec_missing_command"
 
 
 def test_external_runner_launch_spec_builders_are_externalizable() -> None:

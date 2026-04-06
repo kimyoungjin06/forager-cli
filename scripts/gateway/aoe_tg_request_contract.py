@@ -248,6 +248,7 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         ("kind", 64),
         ("mode", 64),
         ("entrypoint", 160),
+        ("command_cwd", 240),
         ("project_root", 240),
         ("team_dir", 240),
         ("manager_state_file", 240),
@@ -263,10 +264,13 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
             snapshot[key] = token
     env_keys = _dedupe_rows(list(raw.get("env_keys") or []), limit=12, text_limit=64)
     argv = _dedupe_rows(list(raw.get("argv") or []), limit=20, text_limit=200)
+    command_argv = _dedupe_rows(list(raw.get("command_argv") or []), limit=40, text_limit=240)
     if env_keys:
         snapshot["env_keys"] = env_keys
     if argv:
         snapshot["argv"] = argv
+    if command_argv:
+        snapshot["command_argv"] = command_argv
     if "externalizable" in raw:
         snapshot["externalizable"] = _normalize_bool(raw.get("externalizable"), False)
     summary = _trim(raw.get("summary", ""), 320)
@@ -489,6 +493,8 @@ def build_background_launch_spec(
     entrypoint: str = "aoe-telegram-gateway",
     argv: Optional[List[str]] = None,
     env_keys: Optional[List[str]] = None,
+    command_argv: Optional[List[str]] = None,
+    command_cwd: str = "",
     externalizable: bool = False,
     blocked_reason: str = "",
     summary: str = "",
@@ -514,6 +520,8 @@ def build_background_launch_spec(
             "created_by": _trim(created_by, 96),
             "argv": list(argv or []),
             "env_keys": list(env_keys or []),
+            "command_argv": list(command_argv or []),
+            "command_cwd": _trim(command_cwd, 240),
             "externalizable": bool(externalizable),
             "blocked_reason": _trim(
                 blocked_reason or (
@@ -580,6 +588,8 @@ def build_runner_background_launch_spec(
     launch_mode: str = "offdesk_manual",
     source_surface: str = "",
     created_by: str = "",
+    command_argv: Optional[List[str]] = None,
+    command_cwd: str = "",
 ) -> Dict[str, Any]:
     defaults = _runner_launch_defaults(runner_target)
     return build_background_launch_spec(
@@ -597,6 +607,8 @@ def build_runner_background_launch_spec(
         entrypoint=str(defaults.get("entrypoint", "")),
         argv=list(defaults.get("argv") or []),
         env_keys=list(defaults.get("env_keys") or []),
+        command_argv=list(command_argv or []),
+        command_cwd=command_cwd,
         externalizable=bool(defaults.get("externalizable", False)),
         blocked_reason=str(defaults.get("blocked_reason", "")),
     )
@@ -612,6 +624,8 @@ def build_local_tmux_background_launch_spec(
     launch_mode: str = "offdesk_manual",
     source_surface: str = "",
     created_by: str = "",
+    command_argv: Optional[List[str]] = None,
+    command_cwd: str = "",
 ) -> Dict[str, Any]:
     return build_runner_background_launch_spec(
         runner_target="local_tmux",
@@ -623,6 +637,8 @@ def build_local_tmux_background_launch_spec(
         launch_mode=launch_mode,
         source_surface=source_surface,
         created_by=created_by,
+        command_argv=command_argv,
+        command_cwd=command_cwd,
     )
 
 
