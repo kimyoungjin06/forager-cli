@@ -113,6 +113,7 @@ _ORCH_DISCOVERY_TRIGGER_CMDS = {
     "orch-repair",
     "orch-status",
     "orch-bgq-clean",
+    "orch-bg-runner",
     "orch-bgw-status",
     "orch-bgw-start",
     "orch-bgw-stop",

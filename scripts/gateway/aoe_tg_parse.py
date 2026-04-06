@@ -1081,6 +1081,31 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 i += 1
             return {"cmd": "orch-bgw-stop", "orch": orch_name}
 
+        if sub in {"bg-runner", "background-runner", "runner-target"}:
+            orch_name: Optional[str] = None
+            runner_target: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is None:
+                        orch_name = tok.strip()
+                    elif runner_target is None:
+                        runner_target = tok.strip().lower()
+                    else:
+                        raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux>")
+                i += 1
+            if not orch_name or not runner_target:
+                raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux>")
+            return {"cmd": "orch-bg-runner", "orch": orch_name, "runner_target": runner_target}
+
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None
             i = 0

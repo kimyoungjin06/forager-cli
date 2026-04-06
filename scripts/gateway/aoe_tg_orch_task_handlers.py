@@ -9,11 +9,13 @@ import aoe_tg_background_runs as background_runs
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
 from aoe_tg_package_paths import package_root
+from aoe_tg_request_contract import build_background_launch_spec, select_background_runner_target
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
 
 
 _SCENARIO_FILENAME = "AOE_TODO.md"
+_BACKGROUND_RUNNER_PREFS = {"local_background", "local_tmux"}
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -162,6 +164,8 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
 
     focus_button = "/focus off" if lock_key == str(key).strip().lower() else f"/focus {alias}"
     hide_button = f"/orch {'unhide' if project_hidden_from_ops(entry) else 'hide'} {alias}"
+    runner_pref = str(entry.get("background_runner_target", "")).strip().lower() or "local_background"
+    runner_toggle = "local_background" if runner_pref == "local_tmux" else "local_tmux"
     issue = project_runtime_issue(entry)
     if issue:
         keyboard: List[List[Dict[str, str]]] = [
@@ -173,6 +177,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
         keyboard = [
             [{"text": f"/todo {alias}"}, {"text": f"/todo {alias} followup"}, {"text": f"/orch monitor {alias}"}],
             ([{"text": f"/orch bgq-clean {alias}"}] if queue_stale_count > 0 else []),
+            [{"text": f"/orch bg-runner {alias} {runner_toggle}"}],
             [{"text": f"/orch bgw-status {alias}"}]
             + (
                 [{"text": f"/orch bgw-stop {alias}"}]
@@ -191,6 +196,42 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
         "one_time_keyboard": False,
         "input_field_placeholder": f"예: /todo {alias} 또는 /orch monitor {alias}",
     }
+
+
+def _background_runner_preference(entry: Dict[str, Any]) -> str:
+    token = str(entry.get("background_runner_target", "")).strip().lower()
+    return token if token in _BACKGROUND_RUNNER_PREFS else "local_background"
+
+
+def _background_runner_status(entry: Dict[str, Any], key: str) -> tuple[str, str, str]:
+    preferred = _background_runner_preference(entry)
+    launch_spec = build_background_launch_spec(
+        request_id="",
+        project_key=str(key or "").strip(),
+        project_root=str(entry.get("project_root", "") or "").strip(),
+        team_dir=str(entry.get("team_dir", "") or "").strip(),
+        manager_state_file="",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        source_surface="orch_status",
+        created_by="status",
+        kind="gateway_dispatch",
+        mode="in_process_callback",
+        entrypoint="aoe-telegram-gateway",
+        argv=["run", "--no-wait"],
+        env_keys=["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        externalizable=False,
+        blocked_reason="requires in-process callback registry",
+    )
+    effective = select_background_runner_target(
+        preferred_runner_target=preferred,
+        launch_spec=launch_spec,
+        allow_external_targets=False,
+    )
+    note = ""
+    if preferred != effective:
+        note = f"preferred {preferred} is pending until an externalizable launch spec exists"
+    return preferred, effective, note
 
 
 def _task_ref_for_actions(task: Dict[str, Any], request_id: str) -> str:
@@ -617,10 +658,13 @@ def handle_orch_task_command(
         except Exception:
             queue_line = ""
             worker_line = ""
+        runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
+        runner_line = f"background_runner: pref={runner_pref} | effective={runner_effective}\n"
+        runner_note_line = f"background_runner_note: {runner_note}\n" if runner_note else ""
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{queue_line}{worker_line}\n{status}",
+            f"{runner_line}{runner_note_line}{queue_line}{worker_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
@@ -671,6 +715,69 @@ def handle_orch_task_command(
             "next:\n"
             f"- /orch status {alias}",
             context="orch-bgq-clean",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd == "orch-bg-runner":
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "background runner preference blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context="orch-bg-runner blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        target = str(rest or "").strip().lower()
+        if target not in _BACKGROUND_RUNNER_PREFS:
+            send(
+                "usage: /orch bg-runner <O#|name> <local_background|local_tmux>",
+                context="orch-bg-runner usage",
+                with_menu=True,
+            )
+            return True
+        entry["background_runner_target"] = target
+        entry["updated_at"] = now_iso()
+        save_manager_state(args.manager_state_file, manager_state)
+        preferred, effective, note = _background_runner_status(entry, key)
+        team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser().resolve()
+        append_action_audit_row(
+            team_dir,
+            headline="Background Runner Target | configured",
+            status="configured",
+            outcome_kind="background_runner",
+            outcome_status="configured",
+            outcome_reason_code=preferred,
+            outcome_detail=(f"preferred={preferred} | effective={effective}" + (f" | note={note}" if note else "")),
+            next_step=f"/orch status {alias}",
+            remediation=(note or "future detached/background launches will use this runner preference when eligible"),
+            source_command=f"/orch bg-runner {alias} {preferred}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
+        lines = [
+            "background runner preference",
+            f"- runtime: {key}",
+            f"- preferred: {preferred}",
+            f"- effective: {effective}",
+        ]
+        if note:
+            lines.append(f"- note: {note}")
+        lines.extend(["next:", f"- /orch status {alias}"])
+        send(
+            "\n".join(lines),
+            context="orch-bg-runner",
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )

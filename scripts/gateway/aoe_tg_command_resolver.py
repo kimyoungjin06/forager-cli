@@ -325,11 +325,17 @@ def resolve_message_command(
                 elif sub in {"bgw-stop", "worker-stop"}:
                     out.cmd = "orch-bgw-stop"
                     out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bg-runner", "background-runner", "runner-target"}:
+                    out.cmd = "orch-bg-runner"
+                    out.orch_target = tail[0].strip() if tail else None
+                    out.rest = tail[1].strip() if len(tail) > 1 else ""
+                    if not out.orch_target or not out.rest:
+                        raise RuntimeError("usage: /orch bg-runner <O#|name> <local_background|local_tmux>")
                 elif sub in {"status", "stat"}:
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-start|bgw-stop|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-start|bgw-stop|bg-runner|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -453,6 +459,9 @@ def resolve_message_command(
                 out.orch_target = quick.get("orch")
             elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = quick.get("orch")
+            elif out.cmd == "orch-bg-runner":
+                out.orch_target = quick.get("orch")
+                out.rest = str(quick.get("runner_target", "")).strip()
             elif out.cmd == "orch-check":
                 out.orch_target = quick.get("orch")
                 out.orch_check_request_id = quick.get("request_id")
@@ -515,6 +524,9 @@ def resolve_message_command(
                 _apply_add_role_cli(cli)
             elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = cli.get("orch")
+            elif out.cmd == "orch-bg-runner":
+                out.orch_target = cli.get("orch")
+                out.rest = str(cli.get("runner_target", "")).strip()
             elif out.cmd == "orch-add":
                 out.orch_add_name = str(cli.get("orch", "")).strip()
                 out.orch_add_path = str(cli.get("path", "")).strip()
@@ -655,6 +667,7 @@ def resolve_message_command(
                 "orch-bgw-status",
                 "orch-bgw-start",
                 "orch-bgw-stop",
+                "orch-bg-runner",
                 "orch-check",
                 "orch-task",
                 "orch-pick",
@@ -692,6 +705,9 @@ def resolve_message_command(
                     out.orch_target = natural.get("orch")
                 elif ncmd in {"orch-bgw-status", "orch-bgw-start", "orch-bgw-stop"}:
                     out.orch_target = natural.get("orch")
+                elif ncmd == "orch-bg-runner":
+                    out.orch_target = natural.get("orch")
+                    out.rest = str(natural.get("runner_target", "")).strip()
                 elif ncmd == "mode":
                     token = str(natural.get("mode", "status")).strip().lower()
                     out.mode_setting = token if token in {"status", "dispatch", "direct", "off"} else "invalid"

@@ -70,6 +70,7 @@ def maybe_handle_no_wait_dispatch_detach(
         blocked_reason="requires in-process callback registry",
     )
     selected_runner_target = select_background_runner_target(
+        preferred_runner_target=str(entry.get("background_runner_target", "")).strip(),
         launch_spec=launch_spec,
         allow_external_targets=False,
     )

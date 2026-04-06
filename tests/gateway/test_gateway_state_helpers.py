@@ -3578,6 +3578,7 @@ def test_parse_focus_and_unlock_commands() -> None:
     assert tg_parse.parse_cli_message("aoe orch bgw-status O2") == {"cmd": "orch-bgw-status", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch bgw-start O2") == {"cmd": "orch-bgw-start", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch bgw-stop O2") == {"cmd": "orch-bgw-stop", "orch": "O2"}
+    assert tg_parse.parse_cli_message("aoe orch bg-runner O2 local_tmux") == {"cmd": "orch-bg-runner", "orch": "O2", "runner_target": "local_tmux"}
 
     manager_state = _empty_state()
     resolved = resolver.resolve_message_command(
