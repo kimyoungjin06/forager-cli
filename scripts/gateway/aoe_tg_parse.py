@@ -1024,6 +1024,63 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 i += 1
             return {"cmd": "orch-bgq-clean", "orch": orch_name}
 
+        if sub in {"bgw-status", "worker-status"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-status [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-status [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-status", "orch": orch_name}
+
+        if sub in {"bgw-start", "worker-start"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-start [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-start [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-start", "orch": orch_name}
+
+        if sub in {"bgw-stop", "worker-stop"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-stop [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-stop [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-stop", "orch": orch_name}
+
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None
             i = 0

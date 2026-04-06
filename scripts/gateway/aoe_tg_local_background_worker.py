@@ -362,6 +362,7 @@ def ensure_local_background_daemon(
     max_items: int = 8,
 ) -> Dict[str, Any]:
     key = str(Path(queue_path).expanduser().resolve())
+    state_path = background_worker_state_path(Path(key).parent)
     with _LOCAL_BACKGROUND_DAEMONS_LOCK:
         row = _LOCAL_BACKGROUND_DAEMONS.get(key)
         if isinstance(row, dict):
@@ -398,6 +399,18 @@ def ensure_local_background_daemon(
             "thread": thread,
             "stop_event": stop_event,
         }
+        update_background_worker_state(
+            state_path,
+            now_iso=now_iso,
+            status="running",
+            runner_target=runner_target,
+            mode="thread_daemon",
+            thread_name=thread_name,
+            pid=os.getpid(),
+            started_at=now_iso(),
+            heartbeat_at=now_iso(),
+            last_reason="startup",
+        )
         thread.start()
     return {
         "started": True,

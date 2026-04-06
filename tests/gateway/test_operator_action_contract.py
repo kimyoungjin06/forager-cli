@@ -129,6 +129,18 @@ def test_http_action_spec_maps_bgq_clean_to_phase2_runtime_contract() -> None:
     assert row["payload"] == {"project_ref": "O2"}
 
 
+def test_classify_operator_command_handles_background_worker_lifecycle_commands() -> None:
+    status = mod.classify_operator_command("/orch bgw-status O2")
+    start = mod.classify_operator_command("/orch bgw-start O2")
+    stop = mod.classify_operator_command("/orch bgw-stop O2")
+
+    assert status["bucket"] == "safe"
+    assert status["scope"] == "runtime"
+    assert start["bucket"] == "phase2"
+    assert start["mutation"] == "runtime_mutation"
+    assert stop["bucket"] == "phase2"
+
+
 def test_http_action_spec_maps_auto_recover_force_to_phase2_contract() -> None:
     row = mod.http_action_spec("/auto recover force")
 

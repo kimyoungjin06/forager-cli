@@ -149,6 +149,24 @@ def test_resolve_message_command_parses_slash_orch_bgq_clean() -> None:
     assert resolved.orch_target == "O2"
 
 
+def test_resolve_message_command_parses_slash_orch_bgw_start() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgw-start O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgw-start"
+    assert resolved.orch_target == "O2"
+
+
 def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     state = _empty_state()
     project_root = tmp_path / "TwinPaper"
@@ -346,6 +364,106 @@ def test_orch_bgq_clean_marks_stale_background_queue_tickets(tmp_path: Path) -> 
     assert snapshot["stale_count"] >= 1
     buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
     assert "/orch status O2" in buttons
+
+
+def test_orch_bgw_start_and_status_and_stop_manage_local_background_daemon(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    def _send(msg: str, **kwargs):
+        sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup")))
+        return True
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-06T12:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-start", **common_kwargs) is True
+    start_text, start_context, start_markup = sent[-1]
+    assert start_context == "orch-bgw-start"
+    assert "background worker start" in start_text
+    assert "- started: yes" in start_text
+    start_buttons = [btn["text"] for row in (start_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-stop O2" in start_buttons
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-status", **common_kwargs) is True
+    status_text, status_context, _status_markup = sent[-1]
+    assert status_context == "orch-bgw-status"
+    assert "background worker status" in status_text
+    assert "status=running" in status_text or "status=idle" in status_text
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-stop", **common_kwargs) is True
+    stop_text, stop_context, stop_markup = sent[-1]
+    assert stop_context == "orch-bgw-stop"
+    assert "background worker stop" in stop_text
+    assert "- stopped: yes" in stop_text
+    stop_buttons = [btn["text"] for row in (stop_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-start O2" in stop_buttons
 
 
 def test_orch_repair_all_repairs_multiple_projects(tmp_path: Path) -> None:

@@ -3509,6 +3509,9 @@ def test_parse_focus_and_unlock_commands() -> None:
     assert tg_parse.parse_cli_message("aoe unlock") == {"cmd": "focus", "rest": "off"}
     assert tg_parse.parse_cli_message("aoe orch repair O2") == {"cmd": "orch-repair", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch bgq-clean O2") == {"cmd": "orch-bgq-clean", "orch": "O2"}
+    assert tg_parse.parse_cli_message("aoe orch bgw-status O2") == {"cmd": "orch-bgw-status", "orch": "O2"}
+    assert tg_parse.parse_cli_message("aoe orch bgw-start O2") == {"cmd": "orch-bgw-start", "orch": "O2"}
+    assert tg_parse.parse_cli_message("aoe orch bgw-stop O2") == {"cmd": "orch-bgw-stop", "orch": "O2"}
 
     manager_state = _empty_state()
     resolved = resolver.resolve_message_command(

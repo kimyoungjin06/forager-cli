@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import aoe_tg_background_runs as background_runs
+from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
 from aoe_tg_package_paths import package_root
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
@@ -132,6 +133,7 @@ def _repair_registered_project(
 def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     alias = _project_alias(entry, key)
     queue_stale_count = 0
+    worker_status = ""
     try:
         team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
         if str(team_dir):
@@ -139,8 +141,13 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
                 background_runs.background_runs_state_path(team_dir)
             )
             queue_stale_count = int(queue_snapshot.get("stale_count", 0) or 0)
+            worker_snapshot = background_runs.summarize_background_worker_state(
+                background_runs.background_worker_state_path(team_dir)
+            )
+            worker_status = str(worker_snapshot.get("status", "")).strip().lower()
     except Exception:
         queue_stale_count = 0
+        worker_status = ""
     raw_lock = manager_state.get("project_lock") if isinstance(manager_state, dict) else {}
     lock_key = ""
     if isinstance(raw_lock, dict) and bool(raw_lock.get("enabled", False)):
@@ -159,6 +166,12 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
         keyboard = [
             [{"text": f"/todo {alias}"}, {"text": f"/todo {alias} followup"}, {"text": f"/orch monitor {alias}"}],
             ([{"text": f"/orch bgq-clean {alias}"}] if queue_stale_count > 0 else []),
+            [{"text": f"/orch bgw-status {alias}"}]
+            + (
+                [{"text": f"/orch bgw-stop {alias}"}]
+                if worker_status in {"running", "idle"}
+                else [{"text": f"/orch bgw-start {alias}"}]
+            ),
             [{"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/sync {alias} 1h"}, {"text": f"/use {alias}"}, {"text": focus_button}],
             [{"text": hide_button}],
@@ -580,9 +593,27 @@ def handle_orch_task_command(
                 status = run_aoe_status(p_args)
         except Exception as exc:
             status = f"[WARN] status unavailable: {exc}"
+        queue_line = ""
+        worker_line = ""
+        try:
+            team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
+            if str(team_dir):
+                queue_snapshot = background_runs.summarize_background_runs_state(
+                    background_runs.background_runs_state_path(team_dir)
+                )
+                worker_snapshot = background_runs.summarize_background_worker_state(
+                    background_runs.background_worker_state_path(team_dir),
+                    now_iso=now_iso,
+                )
+                queue_line = f"background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}\n"
+                worker_line = f"background_worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
+        except Exception:
+            queue_line = ""
+            worker_line = ""
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
-            f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n\n{status}",
+            f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
+            f"{queue_line}{worker_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
@@ -633,6 +664,96 @@ def handle_orch_task_command(
             "next:\n"
             f"- /orch status {alias}",
             context="orch-bgq-clean",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd in {"orch-bgw-status", "orch-bgw-start", "orch-bgw-stop"}:
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "background worker command blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context=f"{cmd} blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if not team_dir_raw:
+            send(
+                "background worker command blocked\n"
+                f"- runtime: {key}\n"
+                "- reason: team_dir missing\n"
+                f"- next: /orch repair {alias}",
+                context=f"{cmd} blocked",
+                with_menu=True,
+            )
+            return True
+        team_dir = Path(team_dir_raw).expanduser().resolve()
+        queue_path = background_runs.background_runs_state_path(team_dir)
+        worker_path = background_runs.background_worker_state_path(team_dir)
+        if cmd == "orch-bgw-start":
+            started = ensure_local_background_daemon(
+                queue_path=queue_path,
+                now_iso=now_iso,
+                runner_target="local_background",
+                launch_mode="orch_bgw_start",
+                claimed_by=f"telegram:{chat_id}",
+                source_surface="orch_bgw_start",
+                interval_sec=1.0,
+                idle_sec=4.0,
+                stale_after_sec=900,
+                max_items=8,
+            )
+            worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
+            send(
+                "background worker start\n"
+                f"- runtime: {key}\n"
+                f"- started: {'yes' if bool(started.get('started')) else 'already_running'}\n"
+                f"- worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
+                f"- queue: {str(background_runs.summarize_background_runs_state(queue_path).get('summary', '-')).strip() or '-'}\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-bgw-start",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        if cmd == "orch-bgw-stop":
+            stopped = stop_local_background_daemon(queue_path=queue_path, wait_sec=2.0)
+            worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
+            send(
+                "background worker stop\n"
+                f"- runtime: {key}\n"
+                f"- stopped: {'yes' if bool(stopped.get('stopped')) else 'no'}\n"
+                f"- alive: {'yes' if bool(stopped.get('alive')) else 'no'}\n"
+                f"- worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-bgw-stop",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
+        queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
+        send(
+            "background worker status\n"
+            f"- runtime: {key}\n"
+            f"- worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
+            f"- queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}\n"
+            "next:\n"
+            f"- /orch status {alias}",
+            context="orch-bgw-status",
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )

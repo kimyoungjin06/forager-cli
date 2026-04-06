@@ -109,6 +109,14 @@ def classify_operator_command(command: str) -> Dict[str, str]:
         if second in {"status", "monitor", "list"}:
             scope = "runtime"
             note = "read-only runtime status"
+        elif second in {"bgw-status", "worker-status"}:
+            scope = "runtime"
+            note = "read-only background worker status"
+        elif second in {"bgw-start", "worker-start", "bgw-stop", "worker-stop"}:
+            bucket = "phase2"
+            mutation = "runtime_mutation"
+            scope = "runtime"
+            note = "background worker lifecycle mutation candidate"
         elif second == "bgq-clean":
             bucket = "phase2"
             mutation = "runtime_mutation"

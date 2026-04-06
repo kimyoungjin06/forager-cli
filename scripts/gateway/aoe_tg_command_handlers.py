@@ -113,6 +113,9 @@ _ORCH_DISCOVERY_TRIGGER_CMDS = {
     "orch-repair",
     "orch-status",
     "orch-bgq-clean",
+    "orch-bgw-status",
+    "orch-bgw-start",
+    "orch-bgw-stop",
     "orch-monitor",
     "orch-kpi",
     # Global orchestration (needs full registry)
