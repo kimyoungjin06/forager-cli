@@ -59,6 +59,15 @@ MULTI_SIGNAL_KEYS = (
 )
 SINGLE_ROLE_ONLY_KEYS = (" only ", " solo ", " single ", "단독", "혼자", "하나만")
 
+REVIEW_OUTPUT_ARTIFACT_KEYS = (
+    "review_report",
+    "review_report.md",
+    "review report",
+    "review-only output",
+    "review-only artifact",
+    "review 결과물",
+)
+
 ROLE_ORDER = {
     "DataEngineer": 10,
     "Codex-Dev": 20,
@@ -343,6 +352,29 @@ def _prefer_review_over_build(
     return not _has_any(prompt_lower, BUILD_ACTION_SIGNAL_KEYS)
 
 
+def _review_output_doc_signal_only(*, prompt_lower: str, has_review_signal: bool, has_doc_signal: bool) -> bool:
+    if not has_review_signal or not has_doc_signal:
+        return False
+    if not _has_any(prompt_lower, REVIEW_OUTPUT_ARTIFACT_KEYS):
+        return False
+    return not _has_any(
+        prompt_lower,
+        (
+            "handoff",
+            "documentation",
+            "docs ",
+            "docs/",
+            "docs\\",
+            "guide",
+            "readme",
+            "tutorial",
+            "인수인계",
+            "가이드",
+            "튜토리얼",
+        ),
+    )
+
+
 def _build_prompt_role_preset(
     *,
     prompt_lower: str,
@@ -434,12 +466,17 @@ def classify_dispatch_role_preset(
     has_doc_signal = _has_any(prompt_lower, DOC_SIGNAL_KEYS)
     has_analysis_signal = _has_any(prompt_lower, ANALYSIS_SIGNAL_KEYS)
     has_review_signal = _has_any(prompt_lower, REVIEW_SIGNAL_KEYS)
+    effective_doc_signal = has_doc_signal and not _review_output_doc_signal_only(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_doc_signal=has_doc_signal,
+    )
     prefer_review_over_build = _prefer_review_over_build(
         prompt_lower=prompt_lower,
         has_review_signal=has_review_signal,
         has_build_signal=has_build_signal,
         has_data_signal=has_data_signal,
-        has_doc_signal=has_doc_signal,
+        has_doc_signal=effective_doc_signal,
         has_analysis_signal=has_analysis_signal,
     )
 
@@ -448,7 +485,7 @@ def classify_dispatch_role_preset(
         for label, enabled in (
             ("data", has_data_signal),
             ("build", has_build_signal and not prefer_review_over_build),
-            ("writer", has_doc_signal),
+            ("writer", effective_doc_signal),
             ("analysis", has_analysis_signal),
         )
         if enabled
@@ -485,16 +522,23 @@ def choose_auto_dispatch_roles(
     has_build_signal = _has_any(prompt_lower, BUILD_SIGNAL_KEYS)
     has_doc_signal = _has_any(prompt_lower, DOC_SIGNAL_KEYS)
     has_analysis_signal = _has_any(prompt_lower, ANALYSIS_SIGNAL_KEYS)
+    effective_doc_signal = has_doc_signal and not _review_output_doc_signal_only(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_doc_signal=has_doc_signal,
+    )
     prefer_review_over_build = _prefer_review_over_build(
         prompt_lower=prompt_lower,
         has_review_signal=has_review_signal,
         has_build_signal=has_build_signal,
         has_data_signal=has_data_signal,
-        has_doc_signal=has_doc_signal,
+        has_doc_signal=effective_doc_signal,
         has_analysis_signal=has_analysis_signal,
     )
     effective_build_signal = has_build_signal and not prefer_review_over_build
-    review_only_requested = has_review_signal and not any((has_data_signal, effective_build_signal, has_doc_signal, has_analysis_signal))
+    review_only_requested = has_review_signal and not any(
+        (has_data_signal, effective_build_signal, effective_doc_signal, has_analysis_signal)
+    )
 
     wants_multi = _has_any(prompt_lower, MULTI_SIGNAL_KEYS)
     category_hits = sum(
@@ -532,7 +576,7 @@ def choose_auto_dispatch_roles(
                 has_review_signal=has_review_signal,
                 has_data_signal=has_data_signal,
                 has_build_signal=effective_build_signal,
-                has_doc_signal=has_doc_signal,
+                has_doc_signal=effective_doc_signal,
                 has_analysis_signal=has_analysis_signal,
                 prefer_review_over_build=prefer_review_over_build,
             )
@@ -558,7 +602,7 @@ def choose_auto_dispatch_roles(
         has_review_signal=has_review_signal,
         has_data_signal=has_data_signal,
         has_build_signal=effective_build_signal,
-        has_doc_signal=has_doc_signal,
+        has_doc_signal=effective_doc_signal,
         has_analysis_signal=has_analysis_signal,
         prefer_review_over_build=prefer_review_over_build,
     )

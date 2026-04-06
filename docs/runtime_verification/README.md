@@ -42,6 +42,15 @@
     - finding:
       - live progression moved through reusable review seams: review-only routing, reviewer-only role defaults, readonly review contracts, canonical diff-range policy, auth/session scope tracing, and section-specific acceptance for severity findings vs test gaps vs uncertainties
       - final successful run (`T-022`) reached `planning_ready`, triggered one integration retry for dirty-path evidence precision, and then closed as `done`
+  - `review/R2_rerun_path.md`
+    - `executed_blocked`
+    - finding:
+      - review rerun-path work promoted reusable review abstractions:
+        - review_report single-output ownership
+        - review evidence step-shape normalization
+        - duplicated stage dedupe / canonical ordering
+      - the current remaining blocker is still structural:
+        - `review_report.md` final acceptance does not yet require canonical diff range plus excluded-candidate / dirty-worktree exclusion evidence strongly enough to permit rerun-path closure
   - `mixed/M1_happy_path.md`
     - `executed_done`
     - finding:

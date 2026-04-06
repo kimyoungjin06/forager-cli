@@ -3,6 +3,7 @@
 ## 1. Goal
 - Replace text-only execution inference with a canonical `Request Contract` layer.
 - Keep plain text as the operator-facing input surface, but stop treating raw phrasing as the execution truth.
+- Insert an explicit `Execution Brief` layer between intake normalization and off-desk execution.
 - Make planning, acceptance generation, runtime state, and operator surfaces depend on structured request fields instead of brittle keyword matches.
 
 ## 2. Why This Layer Is Needed
@@ -22,12 +23,15 @@
 
 ## 3. Core Principle
 - `plain text = UI`
-- `request contract = planning truth`
+- `request contract = intake normalization truth`
+- `execution brief = on-desk execution truth`
+- `OrchTaskSpec = planner-facing execution object`
 
 Operational meaning:
 - Telegram / CLI / quick plain text remains the intake surface.
 - After intake routing, the system should derive a normalized request contract.
-- Planning, acceptance generation, and runtime reporting should prefer that contract over raw prompt phrasing.
+- On-desk must then decide whether the request is executable, partially executable, underspecified, infeasible, or operator-decision-bound.
+- Off-desk should only execute the slice explicitly authorized by the resulting `Execution Brief`.
 
 ## 4. Position In The System
 
@@ -42,7 +46,9 @@ Operational meaning:
 - `intent routing`
 - `request contract extraction`
 - `contract completeness gate`
-- `planner/critic + acceptance generation from contract`
+- `execution brief assembly`
+- `ExecutionBrief -> OrchTaskSpec`
+- `planner/critic + acceptance generation from brief + contract`
 - `task/runtime/surface summaries from contract`
 
 ## 5. Canonical Object
@@ -80,19 +86,52 @@ Operational meaning:
 
 ### 5.3 Relation To OrchTaskSpec
 - `RequestContract` is not a second planner input beside `OrchTaskSpec`.
-- It is the canonical normalization layer that must be applied before `OrchTaskSpec` is assembled.
+- It is the canonical normalization layer that must be applied before `ExecutionBrief` and `OrchTaskSpec` are assembled.
 - The enforced order is:
   1. plain text intake
   2. request contract extraction
   3. contract completeness gate
-  4. `RequestContract -> OrchTaskSpec` assembly
-  5. TF planning
+  4. execution brief assembly
+  5. `ExecutionBrief -> OrchTaskSpec` assembly
+  6. TF planning
 
 Policy:
 - TF planner should receive `OrchTaskSpec` plus contract-derived metadata, not two competing truths.
+- `ExecutionBrief` is the on-desk/operator-facing execution handoff that decides what off-desk is allowed to do.
 - `OrchTaskSpec` remains the planner-facing object.
 - `RequestContract` remains the intake-normalization truth that constrains how `OrchTaskSpec` is built.
 - When the two disagree, the implementation is wrong; planner code must not silently pick one.
+
+### 5.4 Relation To ExecutionBrief
+- `RequestContract` alone is not enough to authorize off-desk execution.
+- On-desk must derive an `ExecutionBrief` that captures:
+  - what can be executed now
+  - what must not be executed
+  - what still needs operator clarification
+  - what remains infeasible or only partially executable
+- `ExecutionBrief` is the last on-desk artifact and the first off-desk artifact.
+- benchmark references for this layer:
+  - `OpenCode` plan/build split and permission UX:
+    - `REF-OC-1`, `REF-OC-2`, `REF-OC-3`
+  - `GitHub Copilot coding agent` asynchronous handoff model:
+    - `REF-GHCA-1`, `REF-GHCA-2`
+  - `Claude Code` terminal-native activation and workflow hooks:
+    - `REF-CC-1`
+  - reference index:
+    - `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md`
+
+### 5.5 Execution Feasibility States
+The `ExecutionBrief` must classify each request as one of:
+- `executable`
+  - enough scope, inputs, deliverables, and done criteria exist to start off-desk execution
+- `underspecified`
+  - the request is directionally valid but missing scope, evidence, or completion boundaries
+- `infeasible`
+  - the requested work cannot be safely or coherently executed under current constraints
+- `partially_executable`
+  - only a safe subset is executable; the brief must name the executable slice and the blocked slice
+- `operator_decision_required`
+  - the remaining ambiguity is not a missing technical field; it is a choice the operator must make
 
 ## 6. Preset-Specific Shapes
 
@@ -211,7 +250,40 @@ Responsibilities:
 
 Policy:
 - a complete contract does not mean immediate execution readiness
-- after the contract gate passes, the plan must still survive the bounded planning convergence loop before it may become `planning_ready`
+- after the contract gate passes, on-desk must still assemble an `ExecutionBrief`
+- only `ExecutionBrief.status in {executable, partially_executable}` may proceed toward planning
+- after the brief gate passes, the plan must still survive the bounded planning convergence loop before it may become `planning_ready`
+
+### 7.3A Execution Brief Assembly
+Files:
+- `scripts/gateway/aoe_tg_run_command_flow.py`
+- `scripts/gateway/aoe_tg_plan_pipeline.py`
+- later:
+  - `scripts/gateway/aoe_tg_execution_brief.py`
+
+Responsibilities:
+- derive an operator-facing execution handoff from `RequestContract`
+- classify:
+  - `executable`
+  - `underspecified`
+  - `infeasible`
+  - `partially_executable`
+  - `operator_decision_required`
+- define:
+  - executable scope
+  - non-goals
+  - required inputs
+  - deliverables
+  - done criteria
+  - rerun criteria
+  - operator-only decisions
+
+Policy:
+- off-desk must not invent scope beyond the brief
+- `partially_executable` must name both:
+  - the executable slice
+  - the blocked slice
+- `operator_decision_required` must surface the unresolved choice directly instead of converting it into planner guesswork
 
 ### 7.4 Planner / Critic / Acceptance Generation
 Files:
@@ -239,10 +311,18 @@ Required stored fields:
 - `request_contract_preset`
 - `request_contract_fields`
 - `request_contract_required_outputs[]`
+- `execution_brief_status`
+- `execution_brief_summary`
+- `execution_brief_non_goals[]`
+- `execution_brief_executable_scope[]`
+- `execution_brief_operator_decisions[]`
 
 Optional later fields:
 - `request_contract_artifact_contracts`
 - `request_contract_ambiguity_notes[]`
+- `execution_brief_blocked_scope[]`
+- `execution_brief_done_criteria[]`
+- `execution_brief_rerun_criteria[]`
 
 Persistence policy:
 - `request_contract_fields` may be trimmed to the preset-minimum canonical subset
@@ -254,6 +334,10 @@ Persistence policy:
   - `invalid_value_policy`
 - for `data`, file-producing tasks must also persist `request_contract_artifact_contracts`
 - rerun/recovery/history surfaces must never reconstruct these core fields from free-text summaries if a stored contract is available
+- off-desk surfaces must prefer `execution_brief_*` for:
+  - what is allowed now
+  - what is still blocked
+  - what requires operator choice
 
 ### 7.6 Operator Surface Integration
 Files:
@@ -267,9 +351,12 @@ Files:
 
 Expected output additions:
 - contract summary
+- execution brief summary
+- feasibility status
 - missing field summary
 - artifact contract completeness summary
 - contract-derived first focus
+- blocked-vs-executable slice summary
 
 ## 8. Failure Model
 
@@ -289,9 +376,10 @@ Expected output additions:
 |---|---|---|
 | Intake routing | `aoe_tg_orch_actions.py`, `aoe_tg_command_resolver.py`, `aoe_tg_message_handler.py` | keep shallow text routing only |
 | Planning entry | `aoe_tg_run_command_flow.py`, `aoe_tg_plan_pipeline.py`, `aoe_tg_run_dispatch_flow.py` | pass request contract through the run/planning seam |
+| On-desk handoff | `aoe_tg_run_command_flow.py`, `aoe_tg_plan_pipeline.py`, later `aoe_tg_execution_brief.py` | assemble `ExecutionBrief` and classify execution feasibility |
 | Planner contract | `aoe_tg_schema.py`, `aoe_tg_plan_ensemble.py`, `aoe_tg_control_plane.py` | generate acceptance from contract, not markers |
-| Runtime state | `aoe_tg_run_planning_flow.py`, `aoe_tg_task_state.py`, `aoe_tg_tf_exec.py` | persist contract summary and missing fields |
-| Operator surfaces | `/task`, `/monitor`, dashboard builders, nightly summary | show contract completeness and missing fields |
+| Runtime state | `aoe_tg_run_planning_flow.py`, `aoe_tg_task_state.py`, `aoe_tg_tf_exec.py` | persist contract summary, brief status, and missing fields |
+| Operator surfaces | `/task`, `/monitor`, dashboard builders, nightly summary | show contract completeness, brief status, and blocked/executable slices |
 | Search/docs/tests | `aoe_tg_history_search.py`, runtime verification docs, tests | search by contract fields and verify contract extraction |
 
 ## 10. Incremental Plan

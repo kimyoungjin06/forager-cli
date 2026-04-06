@@ -112,6 +112,7 @@ _ORCH_DISCOVERY_TRIGGER_CMDS = {
     "orch-unhide",
     "orch-repair",
     "orch-status",
+    "orch-bgq-clean",
     "orch-monitor",
     "orch-kpi",
     # Global orchestration (needs full registry)

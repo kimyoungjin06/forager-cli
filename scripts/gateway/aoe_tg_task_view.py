@@ -506,6 +506,44 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
             if gate_reason:
                 lines.append("plan_gate_reason: " + gate_reason[:240])
 
+    execution_brief_status = str(task.get("execution_brief_status", "")).strip().lower()
+    execution_brief_summary = str(task.get("execution_brief_summary", "")).strip()
+    if execution_brief_status or execution_brief_summary:
+        lines.append("execution_brief: " + (execution_brief_status or "-"))
+        if execution_brief_summary:
+            lines.append("execution_brief_summary: " + execution_brief_summary[:240])
+    executable_slice = [str(item).strip() for item in (task.get("execution_brief_executable_slice") or []) if str(item).strip()]
+    if executable_slice:
+        lines.append("execution_brief_do: " + ", ".join(executable_slice[:6]))
+    blocked_slice = [str(item).strip() for item in (task.get("execution_brief_blocked_slice") or []) if str(item).strip()]
+    if blocked_slice:
+        lines.append("execution_brief_blocked: " + ", ".join(blocked_slice[:6]))
+    operator_decision = str(task.get("execution_brief_operator_decision", "")).strip()
+    if operator_decision:
+        lines.append("execution_brief_decision: " + operator_decision[:240])
+
+    background_run_status = str(task.get("background_run_status", "")).strip().lower()
+    background_runner = str(task.get("background_run_runner_target", "")).strip()
+    background_ticket = str(task.get("background_run_ticket_id", "")).strip()
+    background_launch = str(task.get("background_run_launch_mode", "")).strip()
+    if background_run_status or background_runner or background_ticket:
+        lines.append("background_run: " + (background_run_status or "-"))
+        detail_parts: List[str] = []
+        if background_runner:
+            detail_parts.append(f"runner={background_runner}")
+        if background_ticket:
+            detail_parts.append(f"ticket={background_ticket}")
+        if background_launch:
+            detail_parts.append(f"launch={background_launch}")
+        if detail_parts:
+            lines.append("background_run_detail: " + " | ".join(detail_parts)[:240])
+    background_evidence = str(task.get("background_run_evidence_bundle", "")).strip()
+    if background_evidence:
+        lines.append("background_run_evidence: " + background_evidence[:240])
+    background_artifacts = [str(item).strip() for item in (task.get("background_run_evidence_artifacts") or []) if str(item).strip()]
+    if background_artifacts:
+        lines.append("background_run_artifacts: " + ", ".join(background_artifacts[:6]))
+
     try:
         plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))
     except Exception:

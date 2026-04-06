@@ -33,13 +33,17 @@
 ### 3.1 Immediate Adoption
 1. `Session Search`
 2. `Task Team Observatory`
-3. `Project Flow Compiler`
-4. `Centralized State Root`
+3. `Execution Brief`
+4. `Background / Remote Execution`
+5. `Project Progress Board`
+6. `Centralized State Root`
 
 ### 3.2 Medium-Term Adoption
 1. `Doctor / Setup / Migration Discipline`
 2. `Compatibility / Deprecation Envelopes`
-3. `Delegation Contract Enforcement`
+3. `Governance / Permissions / Usage`
+4. `Delegation Contract Enforcement`
+5. `Project Flow Compiler`
 
 ### 3.3 Long-Term Adoption
 1. `Learned Runbook Extraction`
@@ -49,6 +53,39 @@
 1. `Request Contract Layer`
 - This item is not benchmark-driven OMC shell adoption.
 - It is a core runtime hardening step required because live verification has now shown the limit of text-only execution inference.
+
+### 3.5 Hot Package Import Baseline
+- Current benchmark import matrix:
+  - `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md`
+- Direct import lanes:
+  1. `OpenCode` -> `Execution Brief`, plan/build split, permission UX
+     - refs: `REF-OC-1`, `REF-OC-2`, `REF-OC-3`, `REF-OC-4`
+  2. `OpenHands` -> background / remote execution, governance, reporting
+     - refs: `REF-OH-1`
+  3. `Claude Code` + `Claude Code Action` -> hooks, GitHub-triggered off-desk execution
+     - refs: `REF-CC-1`, `REF-CC-2`
+  4. `GitHub Copilot coding agent` -> issue-to-agent handoff, background PR loop
+     - refs: `REF-GHCA-1`, `REF-GHCA-2`, `REF-GHCA-3`
+  5. `Aider` -> repo map, git/test discipline
+     - refs: `REF-AI-1`, `REF-AI-2`
+  6. `Goose` -> diagnostics, desktop/CLI parity
+     - refs: `REF-GS-1`, `REF-GS-2`
+  7. `OMC` -> context hygiene, async specialists, strong verification defaults
+     - refs: `REF-OMC-1`
+  8. `Amp` -> policy, redaction, explicit allow/reject boundaries
+     - refs: `REF-AMP-1`, `REF-AMP-2`
+
+### 3.6 Priority Correction
+- We should no longer let scenario-level planner seam chasing dominate the roadmap.
+- The larger product imports come first:
+  1. `Execution Brief`
+  2. `Background / Remote Execution`
+  3. `Project Progress Board`
+  4. `Governance / Permissions / Usage`
+  5. `Project Flow Compiler`
+- Deep rerun/manual-followup proof remains necessary, but it is no longer the main strategic driver.
+- reference rule:
+  - every new benchmark-driven package under Sections `6B`, `7`, `8`, and later roadmap imports must point back to `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md` reference IDs
 
 ## 4. Package A: Session Search
 

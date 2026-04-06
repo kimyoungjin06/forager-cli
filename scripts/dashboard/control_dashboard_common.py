@@ -18,6 +18,7 @@ ACTION_PATHS = {
     "/control/actions/task/retry",
     "/control/actions/task/followup",
     "/control/actions/runtime/sync-preview",
+    "/control/actions/runtime/background-queue-clean",
     "/control/actions/control/auto-recover",
 }
 

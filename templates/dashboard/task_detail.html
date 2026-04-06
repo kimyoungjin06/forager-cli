@@ -16,6 +16,17 @@
     <li><span>done_when</span><strong>{{ detail.completion_done_when }}</strong></li>
     <li><span>rerun_when</span><strong>{{ detail.completion_rerun_when }}</strong></li>
     <li><span>manual_followup_when</span><strong>{{ detail.completion_followup_when }}</strong></li>
+    <li><span>execution_brief</span><strong>{{ detail.execution_brief_status }}</strong></li>
+    <li><span>brief_summary</span><strong>{{ detail.execution_brief_summary }}</strong></li>
+    <li><span>brief_do</span><strong>{{ detail.execution_brief_executable_slice }}</strong></li>
+    <li><span>brief_blocked</span><strong>{{ detail.execution_brief_blocked_slice }}</strong></li>
+    <li><span>brief_decision</span><strong>{{ detail.execution_brief_operator_decision }}</strong></li>
+    <li><span>background_run</span><strong>{{ detail.background_run_status }}</strong></li>
+    <li><span>runner_target</span><strong>{{ detail.background_run_runner_target }}</strong></li>
+    <li><span>background_ticket</span><strong>{{ detail.background_run_ticket_id }}</strong></li>
+    <li><span>launch_mode</span><strong>{{ detail.background_run_launch_mode }}</strong></li>
+    <li><span>evidence_bundle</span><strong>{{ detail.background_run_evidence_bundle }}</strong></li>
+    <li><span>evidence_artifacts</span><strong>{{ detail.background_run_evidence_artifacts }}</strong></li>
     <li><span>control_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
     <li><span>first_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }}</strong></li>
     <li><span>lane_summary</span><strong>{{ detail.lane_summary }}</strong></li>

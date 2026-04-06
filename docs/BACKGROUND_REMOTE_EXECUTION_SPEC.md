@@ -1,0 +1,166 @@
+# Background / Remote Execution Spec
+
+## 1. Purpose
+- Move off-desk work off foreground live sessions and into durable execution rails.
+- Keep `ExecutionBrief` as the operator-approved handoff object.
+- Ensure every off-desk run leaves an auditable trail and an evidence bundle.
+
+## 2. Benchmark References
+- `REF-OH-1`: OpenHands local/cloud/operator console direction
+- `REF-CC-2`: Claude Code Action GitHub-triggered execution model
+- `REF-GHCA-1`: GitHub Copilot coding agent issue-to-background-work loop
+- `REF-GHCA-2`: GitHub Copilot coding agent browser/background surface
+- `REF-API-1`: Agent adapter seam for vendor-neutral control
+
+## 3. Design Goal
+- `on-desk`:
+  - normalize request
+  - build `ExecutionBrief`
+  - decide `executable / underspecified / partially_executable / operator_decision_required / infeasible`
+- `off-desk`:
+  - only runs `ExecutionBrief` objects that are allowed for off-desk execution
+  - never invents scope beyond the brief
+
+## 4. Non-Goals
+- This spec does not define planner prompt wording.
+- This spec does not replace `Task Team` or `Phase2` planning.
+- This spec does not require cloud execution first; local background execution is the first milestone.
+
+## 5. Core Objects
+
+### 5.1 Execution Brief
+- Source of truth for off-desk eligibility.
+- Required minimum:
+  - `execution_brief_status`
+  - `execution_brief_summary`
+  - `execution_brief_executable_slice`
+  - `execution_brief_blocked_slice`
+  - `execution_brief_operator_decision`
+
+### 5.2 Background Run Ticket
+- Immutable handoff object created when an off-desk run is launched.
+- Fields:
+  - `ticket_id`
+  - `request_id`
+  - `project_key`
+  - `execution_brief_status`
+  - `runner_target`
+  - `launch_mode`
+  - `created_at`
+  - `created_by`
+  - `source_surface`
+- Phase 1 persisted task/runtime fields:
+  - `background_run_ticket_version`
+  - `background_run_ticket_id`
+  - `background_run_status`
+  - `background_run_runner_target`
+  - `background_run_launch_mode`
+  - `background_run_created_at`
+  - `background_run_created_by`
+  - `background_run_source_surface`
+  - `background_run_request_id`
+  - `background_run_project_key`
+  - `background_run_execution_brief_status`
+  - `background_run_evidence_bundle`
+  - `background_run_evidence_artifacts[]`
+
+### 5.3 Runner Target
+- Where the work executes.
+- Initial enum:
+  - `local_background`
+  - `local_tmux`
+  - `github_runner`
+  - `remote_worker`
+
+### 5.4 Evidence Bundle
+- Durable off-desk result package.
+- Minimum contents:
+  - request/task metadata
+  - execution brief snapshot
+  - launch ticket
+  - final branch/outcome
+  - task/runtime evidence links
+  - produced artifacts
+
+## 6. State Model
+
+### 6.1 Off-desk Eligibility
+- `executable`
+  - may launch directly
+- `partially_executable`
+  - may launch only the declared executable slice
+- `underspecified`
+  - must not launch
+- `operator_decision_required`
+  - must not launch
+- `infeasible`
+  - must not launch
+
+### 6.2 Background Run Lifecycle
+- `queued`
+- `dispatching`
+- `running`
+- `completed`
+- `failed`
+- `canceled`
+- `stale`
+
+## 7. Required Guarantees
+1. A run cannot start without a stored `ExecutionBrief`.
+2. A run cannot start if `execution_brief_status` is not in:
+   - `executable`
+   - `partially_executable`
+3. Every run must write a launch ticket before work starts.
+4. Every run must write a final evidence bundle before closing.
+5. Operator surfaces must show:
+   - current runner target
+   - launch mode
+   - latest ticket
+   - current background lifecycle state
+
+## 8. Rollout Plan
+
+### Phase 1: Local Background Queue
+- Launch off-desk work without tying it to the foreground gateway session.
+- Add:
+  - queue file/state
+  - run ticket persistence
+  - background lifecycle state in dashboard
+
+### Phase 2: Remote Runner Abstraction
+- Introduce runner target selection:
+  - `local_background`
+  - `github_runner`
+  - `remote_worker`
+- Preserve the same run ticket and evidence bundle format.
+
+### Phase 3: SCM / Issue Trigger Bridge
+- Allow issue/PR-driven off-desk execution.
+- Constraints:
+  - brief must still exist first
+  - remote launch still writes the same ticket/evidence objects
+
+## 9. Operator Surfaces
+- Dashboard must expose:
+  - `ExecutionBrief` status
+  - background lifecycle state
+  - runner target
+  - latest launch ticket
+  - evidence bundle availability
+- Recovery must expose:
+  - stale background runs
+  - failed launches
+  - missing evidence bundles
+
+## 10. Implementation Order
+1. `ExecutionBrief` gate in off-desk action path
+2. background run ticket persistence
+3. local background queue
+4. dashboard runtime/recovery visibility
+5. remote runner abstraction
+6. SCM trigger bridge
+
+## 11. Open Questions
+- How much of the current tmux/runtime process model should be reused as `local_background`?
+- Should `github_runner` be phase2-only or allow full off-desk dispatch?
+- What is the minimum evidence bundle for partial execution?

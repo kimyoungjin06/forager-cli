@@ -872,11 +872,14 @@ def _request_contract_review_outputs(plan: Dict[str, Any]) -> List[str]:
     request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
     fields = request_contract.get("fields") if isinstance(request_contract.get("fields"), dict) else {}
     deliverable_policy = fields.get("deliverable_policy") if isinstance(fields.get("deliverable_policy"), dict) else {}
-    return _normalize_text_list(
+    outputs = _normalize_text_list(
         deliverable_policy.get("review_outputs", []),
         limit=8,
         item_limit=64,
     )
+    if outputs:
+        return outputs
+    return []
 
 
 def _request_contract_artifact_contracts(plan: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -930,29 +933,70 @@ def _request_contract_execution_deliverables(plan: Dict[str, Any]) -> List[Dict[
 def _request_contract_review_acceptance(plan: Dict[str, Any]) -> List[str]:
     deliverables = _request_contract_review_deliverables(plan)
     lines: List[str] = []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    fields = request_contract.get("fields") if isinstance(request_contract.get("fields"), dict) else {}
+    if _normalize_role_preset(request_contract.get("preset")) == "review" and _normalize_bool(request_contract.get("readonly", False), False):
+        lines.append("Readonly review flow may write only the declared review_evidence/* artifacts and review_report.md; code or runtime state mutation remains forbidden.")
     for row in deliverables:
         output = _trim_text(row.get("output", ""), 64) or "review output"
         path = _trim_text(row.get("path", output), 200) or output
-        required_fields = _normalize_text_list(row.get("required_fields", []), limit=8, item_limit=120)
+        required_fields = _normalize_text_list(row.get("required_fields", []), limit=16, item_limit=120)
         lines.append(f"Review lane directly writes {path} as the canonical {output} artifact.")
         if required_fields:
-            lines.append(f"{path} keeps required sections/fields: {', '.join(required_fields)}.")
-    return _normalize_text_list(lines, limit=6, item_limit=240)
+            chunk_size = 4
+            for idx in range(0, len(required_fields), chunk_size):
+                chunk = required_fields[idx : idx + chunk_size]
+                prefix = f"{path} keeps required sections/fields: " if idx == 0 else f"{path} also keeps sections/fields: "
+                lines.append(prefix + ", ".join(chunk) + ".")
+    quality_gate_policy = fields.get("quality_gate_policy") if isinstance(fields.get("quality_gate_policy"), dict) else {}
+    required_sections = _normalize_text_list(quality_gate_policy.get("required_sections", []), limit=16, item_limit=64)
+    required_evidence = _normalize_text_list(quality_gate_policy.get("required_evidence", []), limit=16, item_limit=64)
+    if required_sections:
+        chunk_size = 4
+        for idx in range(0, len(required_sections), chunk_size):
+            chunk = required_sections[idx : idx + chunk_size]
+            if not chunk:
+                continue
+            prefix = "Review lane verifies sections=" if idx == 0 else "Review lane also verifies sections="
+            lines.append(prefix + ", ".join(chunk) + ".")
+    if required_evidence:
+        chunk_size = 4
+        for idx in range(0, len(required_evidence), chunk_size):
+            chunk = required_evidence[idx : idx + chunk_size]
+            if not chunk:
+                continue
+            prefix = "Review lane verifies evidence=" if idx == 0 else "Review lane also verifies evidence="
+            lines.append(prefix + ", ".join(chunk) + ".")
+    if required_sections or required_evidence:
+        lines.append("If scope or evidence stays incomplete, review lane reports `rerun` instead of `done`.")
+        lines.append("Review lane owns the final disposition: it reports `done` only after review_report.md contains every required section and cited evidence, otherwise it reports `rerun`.")
+    return _normalize_text_list(lines, limit=16, item_limit=240)
 
 
 def _request_contract_execution_acceptance_for_outputs(plan: Dict[str, Any], outputs: List[str]) -> List[str]:
     deliverables = _request_contract_execution_deliverables_for_outputs(plan, outputs)
     writer_outputs = set(_request_contract_writer_outputs(plan))
     lines: List[str] = []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    if _normalize_role_preset(request_contract.get("preset")) == "review" and _normalize_bool(request_contract.get("readonly", False), False):
+        lines.append("Readonly review flow may write only the declared review_evidence/* artifacts and review_report.md; code or runtime state mutation remains forbidden.")
     for row in deliverables:
         output = _trim_text(row.get("output", ""), 64) or "execution output"
         path = _trim_text(row.get("path", output), 200) or output
-        required_fields = _normalize_text_list(row.get("required_fields", []), limit=8, item_limit=120)
+        required_fields = _normalize_text_list(row.get("required_fields", []), limit=16, item_limit=120)
         lane_label = "Writer lane" if output in writer_outputs else "Execution lane"
         lines.append(f"{lane_label} directly writes {path} as the canonical {output} artifact.")
         if required_fields:
-            lines.append(f"{path} keeps required sections/fields: {', '.join(required_fields)}.")
-    return _normalize_text_list(lines, limit=6, item_limit=240)
+            chunk_size = 4
+            for idx in range(0, len(required_fields), chunk_size):
+                chunk = required_fields[idx : idx + chunk_size]
+                prefix = f"{path} keeps required sections/fields: " if idx == 0 else f"{path} also keeps sections/fields: "
+                lines.append(prefix + ", ".join(chunk) + ".")
+        for note in _normalize_text_list(row.get("acceptance_notes", []), limit=6, item_limit=240):
+            lines.append(note)
+    return _normalize_text_list(lines, limit=20, item_limit=240)
 
 
 def _request_contract_execution_acceptance(plan: Dict[str, Any]) -> List[str]:
@@ -990,6 +1034,35 @@ def _request_contract_execution_outputs(plan: Dict[str, Any]) -> List[str]:
         if "work_result" not in outputs:
             outputs.append("work_result")
     return outputs
+
+
+def _request_contract_artifact_write_scope(plan: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    if _normalize_role_preset(request_contract.get("preset")) != "review":
+        return {}
+    if not _normalize_bool(request_contract.get("readonly", False), False):
+        return {}
+    deliverables = _request_contract_execution_deliverables(plan) + _request_contract_review_deliverables(plan)
+    allowed_paths: List[str] = []
+    for row in deliverables:
+        path = _trim_text(row.get("path", ""), 200)
+        if path and path not in allowed_paths:
+            allowed_paths.append(path)
+    allowed_outputs = _dedupe_roles(
+        _request_contract_execution_outputs(plan) + _request_contract_review_outputs(plan),
+        limit=16,
+    )
+    if not allowed_paths and not allowed_outputs:
+        return {}
+    return {
+        "mode": "declared_outputs_only",
+        "allowed_outputs": allowed_outputs,
+        "allowed_paths": allowed_paths,
+        "forbidden_targets": ["repo source", "runtime state", "persistent operator state"],
+    }
 
 
 def _dependency_cycle_exists(rows: List[Dict[str, Any]], *, id_key: str) -> bool:
@@ -1179,6 +1252,7 @@ def normalize_phase2_team_spec(
     review_acceptance = _request_contract_review_acceptance(plan_data)
     writer_owned_outputs = _request_contract_writer_outputs(plan_data)
     execution_owned_outputs = _request_contract_execution_outputs(plan_data)
+    artifact_write_scope = _request_contract_artifact_write_scope(plan_data)
     all_exec_roles = [str(row.get("role", "")).strip() for row in default_exec_groups if str(row.get("role", "")).strip()]
     meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
     phase2_team_preset = _normalize_role_preset(meta.get("phase2_team_preset"))
@@ -1235,7 +1309,9 @@ def normalize_phase2_team_spec(
     if execution_owned_outputs:
         for row in execution_groups:
             role = str(row.get("role", "")).strip().lower()
-            if any(token in role for token in ("writer", "doc", "scribe", "review", "critic", "verif", "qa")):
+            if phase2_team_preset != "review" and any(
+                token in role for token in ("writer", "doc", "scribe", "review", "critic", "verif", "qa")
+            ):
                 continue
             if not _normalize_text_list(row.get("outputs", []), limit=8, item_limit=64):
                 row["outputs"] = list(execution_owned_outputs)
@@ -1312,6 +1388,11 @@ def normalize_phase2_team_spec(
     for idx, row in enumerate(review_rows, start=1):
         item = row if isinstance(row, dict) else {}
         role = _trim_text(item.get("role", ""), 64)
+        fallback_review_role = review_roles[min(idx - 1, len(review_roles) - 1)] if review_roles else ""
+        if not role:
+            role = fallback_review_role
+        elif review_roles and role not in set(review_roles):
+            role = fallback_review_role or review_roles[0]
         if not role:
             continue
         depends_on = _normalize_text_list(item.get("depends_on", default_depends), limit=8, item_limit=16)
@@ -1344,7 +1425,7 @@ def normalize_phase2_team_spec(
             if entry:
                 normalized_deliverables.append(entry)
         fallback_acceptance = list(review_acceptance) if idx == 1 else []
-        acceptance = _normalize_text_list(item.get("acceptance", fallback_acceptance), limit=8, item_limit=240)
+        acceptance = _normalize_text_list(item.get("acceptance", fallback_acceptance), limit=16, item_limit=240)
         review_groups.append(
             {
                 "group_id": _trim_text(item.get("group_id", f"R{idx}"), 16) or f"R{idx}",
@@ -1410,6 +1491,7 @@ def normalize_phase2_team_spec(
         "team_roles": team_roles,
         "critic_role": critic_role,
         "integration_role": integration_role,
+        "artifact_write_scope": artifact_write_scope,
     }
 
 
@@ -1421,10 +1503,23 @@ def normalize_phase2_execution_plan(
 ) -> Dict[str, Any]:
     spec = team_spec if isinstance(team_spec, dict) else {}
     data = raw if isinstance(raw, dict) else {}
+    artifact_write_scope = data.get("artifact_write_scope")
+    if not isinstance(artifact_write_scope, dict):
+        artifact_write_scope = spec.get("artifact_write_scope") if isinstance(spec.get("artifact_write_scope"), dict) else {}
 
     execution_groups = spec.get("execution_groups") if isinstance(spec.get("execution_groups"), list) else []
     review_groups = spec.get("review_groups") if isinstance(spec.get("review_groups"), list) else []
     spec_subtask_ids = _row_subtask_ids(execution_groups)
+    execution_group_roles = [
+        str(row.get("role", "")).strip()
+        for row in execution_groups
+        if isinstance(row, dict) and str(row.get("role", "")).strip()
+    ]
+    review_group_roles = [
+        str(row.get("role", "")).strip()
+        for row in review_groups
+        if isinstance(row, dict) and str(row.get("role", "")).strip()
+    ]
 
     exec_rows = data.get("execution_lanes")
     if (
@@ -1437,12 +1532,19 @@ def normalize_phase2_execution_plan(
     execution_lanes: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
         item = row if isinstance(row, dict) else {}
+        fallback_group = execution_groups[idx - 1] if idx - 1 < len(execution_groups) and isinstance(execution_groups[idx - 1], dict) else {}
         subtask_ids = _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32)
         lane_parallel_default = exec_parallel_default if len(subtask_ids) <= 1 else False
+        role = _trim_text(item.get("role", ""), 64)
+        fallback_role = _trim_text(fallback_group.get("role", ""), 64)
+        if not role:
+            role = fallback_role or "Worker"
+        elif execution_group_roles and role not in execution_group_roles:
+            role = fallback_role or execution_group_roles[0]
         execution_lanes.append(
             {
                 "lane_id": _trim_text(item.get("lane_id", item.get("group_id", f"L{idx}")), 16) or f"L{idx}",
-                "role": _trim_text(item.get("role", "Worker"), 64) or "Worker",
+                "role": role,
                 "subtask_ids": subtask_ids,
                 "depends_on": _normalize_text_list(item.get("depends_on", []), limit=8, item_limit=16),
                 "outputs": _normalize_text_list(item.get("outputs", []), limit=8, item_limit=64),
@@ -1489,6 +1591,15 @@ def normalize_phase2_execution_plan(
     )
     for idx, row in enumerate(execution_lanes):
         fallback_group = execution_groups[idx] if idx < len(execution_groups) and isinstance(execution_groups[idx], dict) else {}
+        fallback_outputs = _normalize_text_list(
+            row.get("outputs") or fallback_group.get("outputs", []),
+            limit=8,
+            item_limit=64,
+        )
+        if fallback_outputs:
+            row["outputs"] = fallback_outputs
+        else:
+            row.pop("outputs", None)
         raw_deliverables = row.get("deliverables", fallback_group.get("deliverables", []))
         if not isinstance(raw_deliverables, list) or not raw_deliverables:
             raw_deliverables = list(fallback_group.get("deliverables", [])) if isinstance(fallback_group.get("deliverables", []), list) else []
@@ -1513,7 +1624,7 @@ def normalize_phase2_execution_plan(
                 deliverables.append(entry)
         fallback_acceptance = _normalize_text_list(
             row.get("acceptance") or fallback_group.get("acceptance", []),
-            limit=8,
+            limit=16,
             item_limit=240,
         )
         if deliverables:
@@ -1532,7 +1643,13 @@ def normalize_phase2_execution_plan(
     review_parallel_default = len(review_rows) > 1 if isinstance(review_rows, list) else len(review_groups) > 1
     for idx, row in enumerate(review_rows, start=1):
         item = row if isinstance(row, dict) else {}
+        fallback_review_group = review_groups[idx - 1] if idx - 1 < len(review_groups) and isinstance(review_groups[idx - 1], dict) else {}
         role = _trim_text(item.get("role", ""), 64)
+        fallback_role = _trim_text(fallback_review_group.get("role", ""), 64)
+        if not role:
+            role = fallback_role
+        elif review_group_roles and role not in review_group_roles:
+            role = fallback_role or review_group_roles[0]
         if not role:
             continue
         depends_on = _normalize_text_list(item.get("depends_on", execution_lane_ids), limit=8, item_limit=16)
@@ -1579,7 +1696,7 @@ def normalize_phase2_execution_plan(
                 "acceptance",
                 (review_groups[idx - 1].get("acceptance", []) if idx - 1 < len(review_groups) and isinstance(review_groups[idx - 1], dict) else []),
             ),
-            limit=8,
+            limit=16,
             item_limit=240,
         )
         review_lanes.append(
@@ -1617,6 +1734,7 @@ def normalize_phase2_execution_plan(
         "parallel_workers": len(execution_lanes) > 1,
         "parallel_reviews": len(review_lanes) > 1,
         "readonly": _normalize_bool(data.get("readonly", readonly), readonly),
+        "artifact_write_scope": artifact_write_scope,
     }
 
 

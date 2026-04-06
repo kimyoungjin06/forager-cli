@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import aoe_tg_operator_action_contract as operator_action_contract
 
-from control_dashboard_action_exec import _execute_auto_recover_action, _execute_retry_action
+from control_dashboard_action_exec import _execute_auto_recover_action, _execute_background_queue_clean_action, _execute_retry_action
 from control_dashboard_audit import _with_action_audit
 from control_dashboard_common import (
     ACTION_PATHS,
@@ -60,6 +60,15 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         spec = operator_action_contract.http_action_spec(f"/sync preview {project_ref} {window}")
         if spec is None:
             raise ValueError("unsupported sync preview action contract")
+        return spec
+
+    if path == "/control/actions/runtime/background-queue-clean":
+        project_ref = str(payload.get("project_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        spec = operator_action_contract.http_action_spec(f"/orch bgq-clean {project_ref}")
+        if spec is None:
+            raise ValueError("unsupported background queue cleanup action contract")
         return spec
 
     if path == "/control/actions/control/auto-recover":
@@ -208,6 +217,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/runtime/sync-preview":
         return _with_action_audit(_preview_sync_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/background-queue-clean":
+        return _with_action_audit(_execute_background_queue_clean_action(spec, config=config), config=config)
 
     if path == "/control/actions/task/retry":
         return _with_action_audit(_execute_retry_action(spec, config=config), config=config)

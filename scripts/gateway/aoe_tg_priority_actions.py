@@ -100,6 +100,9 @@ def offdesk_priority_action_snapshot(
     alias: str,
     active_task_label: str,
     active_task_tf_phase: str,
+    active_task_execution_brief_status: str = "",
+    active_task_execution_brief_blocked_slice: Optional[List[str]] = None,
+    active_task_execution_brief_operator_decision: str = "",
     active_task_targets: Optional[Dict[str, List[str]]] = None,
     active_task_rate_limit: Optional[Dict[str, Any]] = None,
     syncback_pending: bool,
@@ -114,7 +117,29 @@ def offdesk_priority_action_snapshot(
     canonical_exists: bool,
     include_ok: bool,
     last_sync_mode: str,
+    background_queue_depth: int = 0,
+    background_queue_stale_count: int = 0,
+    background_queue_runner_targets: Optional[Dict[str, int]] = None,
 ) -> Dict[str, str]:
+    brief_status = str(active_task_execution_brief_status or "").strip().lower()
+    brief_blocked = [str(x).strip() for x in (active_task_execution_brief_blocked_slice or []) if str(x).strip()]
+    brief_decision = str(active_task_execution_brief_operator_decision or "").strip()
+    if brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
+        reason = brief_decision
+        if not reason and brief_blocked:
+            reason = f"execution brief blocked by {', '.join(brief_blocked[:4])}"
+        if not reason:
+            reason = f"execution brief is {brief_status}"
+        return {
+            "action": f"/offdesk review {alias}",
+            "reason": reason,
+        }
+    if int(background_queue_stale_count or 0) > 0:
+        return {
+            "action": f"/offdesk review {alias}",
+            "reason": f"background queue contains stale tickets ({int(background_queue_stale_count or 0)})",
+        }
+
     task_priority = task_priority_action_snapshot(
         label=active_task_label,
         tf_phase=active_task_tf_phase,
@@ -126,6 +151,20 @@ def offdesk_priority_action_snapshot(
     )
     if str(task_priority.get("action", "")).strip():
         return task_priority
+    if int(background_queue_depth or 0) > 0:
+        targets = background_queue_runner_targets if isinstance(background_queue_runner_targets, dict) else {}
+        target_summary = ",".join(
+            f"{str(key).strip()}={int(value or 0)}"
+            for key, value in sorted(targets.items())
+            if str(key).strip() and int(value or 0) > 0
+        )
+        reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
+        if target_summary:
+            reason += f" ({target_summary})"
+        return {
+            "action": f"/orch status {alias}",
+            "reason": reason,
+        }
     if syncback_pending:
         return {
             "action": f"/todo {alias} syncback preview",

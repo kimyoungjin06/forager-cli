@@ -312,6 +312,7 @@ def help_text(
         "- aoe orch use <name>\n"
         "- aoe orch add <name> --path <project_root> [--overview <text>] [--init|--no-init] [--spawn|--no-spawn]\n"
         "- aoe orch repair [all|--orch <name>]\n"
+        "- aoe orch bgq-clean [--orch <name>]\n"
         "- aoe orch pause <name> [reason]\n"
         "- aoe orch resume <name>\n"
         "- aoe orch hide <name> [reason]\n"

@@ -77,6 +77,21 @@ def test_partition_runtime_operator_commands_moves_mutating_priority_to_phase2()
     assert "/offdesk review" in rows["safe"]
 
 
+def test_partition_runtime_operator_commands_adds_background_queue_cleanup_for_stale_queue() -> None:
+    rows = mod.partition_operator_commands(
+        mod.runtime_operator_commands(
+            project_alias="O2",
+            priority_action="/offdesk review O2",
+            has_active_task=True,
+            has_rate_limit=False,
+            background_queue_stale_count=2,
+        )
+    )
+
+    assert "/orch bgq-clean O2" in rows["phase2"]
+    assert "/offdesk review O2" in rows["safe"]
+
+
 def test_http_action_spec_maps_retry_to_post_contract() -> None:
     row = mod.http_action_spec("/retry T-001 lane L1,R1")
 
@@ -103,6 +118,15 @@ def test_http_action_spec_maps_sync_preview_to_safe_runtime_contract() -> None:
     assert row["mode"] == "safe"
     assert row["path"] == "/control/actions/runtime/sync-preview"
     assert row["payload"] == {"project_ref": "O2", "window": "24h"}
+
+
+def test_http_action_spec_maps_bgq_clean_to_phase2_runtime_contract() -> None:
+    row = mod.http_action_spec("/orch bgq-clean O2")
+
+    assert row is not None
+    assert row["mode"] == "phase2"
+    assert row["path"] == "/control/actions/runtime/background-queue-clean"
+    assert row["payload"] == {"project_ref": "O2"}
 
 
 def test_http_action_spec_maps_auto_recover_force_to_phase2_contract() -> None:

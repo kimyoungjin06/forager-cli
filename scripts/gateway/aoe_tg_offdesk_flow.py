@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
+from aoe_tg_background_runs import background_runs_state_path, summarize_background_runs_state
 from aoe_tg_ops_policy import list_ops_projects, summarize_ops_scope
 from aoe_tg_ops_view import (
     blocked_bucket_count,
@@ -380,6 +381,11 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "label": label,
         "status": status,
         "tf_phase": tf_phase,
+        "execution_brief_status": str(best_task.get("execution_brief_status", "")).strip(),
+        "execution_brief_summary": str(best_task.get("execution_brief_summary", "")).strip(),
+        "execution_brief_executable_slice": [str(x).strip() for x in (best_task.get("execution_brief_executable_slice") or []) if str(x).strip()],
+        "execution_brief_blocked_slice": [str(x).strip() for x in (best_task.get("execution_brief_blocked_slice") or []) if str(x).strip()],
+        "execution_brief_operator_decision": str(best_task.get("execution_brief_operator_decision", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -673,6 +679,11 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             sync_stale = False
     manual_followup_count = blocked_bucket_count(todos, "manual_followup")
     blocked_head = blocked_head_summary(todos)
+    queue_snapshot = (
+        summarize_background_runs_state(background_runs_state_path(Path(str(entry.get("team_dir", "")).strip())))
+        if str(entry.get("team_dir", "")).strip()
+        else {}
+    )
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -712,6 +723,12 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         notes.append("task already running")
         attention.append("running")
         severity_score += 15
+    queue_stale_count = int(queue_snapshot.get("stale_count", 0) or 0)
+    if queue_stale_count > 0:
+        status = "warn" if status == "ready" else status
+        notes.append(f"background queue contains stale tickets ({queue_stale_count})")
+        attention.append(f"bgq:stale:{queue_stale_count}")
+        severity_score += 20
     if counts["blocked"] > 0:
         status = "warn" if status == "ready" else status
         notes.append(f"blocked backlog present ({counts['blocked']})")
@@ -724,8 +741,30 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         severity_score += 55
     task_tf_phase = str(latest_task.get("tf_phase", "")).strip()
     task_status = str(latest_task.get("status", "")).strip()
+    task_execution_brief_status = str(latest_task.get("execution_brief_status", "")).strip().lower()
+    task_execution_brief_summary = str(latest_task.get("execution_brief_summary", "")).strip()
+    task_execution_brief_blocked = list(latest_task.get("execution_brief_blocked_slice") or [])
+    task_execution_brief_decision = str(latest_task.get("execution_brief_operator_decision", "")).strip()
     active_rate_limit = latest_task.get("rate_limit") if isinstance(latest_task.get("rate_limit"), dict) else {}
     capacity_pressure = _capacity_pressure_snapshot(active_rate_limit)
+    if task_execution_brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
+        status = "warn" if status == "ready" else status
+        notes.append(
+            "execution brief blocked ({status})".format(
+                status=task_execution_brief_status,
+            )
+        )
+        if task_execution_brief_decision:
+            notes.append("execution brief decision: " + task_execution_brief_decision[:180])
+        elif task_execution_brief_blocked:
+            notes.append("execution brief blocked slice: " + ",".join(task_execution_brief_blocked[:4]))
+        attention.append(f"brief:{task_execution_brief_status}")
+        severity_score += 50
+    elif task_execution_brief_status == "partially_executable":
+        status = "warn" if status == "ready" else status
+        notes.append("execution brief is partial; operator should confirm the executable slice")
+        attention.append("brief:partial")
+        severity_score += 25
     if task_tf_phase in {"needs_retry", "manual_intervention", "blocked", "critic_review"}:
         status = "warn" if status == "ready" else status
         notes.append(f"active task needs attention ({task_tf_phase})")
@@ -833,6 +872,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         alias=alias,
         active_task_label=str(latest_task.get("label", "")).strip(),
         active_task_tf_phase=task_tf_phase,
+        active_task_execution_brief_status=task_execution_brief_status,
+        active_task_execution_brief_blocked_slice=task_execution_brief_blocked,
+        active_task_execution_brief_operator_decision=task_execution_brief_decision,
         active_task_targets=latest_task.get("lane_targets") if isinstance(latest_task.get("lane_targets"), dict) else None,
         active_task_rate_limit=latest_task.get("rate_limit") if isinstance(latest_task.get("rate_limit"), dict) else None,
         syncback_pending=syncback_pending,
@@ -847,6 +889,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         canonical_exists=bool(canonical_exists),
         include_ok=bool(include_ok),
         last_sync_mode=last_sync_mode,
+        background_queue_depth=int(queue_snapshot.get("depth", 0) or 0),
+        background_queue_stale_count=int(queue_snapshot.get("stale_count", 0) or 0),
+        background_queue_runner_targets=(
+            dict(queue_snapshot.get("target_counts", {}))
+            if isinstance(queue_snapshot.get("target_counts"), dict)
+            else {}
+        ),
     )
 
     lines = [
@@ -857,6 +906,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"  canonical: {canonical_rel if canonical_exists else 'missing TODO.md'}",
         f"  scenario_include: {include_display}",
         f"  queue: open={counts['open']} running={counts['running']} blocked={counts['blocked']} followup={manual_followup_count} pending={'yes' if pending_flag else 'no'} proposals={open_proposals}",
+        f"  background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}",
         f"  proposal_triage: priorities={proposal_triage.get('priority_summary', '-')} | kinds={proposal_triage.get('kind_summary', '-')}",
         f"  syncback: done={syncback_counts['done']} reopen={syncback_counts['reopen']} append={syncback_counts['append']} blocked_notes={syncback_counts['blocked']}",
         f"  last_sync: {last_sync_mode} {last_sync_disp}".rstrip(),
@@ -883,6 +933,22 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append(
             f"  active_task: {latest_task.get('label', '-')} | {latest_task.get('status', '-')}/{latest_task.get('tf_phase', '-')}"
         )
+        if task_execution_brief_status:
+            lines.append(
+                "  active_task_execution_brief: {status} | {summary}".format(
+                    status=task_execution_brief_status,
+                    summary=task_execution_brief_summary or "-",
+                )
+            )
+            if task_execution_brief_blocked:
+                lines.append(
+                    "  active_task_execution_brief_blocked: "
+                    + ",".join(task_execution_brief_blocked[:4])
+                )
+            if task_execution_brief_decision:
+                lines.append(
+                    "  active_task_execution_brief_decision: " + task_execution_brief_decision[:240]
+                )
         if phase1_role_preset or phase2_team_preset:
             lines.append(
                 "  active_task_preset: phase1={phase1} phase2={phase2}".format(

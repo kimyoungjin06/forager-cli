@@ -53,7 +53,7 @@ Required fields:
 Operational meaning:
 
 - plain text remains the operator-facing UI
-- `RequestContract` becomes the planning-facing truth once extracted
+- `RequestContract` becomes the intake-normalization truth once extracted
 - planner/critic logic should depend on structured fields before it depends on prompt wording
 
 Important policy:
@@ -62,9 +62,53 @@ Important policy:
 - planning must not rely on raw prompt wording when the same requirement is already expressible as a structured field
 - incomplete request contracts should fail closed with explicit `contract_*` reasons instead of hidden planner guesses
 - runtime/operator surfaces should preserve contract summary and missing-field evidence so blocker explanations stay stable across phrasing drift
-- `RequestContract` must be resolved before `OrchTaskSpec` is assembled
-- `OrchTaskSpec` remains the single planner-facing task object
-- implementation should treat `RequestContract -> OrchTaskSpec` as a mandatory assembly step, not an optional enrichment path
+- `RequestContract` must be resolved before `ExecutionBrief` and `OrchTaskSpec` are assembled
+- `OrchTaskSpec` remains the single planner-facing task object, but it should be assembled from `ExecutionBrief`
+- implementation should treat `RequestContract -> ExecutionBrief -> OrchTaskSpec` as a mandatory assembly step, not an optional enrichment path
+
+### 2.0A ExecutionBrief
+
+This is the on-desk execution handoff that decides what off-desk may execute.
+
+Required fields:
+
+- `brief_status`
+- `objective`
+- `scope`
+- `non_goals`
+- `required_inputs`
+- `deliverables`
+- `done_criteria`
+- `rerun_criteria`
+- `operator_decisions`
+- `blocked_reasons`
+
+States:
+
+- `executable`
+- `underspecified`
+- `infeasible`
+- `partially_executable`
+- `operator_decision_required`
+
+Operational meaning:
+
+- `ExecutionBrief` is the final on-desk artifact
+- `ExecutionBrief` is the first off-desk artifact
+- it states:
+  - what can be executed now
+  - what is explicitly out of scope
+  - what still needs operator clarification
+  - what only has a partial executable slice
+
+Important policy:
+
+- off-desk must not exceed the executable scope named by the brief
+- `partially_executable` must enumerate:
+  - executable slice
+  - blocked slice
+- `operator_decision_required` must name the exact unresolved decision instead of translating it into planner guesswork
+- `underspecified` and `infeasible` requests must not silently fall through into normal planning
 
 ### 2.1 OrchTaskSpec
 
@@ -96,7 +140,9 @@ Important policy:
 - TF may read `source_ref`
 - TF must not rewrite queue state directly
 - TF should emit proposals instead of creating backlog rows
-- `OrchTaskSpec` should inherit normalized request truth from `RequestContract` rather than re-deriving it from raw prompt text
+- `OrchTaskSpec` should inherit normalized request truth from `RequestContract` and executable boundaries from `ExecutionBrief` rather than re-deriving either from raw prompt text
+- only `ExecutionBrief.status in {executable, partially_executable}` may produce a normal `OrchTaskSpec`
+- when the brief is `partially_executable`, `OrchTaskSpec.objective` and `acceptance_criteria` must describe only the permitted slice
 - `approval_mode` semantics:
   - `policy`: operator approval/recovery is outside the Task Team; missing human approver/DRI is not a planning gate blocker
   - `confirm`: explicit operator confirmation is part of closure; approval-related critic issues may remain planning blockers

@@ -17,6 +17,7 @@ for path in (GW_DIR, DASH_DIR):
         sys.path.insert(0, str(path))
 
 from _gateway_test_support import gw  # noqa: E402
+import aoe_tg_background_runs as background_runs  # noqa: E402
 import aoe_tg_operator_summary as operator_summary  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
@@ -71,6 +72,17 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                     "backend_verdict": "fail",
                     "backend_contract": "drift",
                     "backend_contract_note": "contract gaps: expected work execution role for preset",
+                    "execution_brief_status": "underspecified",
+                    "execution_brief_summary": "underspecified | do=reports/summary.md | blocked=acceptance_gap",
+                    "execution_brief_executable_slice": ["reports/summary.md"],
+                    "execution_brief_blocked_slice": ["acceptance_gap"],
+                    "execution_brief_operator_decision": "confirm acceptance scope before off-desk execution",
+                    "background_run_ticket_id": "BGT-001",
+                    "background_run_status": "running",
+                    "background_run_runner_target": "local_background",
+                    "background_run_launch_mode": "offdesk_manual",
+                    "background_run_evidence_bundle": "status=pending | outcome=awaiting_review",
+                    "background_run_evidence_artifacts": ["review_evidence/git_diff_scope.md"],
                     "updated_at": "2026-03-16T10:00:00+09:00",
                     "created_at": "2026-03-16T09:55:00+09:00",
                     "plan": {
@@ -369,6 +381,22 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
+    assert "execution_brief" in overview_text
+    assert "underspecified" in overview_text
+    assert "brief_summary" in overview_text
+    assert "blocked=acceptance_gap" in overview_text
+    assert "execution_brief_summary" in overview_text
+    assert "underspecified=1" in overview_text
+    assert "background_run_summary" in overview_text
+    assert "status running=1" in overview_text
+    assert "target local_background=1" in overview_text
+    assert "Project Progress Board" in overview_text
+    assert "reports/summary.md" in overview_text
+    assert "acceptance_gap" in overview_text
+    assert "confirm acceptance scope before off-desk execution" in overview_text
+    assert "background_run" in overview_text
+    assert "BGT-001" in overview_text
+    assert "awaiting_review" in overview_text
     assert "Action Result" in overview_text
     assert "Clear Local History" in overview_text
     assert "Raw Payload" in overview_text
@@ -465,6 +493,15 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "critic=Codex-Reviewer | integration=Codex-Analyst" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "conclusion is supported by inspectable evidence and explicit caveats" in text
+    assert "execution_brief" in text
+    assert "brief_summary" in text
+    assert "background_run" in text
+    assert "runner_target" in text
+    assert "local_background" in text
+    assert "background_ticket" in text
+    assert "BGT-001" in text
+    assert "evidence_bundle" in text
+    assert "awaiting_review" in text
     assert "control_intent_action" in text
     assert "offdesk_prepare" in text
     assert "first_focus" in text
@@ -482,12 +519,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "/task T-001" in text
     assert "/request REQ-1" in text
     assert "/monitor O2" in text
-    assert "/retry T-001" in text
+    assert "/offdesk review" in text
     assert "Follow-up Preview" in text
     assert "/control/actions/task/followup" in text
-    assert "/control/actions/task/retry" in text
     assert "data-dashboard-action" in text
-    assert "data-action-confirm=\"true\"" in text
 
 
 def test_control_dashboard_task_detail_route_loads_hidden_project_by_request_id(tmp_path: Path) -> None:
@@ -555,20 +590,71 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "control_intent_action" in text
     assert "offdesk_prepare" in text
     assert "first_focus" in text
-    assert "next=/retry T-001" in text
+    assert "next=/offdesk review O2" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
     assert "analysis-check" in text
+    assert "execution_brief" in text
+    assert "underspecified" in text
+    assert "brief_summary" in text
+    assert "brief_do" in text
+    assert "reports/summary.md" in text
+    assert "brief_blocked" in text
+    assert "acceptance_gap" in text
+    assert "brief_decision" in text
+    assert "confirm acceptance scope before off-desk execution" in text
+    assert "background_run" in text
+    assert "runner_target" in text
+    assert "local_background" in text
+    assert "background_ticket" in text
+    assert "BGT-001" in text
+    assert "evidence_bundle" in text
+    assert "awaiting_review" in text
     assert "analysis-followup" in text
     assert "/control/actions/runtime/sync-preview" in text
     assert "Sync Preview (24h)" in text
     assert "/control/actions/task/followup" in text
-    assert "/control/actions/task/retry" in text
+    assert "/offdesk review" in text
     assert "/monitor O2" in text
     assert "/todo O2" in text
     assert "action-section" in text
     assert "/task T-001" in text
     assert "/request REQ-1" in text
+
+
+def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/offdesk", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Offdesk Prep" in text
+    assert "execution_brief" in text
+    assert "underspecified" in text
+    assert "brief_summary" in text
+    assert "blocked=acceptance_gap" in text
+    assert "execution_brief_summary" in text
+    assert "underspecified=1" in text
+    assert "background_run_summary" in text
+    assert "status running=1" in text
+    assert "Project Progress Board" in text
+    assert "reports/summary.md" in text
+    assert "acceptance_gap" in text
+    assert "confirm acceptance scope before off-desk execution" in text
+    assert "local_background" in text
+    assert "BGT-001" in text
+    assert "awaiting_review" in text
+    assert "/offdesk review O2" in text
 
 
 def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_path: Path) -> None:
@@ -601,6 +687,10 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "selected=offdesk_prepare" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "execution_brief_summary" in text
+    assert "underspecified=1" in text
+    assert "background_run_summary" in text
+    assert "status running=1" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text
@@ -618,6 +708,9 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "/task T-001" in text
     assert "/request REQ-1" in text
     assert "/retry T-001" in text
+    assert "background_run" in text
+    assert "BGT-001" in text
+    assert "local_background" in text
 
 
 def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:
@@ -1128,6 +1221,54 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
     assert payload["messages"][-1]["context"] == "auto-recover"
 
 
+def test_control_dashboard_post_background_queue_clean_marks_stale_tickets(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    queue_path = background_runs.background_runs_state_path(project_root / ".aoe-team")
+    background_runs.upsert_background_run_ticket(
+        queue_path,
+        {
+            "ticket_id": "BGT-STALE-1",
+            "request_id": "REQ-STALE-1",
+            "project_key": "alpha",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "dashboard-http",
+            "source_surface": "offdesk",
+            "status": "running",
+            "created_at": "2026-03-16T07:00:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T07:00:00+09:00",
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/background-queue-clean",
+        body=b'{"project_ref":"O2"}',
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    summary = background_runs.summarize_background_runs_state(queue_path)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["implemented"] is True
+    assert payload["executed"] is True
+    assert payload["source_command"] == "/orch bgq-clean O2"
+    assert payload["outcome"]["kind"] == "background_queue_cleanup"
+    assert payload["outcome"]["reason_code"] == "stale_marked"
+    assert payload["next_step"] == "/orch status O2"
+    assert summary["stale_count"] >= 1
+
+
 def test_control_dashboard_post_auto_recover_blocked_includes_retry_at_remediation(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -1200,6 +1341,94 @@ def test_control_dashboard_post_auto_recover_requires_structured_outcome(tmp_pat
     assert payload["status"] == "contract_missing"
     assert payload["outcome"]["reason_code"] == "outcome_missing"
     assert "structured outcome rows" in payload["remediation"]
+
+
+def test_control_dashboard_runtime_detail_renders_background_queue_cleanup_button_and_sorts_urgent_runtime_first(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    manager_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    beta_root = control_root / "Beta"
+    beta_team_dir = beta_root / ".aoe-team"
+    beta_team_dir.mkdir(parents=True, exist_ok=True)
+    (beta_team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (beta_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (beta_team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    manager_state["projects"]["beta"] = {
+        "name": "beta",
+        "display_name": "Beta",
+        "project_alias": "O3",
+        "project_root": str(beta_root),
+        "team_dir": str(beta_team_dir),
+        "overview": "runtime beta",
+        "last_request_id": "",
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+        "todos": [],
+        "todo_seq": 0,
+        "todo_proposals": [],
+        "todo_proposal_seq": 0,
+        "system_project": False,
+        "ops_hidden": False,
+        "paused": False,
+        "last_sync_at": "2026-03-16T09:20:00+09:00",
+        "last_sync_mode": "scenario",
+        "created_at": "2026-03-16T09:00:00+09:00",
+        "updated_at": "2026-03-16T09:30:00+09:00",
+    }
+    manager_state_file.write_text(json.dumps(manager_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    background_runs.upsert_background_run_ticket(
+        background_runs.background_runs_state_path(beta_team_dir),
+        {
+            "ticket_id": "BGT-BETA-1",
+            "request_id": "REQ-BETA-1",
+            "project_key": "beta",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "dashboard-http",
+            "source_surface": "offdesk",
+            "status": "stale",
+            "created_at": "2026-03-16T09:00:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T09:00:00+09:00",
+    )
+    background_runs.upsert_background_run_ticket(
+        background_runs.background_runs_state_path((control_root / "Alpha" / ".aoe-team")),
+        {
+            "ticket_id": "BGT-ALPHA-1",
+            "request_id": "REQ-ALPHA-1",
+            "project_key": "alpha",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "dashboard-http",
+            "source_surface": "offdesk",
+            "status": "running",
+            "created_at": "2026-03-16T09:45:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T09:45:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    status, _headers, body = dashboard_app.build_dashboard_response("/control/runtimes/O3", config)
+    text = body.decode("utf-8")
+
+    assert [card.project_alias for card in snapshot.runtime_cards[:2]] == ["O3", "O2"]
+    assert status == 200
+    assert "/control/actions/runtime/background-queue-clean" in text
+    assert "Background Queue Cleanup" in text
 
 
 def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path: Path, monkeypatch) -> None:

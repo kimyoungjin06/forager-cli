@@ -204,6 +204,7 @@ def _task_command_contract(
     rerun_summary: str = "",
     followup_summary: str = "",
     rate_limit_summary: str = "",
+    execution_brief_status: str = "",
 ) -> Dict[str, Any]:
     return operator_action_contract.partition_operator_commands(
         operator_action_contract.task_operator_commands(
@@ -214,6 +215,7 @@ def _task_command_contract(
             rerun_summary=rerun_summary,
             followup_summary=followup_summary,
             rate_limit_summary=rate_limit_summary,
+            execution_brief_status=execution_brief_status,
         )
     )
 
@@ -224,6 +226,7 @@ def _runtime_command_contract(
     priority_action: str = "",
     has_active_task: bool = False,
     has_rate_limit: bool = False,
+    background_queue_stale_count: int = 0,
 ) -> Dict[str, Any]:
     return operator_action_contract.partition_operator_commands(
         operator_action_contract.runtime_operator_commands(
@@ -231,6 +234,7 @@ def _runtime_command_contract(
             priority_action=priority_action,
             has_active_task=has_active_task,
             has_rate_limit=has_rate_limit,
+            background_queue_stale_count=background_queue_stale_count,
         )
     )
 
@@ -247,6 +251,8 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
     if path == "/control/actions/runtime/sync-preview":
         window = str(payload.get("window", "")).strip()
         return f"Sync Preview ({window})" if window else "Sync Preview"
+    if path == "/control/actions/runtime/background-queue-clean":
+        return "Background Queue Cleanup"
     if path == "/control/actions/control/auto-recover":
         return "Auto Recover Force" if bool(payload.get("force")) else "Auto Recover"
     return str(spec.get("command", "")).strip() or "Action"
@@ -343,4 +349,3 @@ def _runtime_reports(manager_state: Dict[str, Any], provider_state: Dict[str, An
         report["capacity_repeat_count"] = int(repeat_counts.get(alias, 0) or 0)
         reports.append(report)
     return offdesk_flow.sort_offdesk_reports(reports)
-

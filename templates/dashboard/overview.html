@@ -12,6 +12,8 @@
       <li><span>next_retry_at</span><strong>{{ snapshot.control_summary.next_retry_at }}</strong></li>
       <li><span>next_retry_target</span><strong>{{ snapshot.control_summary.next_retry_target }}</strong></li>
       <li><span>repeat_memory</span><strong>{{ snapshot.control_summary.repeat_memory_summary }}</strong></li>
+      <li><span>execution_brief_summary</span><strong>{{ snapshot.control_summary.execution_brief_summary }}</strong></li>
+      <li><span>background_run_summary</span><strong>{{ snapshot.control_summary.background_run_summary }}</strong></li>
       <li><span>latest_intent_command</span><strong>{{ snapshot.control_summary.latest_intent_command }}</strong></li>
       <li><span>latest_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
       <li><span>latest_intent_trace</span><strong>{{ snapshot.control_summary.latest_intent_trace }}</strong></li>
@@ -32,6 +34,16 @@
         <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
         <p><strong>preset</strong> {{ card.active_task_preset }}</p>
         <p><strong>shape</strong> {{ card.active_task_phase2_shape }}</p>
+        <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
+        <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
+        <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+        <p><strong>background_queue</strong> {{ card.background_queue_summary }}</p>
+        {% with title='Runtime Actions', buttons=card.runtime_safe_action_buttons %}
+          {% include 'dashboard/_action_buttons.html' %}
+        {% endwith %}
+        {% with title='Phase2 Actions', buttons=card.runtime_phase2_action_buttons %}
+          {% include 'dashboard/_action_buttons.html' %}
+        {% endwith %}
         {% endif %}
       </div>
       {% endfor %}
@@ -52,9 +64,53 @@
       <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
       {% if card.active_task_label %}
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
+      <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
+      <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
+      <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+      <p><strong>background_queue</strong> {{ card.background_queue_summary }}</p>
+      {% with title='Runtime Actions', buttons=card.runtime_safe_action_buttons %}
+        {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
+      {% with title='Phase2 Actions', buttons=card.runtime_phase2_action_buttons %}
+        {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
       {% endif %}
     </div>
     {% endfor %}
   </div>
+</section>
+
+<section class="panel">
+  <h2>Project Progress Board</h2>
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Runtime</th>
+        <th>Task</th>
+        <th>Execution Brief</th>
+        <th>Background Run</th>
+        <th>Background Queue</th>
+        <th>Do</th>
+        <th>Blocked</th>
+        <th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for card in snapshot.runtime_cards %}
+      {% if card.active_task_label %}
+      <tr>
+        <td><a href="{{ card.runtime_path }}">{{ card.project_alias }}</a><br><span class="muted">{{ card.project_label }}</span></td>
+        <td><a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a><br><span class="muted">{{ card.active_task_status }}/{{ card.active_task_phase }}</span></td>
+        <td>{{ card.active_task_execution_brief_status }}<br><span class="muted">{{ card.active_task_execution_brief_summary }}</span></td>
+        <td>{{ card.active_task_background_run_status }}<br><span class="muted">{{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_bundle }}</span></td>
+        <td>{{ card.background_queue_summary }}</td>
+        <td>{{ card.active_task_execution_brief_executable_slice }}</td>
+        <td>{{ card.active_task_execution_brief_blocked_slice }}</td>
+        <td>{{ card.active_task_execution_brief_operator_decision }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
 {% endblock %}

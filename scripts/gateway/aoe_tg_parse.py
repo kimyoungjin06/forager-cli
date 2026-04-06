@@ -1005,6 +1005,25 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 i += 1
             return {"cmd": "orch-status", "orch": orch_name}
 
+        if sub in {"bgq-clean", "queue-clean", "cleanup-queue"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgq-clean [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgq-clean [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgq-clean", "orch": orch_name}
+
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None
             i = 0

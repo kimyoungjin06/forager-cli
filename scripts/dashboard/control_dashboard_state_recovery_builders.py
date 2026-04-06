@@ -48,6 +48,7 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
             rerun_summary=rerun_summary,
             followup_summary=followup_summary,
             rate_limit_summary=rate_limit_summary,
+            execution_brief_status=str(row.get("execution_brief_status", "")).strip(),
         )
         safe_action_buttons, phase2_action_buttons = _task_action_buttons(
             label=label,
@@ -117,6 +118,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             priority_action=str(row.get("priority_action", "")).strip(),
             has_active_task=bool(active_request_id),
             has_rate_limit=active_rate_limit != "-",
+            background_queue_stale_count=int(row.get("background_queue_stale_count", 0) or 0),
         )
         active_task_action_contract = (
             _task_command_contract(
@@ -127,6 +129,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 rerun_summary=str(active_task_row.get("rerun_summary", "")).strip() or "-",
                 followup_summary=str(active_task_row.get("followup_summary", "")).strip() or "-",
                 rate_limit_summary=active_rate_limit,
+                execution_brief_status=str(active_task_row.get("execution_brief_status", "")).strip(),
             )
             if active_request_id
             else {"safe": [], "phase2": []}
@@ -168,6 +171,13 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_preset=str(row.get("active_task_preset", "")).strip() or "-",
                 active_task_phase2_shape=str(row.get("active_task_phase2_shape", "")).strip() or "-",
                 active_task_phase2_quality=str(row.get("active_task_phase2_quality", "")).strip() or "-",
+                active_task_background_run_status=str(row.get("active_task_background_run_status", "")).strip() or "-",
+                active_task_background_run_runner_target=str(row.get("active_task_background_run_runner_target", "")).strip() or "-",
+                active_task_background_run_ticket_id=str(row.get("active_task_background_run_ticket_id", "")).strip() or "-",
+                active_task_background_run_evidence_bundle=str(row.get("active_task_background_run_evidence_bundle", "")).strip() or "-",
+                background_queue_summary=str(row.get("background_queue_summary", "")).strip() or "-",
+                background_queue_depth=int(row.get("background_queue_depth", 0) or 0),
+                background_queue_stale_count=int(row.get("background_queue_stale_count", 0) or 0),
                 active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",
                 active_task_completion_done=str(active_contract.get("done_when", "")).strip() or "-",
                 active_task_completion_rerun=str(active_contract.get("rerun_when", "")).strip() or "-",
@@ -206,6 +216,8 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
         next_retry_at=str(control.get("next_retry_at", "")).strip() or "-",
         next_retry_target=str(control.get("next_retry_target", "")).strip() or "-",
         repeat_memory_summary=str(control.get("repeat_memory_summary", "")).strip() or "-",
+        execution_brief_summary=str(control.get("execution_brief_summary", "")).strip() or "-",
+        background_run_summary=str(control.get("background_run_summary", "")).strip() or "-",
         latest_intent_command=str(control.get("latest_intent_command", "")).strip() or "-",
         latest_intent_action=str(control.get("latest_intent_action", "")).strip() or "-",
         latest_intent_trace=str(control.get("latest_intent_trace", "")).strip() or "-",

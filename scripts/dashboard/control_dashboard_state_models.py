@@ -50,6 +50,8 @@ class ControlSummaryDTO:
     next_retry_at: str
     next_retry_target: str
     repeat_memory_summary: str
+    execution_brief_summary: str
+    background_run_summary: str
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str
@@ -82,6 +84,20 @@ class RuntimeCardDTO:
     active_task_phase2_shape: str
     active_task_phase2_quality: str
     active_task_backend: str
+    active_task_execution_brief_status: str
+    active_task_execution_brief_summary: str
+    active_task_execution_brief_executable_slice: str
+    active_task_execution_brief_blocked_slice: str
+    active_task_execution_brief_operator_decision: str
+    active_task_background_run_status: str
+    active_task_background_run_runner_target: str
+    active_task_background_run_ticket_id: str
+    active_task_background_run_evidence_bundle: str
+    background_queue_summary: str
+    background_queue_depth: int
+    background_queue_stale_count: int
+    runtime_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
+    runtime_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
 
@@ -132,6 +148,17 @@ class TaskDetailDTO:
     completion_done_when: str = ""
     completion_rerun_when: str = ""
     completion_followup_when: str = ""
+    execution_brief_status: str = ""
+    execution_brief_summary: str = ""
+    execution_brief_executable_slice: str = ""
+    execution_brief_blocked_slice: str = ""
+    execution_brief_operator_decision: str = ""
+    background_run_status: str = ""
+    background_run_runner_target: str = ""
+    background_run_ticket_id: str = ""
+    background_run_launch_mode: str = ""
+    background_run_evidence_bundle: str = ""
+    background_run_evidence_artifacts: str = ""
     backend_summary: str = ""
     backend_note: str = ""
     rate_limit_summary: str = ""
@@ -180,6 +207,19 @@ class RuntimeDetailDTO:
     active_task_preset: str
     active_task_phase2_shape: str
     active_task_phase2_quality: str
+    active_task_execution_brief_status: str
+    active_task_execution_brief_summary: str
+    active_task_execution_brief_executable_slice: str
+    active_task_execution_brief_blocked_slice: str
+    active_task_execution_brief_operator_decision: str
+    active_task_background_run_status: str
+    active_task_background_run_runner_target: str
+    active_task_background_run_ticket_id: str
+    active_task_background_run_launch_mode: str
+    active_task_background_run_evidence_bundle: str
+    background_queue_summary: str
+    background_queue_depth: int
+    background_queue_stale_count: int
     active_task_completion_focus: str
     active_task_completion_done: str
     active_task_completion_rerun: str
@@ -260,6 +300,13 @@ class RecoveryRuntimeDTO:
     active_task_preset: str
     active_task_phase2_shape: str
     active_task_phase2_quality: str
+    active_task_background_run_status: str
+    active_task_background_run_runner_target: str
+    active_task_background_run_ticket_id: str
+    active_task_background_run_evidence_bundle: str
+    background_queue_summary: str
+    background_queue_depth: int
+    background_queue_stale_count: int
     active_task_completion_focus: str
     active_task_completion_done: str
     active_task_completion_rerun: str
@@ -294,6 +341,8 @@ class RecoverySummaryDTO:
     next_retry_at: str
     next_retry_target: str
     repeat_memory_summary: str
+    execution_brief_summary: str
+    background_run_summary: str
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str

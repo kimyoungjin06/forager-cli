@@ -99,6 +99,27 @@
     5. `8.8 compatibility / deprecation` 후속 마무리
     6. `8.8 learned runbook extraction`
     7. `8.7 Structural Debt` 후속
+- [x] hot harness benchmark import baseline fixed
+  - 문서:
+    - `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md`
+    - `docs/HARNESS_ADOPTION_PLAN.md`
+  - 핵심 판단:
+    - 현재 전략 우선순위는 `scenario-level planner seam`보다 `operator workflow productization`
+    - `OMC`를 포함한 상위 하네스들의 공통 강점은:
+      - plan-first interaction
+      - background / remote execution
+      - operator dashboard
+      - governance / audit / permissions
+  - 재정렬된 큰 축:
+    1. `Execution Brief`
+    2. `Ondesk / Offdesk state model`
+    3. `Background / Remote Execution`
+    4. `Project Progress Board`
+    5. `Governance / Permissions / Usage`
+    6. `Project Flow Compiler`
+    7. only then continue deep rerun/manual-followup verification
+  - reference discipline:
+    - benchmark-driven imports must cite `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md` reference IDs
 
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료
@@ -236,6 +257,66 @@
     - `docs/runtime_verification/phase2/data/D1_happy_path.md`
     - `docs/runtime_verification/phase2/review/R1_happy_path.md`
     - `docs/runtime_verification/phase2/mixed/M1_happy_path.md`
+- [ ] `Execution Brief` / on-desk -> off-desk handoff 계약 도입
+  - 목적:
+    - on-desk의 마지막 작업을 `실행 가능성 판정 + 실행계약 확정`으로 고정
+    - off-desk는 확정된 실행계약만 실행하게 한다
+  - 새 상태모델:
+    - `executable`
+    - `underspecified`
+    - `infeasible`
+    - `partially_executable`
+    - `operator_decision_required`
+  - 핵심 산출물:
+    - `RequestContract -> ExecutionBrief -> OrchTaskSpec`
+  - 범위:
+    - executable slice
+    - blocked slice
+    - non-goals
+    - done/rerun criteria
+    - operator-only decisions
+  - benchmark import sources:
+    - `OpenCode` (`REF-OC-1`, `REF-OC-2`, `REF-OC-3`)
+    - `GitHub Copilot coding agent` (`REF-GHCA-1`, `REF-GHCA-2`)
+    - `Claude Code` (`REF-CC-1`)
+- [ ] `Background / Remote Execution` rails 도입
+  - 목적:
+    - off-desk work를 foreground live session에 묶지 않고 durable queue / remote worker / runner로 옮긴다
+  - 문서:
+    - `docs/BACKGROUND_REMOTE_EXECUTION_SPEC.md`
+  - 최소 범위:
+    - background queue
+    - request-to-run audit trail
+    - remote runner abstraction
+    - durable evidence bundle
+  - benchmark import sources:
+    - `OpenHands` (`REF-OH-1`)
+    - `Claude Code Action` (`REF-CC-2`)
+    - `GitHub Copilot coding agent` (`REF-GHCA-1`, `REF-GHCA-2`)
+- [ ] `Project Progress Board`
+  - 목적:
+    - operator가 프로젝트별 진행도, brief status, blocked slice, next intervention을 dashboard에서 본다
+  - 표면:
+    - `/control`
+    - `/control/runtimes/{project_alias}`
+    - later: dedicated project progress board
+  - benchmark import sources:
+    - `OpenHands` (`REF-OH-1`)
+    - `Goose` (`REF-GS-1`, `REF-GS-2`)
+    - our existing dashboard/runtime truth shell
+- [ ] `Governance / Permissions / Usage`
+  - 목적:
+    - off-desk execution을 권한/예산/감사 기준으로 운영 가능한 수준까지 올린다
+  - 범위:
+    - permission policy
+    - usage reporting
+    - budget boundaries
+    - audit trail
+    - secret redaction
+  - benchmark import sources:
+    - `Amp` (`REF-AMP-1`, `REF-AMP-2`)
+    - `Goose` (`REF-GS-1`, `REF-GS-2`)
+    - `Claude Code` (`REF-CC-1`, `REF-CC-2`)
 - [ ] preset별 실제 `Phase2` 완료 흐름 검증
   - 대상:
     - `build`
@@ -252,12 +333,24 @@
     - `/offdesk review`
     - dashboard `Task Detail`
     - dashboard `Recovery`
+  - 현재 상태:
+    - happy-path proof 확보:
+      - `B1`
+      - `D1`
+      - `R1`
+      - `M1`
+    - active rerun-path blocker:
+      - `R2`의 `review_report.md` 최종 완료조건이 아직 완전히 contract-derived가 아님
+  - 전략 위치:
+    - 중요하지만 더 이상 전체 전략의 1순위는 아니다
+    - 위의 product shell / execution model import가 먼저다
   - 실행 순서:
-    1. `Planning Convergence` 정책을 runtime에 먼저 연결
-    2. `data` request contract + convergence loop로 `D1` blocker를 먼저 제거
-    3. 그 다음 happy-path 1개씩
-    4. rerun path 1개씩
-    5. manual-followup path 1개씩
+    1. `Execution Brief`를 먼저 도입해 on-desk/off-desk 경계를 고정
+    2. `Background / Remote Execution` rails를 추가
+    3. `Project Progress Board`로 operator progress surface를 강화
+    4. `Governance / Permissions / Usage`를 올린다
+    5. 그 다음 rerun path 1개씩
+    6. manual-followup path 1개씩
 - [ ] `Planning Convergence` loop 도입
   - 목적:
     - planner one-shot 가정을 제거
@@ -287,7 +380,7 @@
     - marker-only acceptance floor 의존 제거
   - 1단계:
     - `data` contract extractor
-    - `RequestContract -> OrchTaskSpec` assembly seam 명시화
+    - `RequestContract -> ExecutionBrief -> OrchTaskSpec` assembly seam 명시화
     - `contract_incomplete` / `contract_ambiguous` fail-closed gate
     - preset precedence 구현
       - explicit override
@@ -305,7 +398,7 @@
     - `review` / `mixed` contract extractor
     - handoff/review/work separation을 contract 기반으로 전환
   - note:
-    - `Planning Convergence` loop가 먼저 planning truth를 안정화한 뒤 `D1` blocker를 재공략한다
+    - `Execution Brief`가 먼저 on-desk/off-desk handoff를 안정화하고, 그 다음 `Planning Convergence`가 planning truth를 안정화한다
 
 ### 8.5 Recovery Summary
 - [x] nightly session summary spec 고정

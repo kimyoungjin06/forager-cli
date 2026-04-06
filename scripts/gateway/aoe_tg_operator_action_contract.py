@@ -44,9 +44,12 @@ def task_operator_commands(
     rerun_summary: str = "",
     followup_summary: str = "",
     rate_limit_summary: str = "",
+    execution_brief_status: str = "",
 ) -> List[str]:
     alias = _trim(project_alias, 32)
     ref = task_command_ref(label, request_id)
+    brief_status = _trim(execution_brief_status, 64).lower()
+    brief_blocked = brief_status in {"underspecified", "operator_decision_required", "infeasible"}
     hints = [
         f"/task {ref}",
         f"/request {request_id}",
@@ -57,9 +60,9 @@ def task_operator_commands(
         hints.append("/offdesk review")
     if rate_limit_summary and rate_limit_summary != "-":
         hints.append("/auto status")
-    if rerun_summary and rerun_summary != "-":
+    if not brief_blocked and rerun_summary and rerun_summary != "-":
         hints.append(f"/retry {ref}")
-    if followup_summary and followup_summary != "-":
+    if not brief_blocked and followup_summary and followup_summary != "-":
         hints.append(f"/followup {ref}")
         hints.append(f"/todo {alias} followup")
     return _dedupe_commands(hints, limit=8)
@@ -71,10 +74,12 @@ def runtime_operator_commands(
     priority_action: str = "",
     has_active_task: bool = False,
     has_rate_limit: bool = False,
+    background_queue_stale_count: int = 0,
 ) -> List[str]:
     alias = _trim(project_alias, 32)
     hints = [
         _trim(priority_action),
+        f"/orch bgq-clean {alias}" if alias and int(background_queue_stale_count or 0) > 0 else "",
         f"/monitor {alias}",
         f"/todo {alias}",
         "/offdesk review" if has_active_task else "",
@@ -104,6 +109,11 @@ def classify_operator_command(command: str) -> Dict[str, str]:
         if second in {"status", "monitor", "list"}:
             scope = "runtime"
             note = "read-only runtime status"
+        elif second == "bgq-clean":
+            bucket = "phase2"
+            mutation = "runtime_mutation"
+            scope = "runtime"
+            note = "background queue cleanup mutation candidate"
         else:
             bucket = "phase2"
             mutation = "runtime_mutation"
@@ -235,6 +245,18 @@ def http_action_spec(command: str) -> Dict[str, Any] | None:
                 "window": tokens[3] if len(tokens) >= 4 else "24h",
             },
             "note": "inspect sync sources without mutating runtime state",
+        }
+
+    if head == "/orch" and second == "bgq-clean" and len(tokens) >= 3:
+        return {
+            "command": raw,
+            "mode": "phase2",
+            "method": "POST",
+            "path": "/control/actions/runtime/background-queue-clean",
+            "payload": {
+                "project_ref": tokens[2],
+            },
+            "note": "mark stale background queue tickets and refresh runtime queue state",
         }
 
     if head == "/auto" and second == "recover":

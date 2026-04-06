@@ -4,6 +4,7 @@
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import aoe_tg_background_runs as background_runs
 from aoe_tg_package_paths import package_root
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
@@ -130,6 +131,16 @@ def _repair_registered_project(
 
 def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     alias = _project_alias(entry, key)
+    queue_stale_count = 0
+    try:
+        team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
+        if str(team_dir):
+            queue_snapshot = background_runs.summarize_background_runs_state(
+                background_runs.background_runs_state_path(team_dir)
+            )
+            queue_stale_count = int(queue_snapshot.get("stale_count", 0) or 0)
+    except Exception:
+        queue_stale_count = 0
     raw_lock = manager_state.get("project_lock") if isinstance(manager_state, dict) else {}
     lock_key = ""
     if isinstance(raw_lock, dict) and bool(raw_lock.get("enabled", False)):
@@ -142,16 +153,18 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
         keyboard: List[List[Dict[str, str]]] = [
             [{"text": f"/orch repair {alias}"}, {"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/use {alias}"}, {"text": focus_button}, {"text": hide_button}],
-            [{"text": "/map"}, {"text": "/help"}],
+            [{"text": f"/orch status {alias}"}, {"text": "/map"}, {"text": "/help"}],
         ]
     else:
         keyboard = [
             [{"text": f"/todo {alias}"}, {"text": f"/todo {alias} followup"}, {"text": f"/orch monitor {alias}"}],
+            ([{"text": f"/orch bgq-clean {alias}"}] if queue_stale_count > 0 else []),
             [{"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/sync {alias} 1h"}, {"text": f"/use {alias}"}, {"text": focus_button}],
             [{"text": hide_button}],
-            [{"text": "/queue"}, {"text": "/next"}, {"text": "/map"}],
+            [{"text": f"/orch status {alias}"}, {"text": "/queue"}, {"text": "/map"}],
         ]
+        keyboard = [row for row in keyboard if row]
     return {
         "keyboard": keyboard,
         "resize_keyboard": True,
@@ -572,6 +585,55 @@ def handle_orch_task_command(
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n\n{status}",
             context="status",
             with_menu=False,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd == "orch-bgq-clean":
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "background queue cleanup blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context="orch-bgq-clean blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if not team_dir_raw:
+            send(
+                "background queue cleanup blocked\n"
+                f"- runtime: {key}\n"
+                "- reason: team_dir missing\n"
+                f"- next: /orch repair {alias}",
+                context="orch-bgq-clean blocked",
+                with_menu=True,
+            )
+            return True
+        team_dir = Path(team_dir_raw).expanduser().resolve()
+        queue_path = background_runs.background_runs_state_path(team_dir)
+        before = background_runs.summarize_background_runs_state(queue_path)
+        marked = background_runs.mark_stale_background_run_tickets(queue_path, now_iso=now_iso)
+        after = background_runs.summarize_background_runs_state(queue_path)
+        send(
+            "background queue cleanup\n"
+            f"- runtime: {key}\n"
+            f"- queue_path: {queue_path}\n"
+            f"- before: {str(before.get('summary', '-')).strip() or '-'}\n"
+            f"- marked_stale: {int(marked.get('stale_count', 0) or 0)}\n"
+            f"- after: {str(after.get('summary', '-')).strip() or '-'}\n"
+            "next:\n"
+            f"- /orch status {alias}",
+            context="orch-bgq-clean",
+            with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )
         return True

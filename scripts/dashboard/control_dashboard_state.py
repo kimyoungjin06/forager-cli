@@ -57,6 +57,62 @@ from control_dashboard_state_models import (
 )
 
 
+def _execution_brief_summary_text(runtime_cards: list[RuntimeCardDTO]) -> str:
+    counts: dict[str, int] = {}
+    for card in runtime_cards:
+        token = str(card.active_task_execution_brief_status or "").strip().lower()
+        if not token or token == "-":
+            continue
+        counts[token] = counts.get(token, 0) + 1
+    if not counts:
+        return "-"
+    order = (
+        "executable",
+        "partially_executable",
+        "underspecified",
+        "operator_decision_required",
+        "infeasible",
+    )
+    parts = [f"{key}={counts[key]}" for key in order if counts.get(key)]
+    for key in sorted(counts.keys()):
+        if key not in order:
+            parts.append(f"{key}={counts[key]}")
+    return " | ".join(parts) or "-"
+
+
+def _background_run_summary_text(runtime_cards: list[RuntimeCardDTO]) -> str:
+    status_counts: dict[str, int] = {}
+    target_counts: dict[str, int] = {}
+    queue_depth = 0
+    stale_count = 0
+    for card in runtime_cards:
+        status = str(card.active_task_background_run_status or "").strip().lower()
+        target = str(card.active_task_background_run_runner_target or "").strip().lower()
+        if status and status != "-":
+            status_counts[status] = status_counts.get(status, 0) + 1
+        if target and target != "-":
+            target_counts[target] = target_counts.get(target, 0) + 1
+        queue_depth += int(card.background_queue_depth or 0)
+        stale_count += int(card.background_queue_stale_count or 0)
+    if not status_counts and not target_counts and queue_depth <= 0 and stale_count <= 0:
+        return "-"
+    status_order = ("queued", "dispatching", "running", "completed", "failed", "canceled", "stale")
+    target_order = ("local_background", "local_tmux", "github_runner", "remote_worker")
+    parts: list[str] = []
+    status_parts = [f"{key}={status_counts[key]}" for key in status_order if status_counts.get(key)]
+    if status_parts:
+        parts.append("status " + " ".join(status_parts))
+    target_parts = [f"{key}={target_counts[key]}" for key in target_order if target_counts.get(key)]
+    if target_parts:
+        parts.append("target " + " ".join(target_parts))
+    if queue_depth > 0 or stale_count > 0:
+        queue_parts = [f"depth={queue_depth}"]
+        if stale_count > 0:
+            queue_parts.append(f"stale={stale_count}")
+        parts.append("queue " + " ".join(queue_parts))
+    return " | ".join(parts) or "-"
+
+
 def resolve_task_request_for_alias(manager_state: Dict[str, Any], project_alias: str, task_short_id: str) -> str:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     alias_token = str(project_alias or "").strip().upper()
@@ -136,6 +192,8 @@ def load_dashboard_snapshot_result(
         next_retry_at=str(provider_state.get("next_retry_at", "")).strip() or "-",
         next_retry_target=_next_retry_target_text(provider_state),
         repeat_memory_summary=_repeat_summary_text(provider_state),
+        execution_brief_summary=_execution_brief_summary_text(runtime_cards),
+        background_run_summary=_background_run_summary_text(runtime_cards),
         latest_intent_command=str(latest_intent.get("command", "")).strip() or "-",
         latest_intent_action=str(latest_intent.get("action", "")).strip() or "-",
         latest_intent_trace=str(latest_intent.get("trace", "")).strip() or "-",

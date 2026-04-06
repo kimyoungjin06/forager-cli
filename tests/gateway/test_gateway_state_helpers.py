@@ -4,6 +4,7 @@
 from datetime import datetime
 
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_operator_action_contract as operator_action_contract
 
 
 def _write_tf_exec_map(team_dir: Path, req_id: str, *, mode: str, workdir: Path, run_dir: Path) -> None:
@@ -1070,8 +1071,11 @@ def test_sync_task_lifecycle_persists_request_contract_snapshot(tmp_path: Path) 
     assert task["request_contract_fields"]["source_path"] == "data/monthly_raw.csv"
     assert task["request_contract_fields"]["target_column"] == "month"
     assert task["request_contract_artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
+    assert task["execution_brief_status"] == "executable"
+    assert task["execution_brief_executable_slice"] == ["schema_report.json", "null_summary.md", "sample_5.csv"]
     assert task["result"]["request_contract_type"] == "data"
     assert task["result"]["request_contract_status"] == "complete"
+    assert task["result"]["execution_brief_status"] == "executable"
 
 
 def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
@@ -1288,6 +1292,15 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
             "plan_critic": {"approved": False, "issues": ["missing acceptance criteria"]},
             "plan_gate_passed": False,
             "plan_gate_reason": issue,
+            "execution_brief_status": "underspecified",
+            "execution_brief_summary": "underspecified | blocked=acceptance_gap",
+            "execution_brief_blocked_slice": ["acceptance_gap"],
+            "background_run_ticket_id": "BGT-001",
+            "background_run_status": "running",
+            "background_run_runner_target": "local_background",
+            "background_run_launch_mode": "offdesk_manual",
+            "background_run_evidence_bundle": "status=pending | outcome=awaiting_review",
+            "background_run_evidence_artifacts": ["review_evidence/git_diff_scope.md"],
             "plan_review_count": 3,
             "plan_issue_history": [
                 {"round": 1, "review_pass": "contract", "status": "issues", "primary_issue": "missing acceptance criteria", "issue_codes": ["acceptance_gap"], "issue_count": 1},
@@ -1310,6 +1323,12 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
 
     assert "plan_gate: blocked" in summary
     assert "plan_gate_reason: missing acceptance criteria" in summary
+    assert "execution_brief: underspecified" in summary
+    assert "execution_brief_blocked: acceptance_gap" in summary
+    assert "background_run: running" in summary
+    assert "background_run_detail: runner=local_background | ticket=BGT-001 | launch=offdesk_manual" in summary
+    assert "background_run_evidence: status=pending | outcome=awaiting_review" in summary
+    assert "background_run_artifacts: review_evidence/git_diff_scope.md" in summary
     assert "plan_convergence: stalled reviews=3 last_round=3" in summary
     assert "plan_stalled_reason: missing acceptance criteria" in summary
     assert "plan_review_focus: verification | missing acceptance criteria" in summary
@@ -2434,6 +2453,9 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         alias="O4",
         active_task_label="",
         active_task_tf_phase="queued",
+        active_task_execution_brief_status="",
+        active_task_execution_brief_blocked_slice=[],
+        active_task_execution_brief_operator_decision="",
         active_task_targets=None,
         active_task_rate_limit=None,
         syncback_pending=False,
@@ -2448,11 +2470,120 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         canonical_exists=False,
         include_ok=False,
         last_sync_mode="never",
+        background_queue_depth=0,
+        background_queue_stale_count=0,
+        background_queue_runner_targets={},
     )
     assert offdesk_priority == {
         "action": "/sync bootstrap O4 24h",
         "reason": "bootstrap backlog because canonical TODO.md is missing",
     }
+    blocked_brief_priority = priority_actions.offdesk_priority_action_snapshot(
+        alias="O2",
+        active_task_label="T-001 | analysis-check",
+        active_task_tf_phase="needs_retry",
+        active_task_execution_brief_status="underspecified",
+        active_task_execution_brief_blocked_slice=["acceptance_gap"],
+        active_task_execution_brief_operator_decision="confirm acceptance scope before off-desk execution",
+        active_task_targets={"rerun_execution_lane_ids": ["L1"], "rerun_review_lane_ids": ["R1"]},
+        active_task_rate_limit=None,
+        syncback_pending=False,
+        followup_count=0,
+        proposal_count=0,
+        bootstrap_recommended=False,
+        blocked_count=0,
+        open_count=1,
+        sync_quality="canonical",
+        sync_quality_warn=False,
+        sync_stale=False,
+        canonical_exists=True,
+        include_ok=True,
+        last_sync_mode="scenario",
+        background_queue_depth=0,
+        background_queue_stale_count=0,
+        background_queue_runner_targets={},
+    )
+    assert blocked_brief_priority == {
+        "action": "/offdesk review O2",
+        "reason": "confirm acceptance scope before off-desk execution",
+    }
+    stale_queue_priority = priority_actions.offdesk_priority_action_snapshot(
+        alias="O7",
+        active_task_label="",
+        active_task_tf_phase="queued",
+        active_task_execution_brief_status="",
+        active_task_execution_brief_blocked_slice=[],
+        active_task_execution_brief_operator_decision="",
+        active_task_targets=None,
+        active_task_rate_limit=None,
+        syncback_pending=False,
+        followup_count=0,
+        proposal_count=0,
+        bootstrap_recommended=False,
+        blocked_count=0,
+        open_count=2,
+        sync_quality="canonical",
+        sync_quality_warn=False,
+        sync_stale=False,
+        canonical_exists=True,
+        include_ok=True,
+        last_sync_mode="scenario",
+        background_queue_depth=2,
+        background_queue_stale_count=1,
+        background_queue_runner_targets={"local_background": 2},
+    )
+    assert stale_queue_priority == {
+        "action": "/offdesk review O7",
+        "reason": "background queue contains stale tickets (1)",
+    }
+    queued_priority = priority_actions.offdesk_priority_action_snapshot(
+        alias="O8",
+        active_task_label="",
+        active_task_tf_phase="queued",
+        active_task_execution_brief_status="",
+        active_task_execution_brief_blocked_slice=[],
+        active_task_execution_brief_operator_decision="",
+        active_task_targets=None,
+        active_task_rate_limit=None,
+        syncback_pending=False,
+        followup_count=0,
+        proposal_count=0,
+        bootstrap_recommended=False,
+        blocked_count=0,
+        open_count=2,
+        sync_quality="canonical",
+        sync_quality_warn=False,
+        sync_stale=False,
+        canonical_exists=True,
+        include_ok=True,
+        last_sync_mode="scenario",
+        background_queue_depth=2,
+        background_queue_stale_count=0,
+        background_queue_runner_targets={"local_background": 2},
+    )
+    assert queued_priority == {
+        "action": "/orch status O8",
+        "reason": "background queue has 2 queued/running tickets (local_background=2)",
+    }
+
+
+def test_task_operator_commands_suppress_retry_when_execution_brief_is_blocked() -> None:
+    commands = operator_action_contract.task_operator_commands(
+        project_alias="O2",
+        label="T-001 | analysis-check",
+        request_id="REQ-1",
+        tf_phase="needs_retry",
+        rerun_summary="execution=L1 | review=R1",
+        followup_summary="-",
+        rate_limit_summary="-",
+        execution_brief_status="underspecified",
+    )
+
+    assert "/task T-001" in commands
+    assert "/request REQ-1" in commands
+    assert "/monitor O2" in commands
+    assert "/offdesk review" in commands
+    assert all(not command.startswith("/retry ") for command in commands)
 
 
 def test_sync_catalog_module_classifies_sources_and_policy_consistently(tmp_path: Path) -> None:
@@ -2692,7 +2823,7 @@ def test_choose_auto_dispatch_roles_adds_claude_companion_for_multi_review_reque
         team_dir=team_dir,
     )
 
-    assert roles == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert roles == ["Codex-Reviewer"]
 
 
 def test_choose_auto_dispatch_roles_adds_claude_companion_for_explicit_review_role(tmp_path: Path) -> None:
@@ -2904,6 +3035,31 @@ def test_choose_auto_dispatch_roles_keeps_mixed_prompt_from_collapsing_to_review
     )
 
     assert roles == ["Codex-Dev", "Codex-Writer", "Codex-Reviewer", "Claude-Reviewer"]
+
+
+def test_choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    for role, mission in (
+        ("Codex-Dev", "Implement code changes and fix application bugs."),
+        ("Codex-Writer", "Write concise project documents and handoff notes."),
+        ("Claude-Writer", "Write concise project documents and handoff notes."),
+        ("Codex-Reviewer", "Find risks, regressions, and missing tests before merge."),
+        ("Claude-Reviewer", "Cross-check review output before merge."),
+    ):
+        (team_dir / "agents" / role).mkdir(parents=True, exist_ok=True)
+        (team_dir / "agents" / role / "AGENTS.md").write_text(
+            f"# AGENTS.md - {role}\n\n## Mission\n{mission}\n",
+            encoding="utf-8",
+        )
+
+    roles = gw.choose_auto_dispatch_roles(
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. canonical diff range, 변경 파일, severity findings, "
+        "test gaps, uncertainties를 review_report.md에 남겨라. 범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라.",
+        available_roles=["Codex-Dev", "Codex-Writer", "Claude-Writer", "Codex-Reviewer", "Claude-Reviewer"],
+        team_dir=team_dir,
+    )
+
+    assert roles == ["Codex-Reviewer"]
 
 
 def test_available_worker_roles_uses_expanded_default_pool() -> None:
@@ -3352,6 +3508,7 @@ def test_parse_focus_and_unlock_commands() -> None:
     assert tg_parse.parse_cli_message("aoe focus O2") == {"cmd": "focus", "rest": "O2"}
     assert tg_parse.parse_cli_message("aoe unlock") == {"cmd": "focus", "rest": "off"}
     assert tg_parse.parse_cli_message("aoe orch repair O2") == {"cmd": "orch-repair", "orch": "O2"}
+    assert tg_parse.parse_cli_message("aoe orch bgq-clean O2") == {"cmd": "orch-bgq-clean", "orch": "O2"}
 
     manager_state = _empty_state()
     resolved = resolver.resolve_message_command(

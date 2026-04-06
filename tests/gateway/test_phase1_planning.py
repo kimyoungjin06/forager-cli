@@ -1113,9 +1113,41 @@ def test_data_request_contract_extracts_quality_gate_policy_for_rerun_requests()
     assert "schema_drift.status" in contract["artifact_contracts"]["schema_report"]["required_fields"]
     assert "schema_drift.rerun_required" in contract["artifact_contracts"]["schema_report"]["required_fields"]
     assert "columns[].expected_type" in contract["artifact_contracts"]["schema_report"]["required_fields"]
-    assert "schema_drift.violations[]" in contract["artifact_contracts"]["schema_report"]["required_fields"]
-    assert "null_heavy.status" in contract["artifact_contracts"]["null_summary"]["required_fields"]
-    assert "null_heavy.rerun_required" in contract["artifact_contracts"]["null_summary"]["required_fields"]
+
+
+def test_execution_brief_marks_complete_contract_executable() -> None:
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=(
+            "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+            "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+            "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
+        ),
+        selected_roles=["DataEngineer"],
+    )
+
+    brief = request_contract_mod.build_execution_brief(contract)
+
+    assert brief["status"] == "executable"
+    assert brief["offdesk_allowed"] is True
+    assert "schema_report.json" in brief["executable_slice"]
+
+
+def test_execution_brief_marks_ambiguous_contract_as_operator_decision_required() -> None:
+    brief = request_contract_mod.build_execution_brief(
+        {
+            "version": request_contract_mod.REQUEST_CONTRACT_VERSION,
+            "contract_type": "review",
+            "preset": "review",
+            "status": "ambiguous",
+            "summary": "review | ambiguous",
+            "required_outputs": ["review_report"],
+            "ambiguity_notes": ["choose canonical diff range between dirty worktree and latest commit"],
+        }
+    )
+
+    assert brief["status"] == "operator_decision_required"
+    assert brief["offdesk_allowed"] is False
+    assert brief["operator_decision"] == "choose canonical diff range between dirty worktree and latest commit"
 
 
 def test_data_request_contract_treats_original_preserve_phrase_as_row_and_value_policy() -> None:
@@ -1347,8 +1379,10 @@ def test_review_request_contract_extracts_diff_range_policy() -> None:
     assert contract["contract_type"] == "review"
     assert contract["preset"] == "review"
     assert contract["readonly"] is True
-    assert contract["required_outputs"] == ["review_report", "changed_files", "severity_findings", "test_gaps", "uncertainties"]
+    assert contract["required_outputs"] == ["review_report"]
     assert contract["required_evidence"] == ["git_diff_scope", "severity_rationale", "test_coverage_gap", "open_uncertainties"]
+    assert contract["fields"]["deliverable_policy"]["execution_outputs"] == ["git_diff_scope", "severity_rationale", "test_coverage_gap", "open_uncertainties"]
+    assert contract["fields"]["deliverable_policy"]["review_outputs"] == ["review_report"]
     assert contract["fields"]["diff_range_policy"]["scope_source"] == "git-history"
     assert contract["fields"]["diff_range_policy"]["dirty_worktree_policy"] == "exclude-uncommitted-from-canonical-range-and-record-separately"
     assert contract["fields"]["diff_range_policy"]["record_excluded_candidates"] is True
@@ -1357,8 +1391,87 @@ def test_review_request_contract_extracts_diff_range_policy() -> None:
     assert contract["fields"]["auth_scope_policy"]["persisted_store_required"] is True
     assert contract["fields"]["auth_scope_policy"]["record_excluded_paths"] is True
     assert contract["fields"]["auth_scope_policy"]["helper_only_boundary_requires_proof"] is True
+    assert contract["fields"]["auth_scope_output_policy"]["record_within_review_report"] is True
+    assert contract["fields"]["auth_scope_output_policy"]["separate_scope_inventory_forbidden"] is True
     assert contract["fields"]["scope_anchor_terms"] == ["login"]
     assert contract["artifact_contracts"]["review_report"]["path"] == "review_report.md"
+    assert contract["artifact_contracts"]["review_report"]["required_fields"] == [
+        "canonical diff range",
+        "excluded candidates",
+        "dirty-worktree exclusions",
+        "entrypoints",
+        "caller-visible state transitions",
+        "persisted session/token stores",
+        "excluded paths",
+        "helper-only boundary proof",
+        "changed files",
+        "severity findings",
+        "test gaps",
+        "uncertainties",
+    ]
+    assert "review_report.md is the canonical review-only output artifact." in contract["artifact_contracts"]["review_report"]["acceptance_notes"]
+    assert any("separate scope inventory artifact" in item for item in contract["artifact_contracts"]["review_report"]["acceptance_notes"])
+    assert contract["artifact_contracts"]["git_diff_scope"]["path"] == "review_evidence/git_diff_scope.md"
+    assert contract["artifact_contracts"]["severity_rationale"]["path"] == "review_evidence/severity_rationale.md"
+    assert contract["artifact_contracts"]["test_coverage_gap"]["path"] == "review_evidence/test_coverage_gap.md"
+    assert contract["artifact_contracts"]["open_uncertainties"]["path"] == "review_evidence/open_uncertainties.md"
+    assert any("Select and record one canonical diff range" in item for item in contract["artifact_contracts"]["git_diff_scope"]["acceptance_notes"])
+    assert "entrypoints" in contract["artifact_contracts"]["severity_rationale"]["required_fields"]
+    assert any("do not create a separate scope inventory artifact" in item for item in contract["artifact_contracts"]["severity_rationale"]["acceptance_notes"])
+
+
+def test_review_request_contract_extracts_quality_gate_policy_for_rerun_requests() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer", "Claude-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    gate = contract["fields"]["quality_gate_policy"]
+    assert gate["branch_on_failure"] == "rerun"
+    assert gate["done_forbidden_on_failure"] is True
+    assert gate["diff_scope_gate"] is True
+    assert gate["section_completeness_gate"] is True
+    assert gate["required_sections"] == [
+        "canonical diff range",
+        "excluded candidates",
+        "dirty-worktree exclusions",
+        "entrypoints",
+        "caller-visible state transitions",
+        "persisted session/token stores",
+        "excluded paths",
+        "helper-only boundary proof",
+        "changed files",
+        "severity findings",
+        "test gaps",
+        "uncertainties",
+    ]
+    assert gate["required_evidence"] == ["git_diff_scope", "severity_rationale", "test_coverage_gap", "open_uncertainties"]
+    assert "diff_scope_missing" in gate["failure_reasons"]
+    assert "excluded_candidates_missing" in gate["failure_reasons"]
+    assert "dirty_worktree_exclusions_missing" in gate["failure_reasons"]
+
+
+def test_review_rerun_prompt_with_review_report_stays_in_review_preset() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+
+    preset = request_contract_mod.resolve_request_contract_preset(
+        source_prompt=prompt,
+        selected_roles=[],
+    )
+
+    assert preset == "review"
+
 
 
 def test_review_request_contract_defaults_task_plan_to_readonly() -> None:
@@ -1388,9 +1501,12 @@ def test_review_request_contract_defaults_task_plan_to_readonly() -> None:
 
     assert plan["meta"]["readonly"] is True
     assert plan["meta"]["phase2_execution_plan"]["readonly"] is True
+    assert plan["meta"]["phase2_execution_plan"]["artifact_write_scope"]["mode"] == "declared_outputs_only"
+    assert plan["summary"] == "review | auth/session scope -> canonical diff+severity -> test gaps+uncertainties | review lane validates review_report"
     assert any("Review-only flow stays readonly" in item for item in plan["subtasks"][0]["acceptance"])
-    assert any("Canonical diff scope records recent matching candidates" in item for item in plan["subtasks"][0]["acceptance"])
+    assert any("declared review_evidence artifacts and review_report.md remain allowed write targets" in item for item in plan["subtasks"][0]["acceptance"])
     assert any("Auth/session scope evidence enumerates login entrypoints" in item for item in plan["subtasks"][0]["acceptance"])
+    assert any("Canonical diff evidence records recent matching candidates" in item for item in plan["subtasks"][1]["acceptance"])
 
 
 def test_review_request_contract_adds_artifact_specific_acceptance_floor() -> None:
@@ -1409,8 +1525,8 @@ def test_review_request_contract_adds_artifact_specific_acceptance_floor() -> No
             "summary": "review only",
             "subtasks": [
                 {"id": "S1", "title": "Canonical Diff 범위와 인증 경계 고정", "goal": "pick canonical diff range and auth scope", "owner_role": "Codex-Reviewer"},
-                {"id": "S2", "title": "변경 파일별 회귀 리스크 판정", "goal": "write severity findings with impact and evidence", "owner_role": "Codex-Reviewer"},
-                {"id": "S3", "title": "테스트 공백과 잔여 불확실성 정리", "goal": "separate test gaps and uncertainties", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "변경 파일별 severity 근거 수집", "goal": "collect severity evidence with impact and changed-file proof", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "테스트 근거와 잔여 불확실성 수집", "goal": "collect test-gap evidence and unresolved uncertainties", "owner_role": "Codex-Reviewer"},
             ],
         },
         user_prompt=prompt,
@@ -1423,10 +1539,318 @@ def test_review_request_contract_adds_artifact_specific_acceptance_floor() -> No
     s2 = plan["subtasks"][1]["acceptance"]
     s3 = plan["subtasks"][2]["acceptance"]
 
-    assert any("Canonical diff scope records recent matching candidates" in item for item in s1)
-    assert any("Auth/session scope evidence enumerates login entrypoints" in item for item in s1)
-    assert any("Each severity finding records severity" in item for item in s2)
-    assert any("Test gaps and uncertainties are separated explicitly" in item for item in s3)
+    assert any("Canonical diff evidence records recent matching candidates" in item for item in s1)
+    assert any("without mutating canonical persisted outputs" in item for item in s1)
+    assert not any("review_report.md" in item for item in s1)
+    assert any("Severity evidence records affected files or paths" in item for item in s2)
+    assert not any("review_report.md" in item for item in s2)
+    assert any("Coverage and uncertainty evidence stay separate" in item for item in s3)
+    assert not any("review_report.md" in item for item in s3)
+    assert plan["summary"] == "review | auth/session scope -> canonical diff+severity -> test gaps+uncertainties | review lane validates review_report"
+
+
+def test_review_request_contract_quality_gate_marks_rerun_in_acceptance_floor() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun gate",
+            "subtasks": [
+                {"id": "S1", "title": "Canonical diff 범위와 인증 경계 고정", "goal": "pick canonical diff range and auth scope", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "변경 파일별 severity 근거 수집", "goal": "collect severity evidence with impact and changed-file proof", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "테스트 근거와 잔여 불확실성 수집", "goal": "collect test-gap evidence and unresolved uncertainties", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    acceptance = [item for row in plan["subtasks"] for item in row.get("acceptance", [])]
+    assert any("explicit missing-evidence markers" in item for item in acceptance)
+    review_lane_acceptance = plan["meta"]["phase2_execution_plan"]["review_lanes"][0]["acceptance"]
+    assert any("reports `rerun` instead of `done`" in item for item in review_lane_acceptance)
+    assert any("owns the final disposition" in item for item in review_lane_acceptance)
+    assert any("Readonly review flow may write only the declared review_evidence/* artifacts and review_report.md" in item for item in review_lane_acceptance)
+
+
+def test_review_request_contract_projects_review_report_into_phase2_lane_outputs() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun lane ownership",
+            "subtasks": [
+                {"id": "S1", "title": "Canonical diff 범위와 인증 경계 고정", "goal": "pick canonical diff range and auth scope", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "변경 파일별 severity 근거 수집", "goal": "collect severity evidence with impact and changed-file proof", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "테스트 근거와 잔여 불확실성 수집", "goal": "collect test-gap evidence and unresolved uncertainties", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    execution_lane = plan["meta"]["phase2_execution_plan"]["execution_lanes"][0]
+    review_lane = plan["meta"]["phase2_execution_plan"]["review_lanes"][0]
+    assert plan["meta"]["phase2_execution_plan"]["artifact_write_scope"]["allowed_outputs"] == [
+        "git_diff_scope",
+        "severity_rationale",
+        "test_coverage_gap",
+        "open_uncertainties",
+        "review_report",
+    ]
+    assert execution_lane["outputs"] == ["git_diff_scope", "severity_rationale", "test_coverage_gap", "open_uncertainties"]
+    assert [row["output"] for row in execution_lane["deliverables"]] == ["git_diff_scope", "severity_rationale", "test_coverage_gap", "open_uncertainties"]
+    assert any("review_evidence/git_diff_scope.md" in item for item in execution_lane["acceptance"])
+    assert any("Select and record one canonical diff range" in item for item in execution_lane["acceptance"])
+    assert any("Readonly review flow may write only the declared review_evidence/* artifacts and review_report.md" in item for item in execution_lane["acceptance"])
+    assert review_lane["outputs"] == ["review_report"]
+    assert any("canonical diff range" in item for item in review_lane["acceptance"])
+    assert any("excluded candidates" in item for item in review_lane["acceptance"])
+    assert any("dirty-worktree exclusions" in item for item in review_lane["acceptance"])
+    assert any("reports `rerun` instead of `done`" in item for item in review_lane["acceptance"])
+
+
+def test_review_request_contract_rewrites_invalid_phase2_lane_roles_to_team_spec_roles() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun lane role repair",
+            "subtasks": [
+                {"id": "S1", "title": "review_report.md 통합 작성", "goal": "write final review_report.md and decide rerun or done", "owner_role": "Orchestrator"},
+                {"id": "S2", "title": "Auth/session 경계와 severity 근거 수집", "goal": "trace login and write final review_report.md severity findings", "owner_role": "Orchestrator", "depends_on": ["S1"]},
+                {"id": "S3", "title": "테스트 근거와 잔여 불확실성 수집", "goal": "collect gaps and write final review_report.md test gaps", "owner_role": "Orchestrator", "depends_on": ["S2"]},
+            ],
+            "phase2_team_spec": {
+                "execution_groups": [{"group_id": "E1", "role": "Orchestrator", "subtask_ids": ["S1", "S2", "S3"]}],
+                "review_groups": [{"group_id": "R1", "role": "Orchestrator", "outputs": ["review_report"]}],
+            },
+            "phase2_execution_plan": {
+                "execution_lanes": [{"lane_id": "L1", "role": "Orchestrator", "subtask_ids": ["S1", "S2", "S3"], "parallel": False}],
+                "review_lanes": [{"lane_id": "R1", "role": "Orchestrator", "depends_on": ["L1"], "outputs": ["review_report"]}],
+                "readonly": True,
+            },
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    assert {row["owner_role"] for row in plan["subtasks"]} == {"Codex-Reviewer"}
+    execution_lane = plan["meta"]["phase2_execution_plan"]["execution_lanes"][0]
+    review_lane = plan["meta"]["phase2_execution_plan"]["review_lanes"][0]
+    assert execution_lane["role"] == "Codex-Reviewer"
+    assert review_lane["role"] == "Codex-Reviewer"
+
+
+def test_review_request_contract_repairs_report_writing_subtask_into_evidence_consolidation() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun report repair",
+            "subtasks": [
+                {"id": "S1", "title": "review_report.md 통합 작성", "goal": "write final review_report.md and decide rerun or done", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    row = plan["subtasks"][0]
+    assert row["title"] == "Review evidence consolidation"
+    assert "downstream review gating can validate" in row["goal"]
+
+
+def test_review_request_contract_does_not_collapse_non_report_evidence_steps() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun evidence steps",
+            "subtasks": [
+                {"id": "S1", "title": "Canonical diff 범위 확정", "goal": "pick canonical diff range and list changed files", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "변경 파일별 severity 근거 수집", "goal": "collect severity evidence with impact and changed-file proof", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "테스트 근거와 잔여 불확실성 수집", "goal": "collect test-gap evidence and unresolved uncertainties", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    titles = [row["title"] for row in plan["subtasks"]]
+    assert titles == [
+        "Auth/session 경계와 candidate scope 근거 수집",
+        "Canonical diff 범위와 severity 근거 수집",
+        "테스트 근거와 잔여 불확실성 수집",
+    ]
+
+
+def test_review_request_contract_repairs_repeated_evidence_steps_into_canonical_shape() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun repeated evidence steps",
+            "subtasks": [
+                {"id": "S1", "title": "Review evidence consolidation", "goal": "Consolidate canonical diff scope into evidence", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "Review evidence consolidation", "goal": "Consolidate severity rationale into evidence", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "Review evidence consolidation", "goal": "Consolidate test gaps into evidence", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    assert [row["title"] for row in plan["subtasks"]] == [
+        "Auth/session 경계와 candidate scope 근거 수집",
+        "Canonical diff 범위와 severity 근거 수집",
+        "테스트 근거와 잔여 불확실성 수집",
+    ]
+    assert not any("review_report.md" in row["goal"] for row in plan["subtasks"])
+    assert any("Auth/session scope evidence enumerates login entrypoints" in item for item in plan["subtasks"][0]["acceptance"])
+    assert any("Canonical diff evidence records recent matching candidates" in item for item in plan["subtasks"][1]["acceptance"])
+    assert any("Coverage and uncertainty evidence stay separate" in item for item in plan["subtasks"][2]["acceptance"])
+
+
+def test_review_request_contract_replaces_redundant_consolidation_step_with_missing_gap_stage() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun with late consolidation",
+            "subtasks": [
+                {"id": "S1", "title": "Canonical diff 범위 확정", "goal": "pick canonical diff range and changed files", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "Auth/session 경계와 severity 근거 수집", "goal": "trace auth scope and collect severity evidence", "owner_role": "Codex-Reviewer"},
+                {"id": "S4", "title": "Review evidence consolidation", "goal": "write final review_report.md and decide rerun or done", "owner_role": "Codex-Reviewer", "depends_on": ["S1", "S2"]},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    assert [row["title"] for row in plan["subtasks"]] == [
+        "Auth/session 경계와 candidate scope 근거 수집",
+        "Canonical diff 범위와 severity 근거 수집",
+        "테스트 근거와 잔여 불확실성 수집",
+    ]
+    assert set(plan["subtasks"][2]["depends_on"]) == {"S1", "S2"}
+
+
+def test_review_request_contract_dedupes_duplicate_stage_and_restores_canonical_order() -> None:
+    prompt = (
+        "최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. "
+        "canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. "
+        "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+    )
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=prompt,
+        selected_roles=["Codex-Reviewer"],
+        project_key="demo-login-build",
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "review rerun duplicate stage order",
+            "subtasks": [
+                {"id": "S1", "title": "Auth/session 경계와 severity 근거 수집", "goal": "trace auth scope and collect severity evidence", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "Auth/session 경계와 severity 근거 수집", "goal": "trace auth scope and collect severity evidence", "owner_role": "Codex-Reviewer"},
+                {"id": "S3", "title": "테스트 근거와 잔여 불확실성 수집", "goal": "collect test-gap evidence and unresolved uncertainties", "owner_role": "Codex-Reviewer"},
+                {"id": "S4", "title": "Review evidence consolidation", "goal": "write final review_report.md and decide rerun or done", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        user_prompt=prompt,
+        workers=["Codex-Reviewer"],
+        max_subtasks=4,
+        meta_overrides={"request_contract": contract, "phase1_role_preset": "review", "phase2_team_preset": "review"},
+    )
+
+    assert [row["title"] for row in plan["subtasks"]] == [
+        "Auth/session 경계와 candidate scope 근거 수집",
+        "Canonical diff 범위와 severity 근거 수집",
+        "테스트 근거와 잔여 불확실성 수집",
+    ]
+    first_id = plan["subtasks"][0]["id"]
+    second_id = plan["subtasks"][1]["id"]
+    assert "depends_on" not in plan["subtasks"][0]
+    assert plan["subtasks"][1]["depends_on"] == [first_id]
+    assert plan["subtasks"][2]["depends_on"] == [first_id, second_id]
 
 
 def test_mixed_request_contract_extracts_handoff_and_reviewer_note_outputs() -> None:

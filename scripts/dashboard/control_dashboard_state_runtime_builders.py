@@ -14,6 +14,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
+import aoe_tg_background_runs as background_runs
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 
@@ -46,6 +47,39 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         phase1_preset = str(row.get("active_task_phase1_role_preset", "")).strip()
         phase2_preset = str(row.get("active_task_phase2_team_preset", "")).strip()
         alias = str(row.get("alias", "")).strip()
+        active_request_id = str(row.get("active_task_request_id", "")).strip()
+        active_task: Optional[Dict[str, Any]] = None
+        resolved = _resolve_runtime_entry(manager_state, alias)
+        if resolved is not None and active_request_id:
+            _key, entry = resolved
+            candidate = task_state.get_task_record(entry, active_request_id)
+            if isinstance(candidate, dict):
+                active_task = candidate
+        queue_summary = "-"
+        queue_depth = 0
+        queue_stale_count = 0
+        if resolved is not None:
+            _key, entry = resolved
+            team_dir = Path(str(entry.get("team_dir", "")).strip() or ".")
+            if str(entry.get("team_dir", "")).strip():
+                snapshot = background_runs.summarize_background_runs_state(
+                    background_runs.background_runs_state_path(team_dir)
+                )
+                queue_summary = str(snapshot.get("summary", "")).strip() or "-"
+                queue_depth = int(snapshot.get("depth", 0) or 0)
+                queue_stale_count = int(snapshot.get("stale_count", 0) or 0)
+        active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
+        runtime_action_contract = _runtime_command_contract(
+            project_alias=alias,
+            priority_action=str(row.get("priority_action", "")).strip(),
+            has_active_task=bool(active_request_id),
+            has_rate_limit=active_rate_limit_summary != "-",
+            background_queue_stale_count=queue_stale_count,
+        )
+        runtime_safe_action_buttons, runtime_phase2_action_buttons = _runtime_action_buttons(
+            project_alias=alias,
+            phase2_commands=list(runtime_action_contract.get("phase2") or []),
+        )
         cards.append(
             RuntimeCardDTO(
                 project_key=str(row.get("key", "")).strip() or str(row.get("alias", "")).strip(),
@@ -61,7 +95,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 severity_score=int(row.get("severity_score", 0) or 0),
                 provider_pressure_score=int(row.get("capacity_pressure_score", 0) or 0),
                 provider_repeat_count=int(row.get("capacity_repeat_count", 0) or 0),
-                active_task_request_id=str(row.get("active_task_request_id", "")).strip(),
+                active_task_request_id=active_request_id,
                 active_task_label=str(row.get("active_task_label", "")).strip(),
                 active_task_phase=str(row.get("active_task_tf_phase", "")).strip(),
                 active_task_status=str(row.get("active_task_status", "")).strip(),
@@ -77,11 +111,64 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     str(row.get("active_task_backend_verdict", "")).strip(),
                     str(row.get("active_task_backend_contract", "")).strip(),
                 ),
+                active_task_execution_brief_status=(
+                    str((active_task or {}).get("execution_brief_status", "")).strip() or "-"
+                ),
+                active_task_execution_brief_summary=(
+                    str((active_task or {}).get("execution_brief_summary", "")).strip() or "-"
+                ),
+                active_task_execution_brief_executable_slice=", ".join(
+                    str(item).strip()
+                    for item in ((active_task or {}).get("execution_brief_executable_slice") or [])
+                    if str(item).strip()
+                )
+                or "-",
+                active_task_execution_brief_blocked_slice=", ".join(
+                    str(item).strip()
+                    for item in ((active_task or {}).get("execution_brief_blocked_slice") or [])
+                    if str(item).strip()
+                )
+                or "-",
+                active_task_execution_brief_operator_decision=(
+                    str((active_task or {}).get("execution_brief_operator_decision", "")).strip() or "-"
+                ),
+                active_task_background_run_status=(
+                    str((active_task or {}).get("background_run_status", "")).strip() or "-"
+                ),
+                active_task_background_run_runner_target=(
+                    str((active_task or {}).get("background_run_runner_target", "")).strip() or "-"
+                ),
+                active_task_background_run_ticket_id=(
+                    str((active_task or {}).get("background_run_ticket_id", "")).strip() or "-"
+                ),
+                active_task_background_run_evidence_bundle=(
+                    str((active_task or {}).get("background_run_evidence_bundle", "")).strip() or "-"
+                ),
+                background_queue_summary=queue_summary,
+                background_queue_depth=queue_depth,
+                background_queue_stale_count=queue_stale_count,
+                runtime_safe_action_buttons=runtime_safe_action_buttons,
+                runtime_phase2_action_buttons=runtime_phase2_action_buttons,
                 notes=list(row.get("notes") or []),
                 lines=list(row.get("lines") or []),
             )
         )
+    cards.sort(key=_runtime_card_sort_key)
     return cards
+
+
+def _runtime_card_sort_key(card: RuntimeCardDTO) -> tuple[int, int, int, int, int, int, str]:
+    brief_status = str(card.active_task_execution_brief_status or "").strip().lower()
+    brief_blocked = 1 if brief_status in {"underspecified", "operator_decision_required", "infeasible"} else 0
+    return (
+        -int(card.background_queue_stale_count or 0),
+        -int(card.background_queue_depth or 0),
+        -brief_blocked,
+        -int(card.severity_score or 0),
+        -int(card.provider_pressure_score or 0),
+        -int(card.provider_repeat_count or 0),
+        str(card.project_alias or "").strip(),
+    )
 
 
 
@@ -187,6 +274,9 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     runtime_path = _runtime_path(target_alias)
     active_request_id = str(row.get("active_task_request_id", "")).strip()
     active_task = task_state.get_task_record(entry, active_request_id) if active_request_id else None
+    queue_snapshot = background_runs.summarize_background_runs_state(
+        background_runs.background_runs_state_path(Path(str(entry.get("team_dir", "")).strip() or "."))
+    ) if str(entry.get("team_dir", "")).strip() else {}
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
     active_followup_summary = _task_followup_summary(active_task) if isinstance(active_task, dict) else "-"
     active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
@@ -195,6 +285,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         priority_action=str(row.get("priority_action", "")).strip(),
         has_active_task=bool(active_request_id),
         has_rate_limit=active_rate_limit_summary != "-",
+        background_queue_stale_count=int(queue_snapshot.get("stale_count", 0) or 0),
     )
     active_task_action_contract = (
         _task_command_contract(
@@ -205,6 +296,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             rerun_summary=active_rerun_summary,
             followup_summary=active_followup_summary,
             rate_limit_summary=active_rate_limit_summary,
+            execution_brief_status=str((active_task or {}).get("execution_brief_status", "")).strip(),
         )
         if active_request_id
         else {"safe": [], "phase2": []}
@@ -252,6 +344,39 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             row.get("active_task_phase2_review_roles") or [],
         ),
         active_task_phase2_quality=_compose_phase2_quality(row),
+        active_task_execution_brief_status=str((active_task or {}).get("execution_brief_status", "")).strip() or "-",
+        active_task_execution_brief_summary=str((active_task or {}).get("execution_brief_summary", "")).strip() or "-",
+        active_task_execution_brief_executable_slice=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("execution_brief_executable_slice") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_execution_brief_blocked_slice=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("execution_brief_blocked_slice") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_execution_brief_operator_decision=(
+            str((active_task or {}).get("execution_brief_operator_decision", "")).strip() or "-"
+        ),
+        active_task_background_run_status=str((active_task or {}).get("background_run_status", "")).strip() or "-",
+        active_task_background_run_runner_target=(
+            str((active_task or {}).get("background_run_runner_target", "")).strip() or "-"
+        ),
+        active_task_background_run_ticket_id=(
+            str((active_task or {}).get("background_run_ticket_id", "")).strip() or "-"
+        ),
+        active_task_background_run_launch_mode=(
+            str((active_task or {}).get("background_run_launch_mode", "")).strip() or "-"
+        ),
+        active_task_background_run_evidence_bundle=(
+            str((active_task or {}).get("background_run_evidence_bundle", "")).strip() or "-"
+        ),
+        background_queue_summary=str(queue_snapshot.get("summary", "")).strip() or "-",
+        background_queue_depth=int(queue_snapshot.get("depth", 0) or 0),
+        background_queue_stale_count=int(queue_snapshot.get("stale_count", 0) or 0),
         active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",
         active_task_completion_done=str(active_contract.get("done_when", "")).strip() or "-",
         active_task_completion_rerun=str(active_contract.get("rerun_when", "")).strip() or "-",
@@ -281,6 +406,3 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             project_label=display,
         ),
     )
-
-
-

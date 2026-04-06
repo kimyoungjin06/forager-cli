@@ -40,6 +40,7 @@ without drifting from the preset completion matrix.
 ## 4. Canonical Inputs
 - `docs/PRESET_COMPLETION_MATRIX.md`
 - `docs/ORCH_CORE_CONTRACT.md`
+- `docs/REQUEST_CONTRACT_SPEC.md`
 - `docs/OPERATING_MODEL.md`
 - runtime state in `.aoe-team/orch_manager_state.json`
 - task history and lane topology from runtime artifacts
@@ -50,6 +51,12 @@ without drifting from the preset completion matrix.
 
 ### 5.1 Planning
 - was the correct preset selected?
+- did on-desk classify the request correctly as:
+  - `executable`
+  - `underspecified`
+  - `infeasible`
+  - `partially_executable`
+  - `operator_decision_required`?
 - was the `phase2_team_preset` stable and visible?
 - was the expected execution/review shape materialized explicitly?
 
@@ -60,6 +67,7 @@ without drifting from the preset completion matrix.
 
 ### 5.3 Completion / Recovery
 - was `done` only reached with the required evidence?
+- did off-desk stay inside the executable slice declared by on-desk?
 - when the flow was incomplete, did it choose:
   - `rerun`
   - `manual followup`
@@ -88,6 +96,8 @@ without drifting from the preset completion matrix.
 
 ### 7.2 Required Evidence For Each Scenario
 - request text / normalized action
+- request contract summary
+- execution brief status and executable slice
 - selected preset and lane topology
 - stage progression:
   - planning
@@ -110,9 +120,11 @@ without drifting from the preset completion matrix.
 
 ### 8.1 Preset Pass
 - preset classification is correct
+- on-desk feasibility classification is coherent
 - expected lane shape exists
 - lifecycle stages progress coherently
 - completion verdict matches `docs/PRESET_COMPLETION_MATRIX.md`
+- off-desk execution does not exceed the briefed scope
 - operator surfaces agree on the essential status and next action
 
 ### 8.2 Verification Batch Pass
@@ -124,6 +136,7 @@ without drifting from the preset completion matrix.
 
 ### 9.1 Planning Drift
 - wrong preset
+- wrong execution-brief status
 - missing or implicit Phase2 lane staffing
 - review shape drift
 
@@ -133,6 +146,7 @@ without drifting from the preset completion matrix.
 
 ### 9.3 Completion Drift
 - `done` without required evidence
+- `done` outside the executable slice
 - rerun/manual followup branch chosen inconsistently
 - preset-specific risk not surfaced
 
@@ -142,32 +156,41 @@ without drifting from the preset completion matrix.
 
 ## 10. Execution Plan
 
-### 10.1 Step 1: Scenario Fixture Definition
+### 10.1 Step 0: On-desk Brief Classification
+- record:
+  - request contract summary
+  - execution brief status
+  - executable slice
+  - blocked slice or operator decision, when relevant
+
+### 10.2 Step 1: Scenario Fixture Definition
 - define one scenario file or note set per target preset
 - each scenario must state:
   - prompt
   - expected preset
+  - expected brief status
   - expected lane shape
   - expected completion branch
 
-### 10.2 Step 2: Live/Replay Execution
+### 10.3 Step 2: Live/Replay Execution
 - run scenarios through the current runtime path
 - prefer replayable or isolated testable inputs where possible
 
-### 10.3 Step 3: Surface Capture
+### 10.4 Step 3: Surface Capture
 - capture operator-visible outputs from:
   - `/task`
   - `/monitor`
   - `/offdesk review`
   - dashboard pages if applicable
 
-### 10.4 Step 4: Contract Comparison
+### 10.5 Step 4: Contract Comparison
 - compare actual results to:
   - preset matrix
   - ORCH core contract
+  - execution brief classification
   - expected scenario branch
 
-### 10.5 Step 5: Result Recording
+### 10.6 Step 5: Result Recording
 - record:
   - pass/fail
   - drift class

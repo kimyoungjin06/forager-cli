@@ -194,6 +194,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             rerun_summary=rerun_summary,
             followup_summary=followup_summary,
             rate_limit_summary=rate_limit_summary,
+            execution_brief_status=str(task.get("execution_brief_status", "")).strip(),
         )
         safe_action_buttons, phase2_action_buttons = _task_action_buttons(
             label=task_view.task_display_label(task, fallback_request_id=rid),
@@ -232,6 +233,26 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             completion_done_when=str(contract.get("done_when", "")).strip() or "-",
             completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",
             completion_followup_when=str(contract.get("manual_followup_when", "")).strip() or "-",
+            execution_brief_status=str(task.get("execution_brief_status", "")).strip() or "-",
+            execution_brief_summary=str(task.get("execution_brief_summary", "")).strip() or "-",
+            execution_brief_executable_slice=", ".join(
+                str(item).strip() for item in (task.get("execution_brief_executable_slice") or []) if str(item).strip()
+            )
+            or "-",
+            execution_brief_blocked_slice=", ".join(
+                str(item).strip() for item in (task.get("execution_brief_blocked_slice") or []) if str(item).strip()
+            )
+            or "-",
+            execution_brief_operator_decision=str(task.get("execution_brief_operator_decision", "")).strip() or "-",
+            background_run_status=str(task.get("background_run_status", "")).strip() or "-",
+            background_run_runner_target=str(task.get("background_run_runner_target", "")).strip() or "-",
+            background_run_ticket_id=str(task.get("background_run_ticket_id", "")).strip() or "-",
+            background_run_launch_mode=str(task.get("background_run_launch_mode", "")).strip() or "-",
+            background_run_evidence_bundle=str(task.get("background_run_evidence_bundle", "")).strip() or "-",
+            background_run_evidence_artifacts=", ".join(
+                str(item).strip() for item in (task.get("background_run_evidence_artifacts") or []) if str(item).strip()
+            )
+            or "-",
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,

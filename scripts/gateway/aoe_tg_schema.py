@@ -351,7 +351,7 @@ def _review_request_contract_floor(
         return []
     context = "\n".join((str(title or ""), str(goal or ""))).lower()
     floor = [
-        "Review-only flow stays readonly, and review_report.md is the only canonical persisted output artifact.",
+        "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
     ]
     diff_range_policy = snapshot.get("fields", {}).get("diff_range_policy", {})
     if isinstance(diff_range_policy, dict) and diff_range_policy and _contains_any(
@@ -359,7 +359,7 @@ def _review_request_contract_floor(
         ["diff", "scope", "range", "entrypoint", "로그인", "범위", "경계"],
     ):
         floor.append(
-            "Canonical diff scope records recent matching candidates, one selected range with selection rationale, excluded candidates, and any dirty-worktree exclusions separately."
+            "Canonical diff evidence records recent matching candidates, changed files, excluded candidates, and dirty-worktree exclusions as inspectable input for downstream review gating."
         )
     auth_scope_policy = snapshot.get("fields", {}).get("auth_scope_policy", {})
     if isinstance(auth_scope_policy, dict) and auth_scope_policy and _contains_any(
@@ -367,21 +367,287 @@ def _review_request_contract_floor(
         ["login", "auth", "session", "token", "entrypoint", "scope", "로그인", "인증", "세션", "토큰", "경계"],
     ):
         floor.append(
-            "Auth/session scope evidence enumerates login entrypoints, caller-visible state transitions, persisted session or token-store paths, excluded caller or storage paths with reasons, or proof that one helper is the only reachable boundary."
+            "Auth/session scope evidence enumerates login entrypoints, caller-visible state transitions, persisted session or token-store paths, excluded caller or storage paths with reasons, or proof that one helper is the only reachable boundary; record that evidence inside severity_rationale.md and do not create a separate scope inventory artifact."
         )
     if _contains_any(context, ["severity", "risk", "impact", "심각도", "리스크", "영향"]):
         floor.append(
-            "Each severity finding records severity, affected files or paths, user-visible impact, and the exact diff or code evidence used for the judgment."
+            "Severity evidence records affected files or paths, user-visible impact, and exact diff or code evidence as inspectable input for downstream severity gating."
         )
     if _contains_any(context, ["test gap", "uncertainty", "coverage", "테스트 공백", "불확실성", "커버리지"]):
         floor.append(
-            "Test gaps and uncertainties are separated explicitly: each gap names the missing coverage or unchecked path, and each uncertainty names the unresolved assumption or excluded path with reason."
+            "Coverage and uncertainty evidence stay separate: missing coverage or unchecked paths are explicit, and unresolved assumptions or excluded paths keep reasons for downstream review gating."
         )
-    if _contains_any(context, ["report", "review_report", "정리", "final", "최종"]):
+    quality_gate_policy = snapshot.get("fields", {}).get("quality_gate_policy", {})
+    if isinstance(quality_gate_policy, dict) and quality_gate_policy:
         floor.append(
-            "Final review_report.md keeps canonical sections for changed files, severity findings, test gaps, and uncertainties without duplicating them into separate output artifacts."
+            "If canonical diff scope or required review sections stay incomplete, leave explicit missing-evidence markers for downstream rerun gating."
         )
     return floor
+
+
+def _repair_review_report_owned_subtask(
+    *,
+    title: str,
+    goal: str,
+    role: str,
+    request_contract: Dict[str, Any] | None,
+) -> tuple[str, str, str]:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if normalize_role_preset(snapshot.get("preset", "")) != "review":
+        return title, goal, role
+    if not _is_review_like_role(role):
+        return title, goal, role
+    context = "\n".join((str(title or ""), str(goal or ""))).lower()
+    report_write_markers = [
+        "review_report",
+        "review report",
+        "write review_report",
+        "write review report",
+        "final review report",
+        "최종 보고서",
+        "보고서 작성",
+        "review_report.md",
+        "rerun or done",
+        "done or rerun",
+        "rerun/done",
+        "done/rerun",
+    ]
+    if not _contains_any(context, report_write_markers):
+        return title, goal, role
+    return (
+        "Review evidence consolidation",
+        "Consolidate canonical diff scope, severity rationale, test coverage gaps, and unresolved uncertainties into evidence that downstream review gating can validate.",
+        role,
+    )
+
+
+def _repair_repeated_review_evidence_subtasks(
+    *,
+    subtasks: List[Dict[str, Any]],
+    request_contract: Dict[str, Any] | None,
+) -> List[Dict[str, Any]]:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if normalize_role_preset(snapshot.get("preset", "")) != "review":
+        return subtasks
+    if len(subtasks) < 2:
+        return subtasks
+
+    auth_scope_policy = snapshot.get("fields", {}).get("auth_scope_policy", {})
+    has_auth_scope = isinstance(auth_scope_policy, dict) and bool(auth_scope_policy)
+    quality_gate_policy = snapshot.get("fields", {}).get("quality_gate_policy", {})
+    has_quality_gate = isinstance(quality_gate_policy, dict) and bool(quality_gate_policy)
+    stage_specs: List[tuple[str, str, List[str]]] = [
+        (
+            "Canonical diff 후보와 변경 파일 근거 수집",
+            "Enumerate recent matching commits, collect changed-file evidence, excluded candidates, and dirty-worktree exclusions for downstream review gating.",
+                [
+                    "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+                    "Canonical diff evidence records recent matching candidates, changed files, excluded candidates, and dirty-worktree exclusions as inspectable input for downstream review gating.",
+                    "Canonical diff evidence remains inspectable input for downstream review gating.",
+                ],
+        ),
+        (
+            "Auth/session 경계와 severity 근거 수집",
+            "Trace login or auth failure boundaries from the canonical diff evidence, identify entrypoints, caller-visible state transitions, persisted session or token stores, and record that boundary plus impact evidence inside severity_rationale.md for downstream severity gating.",
+            [
+                "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+                "Auth/session scope evidence enumerates login entrypoints, caller-visible state transitions, persisted session or token-store paths, excluded caller or storage paths with reasons, or proof that one helper is the only reachable boundary; record that evidence inside severity_rationale.md and do not create a separate scope inventory artifact.",
+                "Severity evidence records affected files or paths, user-visible impact, and exact diff or code evidence as inspectable input for downstream severity gating.",
+            ],
+        ),
+        (
+            "테스트 근거와 잔여 불확실성 수집",
+            "Collect missing coverage, unchecked paths, unresolved assumptions, and excluded-path reasons for downstream rerun gating.",
+            [
+                "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+                "Coverage and uncertainty evidence stay separate: missing coverage or unchecked paths are explicit, and unresolved assumptions or excluded paths keep reasons for downstream review gating.",
+                "If canonical diff scope or required review sections stay incomplete, leave explicit missing-evidence markers for downstream rerun gating.",
+            ],
+        ),
+    ]
+    if not has_auth_scope:
+        stage_specs[1] = (
+            "Severity 근거 수집",
+            "Collect concrete changed-file evidence, affected paths, and user-visible impact notes for downstream severity gating.",
+            [
+                "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+                "Severity evidence records affected files or paths, user-visible impact, and exact diff or code evidence as inspectable input for downstream severity gating.",
+                "Severity evidence stays tied to concrete changed files and inspectable by the review lane.",
+            ],
+        )
+    else:
+        stage_specs = [
+            (
+                "Auth/session 경계와 candidate scope 근거 수집",
+                "Trace login or auth failure boundaries first, identify entrypoints, caller-visible state transitions, persisted session or token stores, excluded caller or storage paths with reasons, and capture the path inventory that later canonical diff selection must cover.",
+                [
+                    "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+                    "Auth/session scope evidence enumerates login entrypoints, caller-visible state transitions, persisted session or token-store paths, excluded caller or storage paths with reasons, or proof that one helper is the only reachable boundary; record that evidence inside severity_rationale.md and do not create a separate scope inventory artifact.",
+                    "Scope evidence must exist before canonical diff selection so non-login entrypoints or persisted-store paths are not excluded from the final review range.",
+                ],
+            ),
+            (
+                "Canonical diff 범위와 severity 근거 수집",
+                "Using the auth/session scope evidence, enumerate recent matching commits, select one canonical diff range, record excluded candidates and dirty-worktree exclusions, and collect changed-file impact evidence for downstream severity gating.",
+                [
+                    "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+                    "Canonical diff evidence records recent matching candidates, changed files, excluded candidates, and dirty-worktree exclusions as inspectable input for downstream review gating.",
+                    "Severity evidence records affected files or paths, user-visible impact, and exact diff or code evidence as inspectable input for downstream severity gating.",
+                ],
+            ),
+            stage_specs[2],
+        ]
+    if not has_quality_gate:
+        stage_specs[2] = (
+            stage_specs[2][0],
+            stage_specs[2][1],
+            stage_specs[2][2][:2] + ["Test gaps and unresolved uncertainties remain explicit evidence for downstream review gating."],
+        )
+
+    def _stage_index(row: Dict[str, Any]) -> int | None:
+        context = "\n".join((str(row.get("title", "")).strip(), str(row.get("goal", "")).strip())).lower()
+        if has_auth_scope:
+            if _contains_any(context, ["test gap", "uncertainty", "coverage", "테스트 공백", "불확실성", "커버리지"]):
+                return 2
+            if _contains_any(
+                context,
+                ["login", "auth", "session", "token", "entrypoint", "scope", "로그인", "인증", "세션", "토큰", "경계", "persisted", "caller-visible"],
+            ):
+                return 0
+            if _contains_any(context, ["diff", "range", "changed files", "commit", "severity", "risk", "impact", "범위", "변경 파일", "커밋", "심각도", "리스크"]):
+                return 1
+            return None
+        if _contains_any(context, ["test gap", "uncertainty", "coverage", "테스트 공백", "불확실성", "커버리지"]):
+            return 2
+        if _contains_any(
+            context,
+            ["login", "auth", "session", "token", "entrypoint", "severity", "risk", "impact", "로그인", "인증", "세션", "토큰", "심각도", "리스크"],
+        ):
+            return 1
+        if _contains_any(context, ["diff", "scope", "range", "changed files", "commit", "범위", "경계", "변경 파일", "커밋"]):
+            return 0
+        return None
+
+    def _is_consolidation_row(row: Dict[str, Any]) -> bool:
+        context = "\n".join((str(row.get("title", "")).strip(), str(row.get("goal", "")).strip())).lower()
+        return _contains_any(
+            context,
+            [
+                "review evidence consolidation",
+                "review_report",
+                "review report",
+                "final review report",
+                "최종 보고서",
+                "보고서 작성",
+                "rerun or done",
+                "done or rerun",
+                "downstream review gating can validate",
+            ],
+        )
+
+    titles = [str(row.get("title", "")).strip().lower() for row in subtasks if isinstance(row, dict)]
+    all_consolidation = bool(titles) and len(set(titles)) == 1 and titles[0] == "review evidence consolidation"
+
+    assigned: Dict[int, Dict[str, Any]] = {}
+    unassigned: List[Dict[str, Any]] = []
+    changed = False
+    for row in subtasks:
+        if not isinstance(row, dict):
+            continue
+        stage_idx = _stage_index(row)
+        consolidation = _is_consolidation_row(row)
+        if consolidation or stage_idx is None or stage_idx in assigned:
+            unassigned.append(dict(row))
+            if consolidation or stage_idx in assigned:
+                changed = True
+            continue
+        assigned[stage_idx] = dict(row)
+
+    missing = [idx for idx in range(len(stage_specs)) if idx not in assigned]
+    force_canonicalize = has_quality_gate
+    if not changed and not missing and not all_consolidation and not force_canonicalize:
+        return subtasks
+
+    for row in unassigned:
+        if not missing:
+            break
+        assigned[missing.pop(0)] = row
+        changed = True
+
+    repaired: List[Dict[str, Any]] = []
+    for stage_idx in range(len(stage_specs)):
+        row = assigned.get(stage_idx)
+        if not isinstance(row, dict):
+            continue
+        title, goal, acceptance = stage_specs[stage_idx]
+        updated = dict(row)
+        updated["title"] = title
+        updated["goal"] = goal
+        updated["acceptance"] = acceptance[:3]
+        repaired.append(updated)
+
+    if not repaired:
+        return subtasks
+
+    for idx, row in enumerate(repaired):
+        deps: List[str] = []
+        if idx == 1 and repaired:
+            deps = [str(repaired[0].get("id", "")).strip()]
+        elif idx >= 2:
+            deps = [
+                str(repaired[j].get("id", "")).strip()
+                for j in range(idx)
+                if str(repaired[j].get("id", "")).strip()
+            ]
+        if deps:
+            row["depends_on"] = deps[:4]
+        else:
+            row.pop("depends_on", None)
+
+    valid_ids = {str(row.get("id", "")).strip() for row in repaired if isinstance(row, dict)}
+    for row in repaired:
+        if not isinstance(row, dict):
+            continue
+        depends = [
+            token
+            for token in [str(item).strip() for item in (row.get("depends_on") or []) if str(item).strip()]
+            if token in valid_ids and token != str(row.get("id", "")).strip()
+        ]
+        if depends:
+            row["depends_on"] = depends[:4]
+        else:
+            row.pop("depends_on", None)
+    return repaired
+
+
+def _repair_review_plan_summary(
+    *,
+    summary: str,
+    subtasks: List[Dict[str, Any]],
+    request_contract: Dict[str, Any] | None,
+) -> str:
+    snapshot = normalize_request_contract_snapshot(request_contract or {})
+    if normalize_role_preset(snapshot.get("preset", "")) != "review":
+        return summary
+    fields = snapshot.get("fields", {}) if isinstance(snapshot.get("fields"), dict) else {}
+    has_auth_scope = isinstance(fields.get("auth_scope_policy"), dict) and bool(fields.get("auth_scope_policy"))
+    has_quality_gate = isinstance(fields.get("quality_gate_policy"), dict) and bool(fields.get("quality_gate_policy"))
+    if has_auth_scope:
+        parts = [
+            "review",
+            "auth/session scope -> canonical diff+severity -> test gaps+uncertainties",
+        ]
+    else:
+        parts = [
+            "review",
+            "canonical diff -> severity -> test gaps+uncertainties",
+        ]
+    if has_quality_gate:
+        parts.append("review lane validates review_report and rerun gate")
+    else:
+        parts.append("review lane validates review_report")
+    repaired = " | ".join(parts)
+    return repaired[:240]
 
 
 def _mixed_request_contract_floor(
@@ -597,6 +863,13 @@ def normalize_task_plan_payload(
         else:
             role = worker_list[min(i - 1, len(worker_list) - 1)]
         role = _coerce_owner_role_for_preset(role, preset=phase2_team_preset, worker_roles=worker_roles)
+        if phase2_team_preset == "review":
+            title, goal, role = _repair_review_report_owned_subtask(
+                title=title,
+                goal=goal,
+                role=role,
+                request_contract=request_contract,
+            )
         if phase2_team_preset == "mixed":
             title, goal, role = _repair_mixed_review_owned_subtask(
                 title=title,
@@ -679,6 +952,17 @@ def normalize_task_plan_payload(
         if depends_on:
             item["depends_on"] = depends_on[:4]
         normalized.append(item)
+
+    if phase2_team_preset == "review":
+        normalized = _repair_repeated_review_evidence_subtasks(
+            subtasks=normalized,
+            request_contract=request_contract,
+        )
+        summary = _repair_review_plan_summary(
+            summary=summary,
+            subtasks=normalized,
+            request_contract=request_contract,
+        )
 
     limit = max(1, int(max_subtasks or 1))
     normalized = normalized[:limit]

@@ -6,7 +6,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_orch_roles import classify_dispatch_role_preset
 from aoe_tg_request_contract import (
+    apply_execution_brief_snapshot,
     apply_request_contract_snapshot,
+    build_execution_brief,
+    execution_brief_block_reason,
+    execution_brief_is_offdesk_allowed,
+    execution_brief_summary,
     build_request_contract,
     request_contract_block_reason,
     request_contract_is_blocking,
@@ -227,6 +232,7 @@ def execute_run_command_flow(
         if dispatch_mode
         else {}
     )
+    execution_brief = build_execution_brief(request_contract) if dispatch_mode else {}
     selected_role_preset = (
         str(request_contract.get("preset", "")).strip().lower()
         or classify_dispatch_role_preset(source_prompt, selected_roles=selected_dispatch_roles)
@@ -263,16 +269,22 @@ def execute_run_command_flow(
             run_intent_trace=run_intent_trace,
             request_contract=request_contract,
         )
+        if isinstance(provisional_task, dict):
+            apply_execution_brief_snapshot(provisional_task, execution_brief)
         save_manager_state(args.manager_state_file, manager_state)
 
-    if dispatch_mode and request_contract_is_blocking(request_contract):
+    if dispatch_mode and not execution_brief_is_offdesk_allowed(execution_brief):
         contract_reason = request_contract_block_reason(request_contract)
+        brief_reason = execution_brief_block_reason(execution_brief)
+        blocked_reason = contract_reason if request_contract_is_blocking(request_contract) else brief_reason
+        block_context = "contract-incomplete" if request_contract_is_blocking(request_contract) else "execution-brief-blocked"
         if isinstance(provisional_task, dict):
             apply_request_contract_snapshot(provisional_task, request_contract)
+            apply_execution_brief_snapshot(provisional_task, execution_brief)
             helpers.finalize_provisional_task(
                 task=provisional_task,
                 outcome="blocked",
-                reason=contract_reason,
+                reason=blocked_reason,
                 lifecycle_set_stage=lifecycle_set_stage,
                 now_iso=now_iso,
             )
@@ -282,28 +294,39 @@ def execute_run_command_flow(
                 {
                     "kind": "run_contract",
                     "status": "blocked",
-                    "reason_code": "contract_incomplete",
+                    "reason_code": "contract_incomplete" if request_contract_is_blocking(request_contract) else "execution_brief_blocked",
                     "next_step": "/offdesk review",
-                    "detail": contract_reason,
+                    "detail": blocked_reason,
                 }
             )
-        send(
-            "request contract incomplete\n"
-            f"- preset: {selected_role_preset or '-'}\n"
-            f"- summary: {request_contract_summary(request_contract) or '-'}\n"
-            f"- reason: {contract_reason}\n"
-            "hint: 입력 파일, 대상 컬럼, 변환 규칙, artifact contract를 명시한 뒤 다시 실행하세요.",
-            context="contract-incomplete",
-            with_menu=True,
-        )
+        if request_contract_is_blocking(request_contract):
+            send(
+                "request contract incomplete\n"
+                f"- preset: {selected_role_preset or '-'}\n"
+                f"- summary: {request_contract_summary(request_contract) or '-'}\n"
+                f"- reason: {blocked_reason}\n"
+                "hint: 입력 파일, 대상 컬럼, 변환 규칙, artifact contract를 명시한 뒤 다시 실행하세요.",
+                context=block_context,
+                with_menu=True,
+            )
+        else:
+            send(
+                "execution brief blocked\n"
+                f"- preset: {selected_role_preset or '-'}\n"
+                f"- brief: {execution_brief_summary(execution_brief) or '-'}\n"
+                f"- reason: {blocked_reason}\n"
+                "hint: on-desk에서 executable slice와 operator decision boundary를 먼저 확정하세요.",
+                context=block_context,
+                with_menu=True,
+            )
         log_event(
-            event="contract_incomplete",
+            event="contract_incomplete" if request_contract_is_blocking(request_contract) else "execution_brief_blocked",
             project=key,
             request_id=provisional_req_id,
             task=provisional_task if isinstance(provisional_task, dict) else None,
             stage="planning",
             status="failed",
-            detail=contract_reason[:280],
+            detail=blocked_reason[:280],
         )
         if not args.dry_run:
             effective_todo_id = helpers.effective_todo_token(
@@ -318,7 +341,7 @@ def execute_run_command_flow(
                 todo_id=todo_id,
                 pending_todo_used=pending_todo_used,
                 run_auto_source=run_auto_source,
-                reason=contract_reason,
+                reason=blocked_reason,
                 now_iso=now_iso,
             )
             helpers.maybe_send_manual_followup_alert(

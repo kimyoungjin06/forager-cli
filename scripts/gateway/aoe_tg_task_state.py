@@ -10,7 +10,15 @@ from aoe_tg_operator_summary import runtime_latest_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
-from aoe_tg_request_contract import apply_request_contract_snapshot, normalize_request_contract_snapshot
+from aoe_tg_request_contract import (
+    apply_background_run_ticket_snapshot,
+    apply_execution_brief_snapshot,
+    apply_request_contract_snapshot,
+    build_execution_brief,
+    normalize_background_run_ticket_snapshot,
+    normalize_execution_brief_snapshot,
+    normalize_request_contract_snapshot,
+)
 from aoe_tg_team_observatory import observatory_monitor_line, task_team_observatory_snapshot
 
 
@@ -896,6 +904,70 @@ def sanitize_task_record(
             "request_contract_required_outputs",
             "request_contract_fields",
             "request_contract_artifact_contracts",
+        ):
+            task.pop(key, None)
+
+    execution_brief_snapshot = normalize_execution_brief_snapshot(
+        {
+            "version": task.get("execution_brief_version"),
+            "status": task.get("execution_brief_status"),
+            "summary": task.get("execution_brief_summary"),
+            "executable_slice": task.get("execution_brief_executable_slice"),
+            "blocked_slice": task.get("execution_brief_blocked_slice"),
+            "operator_decision": task.get("execution_brief_operator_decision"),
+            "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
+        }
+    )
+    if not execution_brief_snapshot and request_contract_snapshot:
+        execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
+    if execution_brief_snapshot:
+        apply_execution_brief_snapshot(task, execution_brief_snapshot)
+    else:
+        for key in (
+            "execution_brief_version",
+            "execution_brief_status",
+            "execution_brief_summary",
+            "execution_brief_executable_slice",
+            "execution_brief_blocked_slice",
+            "execution_brief_operator_decision",
+            "execution_brief_offdesk_allowed",
+        ):
+            task.pop(key, None)
+
+    background_run_snapshot = normalize_background_run_ticket_snapshot(
+        {
+            "version": task.get("background_run_ticket_version"),
+            "ticket_id": task.get("background_run_ticket_id"),
+            "status": task.get("background_run_status"),
+            "runner_target": task.get("background_run_runner_target"),
+            "launch_mode": task.get("background_run_launch_mode"),
+            "created_at": task.get("background_run_created_at"),
+            "created_by": task.get("background_run_created_by"),
+            "source_surface": task.get("background_run_source_surface"),
+            "request_id": task.get("background_run_request_id"),
+            "project_key": task.get("background_run_project_key"),
+            "execution_brief_status": task.get("background_run_execution_brief_status"),
+            "evidence_bundle": task.get("background_run_evidence_bundle"),
+            "evidence_artifacts": task.get("background_run_evidence_artifacts"),
+        }
+    )
+    if background_run_snapshot:
+        apply_background_run_ticket_snapshot(task, background_run_snapshot)
+    else:
+        for key in (
+            "background_run_ticket_version",
+            "background_run_ticket_id",
+            "background_run_status",
+            "background_run_runner_target",
+            "background_run_launch_mode",
+            "background_run_created_at",
+            "background_run_created_by",
+            "background_run_source_surface",
+            "background_run_request_id",
+            "background_run_project_key",
+            "background_run_execution_brief_status",
+            "background_run_evidence_bundle",
+            "background_run_evidence_artifacts",
         ):
             task.pop(key, None)
 
@@ -1884,6 +1956,7 @@ def sync_task_lifecycle(
     )
     if request_contract_snapshot:
         apply_request_contract_snapshot(task, request_contract_snapshot)
+        apply_execution_brief_snapshot(task, build_execution_brief(request_contract_snapshot))
 
     assignments = int(snap.get("assignments", 0) or 0)
     replies = int(snap.get("replies", 0) or 0)
@@ -1985,6 +2058,11 @@ def sync_task_lifecycle(
         task["result"]["request_contract_status"] = str(request_contract_snapshot.get("status", "")).strip()
         if str(request_contract_snapshot.get("summary", "")).strip():
             task["result"]["request_contract_summary"] = str(request_contract_snapshot.get("summary", "")).strip()
+        brief = build_execution_brief(request_contract_snapshot)
+        if str(brief.get("status", "")).strip():
+            task["result"]["execution_brief_status"] = str(brief.get("status", "")).strip()
+        if str(brief.get("summary", "")).strip():
+            task["result"]["execution_brief_summary"] = str(brief.get("summary", "")).strip()
     rate_limit = request_data.get("rate_limit") if isinstance(request_data.get("rate_limit"), dict) else {}
     if rate_limit:
         task["rate_limit"] = dict(rate_limit)

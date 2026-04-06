@@ -1,7 +1,33 @@
 #!/usr/bin/env python3
 """Gateway operator workflow regression tests."""
 
+import json
+
 from _gateway_test_support import *  # noqa: F401,F403
+
+from aoe_tg_background_runs import (
+    advance_background_run_ticket,
+    background_runs_state_path,
+    claim_background_run_ticket,
+    claim_next_background_run_ticket,
+    list_background_run_tickets,
+    load_background_runs_state,
+    mark_stale_background_run_tickets,
+    summarize_background_runs_state,
+    upsert_background_run_ticket,
+)
+from aoe_tg_local_background_worker import (
+    drain_local_background_queue,
+    drain_local_background_queue_once,
+    register_local_background_run,
+    run_local_background_ticket,
+)
+from aoe_tg_request_contract import (
+    background_run_evidence_artifacts_from_task,
+    background_run_evidence_bundle_from_task,
+    build_background_run_ticket,
+)
+
 def test_orch_map_reply_markup_contains_use_focus_status_todo_and_active_sync_actions() -> None:
     state = _empty_state()
     state["projects"]["twinpaper"] = {
@@ -97,11 +123,32 @@ def test_resolve_message_command_parses_slash_orch_repair() -> None:
     assert resolved.orch_target == "O2"
 
 
+def test_resolve_message_command_parses_slash_orch_bgq_clean() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgq-clean O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgq-clean"
+    assert resolved.orch_target == "O2"
+
+
 def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     state = _empty_state()
     project_root = tmp_path / "TwinPaper"
     team_dir = project_root / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
     state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
@@ -182,6 +229,115 @@ def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     assert messages
     assert "orch repair finished" in messages[-1]
     assert "- after: ready" in messages[-1]
+
+
+def test_orch_bgq_clean_marks_stale_background_queue_tickets(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    queue_path = background_runs_state_path(team_dir)
+    upsert_background_run_ticket(
+        queue_path,
+        {
+            "ticket_id": "BGT-STALE-1",
+            "request_id": "REQ-STALE-1",
+            "project_key": "twinpaper",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "test",
+            "source_surface": "offdesk",
+            "status": "running",
+            "created_at": "2026-03-16T07:00:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T07:00:00+09:00",
+    )
+
+    sent = []
+
+    def _send(msg: str, **kwargs):
+        sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup")))
+        return True
+
+    handled = orch_task_handlers.handle_orch_task_command(
+        cmd="orch-bgq-clean",
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-03-16T10:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    snapshot = summarize_background_runs_state(queue_path)
+
+    assert handled is True
+    assert sent
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgq-clean"
+    assert "background queue cleanup" in text
+    assert "- marked_stale: 1" in text
+    assert snapshot["stale_count"] >= 1
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch status O2" in buttons
 
 
 def test_orch_repair_all_repairs_multiple_projects(tmp_path: Path) -> None:
@@ -2614,6 +2770,13 @@ def test_handle_run_or_unknown_command_blocks_incomplete_data_contract_before_pl
         "accepted_input_formats",
         "normalize_to",
     ]
+    assert task["execution_brief_status"] == "underspecified"
+    assert task["execution_brief_blocked_slice"] == [
+        "source_path",
+        "target_column",
+        "accepted_input_formats",
+        "normalize_to",
+    ]
     assert task["tf_phase"] == "blocked"
     assert task["stages"]["planning"] == "failed"
     assert task["stages"]["close"] == "failed"
@@ -2941,6 +3104,30 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     assert task["phase1_current_phase"] == "planner"
     assert task["phase1_current_round"] == 1
     assert task["phase1_current_total_rounds"] == 3
+    assert task["background_run_status"] == "queued"
+    assert task["background_run_runner_target"] == "local_background"
+    assert task["background_run_launch_mode"] == "detached_no_wait"
+    assert task["background_run_source_surface"] == "run_no_wait"
+    assert task["background_run_request_id"] == "REQ-DETACHED"
+    assert task["background_run_project_key"] == "twinpaper"
+    assert task["background_run_execution_brief_status"] == "executable"
+    assert task["background_run_ticket_id"].startswith("BGT-REQ-DETACHED-")
+    assert task["result"]["background_run_status"] == "queued"
+    assert task["result"]["background_run_runner_target"] == "local_background"
+    assert task["result"]["background_run_ticket_id"].startswith("BGT-REQ-DETACHED-")
+    queue_file = team_dir / "background_runs.json"
+    assert queue_file.exists()
+    queue_state = json.loads(queue_file.read_text(encoding="utf-8"))
+    rows = queue_state.get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket_id"].startswith("BGT-REQ-DETACHED-")
+    assert row["status"] == "queued"
+    assert row["runner_target"] == "local_background"
+    assert row["launch_mode"] == "detached_no_wait"
+    assert row["source_surface"] == "run_no_wait"
+    assert row["request_id"] == "REQ-DETACHED"
+    assert row["project_key"] == "twinpaper"
     assert manager_state["projects"]["twinpaper"]["last_request_id"] == "REQ-DETACHED"
     assert saves
     assert sent
@@ -2954,6 +3141,344 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     assert "/monitor" in buttons
     assert "/offdesk review O2" in buttons
     assert any(evt.get("event") == "dispatch_detached" for evt in logged)
+
+
+def test_background_run_ticket_helpers_advance_queue_state(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    seeded = upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REQ-DETACHED-001",
+            request_id="REQ-DETACHED",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    assert seeded["status"] == "queued"
+
+    claimed = claim_background_run_ticket(
+        queue_file,
+        "BGT-REQ-DETACHED-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="thread:REQ-DETACHED",
+        source_surface="run_no_wait",
+    )
+    assert claimed["status"] == "dispatching"
+    assert claimed["evidence_bundle"] == "status=dispatching | outcome=worker_claimed"
+
+    running = advance_background_run_ticket(
+        queue_file,
+        "BGT-REQ-DETACHED-001",
+        now_iso=lambda: "2026-03-13T18:55:03+0900",
+        status="running",
+        evidence_bundle="status=running | outcome=dispatch_flow_started",
+    )
+    assert running["status"] == "running"
+
+    completed = advance_background_run_ticket(
+        queue_file,
+        "BGT-REQ-DETACHED-001",
+        now_iso=lambda: "2026-03-13T18:55:04+0900",
+        status="completed",
+        evidence_bundle="status=completed | outcome=dispatch_flow_returned",
+        evidence_artifacts=["review_report.md"],
+    )
+    assert completed["status"] == "completed"
+    assert completed["evidence_artifacts"] == ["review_report.md"]
+
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket_id"] == "BGT-REQ-DETACHED-001"
+    assert row["status"] == "completed"
+    assert row["evidence_bundle"] == "status=completed | outcome=dispatch_flow_returned"
+    assert row["evidence_artifacts"] == ["review_report.md"]
+
+
+def test_local_background_worker_claims_and_completes_ticket(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REQ-WORKER-001",
+            request_id="REQ-WORKER",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    updates: list[dict[str, Any]] = []
+    queue_errors: list[str] = []
+
+    result = run_local_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-REQ-WORKER-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        run_target=lambda: "ok",
+        on_ticket_update=lambda ticket: updates.append(dict(ticket)),
+        on_queue_error=lambda event_name, exc: queue_errors.append(f"{event_name}:{exc}"),
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="thread:REQ-WORKER",
+        source_surface="run_no_wait",
+        completed_evidence_artifacts=lambda: ["review_report.md"],
+    )
+
+    assert result == "ok"
+    assert queue_errors == []
+    assert [row["status"] for row in updates] == ["dispatching", "running", "completed"]
+    state = load_background_runs_state(queue_file)
+    rows = state.get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket_id"] == "BGT-REQ-WORKER-001"
+    assert row["status"] == "completed"
+    assert row["evidence_bundle"] == "status=completed | outcome=dispatch_flow_returned"
+    assert row["evidence_artifacts"] == ["review_report.md"]
+
+
+def test_background_run_evidence_artifacts_from_task_uses_request_contract_paths() -> None:
+    task = {
+        "request_contract_required_outputs": ["review_report", "severity_rationale"],
+        "request_contract_artifact_contracts": {
+            "review_report": {"path": "review_report.md"},
+            "severity_rationale": {"path": "review_evidence/severity_rationale.md"},
+        },
+    }
+
+    artifacts = background_run_evidence_artifacts_from_task(task)
+
+    assert artifacts == ["review_report.md", "review_evidence/severity_rationale.md"]
+
+
+def test_background_run_evidence_bundle_from_task_uses_task_outcome_fields() -> None:
+    task = {
+        "status": "completed",
+        "tf_phase": "completed",
+        "result": {
+            "complete": True,
+            "verdict": "success",
+        },
+    }
+
+    bundle = background_run_evidence_bundle_from_task(task)
+
+    assert bundle == "status=completed | outcome=dispatch_completed | phase=completed | complete=true | verdict=success"
+
+
+def test_background_run_queue_claims_next_matching_ticket(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    for ticket_id, runner_target, status in [
+        ("BGT-001", "github_runner", "queued"),
+        ("BGT-002", "local_background", "running"),
+        ("BGT-003", "local_background", "queued"),
+        ("BGT-004", "local_background", "queued"),
+    ]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target=runner_target,
+                launch_mode="detached_no_wait",
+                created_at="2026-03-13T18:55:00+0900",
+                created_by="telegram:939062873",
+                source_surface="run_no_wait",
+                status=status,
+            ),
+            now_iso=lambda: "2026-03-13T18:55:01+0900",
+        )
+
+    queued = list_background_run_tickets(queue_file, statuses=["queued"], runner_target="local_background")
+    assert [row["ticket_id"] for row in queued] == ["BGT-003", "BGT-004"]
+
+    claimed = claim_next_background_run_ticket(
+        queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-003"
+    assert claimed["status"] == "dispatching"
+    state = load_background_runs_state(queue_file)
+    rows = {row["ticket_id"]: row for row in (state.get("runs") or [])}
+    assert rows["BGT-003"]["status"] == "dispatching"
+    assert rows["BGT-004"]["status"] == "queued"
+    assert rows["BGT-001"]["status"] == "queued"
+
+
+def test_background_run_queue_drain_uses_registered_handler(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REG-001",
+            request_id="REQ-REG-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    updates: list[str] = []
+    ran: list[str] = []
+    queue_errors: list[str] = []
+    assert register_local_background_run(
+        ticket_id="BGT-REG-001",
+        run_target=lambda: ran.append("ran") or "ok",
+        on_ticket_update=lambda ticket: updates.append(str(ticket.get("status", "")).strip()),
+        on_queue_error=lambda event_name, exc: queue_errors.append(f"{event_name}:{exc}"),
+        completed_evidence_artifacts=lambda: ["review_report.md"],
+    ) is True
+
+    claimed = drain_local_background_queue_once(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-REG-001"
+    assert ran == ["ran"]
+    assert queue_errors == []
+    assert updates == ["dispatching", "running", "completed"]
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-REG-001"]["status"] == "completed"
+    assert rows["BGT-REG-001"]["evidence_artifacts"] == ["review_report.md"]
+
+
+def test_background_run_queue_drain_consumes_multiple_registered_tickets(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    for ticket_id in ["BGT-REG-101", "BGT-REG-102"]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target="local_background",
+                launch_mode="detached_no_wait",
+                created_at="2026-03-13T18:55:00+0900",
+                created_by="telegram:939062873",
+                source_surface="run_no_wait",
+                status="queued",
+            ),
+            now_iso=lambda: "2026-03-13T18:55:01+0900",
+        )
+
+    ran: list[str] = []
+    for ticket_id in ["BGT-REG-101", "BGT-REG-102"]:
+        assert register_local_background_run(
+            ticket_id=ticket_id,
+            run_target=lambda token=ticket_id: ran.append(token) or "ok",
+            on_ticket_update=lambda ticket: None,
+            on_queue_error=lambda event_name, exc: None,
+            completed_evidence_artifacts=lambda: ["review_report.md"],
+        ) is True
+
+    result = drain_local_background_queue(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+        max_items=8,
+    )
+
+    assert result["claimed_count"] == 2
+    assert result["claimed_ticket_ids"] == ["BGT-REG-101", "BGT-REG-102"]
+    assert ran == ["BGT-REG-101", "BGT-REG-102"]
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-REG-101"]["status"] == "completed"
+    assert rows["BGT-REG-102"]["status"] == "completed"
+
+
+def test_background_run_summary_and_stale_marking(tmp_path: Path) -> None:
+    queue_file = background_runs_state_path(tmp_path)
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-STALE-001",
+            request_id="REQ-STALE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            touched_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="running",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:00+0900",
+    )
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-QUEUE-001",
+            request_id="REQ-QUEUE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:56:00+0900",
+            touched_at="2026-03-13T18:56:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:56:00+0900",
+    )
+
+    before = summarize_background_runs_state(queue_file)
+    assert before["depth"] == 2
+    assert before["stale_count"] == 0
+
+    marked = mark_stale_background_run_tickets(
+        queue_file,
+        now_iso=lambda: "2026-03-13T20:00:00+0900",
+        stale_after_sec=1800,
+    )
+    assert marked == {"stale_count": 1, "changed": True}
+
+    after = summarize_background_runs_state(queue_file)
+    assert after["depth"] == 1
+    assert after["stale_count"] == 1
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-STALE-001"]["status"] == "stale"
+    assert rows["BGT-QUEUE-001"]["status"] == "queued"
 
 
 @pytest.mark.parametrize(

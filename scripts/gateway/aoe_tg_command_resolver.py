@@ -313,11 +313,14 @@ def resolve_message_command(
                 elif sub in {"repair", "init", "fix"}:
                     out.cmd = "orch-repair"
                     out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgq-clean", "queue-clean", "cleanup-queue"}:
+                    out.cmd = "orch-bgq-clean"
+                    out.orch_target = tail[0].strip() if tail else None
                 elif sub in {"status", "stat"}:
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -439,7 +442,7 @@ def resolve_message_command(
                 out.run_no_wait_override = bool(quick.get("no_wait", False))
                 out.run_force_mode = quick.get("force_mode")
                 out.orch_target = quick.get("orch")
-            elif out.cmd in {"orch-use", "orch-status", "orch-repair"}:
+            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean"}:
                 out.orch_target = quick.get("orch")
             elif out.cmd == "orch-check":
                 out.orch_target = quick.get("orch")
@@ -501,7 +504,7 @@ def resolve_message_command(
                 out.orch_target = cli.get("orch")
             elif out.cmd == "add-role":
                 _apply_add_role_cli(cli)
-            elif out.cmd in {"orch-use", "orch-status", "orch-repair"}:
+            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean"}:
                 out.orch_target = cli.get("orch")
             elif out.cmd == "orch-add":
                 out.orch_add_name = str(cli.get("orch", "")).strip()
@@ -639,6 +642,7 @@ def resolve_message_command(
                 "status",
                 "orch-kpi",
                 "orch-monitor",
+                "orch-bgq-clean",
                 "orch-check",
                 "orch-task",
                 "orch-pick",
@@ -672,6 +676,8 @@ def resolve_message_command(
                     out.orch_monitor_limit = natural.get("limit")
                 elif ncmd == "orch-kpi":
                     out.orch_kpi_hours = natural.get("hours")
+                elif ncmd == "orch-bgq-clean":
+                    out.orch_target = natural.get("orch")
                 elif ncmd == "mode":
                     token = str(natural.get("mode", "status")).strip().lower()
                     out.mode_setting = token if token in {"status", "dispatch", "direct", "off"} else "invalid"

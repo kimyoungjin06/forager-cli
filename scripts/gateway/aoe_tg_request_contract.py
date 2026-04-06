@@ -22,6 +22,30 @@ from aoe_tg_request_contract_review import (
 
 
 REQUEST_CONTRACT_VERSION = "2026-03-30.v1"
+EXECUTION_BRIEF_VERSION = "2026-04-04.v1"
+BACKGROUND_RUN_TICKET_VERSION = "2026-04-04.v1"
+EXECUTION_BRIEF_STATUSES = (
+    "executable",
+    "underspecified",
+    "infeasible",
+    "partially_executable",
+    "operator_decision_required",
+)
+BACKGROUND_RUN_STATUSES = (
+    "queued",
+    "dispatching",
+    "running",
+    "completed",
+    "failed",
+    "canceled",
+    "stale",
+)
+BACKGROUND_RUNNER_TARGETS = (
+    "local_background",
+    "local_tmux",
+    "github_runner",
+    "remote_worker",
+)
 
 
 def _trim(raw: Any, limit: int) -> str:
@@ -163,6 +187,213 @@ def normalize_request_contract_snapshot(raw: Any) -> Dict[str, Any]:
         snapshot["summary"] = " | ".join(str(item).strip() for item in parts if str(item).strip())[:400]
 
     return snapshot
+
+
+def normalize_execution_brief_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+
+    status = _trim(raw.get("status", ""), 48).lower()
+    if status not in EXECUTION_BRIEF_STATUSES:
+        status = ""
+
+    snapshot: Dict[str, Any] = {
+        "version": _trim(raw.get("version", EXECUTION_BRIEF_VERSION), 48) or EXECUTION_BRIEF_VERSION,
+    }
+    if status:
+        snapshot["status"] = status
+
+    for key in ("summary", "operator_decision", "non_goals"):
+        token = _trim(raw.get(key, ""), 320)
+        if token:
+            snapshot[key] = token
+
+    executable_slice = _dedupe_rows(list(raw.get("executable_slice") or []), limit=12, text_limit=160)
+    blocked_slice = _dedupe_rows(list(raw.get("blocked_slice") or []), limit=12, text_limit=160)
+    if executable_slice:
+        snapshot["executable_slice"] = executable_slice
+    if blocked_slice:
+        snapshot["blocked_slice"] = blocked_slice
+
+    if "offdesk_allowed" in raw:
+        snapshot["offdesk_allowed"] = _normalize_bool(raw.get("offdesk_allowed"), False)
+
+    return snapshot
+
+
+def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+
+    status = _trim(raw.get("status", ""), 32).lower()
+    if status not in BACKGROUND_RUN_STATUSES:
+        status = ""
+    runner_target = _trim(raw.get("runner_target", ""), 64).lower()
+    if runner_target not in BACKGROUND_RUNNER_TARGETS:
+        runner_target = ""
+
+    snapshot: Dict[str, Any] = {
+        "version": _trim(raw.get("version", BACKGROUND_RUN_TICKET_VERSION), 48) or BACKGROUND_RUN_TICKET_VERSION,
+    }
+    if status:
+        snapshot["status"] = status
+    if runner_target:
+        snapshot["runner_target"] = runner_target
+
+    for key, limit in (
+        ("ticket_id", 96),
+        ("request_id", 96),
+        ("project_key", 64),
+        ("execution_brief_status", 48),
+        ("launch_mode", 64),
+        ("created_at", 64),
+        ("touched_at", 64),
+        ("created_by", 96),
+        ("source_surface", 64),
+    ):
+        token = _trim(raw.get(key, ""), limit)
+        if token:
+            snapshot[key] = token
+
+    evidence_bundle = raw.get("evidence_bundle")
+    evidence_summary = ""
+    evidence_artifacts: List[str] = []
+    if isinstance(evidence_bundle, dict):
+        bundle_id = _trim(evidence_bundle.get("bundle_id", ""), 96)
+        bundle_status = _trim(evidence_bundle.get("status", ""), 48)
+        final_outcome = _trim(evidence_bundle.get("final_outcome", ""), 96)
+        summary = _trim(evidence_bundle.get("summary", ""), 240)
+        if summary:
+            evidence_summary = summary
+        else:
+            parts: List[str] = []
+            if bundle_id:
+                parts.append(f"id={bundle_id}")
+            if bundle_status:
+                parts.append(f"status={bundle_status}")
+            if final_outcome:
+                parts.append(f"outcome={final_outcome}")
+            evidence_summary = " | ".join(parts)[:240]
+        evidence_artifacts = _dedupe_rows(list(evidence_bundle.get("artifacts") or []), limit=8, text_limit=160)
+    else:
+        evidence_summary = _trim(evidence_bundle, 240)
+        evidence_artifacts = _dedupe_rows(list(raw.get("evidence_artifacts") or []), limit=8, text_limit=160)
+    if evidence_summary:
+        snapshot["evidence_bundle"] = evidence_summary
+    if evidence_artifacts:
+        snapshot["evidence_artifacts"] = evidence_artifacts
+
+    return snapshot
+
+
+def build_execution_brief(contract: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_request_contract_snapshot(contract)
+    if not snapshot:
+        return {}
+
+    contract_status = str(snapshot.get("status", "")).strip().lower()
+    missing = list(snapshot.get("missing_fields") or [])
+    ambiguity_notes = list(snapshot.get("ambiguity_notes") or [])
+    required_outputs = list(snapshot.get("required_outputs") or [])
+    artifact_contracts = snapshot.get("artifact_contracts") if isinstance(snapshot.get("artifact_contracts"), dict) else {}
+
+    status = "executable"
+    operator_decision = ""
+    if contract_status == "ambiguous":
+        status = "operator_decision_required" if ambiguity_notes else "underspecified"
+        operator_decision = "; ".join(str(item).strip() for item in ambiguity_notes[:3] if str(item).strip())[:320]
+    elif contract_status == "incomplete":
+        status = "underspecified"
+
+    executable_slice: List[str] = []
+    blocked_slice: List[str] = []
+
+    for item in required_outputs[:8]:
+        token = str(item or "").strip()
+        if token:
+            executable_slice.append(token)
+    if not executable_slice and artifact_contracts:
+        for key in sorted(artifact_contracts.keys())[:8]:
+            token = str(key or "").strip()
+            if token:
+                executable_slice.append(token)
+
+    for item in missing[:8]:
+        token = str(item or "").strip()
+        if token:
+            blocked_slice.append(token)
+    for item in ambiguity_notes[:4]:
+        token = str(item or "").strip()
+        if token and token not in blocked_slice:
+            blocked_slice.append(token)
+
+    if status == "operator_decision_required" and not operator_decision and blocked_slice:
+        operator_decision = blocked_slice[0][:320]
+
+    summary_parts: List[str] = [status]
+    if executable_slice:
+        summary_parts.append("do=" + ",".join(executable_slice[:4]))
+    if blocked_slice:
+        summary_parts.append("blocked=" + ",".join(blocked_slice[:3]))
+    summary = " | ".join(part for part in summary_parts if part).strip()[:400]
+
+    return normalize_execution_brief_snapshot(
+        {
+            "version": EXECUTION_BRIEF_VERSION,
+            "status": status,
+            "summary": summary,
+            "executable_slice": executable_slice,
+            "blocked_slice": blocked_slice,
+            "operator_decision": operator_decision,
+            "offdesk_allowed": status in {"executable", "partially_executable"},
+        }
+    )
+
+
+def build_background_run_ticket(
+    *,
+    request_id: str,
+    project_key: str,
+    execution_brief_status: str = "",
+    runner_target: str = "local_background",
+    launch_mode: str = "detached_no_wait",
+    created_at: str = "",
+    created_by: str = "",
+    source_surface: str = "",
+    status: str = "queued",
+    evidence_bundle: Any = "",
+    evidence_artifacts: Optional[List[str]] = None,
+    ticket_id: str = "",
+    touched_at: str = "",
+) -> Dict[str, Any]:
+    rid = _trim(request_id, 96)
+    pkey = _trim(project_key, 64)
+    created = _trim(created_at, 64)
+    explicit_ticket = _trim(ticket_id, 96)
+    if explicit_ticket:
+        resolved_ticket = explicit_ticket
+    else:
+        stamp = created.replace("-", "").replace(":", "").replace("+", "").replace("T", "").strip()
+        seed = rid or pkey or "run"
+        resolved_ticket = f"BGT-{seed}-{stamp or 'pending'}"[:96]
+    return normalize_background_run_ticket_snapshot(
+        {
+            "version": BACKGROUND_RUN_TICKET_VERSION,
+            "ticket_id": resolved_ticket,
+            "request_id": rid,
+            "project_key": pkey,
+            "execution_brief_status": _trim(execution_brief_status, 48),
+            "runner_target": runner_target,
+            "launch_mode": launch_mode,
+            "created_at": created,
+            "touched_at": _trim(touched_at, 64) or created,
+            "created_by": _trim(created_by, 96),
+            "source_surface": _trim(source_surface, 64),
+            "status": status,
+            "evidence_bundle": evidence_bundle,
+            "evidence_artifacts": list(evidence_artifacts or []),
+        }
+    )
 
 
 def _lineage_preset(run_control_mode: str, run_source_task: Optional[Dict[str, Any]]) -> str:
@@ -322,6 +553,34 @@ def request_contract_summary(contract: Dict[str, Any]) -> str:
     return _trim(snapshot.get("summary", ""), 400)
 
 
+def execution_brief_is_offdesk_allowed(brief: Dict[str, Any]) -> bool:
+    snapshot = normalize_execution_brief_snapshot(brief)
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status in {"executable", "partially_executable"}:
+        return True
+    return bool(snapshot.get("offdesk_allowed", False))
+
+
+def execution_brief_summary(brief: Dict[str, Any]) -> str:
+    snapshot = normalize_execution_brief_snapshot(brief)
+    return _trim(snapshot.get("summary", ""), 400)
+
+
+def execution_brief_block_reason(brief: Dict[str, Any]) -> str:
+    snapshot = normalize_execution_brief_snapshot(brief)
+    status = str(snapshot.get("status", "")).strip().lower() or "underspecified"
+    blocked = list(snapshot.get("blocked_slice") or [])
+    operator_decision = _trim(snapshot.get("operator_decision", ""), 320)
+    if operator_decision:
+        return operator_decision
+    if blocked:
+        return f"{status}: " + ", ".join(str(item).strip() for item in blocked[:6] if str(item).strip())
+    summary = _trim(snapshot.get("summary", ""), 320)
+    if summary:
+        return summary
+    return f"execution brief is {status}"
+
+
 def request_contract_planning_appendix(contract: Dict[str, Any]) -> str:
     snapshot = normalize_request_contract_snapshot(contract)
     if not snapshot:
@@ -398,6 +657,46 @@ def request_contract_metadata(contract: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+def execution_brief_metadata(brief: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_execution_brief_snapshot(brief)
+    if not snapshot:
+        return {}
+    return deepcopy(
+        {
+            "execution_brief_version": snapshot.get("version", EXECUTION_BRIEF_VERSION),
+            "execution_brief_status": snapshot.get("status", ""),
+            "execution_brief_summary": snapshot.get("summary", ""),
+            "execution_brief_executable_slice": list(snapshot.get("executable_slice") or []),
+            "execution_brief_blocked_slice": list(snapshot.get("blocked_slice") or []),
+            "execution_brief_operator_decision": snapshot.get("operator_decision", ""),
+            "execution_brief_offdesk_allowed": bool(snapshot.get("offdesk_allowed", False)),
+        }
+    )
+
+
+def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_background_run_ticket_snapshot(ticket)
+    if not snapshot:
+        return {}
+    return deepcopy(
+        {
+            "background_run_ticket_version": snapshot.get("version", BACKGROUND_RUN_TICKET_VERSION),
+            "background_run_ticket_id": snapshot.get("ticket_id", ""),
+            "background_run_status": snapshot.get("status", ""),
+            "background_run_runner_target": snapshot.get("runner_target", ""),
+            "background_run_launch_mode": snapshot.get("launch_mode", ""),
+            "background_run_created_at": snapshot.get("created_at", ""),
+            "background_run_created_by": snapshot.get("created_by", ""),
+            "background_run_source_surface": snapshot.get("source_surface", ""),
+            "background_run_request_id": snapshot.get("request_id", ""),
+            "background_run_project_key": snapshot.get("project_key", ""),
+            "background_run_execution_brief_status": snapshot.get("execution_brief_status", ""),
+            "background_run_evidence_bundle": snapshot.get("evidence_bundle", ""),
+            "background_run_evidence_artifacts": list(snapshot.get("evidence_artifacts") or []),
+        }
+    )
+
+
 def apply_request_contract_snapshot(target: Dict[str, Any], contract: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(target, dict):
         return {}
@@ -408,3 +707,76 @@ def apply_request_contract_snapshot(target: Dict[str, Any], contract: Dict[str, 
             continue
         target[key] = deepcopy(value)
     return target
+
+
+def apply_execution_brief_snapshot(target: Dict[str, Any], brief: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict):
+        return {}
+    metadata = execution_brief_metadata(brief)
+    for key, value in metadata.items():
+        if value in ("", None, [], {}):
+            target.pop(key, None)
+            continue
+        target[key] = deepcopy(value)
+    return target
+
+
+def apply_background_run_ticket_snapshot(target: Dict[str, Any], ticket: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict):
+        return {}
+    metadata = background_run_ticket_metadata(ticket)
+    for key, value in metadata.items():
+        if value in ("", None, [], {}):
+            target.pop(key, None)
+            continue
+        target[key] = deepcopy(value)
+    return target
+
+
+def background_run_evidence_artifacts_from_task(task: Dict[str, Any]) -> List[str]:
+    if not isinstance(task, dict):
+        return []
+    artifact_contracts = task.get("request_contract_artifact_contracts")
+    if not isinstance(artifact_contracts, dict):
+        artifact_contracts = {}
+    required_outputs = task.get("request_contract_required_outputs")
+    if not isinstance(required_outputs, list):
+        required_outputs = []
+    artifacts: List[str] = []
+    for output in list(required_outputs or [])[:12]:
+        alias = _trim(output, 120)
+        if not alias:
+            continue
+        row = artifact_contracts.get(alias) if isinstance(artifact_contracts.get(alias), dict) else {}
+        path = _trim((row or {}).get("path", ""), 200) or alias
+        if path and path not in artifacts:
+            artifacts.append(path)
+    return artifacts[:8]
+
+
+def background_run_evidence_bundle_from_task(
+    task: Dict[str, Any],
+    *,
+    default_status: str = "completed",
+    default_outcome: str = "dispatch_flow_returned",
+) -> str:
+    if not isinstance(task, dict):
+        return f"status={default_status} | outcome={default_outcome}"
+    parts: List[str] = []
+    status = _trim(task.get("status", default_status), 48) or default_status
+    outcome = default_outcome
+    if status == "completed":
+        outcome = "dispatch_completed"
+    parts.append(f"status={status}")
+    parts.append(f"outcome={outcome}")
+    phase = _trim(task.get("tf_phase", ""), 48)
+    if phase:
+        parts.append(f"phase={phase}")
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    if result:
+        if "complete" in result:
+            parts.append(f"complete={str(bool(result.get('complete', False))).lower()}")
+        verdict = _trim(result.get("verdict", ""), 48)
+        if verdict:
+            parts.append(f"verdict={verdict}")
+    return " | ".join(parts)[:240]
