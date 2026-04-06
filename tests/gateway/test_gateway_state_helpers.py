@@ -1616,8 +1616,14 @@ def test_apply_exec_critic_lifecycle_marks_manual_followup_lane_targets() -> Non
 
     assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L1", "L2"]
     assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
+    assert task["followup_brief_status"] == "preview_only"
+    assert task["followup_brief_execution_lane_ids"] == ["L1", "L2"]
+    assert task["followup_brief_review_lane_ids"] == ["R1"]
+    assert task["followup_brief_reason"] == "operator decision required"
     summary = gw.summarize_task_lifecycle("Demo", task)
     assert "exec_manual_followup_targets: execution=L1, L2 review=R1" in summary
+    assert "followup_brief: preview_only" in summary
+    assert "followup_brief_summary: preview_only | execution=L1,L2 | review=R1" in summary
 
 
 def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets() -> None:
@@ -1710,6 +1716,10 @@ def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_manual_follow
 
     assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L1"]
     assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
+    assert task["followup_brief_status"] == "preview_only"
+    assert task["followup_brief_execution_lane_ids"] == ["L1"]
+    assert task["followup_brief_review_lane_ids"] == ["R1"]
+    assert task["followup_brief_reason"] == "manual follow-up should start from the primary build lane"
 
 
 def test_blocked_state_helpers_render_manual_followup_summary() -> None:

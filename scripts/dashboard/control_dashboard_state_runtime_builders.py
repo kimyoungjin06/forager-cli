@@ -139,6 +139,27 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_execution_brief_operator_decision=(
                     str((active_task or {}).get("execution_brief_operator_decision", "")).strip() or "-"
                 ),
+                active_task_followup_brief_status=(
+                    str((active_task or {}).get("followup_brief_status", "")).strip() or "-"
+                ),
+                active_task_followup_brief_summary=(
+                    str((active_task or {}).get("followup_brief_summary", "")).strip() or "-"
+                ),
+                active_task_followup_brief_execution_lanes=", ".join(
+                    str(item).strip()
+                    for item in ((active_task or {}).get("followup_brief_execution_lane_ids") or [])
+                    if str(item).strip()
+                )
+                or "-",
+                active_task_followup_brief_review_lanes=", ".join(
+                    str(item).strip()
+                    for item in ((active_task or {}).get("followup_brief_review_lane_ids") or [])
+                    if str(item).strip()
+                )
+                or "-",
+                active_task_followup_brief_reason=(
+                    str((active_task or {}).get("followup_brief_reason", "")).strip() or "-"
+                ),
                 active_task_background_run_status=(
                     str((active_task or {}).get("background_run_status", "")).strip() or "-"
                 ),
@@ -392,6 +413,25 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         or "-",
         active_task_execution_brief_operator_decision=(
             str((active_task or {}).get("execution_brief_operator_decision", "")).strip() or "-"
+        ),
+        active_task_followup_brief_status=str((active_task or {}).get("followup_brief_status", "")).strip() or "-",
+        active_task_followup_brief_summary=(
+            str((active_task or {}).get("followup_brief_summary", "")).strip() or "-"
+        ),
+        active_task_followup_brief_execution_lanes=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("followup_brief_execution_lane_ids") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_followup_brief_review_lanes=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("followup_brief_review_lane_ids") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_followup_brief_reason=(
+            str((active_task or {}).get("followup_brief_reason", "")).strip() or "-"
         ),
         active_task_background_run_status=str((active_task or {}).get("background_run_status", "")).strip() or "-",
         active_task_background_run_runner_target=(

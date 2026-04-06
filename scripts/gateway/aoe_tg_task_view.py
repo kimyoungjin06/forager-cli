@@ -633,6 +633,15 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     review=", ".join(manual_review) if manual_review else "-",
                 )
             )
+    followup_brief_status = str(task.get("followup_brief_status", "")).strip()
+    if followup_brief_status:
+        lines.append("followup_brief: " + followup_brief_status[:64])
+        followup_brief_summary = str(task.get("followup_brief_summary", "")).strip()
+        if followup_brief_summary:
+            lines.append("followup_brief_summary: " + followup_brief_summary[:240])
+        followup_brief_reason = str(task.get("followup_brief_reason", "")).strip()
+        if followup_brief_reason:
+            lines.append("followup_brief_reason: " + followup_brief_reason[:240])
 
     result = task.get("result")
     if isinstance(result, dict):

@@ -185,6 +185,12 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         contract = _completion_contract_for_preset(str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip())
         rerun_summary = _task_rerun_summary(task)
         followup_summary = _task_followup_summary(task)
+        followup_brief_execution_lanes = ", ".join(
+            str(item).strip() for item in (task.get("followup_brief_execution_lane_ids") or []) if str(item).strip()
+        ) or "-"
+        followup_brief_review_lanes = ", ".join(
+            str(item).strip() for item in (task.get("followup_brief_review_lane_ids") or []) if str(item).strip()
+        ) or "-"
         rate_limit_summary = _task_rate_limit_summary(task)
         action_contract = _task_command_contract(
             project_alias=alias,
@@ -229,6 +235,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             lane_summary=_compose_lane_summary(lane),
             rerun_summary=rerun_summary,
             followup_summary=followup_summary,
+            followup_brief_status=str(task.get("followup_brief_status", "")).strip() or "-",
+            followup_brief_summary=str(task.get("followup_brief_summary", "")).strip() or "-",
+            followup_brief_execution_lanes=followup_brief_execution_lanes,
+            followup_brief_review_lanes=followup_brief_review_lanes,
+            followup_brief_reason=str(task.get("followup_brief_reason", "")).strip() or "-",
             completion_focus=str(contract.get("focus", "")).strip() or "-",
             completion_done_when=str(contract.get("done_when", "")).strip() or "-",
             completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",

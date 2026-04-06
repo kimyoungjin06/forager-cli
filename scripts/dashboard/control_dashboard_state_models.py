@@ -90,6 +90,11 @@ class RuntimeCardDTO:
     active_task_execution_brief_executable_slice: str
     active_task_execution_brief_blocked_slice: str
     active_task_execution_brief_operator_decision: str
+    active_task_followup_brief_status: str
+    active_task_followup_brief_summary: str
+    active_task_followup_brief_execution_lanes: str
+    active_task_followup_brief_review_lanes: str
+    active_task_followup_brief_reason: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str
     active_task_background_run_ticket_id: str
@@ -151,6 +156,11 @@ class TaskDetailDTO:
     lane_summary: str = ""
     rerun_summary: str = ""
     followup_summary: str = ""
+    followup_brief_status: str = ""
+    followup_brief_summary: str = ""
+    followup_brief_execution_lanes: str = ""
+    followup_brief_review_lanes: str = ""
+    followup_brief_reason: str = ""
     completion_focus: str = ""
     completion_done_when: str = ""
     completion_rerun_when: str = ""
@@ -222,6 +232,11 @@ class RuntimeDetailDTO:
     active_task_execution_brief_executable_slice: str
     active_task_execution_brief_blocked_slice: str
     active_task_execution_brief_operator_decision: str
+    active_task_followup_brief_status: str
+    active_task_followup_brief_summary: str
+    active_task_followup_brief_execution_lanes: str
+    active_task_followup_brief_review_lanes: str
+    active_task_followup_brief_reason: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str
     active_task_background_run_ticket_id: str

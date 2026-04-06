@@ -514,6 +514,14 @@ def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -
 def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["followup_brief_status"] = "preview_only"
+    task["followup_brief_summary"] = "preview_only | execution=L2 | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
+    task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
+    gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -540,6 +548,14 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "conclusion is supported by inspectable evidence and explicit caveats" in text
     assert "execution_brief" in text
     assert "brief_summary" in text
+    assert "followup_brief" in text
+    assert "preview_only" in text
+    assert "followup_exec_lanes" in text
+    assert "L2" in text
+    assert "followup_review_lanes" in text
+    assert "R1" in text
+    assert "followup_reason" in text
+    assert "analysis handoff wording" in text
     assert "background_run" in text
     assert "runner_target" in text
     assert "local_background" in text
@@ -621,6 +637,14 @@ def test_control_dashboard_state_resolves_alias_route_via_request_id(tmp_path: P
 def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["followup_brief_status"] = "preview_only"
+    task["followup_brief_summary"] = "preview_only | execution=L2 | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
+    task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
+    gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -654,6 +678,12 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "acceptance_gap" in text
     assert "brief_decision" in text
     assert "confirm acceptance scope before off-desk execution" in text
+    assert "followup_brief" in text
+    assert "preview_only | execution=L2 | review=R1" in text
+    assert "followup_exec_lanes" in text
+    assert "followup_review_lanes" in text
+    assert "followup_reason" in text
+    assert "analysis handoff wording" in text
     assert "background_run" in text
     assert "runner_target" in text
     assert "local_background" in text

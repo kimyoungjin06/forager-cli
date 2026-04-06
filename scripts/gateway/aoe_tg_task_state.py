@@ -25,6 +25,8 @@ from aoe_tg_team_observatory import observatory_monitor_line, task_team_observat
 LANE_STATES = ("pending", "running", "done", "failed", "waiting_on_dependencies")
 LANE_VERDICTS = ("success", "retry", "fail", "intervention")
 PLAN_CONVERGENCE_STATUSES = ("ready", "blocked", "stalled", "failed", "pending")
+FOLLOWUP_BRIEF_VERSION = "2026-04-06.v1"
+FOLLOWUP_BRIEF_STATUSES = ("preview_only", "executable", "partially_executable")
 
 
 def _normalize_lane_status(raw: Any, default: str = "pending") -> str:
@@ -66,6 +68,80 @@ def _normalize_plan_convergence_status(raw: Any, default: str = "") -> str:
     if token in PLAN_CONVERGENCE_STATUSES:
         return token
     return default
+
+
+def _normalize_followup_brief_status(raw: Any, default: str = "") -> str:
+    token = str(raw or "").strip().lower()
+    if token in FOLLOWUP_BRIEF_STATUSES:
+        return token
+    return default
+
+
+def _normalize_followup_lane_ids(raw: Any, *, limit: int = 8) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    out: List[str] = []
+    for row in rows:
+        token = str(row or "").strip()[:32]
+        if token and token not in out:
+            out.append(token)
+    return out[: max(1, int(limit or 1))]
+
+
+def normalize_followup_brief_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = _normalize_followup_brief_status(raw.get("status"))
+    if not status:
+        return {}
+    execution_lane_ids = _normalize_followup_lane_ids(raw.get("execution_lane_ids"))
+    review_lane_ids = _normalize_followup_lane_ids(raw.get("review_lane_ids"))
+    summary = str(raw.get("summary", "")).strip()
+    reason = str(raw.get("reason", "")).strip()[:240]
+    if not summary:
+        parts = [status]
+        if execution_lane_ids:
+            parts.append("execution=" + ",".join(execution_lane_ids))
+        if review_lane_ids:
+            parts.append("review=" + ",".join(review_lane_ids))
+        summary = " | ".join(parts)[:320]
+    return {
+        "version": str(raw.get("version", FOLLOWUP_BRIEF_VERSION)).strip() or FOLLOWUP_BRIEF_VERSION,
+        "status": status,
+        "summary": summary[:320],
+        "execution_lane_ids": execution_lane_ids,
+        "review_lane_ids": review_lane_ids,
+        "reason": reason,
+    }
+
+
+def build_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
+    execution_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_execution_lane_ids"))
+    review_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_review_lane_ids"))
+    if not execution_lane_ids and not review_lane_ids:
+        return {}
+    return normalize_followup_brief_snapshot(
+        {
+            "version": FOLLOWUP_BRIEF_VERSION,
+            "status": "preview_only",
+            "execution_lane_ids": execution_lane_ids,
+            "review_lane_ids": review_lane_ids,
+            "reason": str(exec_critic.get("reason", exec_critic.get("note", "")) or "").strip(),
+        }
+    )
+
+
+def apply_followup_brief_snapshot(target: Dict[str, Any], brief: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_followup_brief_snapshot(brief)
+    if not snapshot or not isinstance(target, dict):
+        return target
+    target["followup_brief_version"] = snapshot.get("version", FOLLOWUP_BRIEF_VERSION)
+    target["followup_brief_status"] = snapshot.get("status", "")
+    target["followup_brief_summary"] = snapshot.get("summary", "")
+    target["followup_brief_execution_lane_ids"] = list(snapshot.get("execution_lane_ids") or [])
+    target["followup_brief_review_lane_ids"] = list(snapshot.get("review_lane_ids") or [])
+    target["followup_brief_reason"] = snapshot.get("reason", "")
+    return target
 
 
 def _normalize_plan_issue_codes(raw: Any, *, limit: int = 12) -> List[str]:
@@ -738,6 +814,19 @@ def apply_exec_critic_lifecycle(
         lifecycle_set_stage(task=task, stage="close", status="failed", note=reason or verdict)
 
     apply_review_lane_verdicts(task, critic)
+    followup_brief = build_followup_brief_snapshot(task)
+    if followup_brief:
+        apply_followup_brief_snapshot(task, followup_brief)
+    else:
+        for key in (
+            "followup_brief_version",
+            "followup_brief_status",
+            "followup_brief_summary",
+            "followup_brief_execution_lane_ids",
+            "followup_brief_review_lane_ids",
+            "followup_brief_reason",
+        ):
+            task.pop(key, None)
     refresh_task_tf_state(task)
 
 
@@ -931,6 +1020,31 @@ def sanitize_task_record(
             "execution_brief_blocked_slice",
             "execution_brief_operator_decision",
             "execution_brief_offdesk_allowed",
+        ):
+            task.pop(key, None)
+
+    followup_brief_snapshot = normalize_followup_brief_snapshot(
+        {
+            "version": task.get("followup_brief_version"),
+            "status": task.get("followup_brief_status"),
+            "summary": task.get("followup_brief_summary"),
+            "execution_lane_ids": task.get("followup_brief_execution_lane_ids"),
+            "review_lane_ids": task.get("followup_brief_review_lane_ids"),
+            "reason": task.get("followup_brief_reason"),
+        }
+    )
+    if not followup_brief_snapshot:
+        followup_brief_snapshot = build_followup_brief_snapshot(task)
+    if followup_brief_snapshot:
+        apply_followup_brief_snapshot(task, followup_brief_snapshot)
+    else:
+        for key in (
+            "followup_brief_version",
+            "followup_brief_status",
+            "followup_brief_summary",
+            "followup_brief_execution_lane_ids",
+            "followup_brief_review_lane_ids",
+            "followup_brief_reason",
         ):
             task.pop(key, None)
 
