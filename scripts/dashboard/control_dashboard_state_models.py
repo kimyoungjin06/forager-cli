@@ -93,6 +93,8 @@ class RuntimeCardDTO:
     active_task_background_run_status: str
     active_task_background_run_runner_target: str
     active_task_background_run_ticket_id: str
+    active_task_background_run_runtime_handle: str
+    active_task_background_run_runtime_summary: str
     active_task_background_run_evidence_bundle: str
     active_task_background_run_launch_spec_summary: str
     background_worker_status: str

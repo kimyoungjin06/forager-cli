@@ -436,6 +436,10 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "confirm acceptance scope before off-desk execution" in overview_text
     assert "background_run" in overview_text
     assert "BGT-001" in overview_text
+    assert "runtime_handle" in overview_text
+    assert "aoe_bg_bgt_001" in overview_text
+    assert "runtime_summary" in overview_text
+    assert "tmux_session=aoe_bg_bgt_001" in overview_text
     assert "awaiting_review" in overview_text
     assert "Action Result" in overview_text
     assert "Clear Local History" in overview_text
@@ -705,6 +709,10 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "confirm acceptance scope before off-desk execution" in text
     assert "local_background" in text
     assert "BGT-001" in text
+    assert "runtime_handle" in text
+    assert "aoe_bg_bgt_001" in text
+    assert "runtime_summary" in text
+    assert "tmux_session=aoe_bg_bgt_001" in text
     assert "awaiting_review" in text
     assert "/offdesk review O2" in text
 

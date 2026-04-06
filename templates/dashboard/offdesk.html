@@ -21,6 +21,8 @@
       <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
       <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
       <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+      <p><strong>runtime_handle</strong> {{ card.active_task_background_run_runtime_handle }}</p>
+      <p><strong>runtime_summary</strong> {{ card.active_task_background_run_runtime_summary }}</p>
       <p><strong>background_worker</strong> {{ card.background_worker_summary }}</p>
       <p><strong>background_queue</strong> {{ card.background_queue_summary }}</p>
       <p><strong>background_ticket</strong> {{ card.active_task_background_run_ticket_id }}</p>
@@ -68,7 +70,7 @@
         <td><a href="{{ card.runtime_path }}">{{ card.project_alias }}</a><br><span class="muted">{{ card.project_label }}</span></td>
         <td><a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a><br><span class="muted">{{ card.active_task_status }}/{{ card.active_task_phase }}</span></td>
         <td>{{ card.active_task_execution_brief_status }}<br><span class="muted">{{ card.active_task_execution_brief_summary }}</span></td>
-        <td>{{ card.active_task_background_run_status }}<br><span class="muted">{{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_bundle }}</span></td>
+        <td>{{ card.active_task_background_run_status }}<br><span class="muted">{{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</span><br><span class="muted">{{ card.active_task_background_run_runtime_handle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_bundle }}</span></td>
         <td>{{ card.background_worker_summary }}<br><span class="muted">{{ card.background_queue_summary }}</span></td>
         <td>{{ card.active_task_execution_brief_executable_slice }}</td>
         <td>{{ card.active_task_execution_brief_blocked_slice }}</td>
