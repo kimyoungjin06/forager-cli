@@ -229,6 +229,19 @@ def http_action_spec(command: str) -> Dict[str, Any] | None:
             "note": "rerun a task team using existing retry handlers",
         }
 
+    if head == "/replan" and len(tokens) >= 2:
+        return {
+            "command": raw,
+            "mode": "phase2",
+            "method": "POST",
+            "path": "/control/actions/task/replan",
+            "payload": {
+                "task_ref": tokens[1],
+                "lane_ids": lane_ids,
+            },
+            "note": "re-enter phase1 planning for a task team using existing replan handlers",
+        }
+
     if head == "/followup" and len(tokens) >= 2:
         return {
             "command": raw,

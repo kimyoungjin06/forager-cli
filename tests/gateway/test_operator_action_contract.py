@@ -102,6 +102,16 @@ def test_http_action_spec_maps_retry_to_post_contract() -> None:
     assert row["payload"] == {"task_ref": "T-001", "lane_ids": ["L1", "R1"]}
 
 
+def test_http_action_spec_maps_replan_to_post_contract() -> None:
+    row = mod.http_action_spec("/replan T-001 lane L1")
+
+    assert row is not None
+    assert row["mode"] == "phase2"
+    assert row["method"] == "POST"
+    assert row["path"] == "/control/actions/task/replan"
+    assert row["payload"] == {"task_ref": "T-001", "lane_ids": ["L1"]}
+
+
 def test_http_action_spec_maps_followup_to_safe_post_contract() -> None:
     row = mod.http_action_spec("/followup T-001 lane L2")
 

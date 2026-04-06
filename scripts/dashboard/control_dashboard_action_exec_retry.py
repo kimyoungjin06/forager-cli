@@ -91,7 +91,9 @@ def _retry_command_text(transition: Dict[str, Any]) -> str:
         token = str(row or "").strip()[:32]
         if token and token not in lane_ids:
             lane_ids.append(token)
-    command = f"/retry {source_request_id}"
+    run_control_mode = str(transition.get("run_control_mode", "")).strip().lower()
+    head = "/replan" if run_control_mode == "replan" else "/retry"
+    command = f"{head} {source_request_id}"
     if lane_ids:
         command += " lane " + ",".join(lane_ids)
     return command
@@ -137,8 +139,8 @@ def _maybe_execute_retry_background_tmux(
         manager_state_file=str(paths.manager_state_file),
         command_text=command_text,
         simulate_chat_id=_DASHBOARD_CHAT_ID,
-        launch_mode="dashboard_retry",
-        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
+        source_surface="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
         created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
     )
     preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
@@ -160,10 +162,10 @@ def _maybe_execute_retry_background_tmux(
         project_key=project_key,
         execution_brief_status=str((source_task or {}).get("execution_brief_status", "executable")).strip() or "executable",
         runner_target="local_tmux",
-        launch_mode="dashboard_retry",
+        launch_mode="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
         created_at=current_ts,
         created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        source_surface="dashboard_retry",
+        source_surface="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
         status="queued",
         launch_spec=launch_spec,
     )
@@ -173,8 +175,8 @@ def _maybe_execute_retry_background_tmux(
         ticket_id=str(ticket.get("ticket_id", "")).strip(),
         now_iso=_now_iso,
         claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        source_surface="dashboard_retry",
-        launch_mode="dashboard_retry",
+        source_surface="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
+        launch_mode="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
     )
     ticket_snapshot = launched if isinstance(launched, dict) and launched else ticket
 
@@ -236,7 +238,7 @@ def _maybe_execute_retry_background_tmux(
             "outcome": {
                 "kind": "retry_run",
                 "status": "blocked" if blocked else "executed",
-                "reason_code": "background_tmux_launch_failed" if blocked else "background_tmux_started",
+                "reason_code": "background_tmux_launch_failed" if blocked else ("background_tmux_replan_started" if str(transition.get("run_control_mode", "")).strip().lower() == "replan" else "background_tmux_started"),
                 "detail": detail,
             },
         },
@@ -380,6 +382,8 @@ def _execute_retry_run_transition(
 def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
     task_ref = str(payload.get("task_ref", "")).strip()
+    command_text = str(spec.get("command", "")).strip()
+    is_replan = command_text.startswith("/replan ")
     paths, manager_state = _load_dashboard_manager_state(config)
     project_key = _find_task_project_key(manager_state, task_ref)
     if not project_key:
@@ -387,15 +391,15 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
 
     messages: List[Dict[str, Any]] = []
     transition = retry_handlers.resolve_retry_replan_transition(
-        cmd="orch-retry",
+        cmd="orch-replan" if is_replan else "orch-retry",
         args=_dashboard_action_args(config),
         manager_state=manager_state,
         chat_id=_DASHBOARD_CHAT_ID,
         orch_target=project_key,
-        orch_retry_request_id=task_ref,
-        orch_replan_request_id=None,
-        orch_retry_lane_ids=list(payload.get("lane_ids") or []),
-        orch_replan_lane_ids=None,
+        orch_retry_request_id=None if is_replan else task_ref,
+        orch_replan_request_id=task_ref if is_replan else None,
+        orch_retry_lane_ids=[] if is_replan else list(payload.get("lane_ids") or []),
+        orch_replan_lane_ids=list(payload.get("lane_ids") or []) if is_replan else None,
         send=_make_send_collector(messages),
         get_context=_dashboard_get_context_factory(manager_state, paths),
         get_chat_selected_task_ref=chat_state.get_chat_selected_task_ref,
@@ -458,6 +462,6 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         config=config,
         manager_state=manager_state,
         paths=paths,
-        source_command=str(spec.get("command", "")).strip() or "/retry",
+        source_command=command_text or ("/replan" if is_replan else "/retry"),
         payload=payload,
     )

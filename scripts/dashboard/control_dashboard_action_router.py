@@ -26,17 +26,17 @@ from control_dashboard_state import load_dashboard_runtime_details, load_task_de
 
 
 def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str, object]:
-    if path == "/control/actions/task/retry":
+    if path in {"/control/actions/task/retry", "/control/actions/task/replan"}:
         task_ref = str(payload.get("task_ref", "")).strip()
         if not task_ref:
             raise ValueError("task_ref is required")
         lane_ids = _normalize_lane_ids(payload.get("lane_ids"))
-        command = f"/retry {task_ref}"
+        command = f"{'/replan' if path.endswith('/replan') else '/retry'} {task_ref}"
         if lane_ids:
             command += " lane " + ",".join(lane_ids)
         spec = operator_action_contract.http_action_spec(command)
         if spec is None:
-            raise ValueError("unsupported retry action contract")
+            raise ValueError("unsupported retry/replan action contract")
         return spec
 
     if path == "/control/actions/task/followup":
@@ -221,7 +221,7 @@ def build_dashboard_action_response(
     if path == "/control/actions/runtime/background-queue-clean":
         return _with_action_audit(_execute_background_queue_clean_action(spec, config=config), config=config)
 
-    if path == "/control/actions/task/retry":
+    if path in {"/control/actions/task/retry", "/control/actions/task/replan"}:
         return _with_action_audit(_execute_retry_action(spec, config=config), config=config)
 
     if path == "/control/actions/control/auto-recover":
