@@ -43,6 +43,7 @@ def task_operator_commands(
     tf_phase: str = "",
     rerun_summary: str = "",
     followup_summary: str = "",
+    followup_brief_status: str = "",
     rate_limit_summary: str = "",
     execution_brief_status: str = "",
 ) -> List[str]:
@@ -50,6 +51,8 @@ def task_operator_commands(
     ref = task_command_ref(label, request_id)
     brief_status = _trim(execution_brief_status, 64).lower()
     brief_blocked = brief_status in {"underspecified", "operator_decision_required", "infeasible"}
+    followup_status = _trim(followup_brief_status, 64).lower()
+    followup_executable = followup_status in {"executable", "partially_executable"}
     hints = [
         f"/task {ref}",
         f"/request {request_id}",
@@ -64,6 +67,9 @@ def task_operator_commands(
         hints.append(f"/retry {ref}")
     if not brief_blocked and followup_summary and followup_summary != "-":
         hints.append(f"/followup {ref}")
+    if not brief_blocked and followup_executable:
+        hints.append(f"/followup-exec {ref}")
+    if not brief_blocked and followup_summary and followup_summary != "-":
         hints.append(f"/todo {alias} followup")
     return _dedupe_commands(hints, limit=8)
 
@@ -153,6 +159,11 @@ def classify_operator_command(command: str) -> Dict[str, str]:
         mutation = "runtime_mutation"
         scope = "task"
         note = "task rerun mutation candidate"
+    elif head in {"/followup-exec", "/followup-run"}:
+        bucket = "phase2"
+        mutation = "runtime_mutation"
+        scope = "task"
+        note = "task follow-up execution mutation candidate"
     elif head == "/followup":
         scope = "task"
         note = "read-only follow-up inspection"
@@ -253,6 +264,19 @@ def http_action_spec(command: str) -> Dict[str, Any] | None:
                 "lane_ids": lane_ids,
             },
             "note": "inspect manual follow-up targets using the existing followup handler",
+        }
+
+    if head in {"/followup-exec", "/followup-run"} and len(tokens) >= 2:
+        return {
+            "command": raw,
+            "mode": "phase2",
+            "method": "POST",
+            "path": "/control/actions/task/followup-execute",
+            "payload": {
+                "task_ref": tokens[1],
+                "lane_ids": lane_ids,
+            },
+            "note": "attempt explicit follow-up execution using a followup brief instead of the preview surface",
         }
 
     if head == "/sync" and second == "preview" and len(tokens) >= 3:

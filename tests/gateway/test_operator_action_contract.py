@@ -61,6 +61,24 @@ def test_partition_task_operator_commands_splits_phase2_actions() -> None:
     assert "/retry T-001" in rows["phase2"]
 
 
+def test_partition_task_operator_commands_adds_followup_execute_when_followup_brief_is_executable() -> None:
+    rows = mod.partition_operator_commands(
+        mod.task_operator_commands(
+            project_alias="O2",
+            label="T-001 | analysis-check",
+            request_id="REQ-1",
+            tf_phase="blocked",
+            rerun_summary="-",
+            followup_summary="execution=L2 | review=R1",
+            followup_brief_status="executable",
+            rate_limit_summary="-",
+        )
+    )
+
+    assert "/followup T-001" in rows["safe"]
+    assert "/followup-exec T-001" in rows["phase2"]
+
+
 def test_partition_runtime_operator_commands_moves_mutating_priority_to_phase2() -> None:
     rows = mod.partition_operator_commands(
         mod.runtime_operator_commands(
@@ -118,6 +136,15 @@ def test_http_action_spec_maps_followup_to_safe_post_contract() -> None:
     assert row is not None
     assert row["mode"] == "safe"
     assert row["path"] == "/control/actions/task/followup"
+    assert row["payload"] == {"task_ref": "T-001", "lane_ids": ["L2"]}
+
+
+def test_http_action_spec_maps_followup_execute_to_phase2_post_contract() -> None:
+    row = mod.http_action_spec("/followup-exec T-001 lane L2")
+
+    assert row is not None
+    assert row["mode"] == "phase2"
+    assert row["path"] == "/control/actions/task/followup-execute"
     assert row["payload"] == {"task_ref": "T-001", "lane_ids": ["L2"]}
 
 

@@ -348,6 +348,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             tf_phase=str(row.get("active_task_tf_phase", "")).strip(),
             rerun_summary=active_rerun_summary,
             followup_summary=active_followup_summary,
+            followup_brief_status=str((active_task or {}).get("followup_brief_status", "")).strip(),
             rate_limit_summary=active_rate_limit_summary,
             execution_brief_status=str((active_task or {}).get("execution_brief_status", "")).strip(),
         )

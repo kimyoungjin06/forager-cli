@@ -69,3 +69,12 @@
   - actual runtime evidence
   - operator surface evidence
   - mismatch and next fix
+
+## Manual Followup Rule
+- `manual followup` proof is now split in two:
+  - preview proof
+    - `FollowupBrief.status=preview_only`
+    - `/followup` and dashboard preview surfaces must agree
+  - execute proof
+    - only valid after an explicit executable `FollowupBrief` exists
+    - `/followup-exec` must not be treated as equivalent to preview

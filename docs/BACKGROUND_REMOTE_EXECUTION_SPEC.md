@@ -189,11 +189,18 @@
   - operator-facing reason/context
   - next safe drill-down commands
 - It does not currently authorize background execution.
+- Separate execute surface now exists:
+  - `/followup-exec <task>`
+  - `POST /control/actions/task/followup-execute`
+- Current execute-surface rule:
+  - if `FollowupBrief.status=preview_only`, block with `followup_execute_brief_required`
 - If follow-up work should become executable off-desk, the system must first derive a distinct follow-up execution artifact:
   - `FollowupBrief` or equivalent `ExecutionBrief` subtype
   - explicit executable slice
   - explicit blocked/operator-owned slice
   - explicit launch spec
+- detailed model:
+  - `docs/FOLLOWUP_BRIEF_SPEC.md`
 - Until that artifact exists, `retry/replan` may use background runner paths, but `/followup` must remain a safe preview.
 
 ## 6. State Model

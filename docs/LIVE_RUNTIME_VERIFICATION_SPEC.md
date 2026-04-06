@@ -70,7 +70,9 @@ without drifting from the preset completion matrix.
 - did off-desk stay inside the executable slice declared by on-desk?
 - when the flow was incomplete, did it choose:
   - `rerun`
-  - `manual followup`
+- `manual followup`
+  - verify preview surface first
+  - verify execute surface only when an explicit executable `FollowupBrief` exists
   - `blocked`
   coherently?
 

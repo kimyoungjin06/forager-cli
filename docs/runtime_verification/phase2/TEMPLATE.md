@@ -7,6 +7,8 @@
   - `<build|data|review|mixed>`
 - branch_target:
   - `<done|rerun|manual_followup>`
+  - if `manual_followup`, specify:
+    - `<preview_surface|execute_surface>`
 - status:
   - `planned`
 - executed_at:

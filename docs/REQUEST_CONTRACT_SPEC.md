@@ -113,6 +113,8 @@ Policy:
 - `manual followup` is not automatically an off-desk execution request.
   - current `/followup` remains an on-desk inspection surface
   - a future executable follow-up path must derive its own explicit brief instead of reusing the preview surface
+  - see:
+    - `docs/FOLLOWUP_BRIEF_SPEC.md`
 - benchmark references for this layer:
   - `OpenCode` plan/build split and permission UX:
     - `REF-OC-1`, `REF-OC-2`, `REF-OC-3`

@@ -238,6 +238,10 @@
           let headline = `${label} | status=${status}`;
           if (payload?.preview?.kind === "task_followup") {
             headline = `${label} | follow-up preview ready`;
+          } else if (payload?.path === "/control/actions/task/followup-execute" && payload?.error === "followup_execute_brief_required") {
+            headline = `${label} | follow-up execute blocked by brief`;
+          } else if (payload?.path === "/control/actions/task/followup-execute" && payload?.error === "followup_execute_not_implemented") {
+            headline = `${label} | follow-up execute not implemented`;
           } else if (payload?.preview?.kind === "runtime_sync_preview") {
             headline = `${label} | sync preview ready`;
           } else if (payload?.path === "/control/actions/task/retry" && payload?.executed) {

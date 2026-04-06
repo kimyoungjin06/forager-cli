@@ -341,6 +341,8 @@ def _orch_task_reply_markup(key: str, entry: Dict[str, Any], request_id: str, ta
     rerun_review = [str(x).strip() for x in (exec_critic.get("rerun_review_lane_ids") or []) if str(x).strip()]
     manual_exec = [str(x).strip() for x in (exec_critic.get("manual_followup_execution_lane_ids") or []) if str(x).strip()]
     manual_review = [str(x).strip() for x in (exec_critic.get("manual_followup_review_lane_ids") or []) if str(x).strip()]
+    followup_brief_status = str(task.get("followup_brief_status", "")).strip().lower()
+    followup_execute_enabled = followup_brief_status in {"executable", "partially_executable"}
     verdict = str(exec_critic.get("verdict", "")).strip().lower()
     action = str(exec_critic.get("action", "")).strip().lower()
 
@@ -360,7 +362,10 @@ def _orch_task_reply_markup(key: str, entry: Dict[str, Any], request_id: str, ta
             if replan_lane_buttons:
                 keyboard.append(replan_lane_buttons)
     if manual_exec or manual_review or verdict in {"fail", "intervention"}:
-        keyboard.append([{"text": f"/followup {ref}"}, {"text": f"/todo {alias} followup"}])
+        row = [{"text": f"/followup {ref}"}, {"text": f"/todo {alias} followup"}]
+        if followup_execute_enabled:
+            row.append({"text": f"/followup-exec {ref}"})
+        keyboard.append(row)
         followup_lane_buttons = _lane_action_buttons("followup", ref, manual_exec + manual_review)
         if followup_lane_buttons:
             keyboard.append(followup_lane_buttons)
@@ -420,6 +425,8 @@ def handle_orch_task_command(
     orch_cancel_request_id: Optional[str],
     orch_followup_request_id: Optional[str] = None,
     orch_followup_lane_ids: Optional[List[str]] = None,
+    orch_followup_execute_request_id: Optional[str] = None,
+    orch_followup_execute_lane_ids: Optional[List[str]] = None,
     send: Callable[..., bool],
     log_event: Callable[..., None],
     get_context: Callable[[Optional[str]], tuple[str, Dict[str, Any], Any]],
@@ -1106,26 +1113,30 @@ def handle_orch_task_command(
         )
         return True
 
-    if cmd == "orch-followup":
+    def _load_followup_task(
+        req_ref_raw: Optional[str],
+        *,
+        usage_text: str,
+        usage_context: str,
+        missing_context: str,
+        missing_task_context: str,
+    ) -> Optional[tuple[str, Dict[str, Any], str, str, Dict[str, Any], Dict[str, Any]]]:
         key, entry, p_args = get_context(orch_target)
         req_ref = (
-            orch_followup_request_id
+            req_ref_raw
             or get_chat_selected_task_ref(manager_state, chat_id, key)
             or str(entry.get("last_request_id", "")).strip()
             or ""
         ).strip()
         if not req_ref:
-            send(
-                f"usage: /followup <request_or_alias> [lane <L#|R#,...>] | aoe followup <request_or_alias> [lane <L#|R#,...>]\norch={key}",
-                context="orch-followup usage",
-            )
-            return True
+            send(usage_text.format(orch=key), context=usage_context)
+            return None
 
         req_ref = resolve_chat_task_ref(manager_state, chat_id, key, req_ref)
         req_id = resolve_task_request_id(entry, req_ref)
         if not req_id:
-            send(f"task not found: {req_ref} (orch={key})", context="orch-followup missing")
-            return True
+            send(f"task not found: {req_ref} (orch={key})", context=missing_context)
+            return None
 
         task = get_task_record(entry, req_id)
         if task is None:
@@ -1147,10 +1158,23 @@ def handle_orch_task_command(
                 task = None
 
         if task is None:
-            send(f"no lifecycle record: request_or_alias={req_ref or req_id} (orch={key})", context="orch-followup missing task")
-            return True
-
+            send(f"no lifecycle record: request_or_alias={req_ref or req_id} (orch={key})", context=missing_task_context)
+            return None
         exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
+        return key, entry, req_ref, req_id, task, exec_critic
+
+    if cmd == "orch-followup":
+        loaded = _load_followup_task(
+            orch_followup_request_id,
+            usage_text="usage: /followup <request_or_alias> [lane <L#|R#,...>] | aoe followup <request_or_alias> [lane <L#|R#,...>]\norch={orch}",
+            usage_context="orch-followup usage",
+            missing_context="orch-followup missing",
+            missing_task_context="orch-followup missing task",
+        )
+        if loaded is None:
+            return True
+        key, entry, _req_ref, req_id, task, exec_critic = loaded
+
         allowed_execution_lane_ids = [
             str(item).strip()[:32]
             for item in (exec_critic.get("manual_followup_execution_lane_ids") or [])
@@ -1224,6 +1248,140 @@ def handle_orch_task_command(
         send(
             "\n".join(lines),
             context="orch-followup",
+            reply_markup=_orch_task_reply_markup(key, entry, req_id, task),
+        )
+        return True
+
+    if cmd == "orch-followup-exec":
+        loaded = _load_followup_task(
+            orch_followup_execute_request_id,
+            usage_text="usage: /followup-exec <request_or_alias> [lane <L#|R#,...>] | aoe followup-exec <request_or_alias> [lane <L#|R#,...>]\norch={orch}",
+            usage_context="orch-followup-exec usage",
+            missing_context="orch-followup-exec missing",
+            missing_task_context="orch-followup-exec missing task",
+        )
+        if loaded is None:
+            return True
+        key, entry, _req_ref, req_id, task, exec_critic = loaded
+
+        allowed_execution_lane_ids = [
+            str(item).strip()[:32]
+            for item in (exec_critic.get("manual_followup_execution_lane_ids") or [])
+            if str(item).strip()
+        ]
+        allowed_review_lane_ids = [
+            str(item).strip()[:32]
+            for item in (exec_critic.get("manual_followup_review_lane_ids") or [])
+            if str(item).strip()
+        ]
+        if not allowed_execution_lane_ids and not allowed_review_lane_ids:
+            send(
+                f"manual follow-up execute is not available for this task.\nrequest_id={req_id}\nallowed: none",
+                context="orch-followup-exec unavailable",
+            )
+            return True
+
+        requested_execution_lane_ids, requested_review_lane_ids = _normalize_lane_ids(orch_followup_execute_lane_ids)
+        if requested_execution_lane_ids or requested_review_lane_ids:
+            allowed_execution_lane_set = set(allowed_execution_lane_ids)
+            allowed_review_lane_set = set(allowed_review_lane_ids)
+            selected_execution_lane_ids = [
+                lane for lane in requested_execution_lane_ids if lane in allowed_execution_lane_set
+            ]
+            selected_review_lane_ids = [
+                lane for lane in requested_review_lane_ids if lane in allowed_review_lane_set
+            ]
+            if not selected_execution_lane_ids and not selected_review_lane_ids:
+                send(
+                    (
+                        "requested follow-up execute lanes are not allowed for this task.\nrequest_id={req_id}\n"
+                        "allowed execution: {execs}\nallowed review: {reviews}"
+                    ).format(
+                        req_id=req_id,
+                        execs=", ".join(allowed_execution_lane_ids) or "-",
+                        reviews=", ".join(allowed_review_lane_ids) or "-",
+                    ),
+                    context="orch-followup-exec lane invalid",
+                )
+                return True
+        else:
+            selected_execution_lane_ids = list(allowed_execution_lane_ids)
+            selected_review_lane_ids = list(allowed_review_lane_ids)
+
+        touch_chat_recent_task_ref(manager_state, chat_id, key, req_id)
+        set_chat_selected_task_ref(manager_state, chat_id, key, req_id)
+        if not args.dry_run:
+            save_manager_state(args.manager_state_file, manager_state)
+
+        label = task_display_label(task or {}, fallback_request_id=req_id)
+        reason = (
+            str(task.get("followup_brief_reason", "")).strip()
+            or str(exec_critic.get("reason", "")).strip()
+            or str(exec_critic.get("note", "")).strip()
+            or "-"
+        )
+        followup_brief_status = str(task.get("followup_brief_status", "")).strip().lower() or "preview_only"
+        alias = _project_alias(entry, key)
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if followup_brief_status not in {"executable", "partially_executable"}:
+            if team_dir_raw:
+                team_dir = Path(team_dir_raw).expanduser().resolve()
+                append_action_audit_row(
+                    team_dir,
+                    headline="Follow-up Execute | blocked",
+                    status="blocked",
+                    outcome_kind="followup_execute",
+                    outcome_status="blocked",
+                    outcome_reason_code="followup_execute_brief_required",
+                    outcome_detail=f"status={followup_brief_status} | execution={','.join(selected_execution_lane_ids) or '-'} | review={','.join(selected_review_lane_ids) or '-'}",
+                    next_step=f"/followup {label}",
+                    remediation="derive an explicit executable FollowupBrief before off-desk execution; current /followup remains preview-only",
+                    source_command=f"/followup-exec {label}",
+                    link_label="runtime detail",
+                    link_href=_runtime_action_link(alias),
+                    at=now_iso(),
+                )
+            send(
+                "\n".join(
+                    [
+                        f"runtime: {key}",
+                        "follow-up execute blocked",
+                        f"task: {label}",
+                        f"request_id: {req_id}",
+                        f"followup_brief: {followup_brief_status}",
+                        f"execution lanes: {', '.join(selected_execution_lane_ids) or '-'}",
+                        f"review lanes: {', '.join(selected_review_lane_ids) or '-'}",
+                        f"reason: {reason}",
+                        "",
+                        "next:",
+                        f"- /followup {label}",
+                        f"- /task {label}",
+                        f"- /offdesk review {alias}",
+                    ]
+                ),
+                context="orch-followup-exec blocked",
+                reply_markup=_orch_task_reply_markup(key, entry, req_id, task),
+            )
+            return True
+
+        send(
+            "\n".join(
+                [
+                    f"runtime: {key}",
+                    "follow-up execute pending",
+                    f"task: {label}",
+                    f"request_id: {req_id}",
+                    f"followup_brief: {followup_brief_status}",
+                    f"execution lanes: {', '.join(selected_execution_lane_ids) or '-'}",
+                    f"review lanes: {', '.join(selected_review_lane_ids) or '-'}",
+                    "reason: explicit executable follow-up handler is not wired yet",
+                    "",
+                    "next:",
+                    f"- /task {label}",
+                    f"- /orch status {alias}",
+                ]
+            ),
+            context="orch-followup-exec pending",
             reply_markup=_orch_task_reply_markup(key, entry, req_id, task),
         )
         return True

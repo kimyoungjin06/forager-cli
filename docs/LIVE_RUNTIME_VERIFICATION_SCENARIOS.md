@@ -22,6 +22,10 @@
   - `/offdesk review`
   - dashboard `Task Detail`
   - dashboard `Recovery` when the task is blocked or stale
+- manual-followup scenarios are now split into:
+  - `preview_surface`
+  - `execute_surface`
+- until an executable `FollowupBrief` exists, only the preview surface is eligible for proof
 
 ## 4. Scenario Inventory
 

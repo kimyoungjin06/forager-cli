@@ -270,6 +270,7 @@
     - 남은 것:
       - preset별 executable slice 정교화
       - followup용 별도 executable brief 설계
+      - current `FollowupBrief` preview surface를 executable surface로 확장
   - 새 상태모델:
     - `executable`
     - `underspecified`
@@ -304,7 +305,7 @@
       - `local_tmux` retry/replan launch path
       - tmux log/result artifact persistence + polling
     - 남은 것:
-      - `followup` executable path는 아직 미정
+      - `followup execute` path는 아직 launch wiring 미완료
       - `initial detached no-wait` externalizable 분리
       - `github_runner` / `remote_worker` 실제 실행기
   - 최소 범위:

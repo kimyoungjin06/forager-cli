@@ -446,6 +446,11 @@ def parse_quick_message(text: str) -> Optional[Dict[str, Any]]:
             norm.split(" ", 1)[1].strip(),
             usage="usage: followup <request_or_alias> [lane <L#|R#,...>]",
         ) | {"cmd": "orch-followup"}
+    if low.startswith("followup-exec ") or low.startswith("followup-run "):
+        return parse_request_lane_args(
+            norm.split(" ", 1)[1].strip(),
+            usage="usage: followup-exec <request_or_alias> [lane <L#|R#,...>]",
+        ) | {"cmd": "orch-followup-exec"}
     if low.startswith("동기화 "):
         return {"cmd": "sync", "rest": norm.split(" ", 1)[1].strip()}
 
@@ -779,6 +784,15 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
             usage="usage: aoe followup <request_or_alias> [lane <L#|R#,...>]",
         )
         return {"cmd": "orch-followup", "request_id": parsed["request_id"], "lane_ids": parsed["lane_ids"]}
+
+    if cmd in {"followup-exec", "followup-run"}:
+        if len(argv) == 0:
+            raise RuntimeError("usage: aoe followup-exec <request_or_alias> [lane <L#|R#,...>]")
+        parsed = parse_request_lane_args(
+            " ".join(str(item).strip() for item in argv if str(item).strip()),
+            usage="usage: aoe followup-exec <request_or_alias> [lane <L#|R#,...>]",
+        )
+        return {"cmd": "orch-followup-exec", "request_id": parsed["request_id"], "lane_ids": parsed["lane_ids"]}
 
     if cmd == "request":
         if len(argv) != 1:

@@ -57,6 +57,8 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
     source_command = str(payload.get("source_command", "")).strip() or "-"
     if path == "/control/actions/task/followup":
         return f"Follow-up Preview | {status}"
+    if path == "/control/actions/task/followup-execute":
+        return f"Follow-up Execute | {status}"
     if path == "/control/actions/runtime/sync-preview":
         return f"Sync Preview | {status}"
     if path == "/control/actions/runtime/background-queue-clean":

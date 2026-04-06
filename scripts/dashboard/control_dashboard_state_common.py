@@ -203,6 +203,7 @@ def _task_command_contract(
     tf_phase: str = "",
     rerun_summary: str = "",
     followup_summary: str = "",
+    followup_brief_status: str = "",
     rate_limit_summary: str = "",
     execution_brief_status: str = "",
 ) -> Dict[str, Any]:
@@ -214,6 +215,7 @@ def _task_command_contract(
             tf_phase=tf_phase,
             rerun_summary=rerun_summary,
             followup_summary=followup_summary,
+            followup_brief_status=followup_brief_status,
             rate_limit_summary=rate_limit_summary,
             execution_brief_status=execution_brief_status,
         )
@@ -248,6 +250,9 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
     if path == "/control/actions/task/followup":
         lane_ids = [str(item).strip() for item in (payload.get("lane_ids") or []) if str(item).strip()]
         return "Follow-up Preview" if not lane_ids else f"Follow-up Preview ({','.join(lane_ids)})"
+    if path == "/control/actions/task/followup-execute":
+        lane_ids = [str(item).strip() for item in (payload.get("lane_ids") or []) if str(item).strip()]
+        return "Follow-up Execute" if not lane_ids else f"Follow-up Execute ({','.join(lane_ids)})"
     if path == "/control/actions/runtime/sync-preview":
         window = str(payload.get("window", "")).strip()
         return f"Sync Preview ({window})" if window else "Sync Preview"

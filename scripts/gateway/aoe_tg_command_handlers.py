@@ -519,6 +519,8 @@ def handle_non_run_command_pipeline(
         orch_cancel_request_id=resolved.orch_cancel_request_id,
         orch_followup_request_id=resolved.orch_followup_request_id,
         orch_followup_lane_ids=resolved.orch_followup_lane_ids,
+        orch_followup_execute_request_id=resolved.orch_followup_execute_request_id,
+        orch_followup_execute_lane_ids=resolved.orch_followup_execute_lane_ids,
         send=deps.send,
         log_event=deps.log_event,
         get_context=deps.get_context,

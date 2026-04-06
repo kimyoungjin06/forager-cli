@@ -1298,11 +1298,49 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert sync_payload["mode"] == "safe"
     assert sync_payload["source_command"] == "/sync preview O2 48h"
     assert sync_payload["payload"] == {"project_ref": "O2", "window": "48h"}
-    assert sync_payload["next_step"] == "/monitor O2"
+    assert sync_payload["next_step"] == "/offdesk review O2"
     assert "inspect sync drift" in sync_payload["remediation"]
     assert sync_payload["preview"]["kind"] == "runtime_sync_preview"
     assert sync_payload["preview"]["project_alias"] == "O2"
     assert "quality=" in sync_payload["preview"]["sync_summary"]
+
+
+def test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_status"] = "preview_only"
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_summary"] = "preview_only | execution=L2 | review=R1"
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_execution_lane_ids"] = ["L2"]
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_review_lane_ids"] = ["R1"]
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_reason"] = "operator must decide analysis handoff wording"
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup-execute",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L2"]}).encode("utf-8"),
+        content_type="application/json; charset=utf-8",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["status"] == "blocked"
+    assert payload["error"] == "followup_execute_brief_required"
+    assert payload["mode"] == "phase2"
+    assert payload["source_command"] == "/followup-exec T-001 lane L2"
+    assert payload["next_step"] == "/followup T-001"
+    assert "safe preview only" in payload["remediation"]
+    assert payload["task"]["followup_brief_status"] == "preview_only"
+    assert payload["task"]["followup_brief_execution_lanes"] == "L2"
+    assert payload["task"]["followup_brief_review_lanes"] == "R1"
 
 
 def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_path: Path) -> None:
@@ -1335,6 +1373,43 @@ def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_p
     assert latest["link_label"] == "task detail"
     assert latest["link_href"] == "/control/tasks/by-request/REQ-1"
     assert latest["source_command"] == "/followup T-001 lane R1"
+
+
+def test_control_dashboard_post_followup_execute_route_appends_blocked_audit_row(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_status"] = "preview_only"
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_summary"] = "preview_only | execution=L2 | review=R1"
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_execution_lane_ids"] = ["L2"]
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_review_lane_ids"] = ["R1"]
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["followup_brief_reason"] = "operator must decide analysis handoff wording"
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup-execute",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L2"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    latest = rows[-1]
+
+    assert status == 409
+    assert payload["status"] == "blocked"
+    assert latest["headline"] == "Follow-up Execute | blocked"
+    assert latest["status"] == "blocked"
+    assert latest["next_step"] == "/followup T-001"
+    assert latest["source_command"] == "/followup-exec T-001 lane L2"
 
 
 def test_control_dashboard_action_audit_prunes_old_and_excess_rows(tmp_path: Path, monkeypatch) -> None:

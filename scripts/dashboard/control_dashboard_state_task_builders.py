@@ -199,6 +199,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             tf_phase=str(task.get("tf_phase", "")).strip() or task_view.normalize_tf_phase(task_view.derive_tf_phase(task), "queued"),
             rerun_summary=rerun_summary,
             followup_summary=followup_summary,
+            followup_brief_status=str(task.get("followup_brief_status", "")).strip(),
             rate_limit_summary=rate_limit_summary,
             execution_brief_status=str(task.get("execution_brief_status", "")).strip(),
         )
