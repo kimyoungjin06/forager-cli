@@ -63,8 +63,32 @@
   - `background_run_execution_brief_status`
   - `background_run_evidence_bundle`
   - `background_run_evidence_artifacts[]`
+  - sidecar queue file:
+    - `.aoe-team/background_runs.json`
 
-### 5.3 Runner Target
+### 5.3 Background Worker State
+- Durable heartbeat/state object for the active local worker.
+- Phase 1 shape:
+  - `status`
+  - `runner_target`
+  - `mode`
+  - `thread_name`
+  - `pid`
+  - `started_at`
+  - `heartbeat_at`
+  - `stopped_at`
+  - `last_reason`
+  - `last_ticket_id`
+  - `last_claimed_at`
+  - `claimed_count`
+  - `drain_cycles`
+  - `queue_depth`
+  - `queue_stale_count`
+  - `queue_summary`
+- Sidecar path:
+  - `.aoe-team/background_worker.json`
+
+### 5.4 Runner Target
 - Where the work executes.
 - Initial enum:
   - `local_background`
@@ -72,7 +96,7 @@
   - `github_runner`
   - `remote_worker`
 
-### 5.4 Evidence Bundle
+### 5.5 Evidence Bundle
 - Durable off-desk result package.
 - Minimum contents:
   - request/task metadata
@@ -125,6 +149,8 @@
 - Add:
   - queue file/state
   - run ticket persistence
+  - same-process singleton `local_background` daemon thread
+  - worker heartbeat/state file
   - background lifecycle state in dashboard
 
 ### Phase 2: Remote Runner Abstraction
@@ -161,6 +187,7 @@
 6. SCM trigger bridge
 
 ## 11. Open Questions
+- Current `local_background` daemon is an in-process thread because execution targets still live in the gateway process registry. A future external worker requires serializable launch specs instead of in-memory callbacks.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

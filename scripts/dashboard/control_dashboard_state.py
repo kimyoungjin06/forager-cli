@@ -113,6 +113,23 @@ def _background_run_summary_text(runtime_cards: list[RuntimeCardDTO]) -> str:
     return " | ".join(parts) or "-"
 
 
+def _background_worker_summary_text(runtime_cards: list[RuntimeCardDTO]) -> str:
+    counts: dict[str, int] = {}
+    for card in runtime_cards:
+        token = str(card.background_worker_status or "").strip().lower()
+        if not token or token == "-":
+            continue
+        counts[token] = counts.get(token, 0) + 1
+    if not counts:
+        return "-"
+    order = ("running", "idle", "stopped", "error", "stale")
+    parts = [f"{key}={counts[key]}" for key in order if counts.get(key)]
+    for key in sorted(counts.keys()):
+        if key not in order:
+            parts.append(f"{key}={counts[key]}")
+    return " | ".join(parts) or "-"
+
+
 def resolve_task_request_for_alias(manager_state: Dict[str, Any], project_alias: str, task_short_id: str) -> str:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     alias_token = str(project_alias or "").strip().upper()
@@ -194,6 +211,7 @@ def load_dashboard_snapshot_result(
         repeat_memory_summary=_repeat_summary_text(provider_state),
         execution_brief_summary=_execution_brief_summary_text(runtime_cards),
         background_run_summary=_background_run_summary_text(runtime_cards),
+        background_worker_summary=_background_worker_summary_text(runtime_cards),
         latest_intent_command=str(latest_intent.get("command", "")).strip() or "-",
         latest_intent_action=str(latest_intent.get("action", "")).strip() or "-",
         latest_intent_trace=str(latest_intent.get("trace", "")).strip() or "-",

@@ -326,6 +326,41 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    background_runs.upsert_background_run_ticket(
+        background_runs.background_runs_state_path(project_root / ".aoe-team"),
+        {
+            "ticket_id": "BGT-001",
+            "request_id": "REQ-1",
+            "project_key": "alpha",
+            "execution_brief_status": "underspecified",
+            "runner_target": "local_background",
+            "launch_mode": "offdesk_manual",
+            "created_by": "dashboard-fixture",
+            "source_surface": "offdesk",
+            "status": "running",
+            "created_at": "2026-03-16T09:55:00+09:00",
+            "evidence_bundle": "status=pending | outcome=awaiting_review",
+            "evidence_artifacts": ["review_evidence/git_diff_scope.md"],
+        },
+        now_iso=lambda: "2026-03-16T10:00:00+09:00",
+    )
+    background_runs.update_background_worker_state(
+        background_runs.background_worker_state_path(project_root / ".aoe-team"),
+        now_iso=lambda: "2026-03-16T10:00:05+09:00",
+        status="running",
+        runner_target="local_background",
+        mode="thread_daemon",
+        thread_name="aoe-local-bg-10001",
+        pid=10001,
+        started_at="2026-03-16T09:55:00+09:00",
+        heartbeat_at="2026-03-16T10:00:05+09:00",
+        last_reason="drained:1",
+        claimed_count=1,
+        drain_cycles=2,
+        queue_depth=1,
+        queue_stale_count=0,
+        queue_summary="depth=1 | status running=1 | target local_background=1",
+    )
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
         team_dir=team_dir,
@@ -390,6 +425,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "background_run_summary" in overview_text
     assert "status running=1" in overview_text
     assert "target local_background=1" in overview_text
+    assert "background_worker_summary" in overview_text
+    assert "status=running" in overview_text
     assert "Project Progress Board" in overview_text
     assert "reports/summary.md" in overview_text
     assert "acceptance_gap" in overview_text

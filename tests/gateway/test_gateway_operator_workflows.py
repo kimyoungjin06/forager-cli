@@ -2,25 +2,33 @@
 """Gateway operator workflow regression tests."""
 
 import json
+import time
 
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_run_detached_flow as run_detached_flow
 
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
+    background_worker_state_path,
     background_runs_state_path,
     claim_background_run_ticket,
     claim_next_background_run_ticket,
     list_background_run_tickets,
+    load_background_worker_state,
     load_background_runs_state,
     mark_stale_background_run_tickets,
+    summarize_background_worker_state,
     summarize_background_runs_state,
+    update_background_worker_state,
     upsert_background_run_ticket,
 )
 from aoe_tg_local_background_worker import (
     drain_local_background_queue,
     drain_local_background_queue_once,
+    ensure_local_background_daemon,
     register_local_background_run,
     run_local_background_ticket,
+    stop_local_background_daemon,
 )
 from aoe_tg_request_contract import (
     background_run_evidence_artifacts_from_task,
@@ -2974,6 +2982,7 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     logged: list[dict] = []
     saves: list[Path] = []
     detached: dict[str, Any] = {}
+    daemon: dict[str, Any] = {}
 
     def _fake_start_background_dispatch_flow(*, name: str, target):
         detached["name"] = name
@@ -2982,6 +2991,11 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
         return object()
 
     monkeypatch.setattr(run_handlers, "_start_background_dispatch_flow", _fake_start_background_dispatch_flow)
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: daemon.update(kwargs) or {"started": True, "thread_name": "aoe-local-bg-test", "runner_target": "local_background"},
+    )
 
     ctx = run_handlers.build_run_context(
         cmd="run",
@@ -3092,8 +3106,9 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
 
     assert handled is True
-    assert detached.get("started") is True
-    assert detached.get("name") == "aoe-run-REQ-DETACHED"
+    assert detached == {}
+    assert daemon["runner_target"] == "local_background"
+    assert daemon["launch_mode"] == "detached_no_wait"
     task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED"]
     assert task["request_id"] == "REQ-DETACHED"
     assert task["status"] == "running"
@@ -3423,6 +3438,71 @@ def test_background_run_queue_drain_consumes_multiple_registered_tickets(tmp_pat
     rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
     assert rows["BGT-REG-101"]["status"] == "completed"
     assert rows["BGT-REG-102"]["status"] == "completed"
+
+
+def test_local_background_daemon_drains_queue_and_writes_worker_state(tmp_path: Path) -> None:
+    queue_file = background_runs_state_path(tmp_path)
+    worker_state_file = background_worker_state_path(tmp_path)
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-DAEMON-001",
+            request_id="REQ-DAEMON-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    ran: list[str] = []
+    assert register_local_background_run(
+        ticket_id="BGT-DAEMON-001",
+        run_target=lambda: ran.append("ok") or "ok",
+        on_ticket_update=lambda ticket: None,
+        on_queue_error=lambda event_name, exc: None,
+        completed_evidence_artifacts=lambda: ["review_report.md"],
+        completed_evidence_bundle=lambda: "status=completed | outcome=daemon_drain",
+    ) is True
+
+    started = ensure_local_background_daemon(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        claimed_by="daemon:test",
+        source_surface="test",
+        interval_sec=0.05,
+        idle_sec=0.05,
+        max_items=4,
+    )
+    assert started["runner_target"] == "local_background"
+
+    deadline = time.time() + 2.0
+    rows = {}
+    while time.time() < deadline:
+        rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+        if rows.get("BGT-DAEMON-001", {}).get("status") == "completed":
+            break
+        time.sleep(0.05)
+
+    stopped = stop_local_background_daemon(queue_path=queue_file, wait_sec=1.0)
+    assert stopped["stopped"] is True
+    assert ran == ["ok"]
+    assert rows["BGT-DAEMON-001"]["status"] == "completed"
+    worker_state = load_background_worker_state(worker_state_file)
+    worker_summary = summarize_background_worker_state(
+        worker_state_file,
+        now_iso=lambda: "2026-03-13T18:55:05+0900",
+    )
+    assert worker_state["thread_name"]
+    assert int(worker_state.get("claimed_count", 0) or 0) >= 1
+    assert worker_summary["status"] in {"stopped", "running", "idle"}
+    assert "queue=" in worker_summary["summary"]
 
 
 def test_background_run_summary_and_stale_marking(tmp_path: Path) -> None:

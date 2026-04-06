@@ -14,9 +14,20 @@ from aoe_tg_request_contract import normalize_background_run_ticket_snapshot
 
 
 BACKGROUND_RUNS_FILENAME = "background_runs.json"
+BACKGROUND_WORKER_FILENAME = "background_worker.json"
+BACKGROUND_WORKER_STATUSES = (
+    "running",
+    "idle",
+    "stopped",
+    "error",
+)
 
 
 def background_runs_state_path(team_dir: Path, *, filename: str = BACKGROUND_RUNS_FILENAME) -> Path:
+    return Path(team_dir).expanduser().resolve() / filename
+
+
+def background_worker_state_path(team_dir: Path, *, filename: str = BACKGROUND_WORKER_FILENAME) -> Path:
     return Path(team_dir).expanduser().resolve() / filename
 
 
@@ -26,6 +37,26 @@ def _empty_state() -> Dict[str, Any]:
         "updated_at": "",
         "runs": [],
     }
+
+
+def _empty_worker_state() -> Dict[str, Any]:
+    return {
+        "version": "2026-04-06.v1",
+        "updated_at": "",
+        "status": "stopped",
+    }
+
+
+def _trim(raw: Any, limit: int) -> str:
+    return str(raw or "").strip()[: max(0, int(limit))]
+
+
+def _normalize_int(raw: Any, default: int = 0) -> int:
+    try:
+        value = int(raw or default)
+    except Exception:
+        value = int(default)
+    return max(0, value)
 
 
 def load_background_runs_state(path: Path) -> Dict[str, Any]:
@@ -49,6 +80,58 @@ def load_background_runs_state(path: Path) -> Dict[str, Any]:
     return loaded
 
 
+def normalize_background_worker_state_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+
+    status = _trim(raw.get("status", "stopped"), 32).lower() or "stopped"
+    if status not in BACKGROUND_WORKER_STATUSES:
+        status = "stopped"
+
+    snapshot: Dict[str, Any] = {
+        "version": _trim(raw.get("version", "2026-04-06.v1"), 48) or "2026-04-06.v1",
+        "status": status,
+    }
+    runner_target = _trim(raw.get("runner_target", ""), 64).lower()
+    if runner_target:
+        snapshot["runner_target"] = runner_target
+    for key, limit in (
+        ("mode", 32),
+        ("thread_name", 96),
+        ("started_at", 64),
+        ("heartbeat_at", 64),
+        ("stopped_at", 64),
+        ("last_reason", 160),
+        ("last_ticket_id", 96),
+        ("last_claimed_at", 64),
+        ("queue_summary", 240),
+    ):
+        token = _trim(raw.get(key, ""), limit)
+        if token:
+            snapshot[key] = token
+    for key in ("pid", "claimed_count", "drain_cycles", "queue_depth", "queue_stale_count"):
+        value = _normalize_int(raw.get(key), 0)
+        if value > 0 or key in {"claimed_count", "drain_cycles", "queue_depth", "queue_stale_count"}:
+            snapshot[key] = value
+    return snapshot
+
+
+def load_background_worker_state(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return _empty_worker_state()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _empty_worker_state()
+    snapshot = normalize_background_worker_state_snapshot(data)
+    if not snapshot:
+        return _empty_worker_state()
+    loaded = _empty_worker_state()
+    loaded.update(snapshot)
+    loaded["updated_at"] = _trim(data.get("updated_at", ""), 64)
+    return loaded
+
+
 def save_background_runs_state(
     path: Path,
     state: Dict[str, Any],
@@ -67,6 +150,73 @@ def save_background_runs_state(
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+def save_background_worker_state(
+    path: Path,
+    state: Dict[str, Any],
+    *,
+    now_iso: Callable[[], str],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _empty_worker_state()
+    payload.update(normalize_background_worker_state_snapshot(state))
+    payload["updated_at"] = now_iso()
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def update_background_worker_state(
+    path: Path,
+    *,
+    now_iso: Callable[[], str],
+    status: str = "",
+    runner_target: str = "",
+    mode: str = "",
+    thread_name: str = "",
+    started_at: str = "",
+    heartbeat_at: str = "",
+    stopped_at: str = "",
+    last_reason: str = "",
+    last_ticket_id: str = "",
+    last_claimed_at: str = "",
+    queue_summary: str = "",
+    pid: int | None = None,
+    claimed_count: int | None = None,
+    drain_cycles: int | None = None,
+    queue_depth: int | None = None,
+    queue_stale_count: int | None = None,
+) -> Dict[str, Any]:
+    current = load_background_worker_state(path)
+    updated = dict(current)
+    for key, value in (
+        ("status", status),
+        ("runner_target", runner_target),
+        ("mode", mode),
+        ("thread_name", thread_name),
+        ("started_at", started_at),
+        ("heartbeat_at", heartbeat_at),
+        ("stopped_at", stopped_at),
+        ("last_reason", last_reason),
+        ("last_ticket_id", last_ticket_id),
+        ("last_claimed_at", last_claimed_at),
+        ("queue_summary", queue_summary),
+    ):
+        token = _trim(value, 240 if key == "queue_summary" else 160)
+        if token:
+            updated[key] = token
+    for key, value in (
+        ("pid", pid),
+        ("claimed_count", claimed_count),
+        ("drain_cycles", drain_cycles),
+        ("queue_depth", queue_depth),
+        ("queue_stale_count", queue_stale_count),
+    ):
+        if value is not None:
+            updated[key] = _normalize_int(value, 0)
+    save_background_worker_state(path, updated, now_iso=now_iso)
+    return load_background_worker_state(path)
 
 
 def upsert_background_run_ticket(
@@ -338,3 +488,49 @@ def mark_stale_background_run_tickets(
             now_iso=now_iso,
         )
     return {"stale_count": stale_count, "changed": changed}
+
+
+def summarize_background_worker_state(
+    path: Path,
+    *,
+    stale_after_sec: int = 180,
+    now_iso: Callable[[], str] | None = None,
+) -> Dict[str, Any]:
+    snapshot = load_background_worker_state(path)
+    status = str(snapshot.get("status", "stopped")).strip().lower() or "stopped"
+    heartbeat_at = str(snapshot.get("heartbeat_at", "")).strip()
+    stale = False
+    if status in {"running", "idle"} and heartbeat_at and callable(now_iso):
+        current_dt = _parse_iso_datetime(now_iso())
+        heartbeat_dt = _parse_iso_datetime(heartbeat_at)
+        if current_dt is not None and heartbeat_dt is not None:
+            stale = (current_dt - heartbeat_dt).total_seconds() >= max(1, int(stale_after_sec or 1))
+    effective_status = "stale" if stale else status
+    parts: List[str] = [f"status={effective_status}"]
+    runner_target = str(snapshot.get("runner_target", "")).strip()
+    if runner_target:
+        parts.append(f"target={runner_target}")
+    pid = int(snapshot.get("pid", 0) or 0)
+    if pid > 0:
+        parts.append(f"pid={pid}")
+    queue_depth = int(snapshot.get("queue_depth", 0) or 0)
+    queue_stale_count = int(snapshot.get("queue_stale_count", 0) or 0)
+    parts.append(f"queue={queue_depth}")
+    if queue_stale_count > 0:
+        parts.append(f"stale_queue={queue_stale_count}")
+    claimed_count = int(snapshot.get("claimed_count", 0) or 0)
+    if claimed_count > 0:
+        parts.append(f"claimed={claimed_count}")
+    last_reason = str(snapshot.get("last_reason", "")).strip()
+    if last_reason:
+        parts.append(f"reason={last_reason}")
+    return {
+        "status": effective_status,
+        "runner_target": runner_target or "-",
+        "heartbeat_at": heartbeat_at or "-",
+        "stale": stale,
+        "queue_depth": queue_depth,
+        "queue_stale_count": queue_stale_count,
+        "claimed_count": claimed_count,
+        "summary": " | ".join(parts) if parts else "-",
+    }

@@ -52,6 +52,7 @@ class ControlSummaryDTO:
     repeat_memory_summary: str
     execution_brief_summary: str
     background_run_summary: str
+    background_worker_summary: str
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str
@@ -93,6 +94,8 @@ class RuntimeCardDTO:
     active_task_background_run_runner_target: str
     active_task_background_run_ticket_id: str
     active_task_background_run_evidence_bundle: str
+    background_worker_status: str
+    background_worker_summary: str
     background_queue_summary: str
     background_queue_depth: int
     background_queue_stale_count: int
@@ -217,6 +220,8 @@ class RuntimeDetailDTO:
     active_task_background_run_ticket_id: str
     active_task_background_run_launch_mode: str
     active_task_background_run_evidence_bundle: str
+    background_worker_status: str
+    background_worker_summary: str
     background_queue_summary: str
     background_queue_depth: int
     background_queue_stale_count: int
@@ -304,6 +309,8 @@ class RecoveryRuntimeDTO:
     active_task_background_run_runner_target: str
     active_task_background_run_ticket_id: str
     active_task_background_run_evidence_bundle: str
+    background_worker_status: str
+    background_worker_summary: str
     background_queue_summary: str
     background_queue_depth: int
     background_queue_stale_count: int
@@ -343,6 +350,7 @@ class RecoverySummaryDTO:
     repeat_memory_summary: str
     execution_brief_summary: str
     background_run_summary: str
+    background_worker_summary: str
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str

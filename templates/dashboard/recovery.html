@@ -19,6 +19,7 @@
     <li><span>repeat_memory</span><strong>{{ recovery.repeat_memory_summary }}</strong></li>
     <li><span>execution_brief_summary</span><strong>{{ recovery.execution_brief_summary }}</strong></li>
     <li><span>background_run_summary</span><strong>{{ recovery.background_run_summary }}</strong></li>
+    <li><span>background_worker_summary</span><strong>{{ recovery.background_worker_summary }}</strong></li>
     <li><span>latest_intent_command</span><strong>{{ recovery.latest_intent_command }}</strong></li>
     <li><span>latest_intent_action</span><strong>{{ recovery.latest_intent_action }}</strong></li>
     <li><span>latest_intent_trace</span><strong>{{ recovery.latest_intent_trace }}</strong></li>
@@ -72,6 +73,7 @@
       <p><strong>background_run</strong> {{ runtime.active_task_background_run_status }} | {{ runtime.active_task_background_run_runner_target }}</p>
       <p><strong>background_ticket</strong> {{ runtime.active_task_background_run_ticket_id }}</p>
       <p><strong>evidence_bundle</strong> {{ runtime.active_task_background_run_evidence_bundle }}</p>
+      <p><strong>background_worker</strong> {{ runtime.background_worker_summary }}</p>
       <p><strong>background_queue</strong> {{ runtime.background_queue_summary }}</p>
       <p><strong>completion_focus</strong> {{ runtime.active_task_completion_focus }}</p>
       <p><strong>done_when</strong> {{ runtime.active_task_completion_done }}</p>

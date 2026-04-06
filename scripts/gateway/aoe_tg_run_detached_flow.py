@@ -9,6 +9,7 @@ from aoe_tg_background_runs import (
 )
 from aoe_tg_local_background_worker import (
     drain_local_background_queue,
+    ensure_local_background_daemon,
     register_local_background_run,
 )
 from aoe_tg_request_contract import (
@@ -157,6 +158,49 @@ def maybe_handle_no_wait_dispatch_detach(
             completed_evidence_artifacts=lambda: background_run_evidence_artifacts_from_task(provisional_task),
             completed_evidence_bundle=lambda: background_run_evidence_bundle_from_task(provisional_task),
         )
+
+    if queue_path:
+        try:
+            daemon_started = ensure_local_background_daemon(
+                queue_path=queue_path,
+                now_iso=now_iso,
+                runner_target="local_background",
+                launch_mode="detached_no_wait",
+                claimed_by=f"daemon:{provisional_req_id or chat_id}",
+                source_surface="run_no_wait",
+                interval_sec=1.0,
+                idle_sec=4.0,
+                stale_after_sec=900,
+                max_items=8,
+            )
+        except Exception as exc:
+            log_event(
+                event="background_daemon_start_failed",
+                project=key,
+                request_id=str(provisional_req_id or "").strip(),
+                task=provisional_task if isinstance(provisional_task, dict) else None,
+                stage="planning",
+                status="failed",
+                detail=str(exc).strip()[:240] or "background daemon start failed",
+            )
+        else:
+            log_event(
+                event="dispatch_detached",
+                project=key,
+                request_id=str(provisional_req_id or "").strip(),
+                task=provisional_task if isinstance(provisional_task, dict) else None,
+                stage="planning",
+                status="running",
+                detail=(
+                    "background queue enqueued"
+                    + (
+                        f" | worker={str(daemon_started.get('thread_name', '')).strip()}"
+                        if str(daemon_started.get("thread_name", "")).strip()
+                        else ""
+                    )
+                ),
+            )
+            return True
 
     def _run_detached_dispatch() -> None:
         try:
