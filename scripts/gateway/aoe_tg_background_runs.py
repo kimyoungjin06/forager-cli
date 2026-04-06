@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-from aoe_tg_request_contract import normalize_background_run_ticket_snapshot
+from aoe_tg_request_contract import (
+    background_run_ticket_external_worker_allowed,
+    background_runner_requires_externalizable_spec,
+    normalize_background_run_ticket_snapshot,
+)
 
 
 BACKGROUND_RUNS_FILENAME = "background_runs.json"
@@ -308,12 +312,33 @@ def claim_background_run_ticket(
     current_status = str(current.get("status", "")).strip().lower()
     if current_status not in {"queued", "stale"}:
         return current
+    requested_runner = str(runner_target or current.get("runner_target", "")).strip() or "local_background"
+    if (
+        background_runner_requires_externalizable_spec(requested_runner)
+        and not background_run_ticket_external_worker_allowed(
+            {
+                **current,
+                "runner_target": requested_runner,
+            }
+        )
+    ):
+        return advance_background_run_ticket(
+            path,
+            token,
+            now_iso=now_iso,
+            status="failed",
+            runner_target=requested_runner,
+            launch_mode=str(launch_mode or current.get("launch_mode", "")).strip(),
+            created_by=str(claimed_by or current.get("created_by", "")).strip(),
+            source_surface=str(source_surface or current.get("source_surface", "")).strip(),
+            evidence_bundle="status=failed | reason=launch_spec_not_externalizable",
+        )
     return advance_background_run_ticket(
         path,
         token,
         now_iso=now_iso,
         status="dispatching",
-        runner_target=str(runner_target or current.get("runner_target", "")).strip() or "local_background",
+        runner_target=requested_runner,
         launch_mode=str(launch_mode or current.get("launch_mode", "")).strip(),
         created_by=str(claimed_by or current.get("created_by", "")).strip(),
         source_surface=str(source_surface or current.get("source_surface", "")).strip(),

@@ -47,6 +47,11 @@ BACKGROUND_RUNNER_TARGETS = (
     "github_runner",
     "remote_worker",
 )
+BACKGROUND_EXTERNAL_RUNNER_TARGETS = (
+    "local_tmux",
+    "github_runner",
+    "remote_worker",
+)
 
 
 def _trim(raw: Any, limit: int) -> str:
@@ -513,6 +518,22 @@ def build_background_launch_spec(
             "summary": _trim(summary, 320),
         }
     )
+
+
+def background_runner_requires_externalizable_spec(runner_target: Any) -> bool:
+    token = _trim(runner_target, 64).lower()
+    return token in BACKGROUND_EXTERNAL_RUNNER_TARGETS
+
+
+def background_run_ticket_external_worker_allowed(ticket: Dict[str, Any]) -> bool:
+    snapshot = normalize_background_run_ticket_snapshot(ticket)
+    if not snapshot:
+        return False
+    runner_target = str(snapshot.get("runner_target", "")).strip().lower()
+    if not background_runner_requires_externalizable_spec(runner_target):
+        return True
+    launch_spec = normalize_background_launch_spec_snapshot(snapshot.get("launch_spec"))
+    return bool(launch_spec.get("externalizable", False))
 
 
 def _lineage_preset(run_control_mode: str, run_source_task: Optional[Dict[str, Any]]) -> str:

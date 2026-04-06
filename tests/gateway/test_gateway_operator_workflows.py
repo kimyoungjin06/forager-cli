@@ -3495,6 +3495,96 @@ def test_background_run_queue_claims_next_matching_ticket(tmp_path: Path) -> Non
     assert rows["BGT-001"]["status"] == "queued"
 
 
+def test_background_run_external_runner_requires_externalizable_launch_spec(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-EXT-001",
+            request_id="REQ-EXT-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="offdesk_manual",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec=build_background_launch_spec(
+                request_id="REQ-EXT-001",
+                project_key="twinpaper",
+                runner_target="github_runner",
+                launch_mode="offdesk_manual",
+                source_surface="run_no_wait",
+                created_by="telegram:939062873",
+                mode="in_process_callback",
+                externalizable=False,
+            ),
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    claimed = claim_background_run_ticket(
+        queue_file,
+        "BGT-EXT-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="github_runner",
+        launch_mode="offdesk_manual",
+        claimed_by="worker:github_runner",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-EXT-001"
+    assert claimed["status"] == "failed"
+    assert claimed["evidence_bundle"] == "status=failed | reason=launch_spec_not_externalizable"
+
+
+def test_background_run_external_runner_claims_when_launch_spec_is_externalizable(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-EXT-OK-001",
+            request_id="REQ-EXT-OK-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="offdesk_manual",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec=build_background_launch_spec(
+                request_id="REQ-EXT-OK-001",
+                project_key="twinpaper",
+                runner_target="github_runner",
+                launch_mode="offdesk_manual",
+                source_surface="run_no_wait",
+                created_by="telegram:939062873",
+                mode="subprocess_json",
+                entrypoint="aoe-background-worker",
+                externalizable=True,
+                blocked_reason="",
+            ),
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    claimed = claim_background_run_ticket(
+        queue_file,
+        "BGT-EXT-OK-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="github_runner",
+        launch_mode="offdesk_manual",
+        claimed_by="worker:github_runner",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-EXT-OK-001"
+    assert claimed["status"] == "dispatching"
+    assert claimed["evidence_bundle"] == "status=dispatching | outcome=worker_claimed"
+
+
 def test_background_run_queue_drain_uses_registered_handler(tmp_path: Path) -> None:
     queue_file = tmp_path / "background_runs.json"
     upsert_background_run_ticket(

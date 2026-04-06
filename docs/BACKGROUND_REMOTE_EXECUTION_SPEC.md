@@ -178,6 +178,11 @@
    - latest ticket
    - launch spec summary / externalizable state
    - current background lifecycle state
+6. External runner targets:
+   - `local_tmux`
+   - `github_runner`
+   - `remote_worker`
+   must not enter `dispatching` unless `launch_spec.externalizable=true`.
 
 ## 8. Rollout Plan
 
@@ -229,6 +234,8 @@
   - `mode=in_process_callback`
   - `externalizable=false`
   This is not a bug; it is the explicit migration seam toward `local_tmux` / `github_runner` / `remote_worker`.
+- When an external runner attempts to claim a non-externalizable ticket, the ticket must fail with:
+  - `reason=launch_spec_not_externalizable`
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?
