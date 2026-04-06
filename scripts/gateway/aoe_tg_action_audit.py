@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -12,6 +15,10 @@ from aoe_tg_runtime_core import action_audit_path as runtime_action_audit_path
 
 ACTION_AUDIT_DIRNAME = "dashboard"
 ACTION_AUDIT_FILENAME = "action-history.jsonl"
+
+
+def _action_audit_now() -> str:
+    return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
 
 def compact_action_text(raw: Any, limit: int = 120) -> str:
@@ -81,6 +88,54 @@ def _load_action_audit_rows(team_dir: Any) -> List[Dict[str, Any]]:
     except Exception:
         return []
     return rows
+
+
+def append_action_audit_row(
+    team_dir: Any,
+    *,
+    headline: Any,
+    status: Any,
+    outcome_kind: Any,
+    outcome_status: Any,
+    outcome_reason_code: Any,
+    outcome_detail: Any,
+    next_step: Any,
+    remediation: Any,
+    source_command: Any,
+    link_label: Any = "-",
+    link_href: Any = "-",
+    at: Any = "",
+) -> bool:
+    token = str(team_dir or "").strip()
+    source = str(source_command or "").strip()
+    if not token or not source:
+        return False
+    path = _action_audit_path(token)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "at": str(at or "").strip() or _action_audit_now(),
+        "headline": str(headline or "").strip() or "-",
+        "status": str(status or "").strip() or "unknown",
+        "outcome_kind": str(outcome_kind or "").strip() or "-",
+        "outcome_status": str(outcome_status or "").strip() or str(status or "").strip() or "unknown",
+        "outcome_reason_code": str(outcome_reason_code or "").strip() or "-",
+        "outcome_detail": str(outcome_detail or "").strip() or "-",
+        "next_step": str(next_step or "").strip() or "-",
+        "remediation": str(remediation or "").strip() or "-",
+        "link_label": str(link_label or "").strip() or "-",
+        "link_href": str(link_href or "").strip() or "-",
+        "source_command": source,
+    }
+    try:
+        with path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        return False
+    return True
 
 
 def load_latest_action_audit_for_task(team_dir: Any, request_id: Any) -> Dict[str, str]:

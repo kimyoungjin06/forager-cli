@@ -465,6 +465,21 @@ def test_orch_bgw_start_and_status_and_stop_manage_local_background_daemon(tmp_p
     stop_buttons = [btn["text"] for row in (stop_markup or {}).get("keyboard", []) for btn in row]
     assert "/orch bgw-start O2" in stop_buttons
 
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [row["source_command"] for row in rows[-3:]] == [
+        "/orch bgw-start O2",
+        "/orch bgw-status O2",
+        "/orch bgw-stop O2",
+    ]
+    assert rows[-3]["headline"] == "Background Worker Start | executed"
+    assert rows[-3]["next_step"] == "/orch status O2"
+    assert "background_worker.json" in rows[-3]["remediation"]
+    assert rows[-2]["headline"] == "Background Worker Status | accepted"
+    assert rows[-2]["link_href"] == "/control/runtimes/O2"
+    assert rows[-1]["headline"] == "Background Worker Stop | executed"
+    assert "queued tickets" in rows[-1]["remediation"]
+
 
 def test_orch_repair_all_repairs_multiple_projects(tmp_path: Path) -> None:
     state = _empty_state()

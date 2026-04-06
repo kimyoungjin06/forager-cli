@@ -2,9 +2,11 @@
 """Orchestrator task lifecycle handlers for Telegram gateway."""
 
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any, Callable, Dict, List, Optional
 
 import aoe_tg_background_runs as background_runs
+from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
 from aoe_tg_package_paths import package_root
 
@@ -46,6 +48,11 @@ Only task lines are parsed; everything else is ignored.
 - [ ] P2: Second task
 ```
 """
+
+
+def _runtime_action_link(alias: str) -> str:
+    token = str(alias or "").strip()
+    return f"/control/runtimes/{quote(token, safe='')}" if token else "-"
 
 
 def _project_alias(entry: Dict[str, Any], fallback: str) -> str:
@@ -715,12 +722,33 @@ def handle_orch_task_command(
                 max_items=8,
             )
             worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
+            queue_summary = str(background_runs.summarize_background_runs_state(queue_path).get("summary", "-")).strip() or "-"
+            started_ok = bool(started.get("started"))
+            append_action_audit_row(
+                team_dir,
+                headline="Background Worker Start | executed",
+                status="executed",
+                outcome_kind="background_worker",
+                outcome_status="executed",
+                outcome_reason_code="started" if started_ok else "already_running",
+                outcome_detail=(worker_snapshot.get("summary") or "-"),
+                next_step=f"/orch status {alias}",
+                remediation=(
+                    "inspect /orch status and background_worker.json if the queue does not begin draining"
+                    if started_ok
+                    else "worker was already running; inspect /orch status and background queue depth before restarting again"
+                ),
+                source_command=f"/orch bgw-start {alias}",
+                link_label="runtime detail",
+                link_href=_runtime_action_link(alias),
+                at=now_iso(),
+            )
             send(
                 "background worker start\n"
                 f"- runtime: {key}\n"
                 f"- started: {'yes' if bool(started.get('started')) else 'already_running'}\n"
                 f"- worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
-                f"- queue: {str(background_runs.summarize_background_runs_state(queue_path).get('summary', '-')).strip() or '-'}\n"
+                f"- queue: {queue_summary}\n"
                 "next:\n"
                 f"- /orch status {alias}",
                 context="orch-bgw-start",
@@ -731,6 +759,26 @@ def handle_orch_task_command(
         if cmd == "orch-bgw-stop":
             stopped = stop_local_background_daemon(queue_path=queue_path, wait_sec=2.0)
             worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
+            stopped_ok = bool(stopped.get("stopped"))
+            append_action_audit_row(
+                team_dir,
+                headline="Background Worker Stop | executed",
+                status="executed",
+                outcome_kind="background_worker",
+                outcome_status="executed",
+                outcome_reason_code="stopped" if stopped_ok else "already_stopped",
+                outcome_detail=(worker_snapshot.get("summary") or "-"),
+                next_step=f"/orch status {alias}",
+                remediation=(
+                    "inspect queued tickets before starting the worker again or cleaning stale queue rows"
+                    if stopped_ok
+                    else "worker was already stopped; inspect queue depth before taking more action"
+                ),
+                source_command=f"/orch bgw-stop {alias}",
+                link_label="runtime detail",
+                link_href=_runtime_action_link(alias),
+                at=now_iso(),
+            )
             send(
                 "background worker stop\n"
                 f"- runtime: {key}\n"
@@ -746,6 +794,28 @@ def handle_orch_task_command(
             return True
         worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
         queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
+        append_action_audit_row(
+            team_dir,
+            headline="Background Worker Status | accepted",
+            status="accepted",
+            outcome_kind="background_worker",
+            outcome_status="accepted",
+            outcome_reason_code=str(worker_snapshot.get("status", "")).strip() or "unknown",
+            outcome_detail=(
+                "worker={worker} | queue={queue}".format(
+                    worker=str(worker_snapshot.get("summary", "-")).strip() or "-",
+                    queue=str(queue_snapshot.get("summary", "-")).strip() or "-",
+                )
+            ),
+            next_step=f"/orch status {alias}",
+            remediation=(
+                "start the worker if queue depth is non-zero and status is stopped; inspect stale/error state before retrying execution"
+            ),
+            source_command=f"/orch bgw-status {alias}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
         send(
             "background worker status\n"
             f"- runtime: {key}\n"
