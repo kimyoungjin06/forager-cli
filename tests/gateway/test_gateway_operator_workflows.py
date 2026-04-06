@@ -40,10 +40,13 @@ from aoe_tg_request_contract import (
     background_run_evidence_bundle_from_task,
     build_background_launch_spec,
     build_github_runner_background_launch_spec,
+    build_gateway_simulation_command_argv,
     build_local_tmux_background_launch_spec,
+    build_local_tmux_gateway_command_launch_spec,
     build_remote_worker_background_launch_spec,
     build_runner_background_launch_spec,
     build_background_run_ticket,
+    gateway_cli_entrypoint_path,
     select_background_runner_target,
 )
 
@@ -3917,6 +3920,52 @@ def test_local_tmux_launch_spec_can_embed_command_payload() -> None:
 
     assert spec["command_argv"] == ["python3", "-c", "print('ok')"]
     assert spec["command_cwd"] == "/tmp/twinpaper"
+
+
+def test_build_gateway_simulation_command_argv_uses_gateway_entrypoint() -> None:
+    argv = build_gateway_simulation_command_argv(
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        simulate_text="/retry T-101",
+        simulate_chat_id="local-bg",
+    )
+
+    assert argv[0]
+    assert argv[1] == gateway_cli_entrypoint_path()
+    assert "--project-root" in argv
+    assert "/tmp/twinpaper" in argv
+    assert "--team-dir" in argv
+    assert "/tmp/twinpaper/.aoe-team" in argv
+    assert "--manager-state-file" in argv
+    assert "/tmp/twinpaper/.aoe-team/orch_manager_state.json" in argv
+    assert "--simulate-live" in argv
+    assert "--simulate-chat-id" in argv
+    assert "local-bg" in argv
+    assert "--simulate-text" in argv
+    assert "/retry T-101" in argv
+
+
+def test_build_local_tmux_gateway_command_launch_spec_embeds_gateway_payload() -> None:
+    spec = build_local_tmux_gateway_command_launch_spec(
+        request_id="REQ-TMUX-CLI-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        command_text="/retry T-101 lane L1",
+        simulate_chat_id="local-bg",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+
+    assert spec["runner_target"] == "local_tmux"
+    assert spec["externalizable"] is True
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+    assert spec["command_argv"][1] == gateway_cli_entrypoint_path()
+    assert "--simulate-text" in spec["command_argv"]
+    assert "/retry T-101 lane L1" in spec["command_argv"]
 
 
 def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

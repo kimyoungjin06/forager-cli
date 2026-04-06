@@ -113,6 +113,12 @@
   - minimal executable payload:
     - `command_argv[]`
     - `command_cwd`
+  - supported serializable payload primitive:
+    - gateway simulation command
+    - shape:
+      - `python <repo>/scripts/gateway/aoe-telegram-gateway.py --project-root ... --team-dir ... --manager-state-file ... --simulate-live --simulate-chat-id ... --simulate-text "<command>"`
+    - intended first use:
+      - retry / replan / followup style re-entry commands that already have a stable task reference
 - `github_runner`
   - `kind=background_dispatch`
   - `mode=github_action_json`

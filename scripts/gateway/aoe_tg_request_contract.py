@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
 
 from aoe_tg_orch_roles import classify_dispatch_role_preset, normalize_role_preset
@@ -645,6 +647,72 @@ def build_local_tmux_background_launch_spec(
         created_by=created_by,
         command_argv=command_argv,
         command_cwd=command_cwd,
+    )
+
+
+def gateway_cli_entrypoint_path() -> str:
+    return str(Path(__file__).resolve().with_name("aoe-telegram-gateway.py"))
+
+
+def build_gateway_simulation_command_argv(
+    *,
+    project_root: str,
+    team_dir: str,
+    manager_state_file: str,
+    simulate_text: str,
+    simulate_chat_id: str = "local-background",
+    simulate_live: bool = True,
+) -> List[str]:
+    argv: List[str] = [
+        str(sys.executable or "python3"),
+        gateway_cli_entrypoint_path(),
+        "--project-root",
+        _trim(project_root, 240) or ".",
+        "--team-dir",
+        _trim(team_dir, 240) or "",
+        "--manager-state-file",
+        _trim(manager_state_file, 240) or "",
+        "--simulate-chat-id",
+        _trim(simulate_chat_id, 96) or "local-background",
+        "--simulate-text",
+        _trim(simulate_text, 1200),
+    ]
+    if simulate_live:
+        argv.append("--simulate-live")
+    return [item for item in argv if str(item).strip()]
+
+
+def build_local_tmux_gateway_command_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    command_text: str,
+    simulate_chat_id: str = "local-background",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    return build_local_tmux_background_launch_spec(
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+        command_argv=build_gateway_simulation_command_argv(
+            project_root=project_root,
+            team_dir=team_dir,
+            manager_state_file=manager_state_file,
+            simulate_text=command_text,
+            simulate_chat_id=simulate_chat_id,
+            simulate_live=True,
+        ),
+        command_cwd=project_root,
     )
 
 
