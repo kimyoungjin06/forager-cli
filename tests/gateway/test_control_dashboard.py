@@ -21,6 +21,7 @@ import aoe_tg_background_runs as background_runs  # noqa: E402
 import aoe_tg_operator_summary as operator_summary  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
+import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
 
@@ -1000,6 +1001,91 @@ def test_control_dashboard_post_retry_route_executes_retry_bridge(tmp_path: Path
     assert payload["task"]["detail_path"] == "/control/tasks/by-request/REQ-RETRY"
     assert payload["next_step"] == "/task T-003 | retry-run"
     assert "review the updated task detail" in payload["remediation"]
+
+
+def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["background_runner_target"] = "local_tmux"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_now_iso", lambda: "2026-04-06T12:00:00+09:00")
+
+    class _GatewayMain:
+        @staticmethod
+        def save_manager_state(path, state):
+            Path(path).write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
+
+    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+        claimed = background_runs.claim_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            claimed_by=claimed_by,
+            source_surface=source_surface,
+        )
+        assert claimed["status"] == "dispatching"
+        return background_runs.advance_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            status="running",
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            created_by=claimed_by,
+            source_surface=source_surface,
+            runtime_handle="aoe_bg_retry_req_1",
+            runtime_summary="tmux_session=aoe_bg_retry_req_1",
+            evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_retry_req_1",
+        )
+
+    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/retry T-001"
+    assert payload["next_step"] == "/orch status O2"
+    assert payload["background_run"]["runner_target"] == "local_tmux"
+    assert payload["background_run"]["status"] == "running"
+    assert payload["background_run"]["runtime_handle"] == "aoe_bg_retry_req_1"
+    assert payload["transition"]["run_source_request_id"] == "REQ-1"
+    assert payload["task"]["request_id"] == "REQ-1"
+    assert payload["task"]["detail_path"] == "/control/tasks/by-request/REQ-1"
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert task["background_run_runner_target"] == "local_tmux"
+    assert task["background_run_status"] == "running"
+    assert task["background_run_ticket_id"].startswith("BGT-REQ-1-")
+    assert task["background_run_runtime_handle"] == "aoe_bg_retry_req_1"
+    queue_path = Path(updated["projects"]["alpha"]["team_dir"]) / "background_runs.json"
+    rows = background_runs.load_background_runs_state(queue_path).get("runs") or []
+    launched = [row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-1-")]
+    assert len(launched) == 1
+    assert launched[0]["runner_target"] == "local_tmux"
+    assert launched[0]["status"] == "running"
+    assert launched[0]["runtime_handle"] == "aoe_bg_retry_req_1"
 
 
 def test_control_dashboard_post_retry_route_blocked_includes_context_specific_remediation(tmp_path: Path, monkeypatch) -> None:

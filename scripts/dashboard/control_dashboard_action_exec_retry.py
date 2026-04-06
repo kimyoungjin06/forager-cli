@@ -3,12 +3,22 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import aoe_tg_background_runs as background_runs
 import aoe_tg_chat_state as chat_state
+from aoe_tg_request_contract import (
+    apply_background_run_ticket_snapshot,
+    build_background_run_ticket,
+    build_local_tmux_gateway_command_launch_spec,
+    select_background_runner_target,
+)
 import aoe_tg_retry_handlers as retry_handlers
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
+from aoe_tg_tmux_background_worker import launch_local_tmux_background_ticket
 
 from control_dashboard_action_exec_shared import (
     _DASHBOARD_CHAT_ID,
@@ -19,6 +29,7 @@ from control_dashboard_action_exec_shared import (
     _find_task_project_key,
     _json,
     _latest_recorded_outcome,
+    _load_gateway_main_module,
     _load_dashboard_manager_state,
     _make_send_collector,
     _missing_outcome_response,
@@ -58,6 +69,179 @@ def _retry_blocked_remediation(contexts: List[str]) -> str:
         if token in _RETRY_BLOCKED_REMEDIATIONS:
             return _RETRY_BLOCKED_REMEDIATIONS[token]
     return "inspect planning or critic blockers in /offdesk review before re-running retry"
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def _project_status_ref(project_key: str, entry: Dict[str, Any]) -> str:
+    alias = str(entry.get("project_alias", "")).strip().upper()
+    return alias or str(project_key or "").strip() or "-"
+
+
+def _retry_command_text(transition: Dict[str, Any]) -> str:
+    source_request_id = str(transition.get("run_source_request_id", "")).strip()
+    if not source_request_id:
+        return ""
+    lane_ids: List[str] = []
+    for row in list(transition.get("run_selected_execution_lane_ids") or []) + list(
+        transition.get("run_selected_review_lane_ids") or []
+    ):
+        token = str(row or "").strip()[:32]
+        if token and token not in lane_ids:
+            lane_ids.append(token)
+    command = f"/retry {source_request_id}"
+    if lane_ids:
+        command += " lane " + ",".join(lane_ids)
+    return command
+
+
+def _set_task_background_ticket(task: Dict[str, Any], ticket: Dict[str, Any], *, current_ts: str) -> None:
+    apply_background_run_ticket_snapshot(task, ticket)
+    task.setdefault("result", {})
+    if isinstance(task.get("result"), dict):
+        task["result"]["background_run_status"] = str(ticket.get("status", "")).strip()
+        task["result"]["background_run_runner_target"] = str(ticket.get("runner_target", "")).strip()
+        task["result"]["background_run_ticket_id"] = str(ticket.get("ticket_id", "")).strip()
+        bundle = str(ticket.get("evidence_bundle", "")).strip()
+        if bundle:
+            task["result"]["background_run_evidence_bundle"] = bundle
+    task["updated_at"] = current_ts
+
+
+def _maybe_execute_retry_background_tmux(
+    transition: Dict[str, Any],
+    *,
+    manager_state: Dict[str, Any],
+    paths: Any,
+    source_command: str,
+    payload: Dict[str, Any],
+) -> Tuple[int, Dict[str, str], bytes] | None:
+    project_key = str(transition.get("orch_target", "")).strip()
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    entry = projects.get(project_key) if project_key and isinstance(projects.get(project_key), dict) else None
+    if not isinstance(entry, dict):
+        return None
+    source_request_id = str(transition.get("run_source_request_id", "")).strip()
+    team_dir_raw = str(entry.get("team_dir", "")).strip()
+    command_text = _retry_command_text(transition)
+    if not source_request_id or not team_dir_raw or not command_text:
+        return None
+
+    launch_spec = build_local_tmux_gateway_command_launch_spec(
+        request_id=source_request_id,
+        project_key=project_key,
+        project_root=str(entry.get("project_root", "")).strip() or str(paths.control_root),
+        team_dir=team_dir_raw,
+        manager_state_file=str(paths.manager_state_file),
+        command_text=command_text,
+        simulate_chat_id=_DASHBOARD_CHAT_ID,
+        launch_mode="dashboard_retry",
+        source_surface="dashboard_retry",
+        created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+    )
+    preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
+    if preferred_runner != "local_tmux":
+        return None
+    selected_runner = select_background_runner_target(
+        preferred_runner_target=preferred_runner,
+        launch_spec=launch_spec,
+        allow_external_targets=False,
+    )
+    if selected_runner != "local_tmux":
+        return None
+
+    queue_path = background_runs.background_runs_state_path(Path(team_dir_raw))
+    current_ts = _now_iso()
+    source_task = gateway_task_state.get_task_record(entry, source_request_id)
+    ticket = build_background_run_ticket(
+        request_id=source_request_id,
+        project_key=project_key,
+        execution_brief_status=str((source_task or {}).get("execution_brief_status", "executable")).strip() or "executable",
+        runner_target="local_tmux",
+        launch_mode="dashboard_retry",
+        created_at=current_ts,
+        created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+        source_surface="dashboard_retry",
+        status="queued",
+        launch_spec=launch_spec,
+    )
+    ticket = background_runs.upsert_background_run_ticket(queue_path, ticket, now_iso=_now_iso)
+    launched = launch_local_tmux_background_ticket(
+        queue_path=queue_path,
+        ticket_id=str(ticket.get("ticket_id", "")).strip(),
+        now_iso=_now_iso,
+        claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+    ticket_snapshot = launched if isinstance(launched, dict) and launched else ticket
+
+    if isinstance(source_task, dict):
+        _set_task_background_ticket(source_task, ticket_snapshot, current_ts=_now_iso())
+        entry["updated_at"] = _now_iso()
+        gateway_main = _load_gateway_main_module()
+        gateway_main.save_manager_state(paths.manager_state_file, manager_state)
+
+    project_ref = _project_status_ref(project_key, entry)
+    task_payload = None
+    if isinstance(source_task, dict):
+        task_payload = {
+            "request_id": source_request_id,
+            "label": gateway_task_view.task_display_label(source_task, fallback_request_id=source_request_id),
+            "status": str(source_task.get("status", "")).strip() or "-",
+            "tf_phase": str(source_task.get("tf_phase", "")).strip() or "-",
+            "detail_path": f"/control/tasks/by-request/{source_request_id}",
+        }
+    background_payload = {
+        "ticket_id": str(ticket_snapshot.get("ticket_id", "")).strip() or "-",
+        "status": str(ticket_snapshot.get("status", "")).strip() or "-",
+        "runner_target": str(ticket_snapshot.get("runner_target", "")).strip() or "local_tmux",
+        "runtime_handle": str(ticket_snapshot.get("runtime_handle", "")).strip() or "-",
+        "runtime_summary": str(ticket_snapshot.get("runtime_summary", "")).strip() or "-",
+        "launch_spec": str((ticket_snapshot.get("launch_spec") or {}).get("summary", "")).strip() or "-",
+    }
+    blocked = str(ticket_snapshot.get("status", "")).strip().lower() == "failed"
+    detail = str(ticket_snapshot.get("evidence_bundle", "")).strip() or "background_tmux_launch_failed"
+    remediation = (
+        f"inspect tmux availability or switch /orch bg-runner {project_ref} local_background before retrying again"
+        if blocked
+        else "inspect tmux session state and runtime status before issuing another retry"
+    )
+    return _json(
+        {
+            "ok": not blocked,
+            "implemented": True,
+            "executed": True,
+            "status": "blocked" if blocked else "executed",
+            "method": "POST",
+            "path": "/control/actions/task/retry",
+            "mode": "phase2",
+            "source_command": source_command,
+            "payload": payload,
+            "transition": {
+                "cmd": transition.get("cmd", "run"),
+                "orch_target": transition.get("orch_target", "-"),
+                "run_control_mode": transition.get("run_control_mode", "-"),
+                "run_source_request_id": transition.get("run_source_request_id", "-"),
+                "run_force_mode": transition.get("run_force_mode", "-"),
+                "execution_lane_ids": list(transition.get("run_selected_execution_lane_ids") or []),
+                "review_lane_ids": list(transition.get("run_selected_review_lane_ids") or []),
+            },
+            "task": task_payload,
+            "background_run": background_payload,
+            "next_step": f"/orch status {project_ref}",
+            "remediation": remediation,
+            "outcome": {
+                "kind": "retry_run",
+                "status": "blocked" if blocked else "executed",
+                "reason_code": "background_tmux_launch_failed" if blocked else "background_tmux_started",
+                "detail": detail,
+            },
+        },
+        status=409 if blocked else 200,
+    )
 
 
 
@@ -256,6 +440,15 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             },
             status=409,
         )
+    background_result = _maybe_execute_retry_background_tmux(
+        transition,
+        manager_state=manager_state,
+        paths=paths,
+        source_command=str(spec.get("command", "")).strip() or "/retry",
+        payload=payload,
+    )
+    if background_result is not None:
+        return background_result
     import sys
 
     compatibility_module = sys.modules.get("control_dashboard")

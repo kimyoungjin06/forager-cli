@@ -166,6 +166,7 @@ def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callab
                 "name": "default",
                 "display_name": "default",
                 "project_alias": "O1",
+                "background_runner_target": "local_background",
                 "project_root": str(project_root),
                 "team_dir": str(team_dir),
                 "overview": "",
@@ -469,6 +470,8 @@ def load_manager_state(
             "name": key,
             "display_name": str(raw_entry.get("display_name", key)).strip() or key,
             "project_alias": normalize_project_alias(str(raw_entry.get("project_alias", ""))),
+            "background_runner_target": str(raw_entry.get("background_runner_target", "local_background")).strip().lower()
+            or "local_background",
             "project_root": str(root_path),
             "team_dir": str(Path(td).expanduser().resolve()),
             "overview": str(raw_entry.get("overview", "")).strip(),
@@ -569,6 +572,7 @@ def ensure_default_project_registered(
             "name": "default",
             "display_name": "default",
             "project_alias": "O1",
+            "background_runner_target": "local_background",
             "project_root": str(project_root),
             "team_dir": str(team_dir),
             "overview": "",
@@ -594,6 +598,7 @@ def ensure_default_project_registered(
             if "todos" not in entry or not isinstance(entry.get("todos"), list):
                 entry["todos"] = []
             entry["project_alias"] = normalize_project_alias(str(entry.get("project_alias", "")))
+            entry["background_runner_target"] = str(entry.get("background_runner_target", "local_background")).strip().lower() or "local_background"
             entry["system_project"] = bool_from_json(entry.get("system_project"), str(entry.get("name", "")).strip().lower() == "default")
             entry["ops_hidden"] = bool_from_json(entry.get("ops_hidden"), bool(entry.get("system_project")))
             entry["ops_hidden_reason"] = str(entry.get("ops_hidden_reason", "")).strip()[:400]
