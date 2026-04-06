@@ -102,6 +102,29 @@
   - `externalizable=false`
   - `blocked_reason=requires in-process callback registry`
 
+#### 5.3.1 Externalizable Runner Defaults
+- `local_tmux`
+  - `kind=background_dispatch`
+  - `mode=tmux_session_json`
+  - `entrypoint=aoe-background-worker`
+  - `argv=["worker-run","--runner","local_tmux"]`
+  - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR","AOE_ORCH_ALIAS"]`
+  - `externalizable=true`
+- `github_runner`
+  - `kind=background_dispatch`
+  - `mode=github_action_json`
+  - `entrypoint=aoe-background-worker`
+  - `argv=["worker-run","--runner","github_runner"]`
+  - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR","GITHUB_TOKEN","GITHUB_REPOSITORY"]`
+  - `externalizable=true`
+- `remote_worker`
+  - `kind=background_dispatch`
+  - `mode=remote_worker_json`
+  - `entrypoint=aoe-background-worker`
+  - `argv=["worker-run","--runner","remote_worker"]`
+  - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR","AOE_REMOTE_ENDPOINT"]`
+  - `externalizable=true`
+
 ### 5.4 Background Worker State
 - Durable heartbeat/state object for the active local worker.
 - Phase 1 shape:

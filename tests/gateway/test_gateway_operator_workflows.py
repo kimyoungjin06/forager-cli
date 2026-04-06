@@ -34,6 +34,10 @@ from aoe_tg_request_contract import (
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
     build_background_launch_spec,
+    build_github_runner_background_launch_spec,
+    build_local_tmux_background_launch_spec,
+    build_remote_worker_background_launch_spec,
+    build_runner_background_launch_spec,
     build_background_run_ticket,
 )
 
@@ -3583,6 +3587,46 @@ def test_background_run_external_runner_claims_when_launch_spec_is_externalizabl
     assert claimed["ticket_id"] == "BGT-EXT-OK-001"
     assert claimed["status"] == "dispatching"
     assert claimed["evidence_bundle"] == "status=dispatching | outcome=worker_claimed"
+
+
+def test_external_runner_launch_spec_builders_are_externalizable() -> None:
+    common = dict(
+        request_id="REQ-EXT-BUILD",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+
+    local_tmux = build_local_tmux_background_launch_spec(**common)
+    github_runner = build_github_runner_background_launch_spec(**common)
+    remote_worker = build_remote_worker_background_launch_spec(**common)
+    generic_local_tmux = build_runner_background_launch_spec(runner_target="local_tmux", **common)
+
+    assert local_tmux["runner_target"] == "local_tmux"
+    assert local_tmux["mode"] == "tmux_session_json"
+    assert local_tmux["entrypoint"] == "aoe-background-worker"
+    assert local_tmux["argv"] == ["worker-run", "--runner", "local_tmux"]
+    assert local_tmux["env_keys"] == ["AOE_TEAM_DIR", "AOE_STATE_DIR", "AOE_ORCH_ALIAS"]
+    assert local_tmux["externalizable"] is True
+    assert "blocked_reason" not in local_tmux
+
+    assert github_runner["runner_target"] == "github_runner"
+    assert github_runner["mode"] == "github_action_json"
+    assert github_runner["argv"] == ["worker-run", "--runner", "github_runner"]
+    assert github_runner["env_keys"] == ["AOE_TEAM_DIR", "AOE_STATE_DIR", "GITHUB_TOKEN", "GITHUB_REPOSITORY"]
+    assert github_runner["externalizable"] is True
+
+    assert remote_worker["runner_target"] == "remote_worker"
+    assert remote_worker["mode"] == "remote_worker_json"
+    assert remote_worker["argv"] == ["worker-run", "--runner", "remote_worker"]
+    assert remote_worker["env_keys"] == ["AOE_TEAM_DIR", "AOE_STATE_DIR", "AOE_REMOTE_ENDPOINT"]
+    assert remote_worker["externalizable"] is True
+
+    assert generic_local_tmux == local_tmux
 
 
 def test_background_run_queue_drain_uses_registered_handler(tmp_path: Path) -> None:

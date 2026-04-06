@@ -52,6 +52,12 @@ BACKGROUND_EXTERNAL_RUNNER_TARGETS = (
     "github_runner",
     "remote_worker",
 )
+BACKGROUND_RUNNER_DEFAULT_MODES = {
+    "local_background": "in_process_callback",
+    "local_tmux": "tmux_session_json",
+    "github_runner": "github_action_json",
+    "remote_worker": "remote_worker_json",
+}
 
 
 def _trim(raw: Any, limit: int) -> str:
@@ -517,6 +523,154 @@ def build_background_launch_spec(
             ),
             "summary": _trim(summary, 320),
         }
+    )
+
+
+def _runner_launch_defaults(runner_target: str) -> Dict[str, Any]:
+    token = _trim(runner_target, 64).lower()
+    if token == "local_tmux":
+        return {
+            "kind": "background_dispatch",
+            "mode": BACKGROUND_RUNNER_DEFAULT_MODES["local_tmux"],
+            "entrypoint": "aoe-background-worker",
+            "argv": ["worker-run", "--runner", "local_tmux"],
+            "env_keys": ["AOE_TEAM_DIR", "AOE_STATE_DIR", "AOE_ORCH_ALIAS"],
+            "externalizable": True,
+            "blocked_reason": "",
+        }
+    if token == "github_runner":
+        return {
+            "kind": "background_dispatch",
+            "mode": BACKGROUND_RUNNER_DEFAULT_MODES["github_runner"],
+            "entrypoint": "aoe-background-worker",
+            "argv": ["worker-run", "--runner", "github_runner"],
+            "env_keys": ["AOE_TEAM_DIR", "AOE_STATE_DIR", "GITHUB_TOKEN", "GITHUB_REPOSITORY"],
+            "externalizable": True,
+            "blocked_reason": "",
+        }
+    if token == "remote_worker":
+        return {
+            "kind": "background_dispatch",
+            "mode": BACKGROUND_RUNNER_DEFAULT_MODES["remote_worker"],
+            "entrypoint": "aoe-background-worker",
+            "argv": ["worker-run", "--runner", "remote_worker"],
+            "env_keys": ["AOE_TEAM_DIR", "AOE_STATE_DIR", "AOE_REMOTE_ENDPOINT"],
+            "externalizable": True,
+            "blocked_reason": "",
+        }
+    return {
+        "kind": "gateway_dispatch",
+        "mode": BACKGROUND_RUNNER_DEFAULT_MODES["local_background"],
+        "entrypoint": "aoe-telegram-gateway",
+        "argv": ["run", "--no-wait"],
+        "env_keys": ["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        "externalizable": False,
+        "blocked_reason": "requires in-process callback registry",
+    }
+
+
+def build_runner_background_launch_spec(
+    *,
+    runner_target: str,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    defaults = _runner_launch_defaults(runner_target)
+    return build_background_launch_spec(
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        runner_target=runner_target,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+        kind=str(defaults.get("kind", "")),
+        mode=str(defaults.get("mode", "")),
+        entrypoint=str(defaults.get("entrypoint", "")),
+        argv=list(defaults.get("argv") or []),
+        env_keys=list(defaults.get("env_keys") or []),
+        externalizable=bool(defaults.get("externalizable", False)),
+        blocked_reason=str(defaults.get("blocked_reason", "")),
+    )
+
+
+def build_local_tmux_background_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    return build_runner_background_launch_spec(
+        runner_target="local_tmux",
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+    )
+
+
+def build_github_runner_background_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    return build_runner_background_launch_spec(
+        runner_target="github_runner",
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+    )
+
+
+def build_remote_worker_background_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    return build_runner_background_launch_spec(
+        runner_target="remote_worker",
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
     )
 
 
