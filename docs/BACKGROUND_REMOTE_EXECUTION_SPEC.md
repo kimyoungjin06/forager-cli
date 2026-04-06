@@ -20,6 +20,7 @@
 - `off-desk`:
   - only runs `ExecutionBrief` objects that are allowed for off-desk execution
   - never invents scope beyond the brief
+  - must not reinterpret safe inspection commands as executable background work
 
 ## 4. Non-Goals
 - This spec does not define planner prompt wording.
@@ -118,7 +119,7 @@
     - shape:
       - `python <repo>/scripts/gateway/aoe-telegram-gateway.py --project-root ... --team-dir ... --manager-state-file ... --simulate-live --simulate-chat-id ... --simulate-text "<command>"`
     - intended first use:
-      - retry / replan / followup style re-entry commands that already have a stable task reference
+      - retry / replan style re-entry commands that already have a stable task reference
   - runtime artifacts:
     - `.aoe-team/background_run_logs/<ticket>.log`
     - `.aoe-team/background_run_results/<ticket>.json`
@@ -180,6 +181,20 @@
   - final branch/outcome
   - task/runtime evidence links
   - produced artifacts
+
+### 5.7 Followup Boundary
+- Current `/followup` is an on-desk inspection surface.
+- It previews:
+  - manual follow-up lane targets
+  - operator-facing reason/context
+  - next safe drill-down commands
+- It does not currently authorize background execution.
+- If follow-up work should become executable off-desk, the system must first derive a distinct follow-up execution artifact:
+  - `FollowupBrief` or equivalent `ExecutionBrief` subtype
+  - explicit executable slice
+  - explicit blocked/operator-owned slice
+  - explicit launch spec
+- Until that artifact exists, `retry/replan` may use background runner paths, but `/followup` must remain a safe preview.
 
 ## 6. State Model
 

@@ -261,6 +261,15 @@
   - 목적:
     - on-desk의 마지막 작업을 `실행 가능성 판정 + 실행계약 확정`으로 고정
     - off-desk는 확정된 실행계약만 실행하게 한다
+  - 현재 상태:
+    - `IN_PROGRESS`
+    - 1차 구현 완료:
+      - `RequestContract -> ExecutionBrief -> OrchTaskSpec` 상태 필드 추가
+      - `/task`, dashboard, offdesk, recovery에 brief truth 노출
+      - off-desk priority가 brief blocked 상태를 직접 읽음
+    - 남은 것:
+      - preset별 executable slice 정교화
+      - followup용 별도 executable brief 설계
   - 새 상태모델:
     - `executable`
     - `underspecified`
@@ -284,6 +293,20 @@
     - off-desk work를 foreground live session에 묶지 않고 durable queue / remote worker / runner로 옮긴다
   - 문서:
     - `docs/BACKGROUND_REMOTE_EXECUTION_SPEC.md`
+  - 현재 상태:
+    - `IN_PROGRESS`
+    - 1차 구현 완료:
+      - `Background Run Ticket`
+      - `background_runs.json`
+      - same-process `local_background` daemon
+      - `background_worker.json`
+      - `bgw-*`, `bgq-clean`, runner preference
+      - `local_tmux` retry/replan launch path
+      - tmux log/result artifact persistence + polling
+    - 남은 것:
+      - `followup` executable path는 아직 미정
+      - `initial detached no-wait` externalizable 분리
+      - `github_runner` / `remote_worker` 실제 실행기
   - 최소 범위:
     - background queue
     - request-to-run audit trail
@@ -296,6 +319,14 @@
 - [ ] `Project Progress Board`
   - 목적:
     - operator가 프로젝트별 진행도, brief status, blocked slice, next intervention을 dashboard에서 본다
+  - 현재 상태:
+    - `IN_PROGRESS`
+    - 1차 구현 완료:
+      - overview/offdesk/runtime/recovery에 brief + background queue + worker truth 노출
+      - queue stale/depth 기반 정렬과 remediation hints 연결
+    - 남은 것:
+      - dedicated board view
+      - queue/brief severity 기반 더 강한 정렬 정책
   - 표면:
     - `/control`
     - `/control/runtimes/{project_alias}`

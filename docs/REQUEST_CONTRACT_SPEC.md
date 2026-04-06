@@ -110,6 +110,9 @@ Policy:
   - what still needs operator clarification
   - what remains infeasible or only partially executable
 - `ExecutionBrief` is the last on-desk artifact and the first off-desk artifact.
+- `manual followup` is not automatically an off-desk execution request.
+  - current `/followup` remains an on-desk inspection surface
+  - a future executable follow-up path must derive its own explicit brief instead of reusing the preview surface
 - benchmark references for this layer:
   - `OpenCode` plan/build split and permission UX:
     - `REF-OC-1`, `REF-OC-2`, `REF-OC-3`
