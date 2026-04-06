@@ -34,6 +34,21 @@ def local_tmux_result_path(team_dir: Path, ticket_id: str) -> Path:
     return Path(team_dir).expanduser().resolve() / "background_run_results" / f"{token}.json"
 
 
+def local_tmux_log_path(team_dir: Path, ticket_id: str) -> Path:
+    token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
+    token = "-".join(part for part in token.split("-") if part) or "run"
+    return Path(team_dir).expanduser().resolve() / "background_run_logs" / f"{token}.log"
+
+
+def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
+    team_root = Path(team_dir).expanduser().resolve()
+    resolved = Path(artifact_path).expanduser().resolve()
+    try:
+        return str(resolved.relative_to(team_root)).strip()
+    except Exception:
+        return str(resolved).strip()
+
+
 def _read_local_tmux_result(result_path: Path) -> Dict[str, Any]:
     if not result_path.exists():
         return {}
@@ -81,19 +96,24 @@ def poll_local_tmux_background_tickets(
         if not ticket_id:
             continue
         result_path = local_tmux_result_path(team_dir, ticket_id)
+        log_path = local_tmux_log_path(team_dir, ticket_id)
         result = _read_local_tmux_result(result_path)
         runtime_handle = _trim(row.get("runtime_handle", ""), 120)
         evidence_artifacts = list(row.get("evidence_artifacts") or [])
-        rel_result_path = str(result_path.relative_to(team_dir)).strip() if str(result_path).startswith(str(team_dir)) else str(result_path)
-        if rel_result_path and rel_result_path not in evidence_artifacts:
-            evidence_artifacts.append(rel_result_path)
+        for artifact_path in (result_path, log_path):
+            rel_path = _artifact_path_for_team(team_dir, artifact_path)
+            if rel_path and rel_path not in evidence_artifacts:
+                evidence_artifacts.append(rel_path)
         if result:
             try:
                 exit_code = int(result.get("exit_code", 1))
             except Exception:
                 exit_code = 1
             status = "completed" if exit_code == 0 else "failed"
-            evidence_bundle = f"status={status} | outcome=tmux_exit_code | exit_code={exit_code}"
+            evidence_bundle = (
+                f"status={status} | outcome=tmux_exit_code | exit_code={exit_code}"
+                f" | log={_artifact_path_for_team(team_dir, log_path)}"
+            )
             advanced = advance_background_run_ticket(
                 queue_path,
                 ticket_id,
@@ -187,14 +207,18 @@ def launch_local_tmux_background_ticket(
 
     session_name = build_local_tmux_session_name(ticket_id)
     result_path = local_tmux_result_path(queue_path.parent, ticket_id)
+    log_path = local_tmux_log_path(queue_path.parent, ticket_id)
+    result_artifact = _artifact_path_for_team(queue_path.parent, result_path)
+    log_artifact = _artifact_path_for_team(queue_path.parent, log_path)
     shell_command = shlex.join([str(item) for item in command_argv if str(item).strip()])
     ticket_json = json.dumps(str(ticket_id or "").strip())
     wrapped_command = "\n".join(
         [
-            "__aoe_exit=0",
-            shell_command,
-            "__aoe_exit=$?",
             f"mkdir -p {shlex.quote(str(result_path.parent))}",
+            f"mkdir -p {shlex.quote(str(log_path.parent))}",
+            "__aoe_exit=0",
+            f"( {shell_command} ) > {shlex.quote(str(log_path))} 2>&1",
+            "__aoe_exit=$?",
             (
                 f"printf '{{\"ticket_id\":{ticket_json},\"exit_code\":%s}}\\n' "
                 f"\"$__aoe_exit\" > {shlex.quote(str(result_path))}"
@@ -232,5 +256,6 @@ def launch_local_tmux_background_ticket(
         source_surface=source_surface,
         runtime_handle=session_name,
         runtime_summary=f"tmux_session={session_name}",
-        evidence_bundle=f"status=running | outcome=tmux_session_started | session={session_name}",
+        evidence_bundle=f"status=running | outcome=tmux_session_started | session={session_name} | log={log_artifact}",
+        evidence_artifacts=[item for item in (log_artifact, result_artifact) if item],
     )

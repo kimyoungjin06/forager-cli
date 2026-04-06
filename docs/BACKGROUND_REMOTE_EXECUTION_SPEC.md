@@ -119,6 +119,9 @@
       - `python <repo>/scripts/gateway/aoe-telegram-gateway.py --project-root ... --team-dir ... --manager-state-file ... --simulate-live --simulate-chat-id ... --simulate-text "<command>"`
     - intended first use:
       - retry / replan / followup style re-entry commands that already have a stable task reference
+  - runtime artifacts:
+    - `.aoe-team/background_run_logs/<ticket>.log`
+    - `.aoe-team/background_run_results/<ticket>.json`
 - `github_runner`
   - `kind=background_dispatch`
   - `mode=github_action_json`
@@ -201,6 +204,20 @@
 - `canceled`
 - `stale`
 
+### 6.3 local_tmux Result Polling
+- tmux wrapper writes:
+  - stdout/stderr log:
+    - `.aoe-team/background_run_logs/<ticket>.log`
+  - terminal result sidecar:
+    - `.aoe-team/background_run_results/<ticket>.json`
+- poll semantics:
+  - `exit_code=0` -> `completed`
+  - `exit_code!=0` -> `failed`
+  - missing session + missing result sidecar -> `failed`
+- ticket evidence should retain both:
+  - `background_run_logs/<ticket>.log`
+  - `background_run_results/<ticket>.json`
+
 ## 7. Required Guarantees
 1. A run cannot start without a stored `ExecutionBrief`.
 2. A run cannot start if `execution_brief_status` is not in:
@@ -229,6 +246,8 @@
   - validate `command_argv[]` / `command_cwd`
   - start detached tmux session
   - mark ticket `running` with session evidence
+  - capture stdout/stderr log:
+    - `.aoe-team/background_run_logs/<ticket>.log`
   - wrap the command so it writes a terminal result sidecar:
     - `.aoe-team/background_run_results/<ticket>.json`
   - poll running `local_tmux` tickets:

@@ -34,6 +34,7 @@ from aoe_tg_local_background_worker import (
 from aoe_tg_tmux_background_worker import (
     build_local_tmux_session_name,
     launch_local_tmux_background_ticket,
+    local_tmux_log_path,
     local_tmux_result_path,
     poll_local_tmux_background_tickets,
 )
@@ -4018,8 +4019,12 @@ def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monk
     assert result["runtime_summary"] == f"tmux_session={build_local_tmux_session_name('BGT-TMUX-001')}"
     assert "tmux_session_started" in result["evidence_bundle"]
     assert build_local_tmux_session_name("BGT-TMUX-001") in result["evidence_bundle"]
+    assert "background_run_logs/bgt-tmux-001.log" in result["evidence_bundle"]
+    assert "background_run_logs/bgt-tmux-001.log" in (result.get("evidence_artifacts") or [])
+    assert "background_run_results/bgt-tmux-001.json" in (result.get("evidence_artifacts") or [])
     assert launched["cmd"][:4] == ["tmux", "new-session", "-d", "-s"]
     assert "background_run_results" in launched["cmd"][-1]
+    assert "background_run_logs" in launched["cmd"][-1]
 
 
 def test_launch_local_tmux_background_ticket_fails_without_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4087,8 +4092,11 @@ def test_poll_local_tmux_background_tickets_marks_completed_from_result_file(tmp
         now_iso=lambda: "2026-04-06T10:00:01+0900",
     )
     result_path = local_tmux_result_path(tmp_path, ticket_id)
+    log_path = local_tmux_log_path(tmp_path, ticket_id)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(json.dumps({"ticket_id": ticket_id, "exit_code": 0}) + "\n", encoding="utf-8")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("tmux run ok\n", encoding="utf-8")
 
     result = poll_local_tmux_background_tickets(
         queue_path=queue_file,
@@ -4100,8 +4108,9 @@ def test_poll_local_tmux_background_tickets_marks_completed_from_result_file(tmp
     rows = load_background_runs_state(queue_file).get("runs") or []
     row = rows[0]
     assert row["status"] == "completed"
-    assert row["evidence_bundle"] == "status=completed | outcome=tmux_exit_code | exit_code=0"
+    assert row["evidence_bundle"] == "status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-tmux-poll-001.log"
     assert "background_run_results/bgt-tmux-poll-001.json" in row["evidence_artifacts"]
+    assert "background_run_logs/bgt-tmux-poll-001.log" in row["evidence_artifacts"]
 
 
 def test_poll_local_tmux_background_tickets_marks_failed_when_session_disappears(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4140,6 +4149,7 @@ def test_poll_local_tmux_background_tickets_marks_failed_when_session_disappears
     assert row["status"] == "failed"
     assert row["evidence_bundle"] == "status=failed | reason=tmux_session_missing_result"
     assert "background_run_results/bgt-tmux-poll-002.json" in row["evidence_artifacts"]
+    assert "background_run_logs/bgt-tmux-poll-002.log" in row["evidence_artifacts"]
 
 
 def test_sync_background_run_snapshots_from_queue_updates_task_record(tmp_path: Path) -> None:
