@@ -63,10 +63,46 @@
   - `background_run_execution_brief_status`
   - `background_run_evidence_bundle`
   - `background_run_evidence_artifacts[]`
+  - `background_run_launch_spec_id`
+  - `background_run_launch_spec_kind`
+  - `background_run_launch_spec_mode`
+  - `background_run_launch_spec_summary`
+  - `background_run_launch_spec_externalizable`
   - sidecar queue file:
     - `.aoe-team/background_runs.json`
 
-### 5.3 Background Worker State
+### 5.3 Launch Spec
+- Serializable execution envelope attached to the ticket.
+- Purpose:
+  - make runner assumptions explicit
+  - separate launch intent from in-memory callback wiring
+  - define what must exist before an external worker can consume the run
+- Phase 1 shape:
+  - `spec_id`
+  - `kind`
+  - `mode`
+  - `entrypoint`
+  - `project_root`
+  - `team_dir`
+  - `manager_state_file`
+  - `request_id`
+  - `project_key`
+  - `runner_target`
+  - `launch_mode`
+  - `source_surface`
+  - `created_by`
+  - `argv[]`
+  - `env_keys[]`
+  - `externalizable`
+  - `blocked_reason`
+  - `summary`
+- Current default:
+  - `kind=gateway_dispatch`
+  - `mode=in_process_callback`
+  - `externalizable=false`
+  - `blocked_reason=requires in-process callback registry`
+
+### 5.4 Background Worker State
 - Durable heartbeat/state object for the active local worker.
 - Phase 1 shape:
   - `status`
@@ -88,7 +124,7 @@
 - Sidecar path:
   - `.aoe-team/background_worker.json`
 
-### 5.4 Runner Target
+### 5.5 Runner Target
 - Where the work executes.
 - Initial enum:
   - `local_background`
@@ -96,7 +132,7 @@
   - `github_runner`
   - `remote_worker`
 
-### 5.5 Evidence Bundle
+### 5.6 Evidence Bundle
 - Durable off-desk result package.
 - Minimum contents:
   - request/task metadata
@@ -140,6 +176,7 @@
    - current runner target
    - launch mode
    - latest ticket
+   - launch spec summary / externalizable state
    - current background lifecycle state
 
 ## 8. Rollout Plan
@@ -188,6 +225,10 @@
 
 ## 11. Open Questions
 - Current `local_background` daemon is an in-process thread because execution targets still live in the gateway process registry. A future external worker requires serializable launch specs instead of in-memory callbacks.
+- Phase 1 launch specs are intentionally honest about the current limitation:
+  - `mode=in_process_callback`
+  - `externalizable=false`
+  This is not a bug; it is the explicit migration seam toward `local_tmux` / `github_runner` / `remote_worker`.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

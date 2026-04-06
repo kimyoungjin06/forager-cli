@@ -949,6 +949,14 @@ def sanitize_task_record(
             "execution_brief_status": task.get("background_run_execution_brief_status"),
             "evidence_bundle": task.get("background_run_evidence_bundle"),
             "evidence_artifacts": task.get("background_run_evidence_artifacts"),
+            "launch_spec": {
+                "version": task.get("background_run_launch_spec_version"),
+                "spec_id": task.get("background_run_launch_spec_id"),
+                "kind": task.get("background_run_launch_spec_kind"),
+                "mode": task.get("background_run_launch_spec_mode"),
+                "summary": task.get("background_run_launch_spec_summary"),
+                "externalizable": task.get("background_run_launch_spec_externalizable"),
+            },
         }
     )
     if background_run_snapshot:
@@ -968,6 +976,12 @@ def sanitize_task_record(
             "background_run_execution_brief_status",
             "background_run_evidence_bundle",
             "background_run_evidence_artifacts",
+            "background_run_launch_spec_version",
+            "background_run_launch_spec_id",
+            "background_run_launch_spec_kind",
+            "background_run_launch_spec_mode",
+            "background_run_launch_spec_summary",
+            "background_run_launch_spec_externalizable",
         ):
             task.pop(key, None)
 

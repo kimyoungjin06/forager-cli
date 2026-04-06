@@ -24,6 +24,7 @@ from aoe_tg_request_contract_review import (
 REQUEST_CONTRACT_VERSION = "2026-03-30.v1"
 EXECUTION_BRIEF_VERSION = "2026-04-04.v1"
 BACKGROUND_RUN_TICKET_VERSION = "2026-04-04.v1"
+BACKGROUND_LAUNCH_SPEC_VERSION = "2026-04-06.v1"
 EXECUTION_BRIEF_STATUSES = (
     "executable",
     "underspecified",
@@ -221,6 +222,65 @@ def normalize_execution_brief_snapshot(raw: Any) -> Dict[str, Any]:
     return snapshot
 
 
+def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+
+    snapshot: Dict[str, Any] = {
+        "version": _trim(raw.get("version", BACKGROUND_LAUNCH_SPEC_VERSION), 48) or BACKGROUND_LAUNCH_SPEC_VERSION,
+    }
+    runner_target = _trim(raw.get("runner_target", ""), 64).lower()
+    if runner_target in BACKGROUND_RUNNER_TARGETS:
+        snapshot["runner_target"] = runner_target
+    for key, limit in (
+        ("spec_id", 96),
+        ("kind", 64),
+        ("mode", 64),
+        ("entrypoint", 160),
+        ("project_root", 240),
+        ("team_dir", 240),
+        ("manager_state_file", 240),
+        ("request_id", 96),
+        ("project_key", 64),
+        ("launch_mode", 64),
+        ("source_surface", 64),
+        ("created_by", 96),
+        ("blocked_reason", 240),
+    ):
+        token = _trim(raw.get(key, ""), limit)
+        if token:
+            snapshot[key] = token
+    env_keys = _dedupe_rows(list(raw.get("env_keys") or []), limit=12, text_limit=64)
+    argv = _dedupe_rows(list(raw.get("argv") or []), limit=20, text_limit=200)
+    if env_keys:
+        snapshot["env_keys"] = env_keys
+    if argv:
+        snapshot["argv"] = argv
+    if "externalizable" in raw:
+        snapshot["externalizable"] = _normalize_bool(raw.get("externalizable"), False)
+    summary = _trim(raw.get("summary", ""), 320)
+    if not summary:
+        parts: List[str] = []
+        kind = str(snapshot.get("kind", "")).strip()
+        mode = str(snapshot.get("mode", "")).strip()
+        entrypoint = str(snapshot.get("entrypoint", "")).strip()
+        externalizable = bool(snapshot.get("externalizable", False))
+        if kind:
+            parts.append(kind)
+        if mode:
+            parts.append(f"mode={mode}")
+        if entrypoint:
+            parts.append(f"entry={entrypoint}")
+        parts.append(f"externalizable={'yes' if externalizable else 'no'}")
+        blocked_reason = str(snapshot.get("blocked_reason", "")).strip()
+        if blocked_reason:
+            parts.append(blocked_reason)
+        summary = " | ".join(parts)[:320]
+    if summary:
+        snapshot["summary"] = summary
+    return snapshot
+
+
 def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
@@ -282,6 +342,10 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         snapshot["evidence_bundle"] = evidence_summary
     if evidence_artifacts:
         snapshot["evidence_artifacts"] = evidence_artifacts
+
+    launch_spec = normalize_background_launch_spec_snapshot(raw.get("launch_spec"))
+    if launch_spec:
+        snapshot["launch_spec"] = launch_spec
 
     return snapshot
 
@@ -363,6 +427,7 @@ def build_background_run_ticket(
     status: str = "queued",
     evidence_bundle: Any = "",
     evidence_artifacts: Optional[List[str]] = None,
+    launch_spec: Any = None,
     ticket_id: str = "",
     touched_at: str = "",
 ) -> Dict[str, Any]:
@@ -392,6 +457,60 @@ def build_background_run_ticket(
             "status": status,
             "evidence_bundle": evidence_bundle,
             "evidence_artifacts": list(evidence_artifacts or []),
+            "launch_spec": launch_spec if isinstance(launch_spec, dict) else {},
+        }
+    )
+
+
+def build_background_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    runner_target: str = "local_background",
+    launch_mode: str = "detached_no_wait",
+    source_surface: str = "",
+    created_by: str = "",
+    kind: str = "gateway_dispatch",
+    mode: str = "in_process_callback",
+    entrypoint: str = "aoe-telegram-gateway",
+    argv: Optional[List[str]] = None,
+    env_keys: Optional[List[str]] = None,
+    externalizable: bool = False,
+    blocked_reason: str = "",
+    summary: str = "",
+) -> Dict[str, Any]:
+    rid = _trim(request_id, 96)
+    pkey = _trim(project_key, 64)
+    spec_id = f"BLS-{rid or pkey or 'run'}"[:96]
+    return normalize_background_launch_spec_snapshot(
+        {
+            "version": BACKGROUND_LAUNCH_SPEC_VERSION,
+            "spec_id": spec_id,
+            "kind": _trim(kind, 64),
+            "mode": _trim(mode, 64),
+            "entrypoint": _trim(entrypoint, 160),
+            "project_root": _trim(project_root, 240),
+            "team_dir": _trim(team_dir, 240),
+            "manager_state_file": _trim(manager_state_file, 240),
+            "request_id": rid,
+            "project_key": pkey,
+            "runner_target": runner_target,
+            "launch_mode": launch_mode,
+            "source_surface": _trim(source_surface, 64),
+            "created_by": _trim(created_by, 96),
+            "argv": list(argv or []),
+            "env_keys": list(env_keys or []),
+            "externalizable": bool(externalizable),
+            "blocked_reason": _trim(
+                blocked_reason or (
+                    "" if externalizable else "requires in-process callback registry"
+                ),
+                240,
+            ),
+            "summary": _trim(summary, 320),
         }
     )
 
@@ -678,6 +797,7 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
     snapshot = normalize_background_run_ticket_snapshot(ticket)
     if not snapshot:
         return {}
+    launch_spec = normalize_background_launch_spec_snapshot(snapshot.get("launch_spec"))
     return deepcopy(
         {
             "background_run_ticket_version": snapshot.get("version", BACKGROUND_RUN_TICKET_VERSION),
@@ -693,6 +813,11 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_execution_brief_status": snapshot.get("execution_brief_status", ""),
             "background_run_evidence_bundle": snapshot.get("evidence_bundle", ""),
             "background_run_evidence_artifacts": list(snapshot.get("evidence_artifacts") or []),
+            "background_run_launch_spec_id": launch_spec.get("spec_id", ""),
+            "background_run_launch_spec_kind": launch_spec.get("kind", ""),
+            "background_run_launch_spec_mode": launch_spec.get("mode", ""),
+            "background_run_launch_spec_summary": launch_spec.get("summary", ""),
+            "background_run_launch_spec_externalizable": bool(launch_spec.get("externalizable", False)),
         }
     )
 

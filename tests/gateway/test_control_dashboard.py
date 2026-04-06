@@ -81,6 +81,7 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                     "background_run_status": "running",
                     "background_run_runner_target": "local_background",
                     "background_run_launch_mode": "offdesk_manual",
+                    "background_run_launch_spec_summary": "gateway_dispatch | mode=in_process_callback | entry=aoe-telegram-gateway | externalizable=no",
                     "background_run_evidence_bundle": "status=pending | outcome=awaiting_review",
                     "background_run_evidence_artifacts": ["review_evidence/git_diff_scope.md"],
                     "updated_at": "2026-03-16T10:00:00+09:00",
@@ -537,6 +538,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "local_background" in text
     assert "background_ticket" in text
     assert "BGT-001" in text
+    assert "launch_spec" in text
+    assert "gateway_dispatch | mode=in_process_callback" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "control_intent_action" in text
@@ -645,6 +648,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "local_background" in text
     assert "background_ticket" in text
     assert "BGT-001" in text
+    assert "launch_spec" in text
+    assert "gateway_dispatch | mode=in_process_callback" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "analysis-followup" in text

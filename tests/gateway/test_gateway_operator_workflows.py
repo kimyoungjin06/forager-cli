@@ -33,6 +33,7 @@ from aoe_tg_local_background_worker import (
 from aoe_tg_request_contract import (
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
+    build_background_launch_spec,
     build_background_run_ticket,
 )
 
@@ -3293,6 +3294,20 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
 
 def test_background_run_ticket_helpers_advance_queue_state(tmp_path: Path) -> None:
     queue_file = tmp_path / "background_runs.json"
+    launch_spec = build_background_launch_spec(
+        request_id="REQ-DETACHED",
+        project_key="twinpaper",
+        project_root=str(tmp_path / "project"),
+        team_dir=str(tmp_path),
+        manager_state_file=str(tmp_path / "orch_manager_state.json"),
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        source_surface="run_no_wait",
+        created_by="telegram:939062873",
+        argv=["run", "--no-wait"],
+        env_keys=["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        externalizable=False,
+    )
     seeded = upsert_background_run_ticket(
         queue_file,
         build_background_run_ticket(
@@ -3306,6 +3321,7 @@ def test_background_run_ticket_helpers_advance_queue_state(tmp_path: Path) -> No
             created_by="telegram:939062873",
             source_surface="run_no_wait",
             status="queued",
+            launch_spec=launch_spec,
         ),
         now_iso=lambda: "2026-03-13T18:55:01+0900",
     )
@@ -3351,6 +3367,8 @@ def test_background_run_ticket_helpers_advance_queue_state(tmp_path: Path) -> No
     assert row["status"] == "completed"
     assert row["evidence_bundle"] == "status=completed | outcome=dispatch_flow_returned"
     assert row["evidence_artifacts"] == ["review_report.md"]
+    assert row["launch_spec"]["spec_id"] == "BLS-REQ-DETACHED"
+    assert row["launch_spec"]["externalizable"] is False
 
 
 def test_local_background_worker_claims_and_completes_ticket(tmp_path: Path) -> None:

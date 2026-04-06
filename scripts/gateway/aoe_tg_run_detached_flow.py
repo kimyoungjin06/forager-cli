@@ -14,6 +14,7 @@ from aoe_tg_local_background_worker import (
 )
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
+    build_background_launch_spec,
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
     build_background_run_ticket,
@@ -49,6 +50,24 @@ def maybe_handle_no_wait_dispatch_detach(
         return None
     team_dir = str(entry.get("team_dir", "")).strip()
     queue_path = background_runs_state_path(team_dir) if team_dir else None
+    launch_spec = build_background_launch_spec(
+        request_id=str(provisional_req_id or "").strip(),
+        project_key=str(key or "").strip(),
+        project_root=str(entry.get("project_root", "") or getattr(args, "project_root", "") or "").strip(),
+        team_dir=team_dir,
+        manager_state_file=str(getattr(args, "manager_state_file", "") or "").strip(),
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        source_surface="run_no_wait",
+        created_by=f"telegram:{chat_id}",
+        kind="gateway_dispatch",
+        mode="in_process_callback",
+        entrypoint="aoe-telegram-gateway",
+        argv=["run", "--no-wait"],
+        env_keys=["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        externalizable=False,
+        blocked_reason="requires in-process callback registry",
+    )
 
     def _sync_background_ticket(ticket: Dict[str, Any]) -> None:
         if not isinstance(provisional_task, dict):
@@ -71,6 +90,7 @@ def maybe_handle_no_wait_dispatch_detach(
             status=str(ticket.get("status", "")).strip(),
             evidence_bundle=str(ticket.get("evidence_bundle", "")).strip(),
             evidence_artifacts=list(ticket.get("evidence_artifacts") or []),
+            launch_spec=ticket.get("launch_spec") if isinstance(ticket.get("launch_spec"), dict) else launch_spec,
         )
         apply_background_run_ticket_snapshot(provisional_task, snapshot)
         provisional_task.setdefault("result", {})
@@ -100,6 +120,7 @@ def maybe_handle_no_wait_dispatch_detach(
             source_surface="run_no_wait",
             status=status,
             evidence_bundle=evidence_bundle,
+            launch_spec=launch_spec,
         )
         apply_background_run_ticket_snapshot(provisional_task, ticket)
         provisional_task.setdefault("result", {})

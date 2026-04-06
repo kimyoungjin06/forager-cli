@@ -543,6 +543,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_artifacts = [str(item).strip() for item in (task.get("background_run_evidence_artifacts") or []) if str(item).strip()]
     if background_artifacts:
         lines.append("background_run_artifacts: " + ", ".join(background_artifacts[:6]))
+    background_launch_spec = str(task.get("background_run_launch_spec_summary", "")).strip()
+    if background_launch_spec:
+        lines.append("background_run_launch_spec: " + background_launch_spec[:240])
 
     try:
         plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))

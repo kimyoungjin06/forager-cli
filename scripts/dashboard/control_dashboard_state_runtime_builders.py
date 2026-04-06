@@ -151,6 +151,9 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_background_run_evidence_bundle=(
                     str((active_task or {}).get("background_run_evidence_bundle", "")).strip() or "-"
                 ),
+                active_task_background_run_launch_spec_summary=(
+                    str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
+                ),
                 background_worker_status=worker_status,
                 background_worker_summary=worker_summary,
                 background_queue_summary=queue_summary,
@@ -390,6 +393,9 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         ),
         active_task_background_run_evidence_bundle=(
             str((active_task or {}).get("background_run_evidence_bundle", "")).strip() or "-"
+        ),
+        active_task_background_run_launch_spec_summary=(
+            str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
         ),
         background_worker_status=str(worker_snapshot.get("status", "")).strip() or "-",
         background_worker_summary=str(worker_snapshot.get("summary", "")).strip() or "-",
