@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
-from aoe_tg_background_runs import background_runs_state_path, summarize_background_runs_state
+from aoe_tg_background_runs import (
+    background_runs_state_path,
+    background_worker_state_path,
+    summarize_background_runs_state,
+    summarize_background_worker_state,
+)
 from aoe_tg_ops_policy import list_ops_projects, summarize_ops_scope
 from aoe_tg_ops_view import (
     blocked_bucket_count,
@@ -684,6 +689,14 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         if str(entry.get("team_dir", "")).strip()
         else {}
     )
+    worker_snapshot = (
+        summarize_background_worker_state(
+            background_worker_state_path(Path(str(entry.get("team_dir", "")).strip())),
+            now_iso=lambda: datetime.now(timezone.utc).isoformat(),
+        )
+        if str(entry.get("team_dir", "")).strip()
+        else {}
+    )
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -729,6 +742,19 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         notes.append(f"background queue contains stale tickets ({queue_stale_count})")
         attention.append(f"bgq:stale:{queue_stale_count}")
         severity_score += 20
+    worker_status = str(worker_snapshot.get("status", "")).strip().lower()
+    worker_summary = str(worker_snapshot.get("summary", "")).strip()
+    queue_depth = int(queue_snapshot.get("depth", 0) or 0)
+    if worker_status in {"stale", "error"}:
+        status = "warn" if status == "ready" else status
+        notes.append(worker_summary or f"background worker is {worker_status}")
+        attention.append(f"bgw:{worker_status}")
+        severity_score += 30
+    elif queue_depth > 0 and worker_status in {"", "-", "stopped"}:
+        status = "warn" if status == "ready" else status
+        notes.append(f"background worker is stopped while queue depth is {queue_depth}")
+        attention.append("bgw:stopped")
+        severity_score += 25
     if counts["blocked"] > 0:
         status = "warn" if status == "ready" else status
         notes.append(f"blocked backlog present ({counts['blocked']})")
@@ -896,6 +922,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             if isinstance(queue_snapshot.get("target_counts"), dict)
             else {}
         ),
+        background_worker_status=worker_status,
+        background_worker_summary=worker_summary,
     )
 
     lines = [
@@ -907,6 +935,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"  scenario_include: {include_display}",
         f"  queue: open={counts['open']} running={counts['running']} blocked={counts['blocked']} followup={manual_followup_count} pending={'yes' if pending_flag else 'no'} proposals={open_proposals}",
         f"  background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}",
+        f"  background_worker: {worker_summary or '-'}",
         f"  proposal_triage: priorities={proposal_triage.get('priority_summary', '-')} | kinds={proposal_triage.get('kind_summary', '-')}",
         f"  syncback: done={syncback_counts['done']} reopen={syncback_counts['reopen']} append={syncback_counts['append']} blocked_notes={syncback_counts['blocked']}",
         f"  last_sync: {last_sync_mode} {last_sync_disp}".rstrip(),

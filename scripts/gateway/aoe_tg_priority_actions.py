@@ -120,10 +120,14 @@ def offdesk_priority_action_snapshot(
     background_queue_depth: int = 0,
     background_queue_stale_count: int = 0,
     background_queue_runner_targets: Optional[Dict[str, int]] = None,
+    background_worker_status: str = "",
+    background_worker_summary: str = "",
 ) -> Dict[str, str]:
     brief_status = str(active_task_execution_brief_status or "").strip().lower()
     brief_blocked = [str(x).strip() for x in (active_task_execution_brief_blocked_slice or []) if str(x).strip()]
     brief_decision = str(active_task_execution_brief_operator_decision or "").strip()
+    worker_status = str(background_worker_status or "").strip().lower()
+    worker_summary = str(background_worker_summary or "").strip()
     if brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
         reason = brief_decision
         if not reason and brief_blocked:
@@ -132,6 +136,12 @@ def offdesk_priority_action_snapshot(
             reason = f"execution brief is {brief_status}"
         return {
             "action": f"/offdesk review {alias}",
+            "reason": reason,
+        }
+    if worker_status in {"stale", "error"}:
+        reason = worker_summary or f"background worker is {worker_status}"
+        return {
+            "action": f"/orch bgw-status {alias}",
             "reason": reason,
         }
     if int(background_queue_stale_count or 0) > 0:
@@ -158,6 +168,15 @@ def offdesk_priority_action_snapshot(
             for key, value in sorted(targets.items())
             if str(key).strip() and int(value or 0) > 0
         )
+        if worker_status in {"", "-", "stopped"}:
+            reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
+            if target_summary:
+                reason += f" ({target_summary})"
+            reason += "; local background worker is stopped"
+            return {
+                "action": f"/orch bgw-start {alias}",
+                "reason": reason,
+            }
         reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
         if target_summary:
             reason += f" ({target_summary})"
