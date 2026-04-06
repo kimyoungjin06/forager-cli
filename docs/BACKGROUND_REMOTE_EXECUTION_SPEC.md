@@ -229,6 +229,12 @@
   - validate `command_argv[]` / `command_cwd`
   - start detached tmux session
   - mark ticket `running` with session evidence
+  - wrap the command so it writes a terminal result sidecar:
+    - `.aoe-team/background_run_results/<ticket>.json`
+  - poll running `local_tmux` tickets:
+    - `exit_code=0` -> `completed`
+    - non-zero exit -> `failed`
+    - missing session + no result sidecar -> `failed`
 - Non-goal:
   - reconstruct in-process callback runs as external tmux work
 

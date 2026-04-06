@@ -9,7 +9,12 @@ import aoe_tg_background_runs as background_runs
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
 from aoe_tg_package_paths import package_root
-from aoe_tg_request_contract import build_background_launch_spec, select_background_runner_target
+from aoe_tg_request_contract import (
+    apply_background_run_ticket_snapshot,
+    build_background_launch_spec,
+    select_background_runner_target,
+)
+from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
 
@@ -232,6 +237,54 @@ def _background_runner_status(entry: Dict[str, Any], key: str) -> tuple[str, str
     if preferred != effective:
         note = f"preferred {preferred} is pending until an externalizable launch spec exists"
     return preferred, effective, note
+
+
+def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path: Path) -> bool:
+    tasks = entry.get("tasks") if isinstance(entry.get("tasks"), dict) else {}
+    if not isinstance(tasks, dict) or not tasks:
+        return False
+    state = background_runs.load_background_runs_state(queue_path)
+    runs = list(state.get("runs") or [])
+    if not runs:
+        return False
+    latest_by_request: Dict[str, Dict[str, Any]] = {}
+    for row in runs:
+        if not isinstance(row, dict):
+            continue
+        request_id = str(row.get("request_id", "")).strip()
+        if request_id:
+            latest_by_request[request_id] = row
+    changed = False
+    for request_id, task in tasks.items():
+        if not isinstance(task, dict):
+            continue
+        ticket = latest_by_request.get(str(request_id).strip())
+        if not isinstance(ticket, dict):
+            continue
+        before = (
+            str(task.get("background_run_status", "")).strip(),
+            str(task.get("background_run_ticket_id", "")).strip(),
+            str(task.get("background_run_evidence_bundle", "")).strip(),
+            str(task.get("background_run_runtime_handle", "")).strip(),
+        )
+        apply_background_run_ticket_snapshot(task, ticket)
+        task.setdefault("result", {})
+        if isinstance(task.get("result"), dict):
+            task["result"]["background_run_status"] = str(ticket.get("status", "")).strip()
+            task["result"]["background_run_runner_target"] = str(ticket.get("runner_target", "")).strip()
+            task["result"]["background_run_ticket_id"] = str(ticket.get("ticket_id", "")).strip()
+            bundle = str(ticket.get("evidence_bundle", "")).strip()
+            if bundle:
+                task["result"]["background_run_evidence_bundle"] = bundle
+        after = (
+            str(task.get("background_run_status", "")).strip(),
+            str(task.get("background_run_ticket_id", "")).strip(),
+            str(task.get("background_run_evidence_bundle", "")).strip(),
+            str(task.get("background_run_runtime_handle", "")).strip(),
+        )
+        if after != before:
+            changed = True
+    return changed
 
 
 def _task_ref_for_actions(task: Dict[str, Any], request_id: str) -> str:
@@ -646,9 +699,13 @@ def handle_orch_task_command(
         try:
             team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
             if str(team_dir):
-                queue_snapshot = background_runs.summarize_background_runs_state(
-                    background_runs.background_runs_state_path(team_dir)
-                )
+                queue_path = background_runs.background_runs_state_path(team_dir)
+                tmux_poll = poll_local_tmux_background_tickets(queue_path=queue_path, now_iso=now_iso)
+                if bool(tmux_poll.get("changed")) and (not args.dry_run):
+                    if _sync_background_run_snapshots_from_queue(entry, queue_path):
+                        entry["updated_at"] = now_iso()
+                        save_manager_state(args.manager_state_file, manager_state)
+                queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
                 worker_snapshot = background_runs.summarize_background_worker_state(
                     background_runs.background_worker_state_path(team_dir),
                     now_iso=now_iso,
@@ -899,6 +956,11 @@ def handle_orch_task_command(
                 reply_markup=_orch_status_reply_markup(manager_state, key, entry),
             )
             return True
+        tmux_poll = poll_local_tmux_background_tickets(queue_path=queue_path, now_iso=now_iso)
+        if bool(tmux_poll.get("changed")) and (not args.dry_run):
+            if _sync_background_run_snapshots_from_queue(entry, queue_path):
+                entry["updated_at"] = now_iso()
+                save_manager_state(args.manager_state_file, manager_state)
         worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
         queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
         append_action_audit_row(

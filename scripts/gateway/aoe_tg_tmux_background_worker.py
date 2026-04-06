@@ -3,13 +3,18 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
-from aoe_tg_background_runs import advance_background_run_ticket, claim_background_run_ticket
+from aoe_tg_background_runs import (
+    advance_background_run_ticket,
+    claim_background_run_ticket,
+    list_background_run_tickets,
+)
 from aoe_tg_request_contract import normalize_background_launch_spec_snapshot
 
 
@@ -21,6 +26,114 @@ def build_local_tmux_session_name(ticket_id: str) -> str:
     token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
     token = "-".join(part for part in token.split("-") if part)
     return (f"aoe_bg_{token or 'run'}")[:64]
+
+
+def local_tmux_result_path(team_dir: Path, ticket_id: str) -> Path:
+    token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
+    token = "-".join(part for part in token.split("-") if part) or "run"
+    return Path(team_dir).expanduser().resolve() / "background_run_results" / f"{token}.json"
+
+
+def _read_local_tmux_result(result_path: Path) -> Dict[str, Any]:
+    if not result_path.exists():
+        return {}
+    try:
+        raw = json.loads(result_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    ticket_id = _trim(raw.get("ticket_id", ""), 96)
+    if ticket_id:
+        out["ticket_id"] = ticket_id
+    try:
+        out["exit_code"] = int(raw.get("exit_code", 1))
+    except Exception:
+        out["exit_code"] = 1
+    return out
+
+
+def _tmux_session_exists(session_name: str) -> bool:
+    token = _trim(session_name, 120)
+    if not token or not shutil.which("tmux"):
+        return False
+    proc = subprocess.run(
+        ["tmux", "has-session", "-t", token],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
+def poll_local_tmux_background_tickets(
+    *,
+    queue_path: Path,
+    now_iso: Callable[[], str],
+) -> Dict[str, Any]:
+    team_dir = queue_path.parent
+    completed: List[str] = []
+    failed: List[str] = []
+    changed = False
+    for row in list_background_run_tickets(queue_path, statuses=["running"], runner_target="local_tmux"):
+        ticket_id = _trim(row.get("ticket_id", ""), 96)
+        if not ticket_id:
+            continue
+        result_path = local_tmux_result_path(team_dir, ticket_id)
+        result = _read_local_tmux_result(result_path)
+        runtime_handle = _trim(row.get("runtime_handle", ""), 120)
+        evidence_artifacts = list(row.get("evidence_artifacts") or [])
+        rel_result_path = str(result_path.relative_to(team_dir)).strip() if str(result_path).startswith(str(team_dir)) else str(result_path)
+        if rel_result_path and rel_result_path not in evidence_artifacts:
+            evidence_artifacts.append(rel_result_path)
+        if result:
+            try:
+                exit_code = int(result.get("exit_code", 1))
+            except Exception:
+                exit_code = 1
+            status = "completed" if exit_code == 0 else "failed"
+            evidence_bundle = f"status={status} | outcome=tmux_exit_code | exit_code={exit_code}"
+            advanced = advance_background_run_ticket(
+                queue_path,
+                ticket_id,
+                now_iso=now_iso,
+                status=status,
+                runner_target="local_tmux",
+                runtime_handle=runtime_handle,
+                runtime_summary=(f"tmux_session={runtime_handle}" if runtime_handle else ""),
+                evidence_bundle=evidence_bundle,
+                evidence_artifacts=evidence_artifacts,
+            )
+            if advanced:
+                changed = True
+                if status == "completed":
+                    completed.append(ticket_id)
+                else:
+                    failed.append(ticket_id)
+            continue
+        if runtime_handle and (not _tmux_session_exists(runtime_handle)):
+            advanced = advance_background_run_ticket(
+                queue_path,
+                ticket_id,
+                now_iso=now_iso,
+                status="failed",
+                runner_target="local_tmux",
+                runtime_handle=runtime_handle,
+                runtime_summary=f"tmux_session={runtime_handle}",
+                evidence_bundle="status=failed | reason=tmux_session_missing_result",
+                evidence_artifacts=evidence_artifacts,
+            )
+            if advanced:
+                changed = True
+                failed.append(ticket_id)
+    return {
+        "changed": changed,
+        "completed_count": len(completed),
+        "failed_count": len(failed),
+        "completed_ticket_ids": completed,
+        "failed_ticket_ids": failed,
+    }
 
 
 def launch_local_tmux_background_ticket(
@@ -73,9 +186,24 @@ def launch_local_tmux_background_ticket(
         )
 
     session_name = build_local_tmux_session_name(ticket_id)
+    result_path = local_tmux_result_path(queue_path.parent, ticket_id)
     shell_command = shlex.join([str(item) for item in command_argv if str(item).strip()])
+    ticket_json = json.dumps(str(ticket_id or "").strip())
+    wrapped_command = "\n".join(
+        [
+            "__aoe_exit=0",
+            shell_command,
+            "__aoe_exit=$?",
+            f"mkdir -p {shlex.quote(str(result_path.parent))}",
+            (
+                f"printf '{{\"ticket_id\":{ticket_json},\"exit_code\":%s}}\\n' "
+                f"\"$__aoe_exit\" > {shlex.quote(str(result_path))}"
+            ),
+            'exit "$__aoe_exit"',
+        ]
+    )
     proc = subprocess.run(
-        ["tmux", "new-session", "-d", "-s", session_name, "-c", command_cwd or ".", "bash", "-lc", shell_command],
+        ["tmux", "new-session", "-d", "-s", session_name, "-c", command_cwd or ".", "bash", "-lc", wrapped_command],
         capture_output=True,
         text=True,
         check=False,
