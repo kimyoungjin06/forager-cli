@@ -154,6 +154,10 @@
   - `local_tmux`
   - `github_runner`
   - `remote_worker`
+- Current selection policy:
+  - default to `local_background`
+  - auto-promote to `local_tmux` only when the launch spec already declares `runner_target=local_tmux` and `externalizable=true`
+  - keep `github_runner` and `remote_worker` spec-defined only until explicit runner selection policy is implemented
 
 ### 5.6 Evidence Bundle
 - Durable off-desk result package.

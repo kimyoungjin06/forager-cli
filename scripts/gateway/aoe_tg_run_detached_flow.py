@@ -18,6 +18,7 @@ from aoe_tg_request_contract import (
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
     build_background_run_ticket,
+    select_background_runner_target,
 )
 
 
@@ -68,6 +69,10 @@ def maybe_handle_no_wait_dispatch_detach(
         externalizable=False,
         blocked_reason="requires in-process callback registry",
     )
+    selected_runner_target = select_background_runner_target(
+        launch_spec=launch_spec,
+        allow_external_targets=False,
+    )
 
     def _sync_background_ticket(ticket: Dict[str, Any]) -> None:
         if not isinstance(provisional_task, dict):
@@ -82,7 +87,7 @@ def maybe_handle_no_wait_dispatch_detach(
                     provisional_task.get("execution_brief_status", ""),
                 )
             ).strip(),
-            runner_target=str(ticket.get("runner_target", "local_background")).strip() or "local_background",
+            runner_target=str(ticket.get("runner_target", selected_runner_target)).strip() or selected_runner_target,
             launch_mode=str(ticket.get("launch_mode", "detached_no_wait")).strip() or "detached_no_wait",
             created_at=str(ticket.get("created_at", provisional_task.get("background_run_created_at", "") or now_iso())).strip(),
             created_by=str(ticket.get("created_by", f"telegram:{chat_id}")).strip() or f"telegram:{chat_id}",
@@ -185,7 +190,7 @@ def maybe_handle_no_wait_dispatch_detach(
             daemon_started = ensure_local_background_daemon(
                 queue_path=queue_path,
                 now_iso=now_iso,
-                runner_target="local_background",
+                runner_target=selected_runner_target,
                 launch_mode="detached_no_wait",
                 claimed_by=f"daemon:{provisional_req_id or chat_id}",
                 source_surface="run_no_wait",
@@ -229,7 +234,7 @@ def maybe_handle_no_wait_dispatch_detach(
                 drain_local_background_queue(
                     queue_path=queue_path,
                     now_iso=now_iso,
-                    runner_target="local_background",
+                    runner_target=selected_runner_target,
                     launch_mode="detached_no_wait",
                     claimed_by=f"thread:{provisional_req_id or chat_id}",
                     source_surface="run_no_wait",

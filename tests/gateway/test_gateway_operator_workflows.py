@@ -39,6 +39,7 @@ from aoe_tg_request_contract import (
     build_remote_worker_background_launch_spec,
     build_runner_background_launch_spec,
     build_background_run_ticket,
+    select_background_runner_target,
 )
 
 def test_orch_map_reply_markup_contains_use_focus_status_todo_and_active_sync_actions() -> None:
@@ -3587,6 +3588,56 @@ def test_background_run_external_runner_claims_when_launch_spec_is_externalizabl
     assert claimed["ticket_id"] == "BGT-EXT-OK-001"
     assert claimed["status"] == "dispatching"
     assert claimed["evidence_bundle"] == "status=dispatching | outcome=worker_claimed"
+
+
+def test_select_background_runner_target_defaults_to_local_background() -> None:
+    assert select_background_runner_target() == "local_background"
+    assert select_background_runner_target(preferred_runner_target="github_runner") == "local_background"
+    assert select_background_runner_target(
+        launch_spec=build_background_launch_spec(
+            request_id="REQ-SEL-001",
+            project_key="twinpaper",
+            runner_target="local_background",
+            externalizable=False,
+        )
+    ) == "local_background"
+
+
+def test_select_background_runner_target_allows_externalizable_local_tmux_only() -> None:
+    tmux_spec = build_local_tmux_background_launch_spec(
+        request_id="REQ-SEL-002",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+    github_spec = build_github_runner_background_launch_spec(
+        request_id="REQ-SEL-003",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+
+    assert select_background_runner_target(
+        preferred_runner_target="local_tmux",
+        launch_spec=tmux_spec,
+    ) == "local_tmux"
+    assert select_background_runner_target(
+        preferred_runner_target="github_runner",
+        launch_spec=github_spec,
+    ) == "local_background"
+    assert select_background_runner_target(
+        preferred_runner_target="github_runner",
+        launch_spec=github_spec,
+        allow_external_targets=True,
+    ) == "github_runner"
 
 
 def test_external_runner_launch_spec_builders_are_externalizable() -> None:

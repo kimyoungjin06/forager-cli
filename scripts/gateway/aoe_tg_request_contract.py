@@ -690,6 +690,27 @@ def background_run_ticket_external_worker_allowed(ticket: Dict[str, Any]) -> boo
     return bool(launch_spec.get("externalizable", False))
 
 
+def select_background_runner_target(
+    *,
+    preferred_runner_target: Any = "",
+    launch_spec: Any = None,
+    allow_external_targets: bool = False,
+) -> str:
+    preferred = _trim(preferred_runner_target, 64).lower()
+    if preferred not in BACKGROUND_RUNNER_TARGETS:
+        preferred = ""
+    snapshot = normalize_background_launch_spec_snapshot(launch_spec)
+    spec_runner = _trim(snapshot.get("runner_target", ""), 64).lower()
+    if spec_runner not in BACKGROUND_RUNNER_TARGETS:
+        spec_runner = ""
+    candidate = preferred or spec_runner or "local_background"
+    if candidate == "local_tmux" and bool(snapshot.get("externalizable", False)):
+        return "local_tmux"
+    if allow_external_targets and candidate in {"github_runner", "remote_worker"} and bool(snapshot.get("externalizable", False)):
+        return candidate
+    return "local_background"
+
+
 def _lineage_preset(run_control_mode: str, run_source_task: Optional[Dict[str, Any]]) -> str:
     if str(run_control_mode or "").strip().lower() not in {"retry", "replan", "followup"}:
         return ""
