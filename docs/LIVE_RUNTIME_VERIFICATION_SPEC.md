@@ -76,7 +76,24 @@ without drifting from the preset completion matrix.
   - `blocked`
   coherently?
 
-### 5.4 Surface Parity
+### 5.4 Reentry Rail Proof
+- did the task expose a coherent `reentry_rails_summary` across:
+  - `/task`
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+  - dashboard `Recovery`
+  - nightly summary, when present?
+- when the expected branch was `rerun`, did the reentry rail correctly separate:
+  - retry scope
+  - followup scope
+  - current background rail / runner target?
+- when the expected branch was `manual followup`, did the proof explicitly distinguish:
+  - `preview_only`
+  - `executable`
+  - `partially_executable`?
+- if a background rail was used, did the ticket / launch spec / evidence bundle agree with the operator-visible next action?
+
+### 5.5 Surface Parity
 - did `/task`, `/monitor`, `/offdesk review`, dashboard `Task Detail`, and dashboard `Recovery` all expose the same essential interpretation?
 
 ## 6. Verification Matrix
@@ -100,6 +117,8 @@ without drifting from the preset completion matrix.
 - request text / normalized action
 - request contract summary
 - execution brief status and executable slice
+- followup brief status and lane split, when relevant
+- reentry rails summary
 - selected preset and lane topology
 - stage progression:
   - planning
@@ -117,6 +136,7 @@ without drifting from the preset completion matrix.
   - `/monitor`
   - `/offdesk review`
   - dashboard task/recovery view when relevant
+  - background ticket / launch spec / evidence bundle when a background rail is involved
 
 ## 8. Pass Criteria
 
@@ -156,6 +176,12 @@ without drifting from the preset completion matrix.
 - runtime state says one thing but `/task` / dashboard say another
 - recovery surface loses the critical blocker or next action
 
+### 9.5 Reentry Rail Drift
+- `reentry_rails_summary` disagrees across task/runtime/recovery surfaces
+- retry and followup scopes are conflated
+- `preview_only` followup is treated like executable followup
+- background runner / launch spec / evidence bundle disagree with visible next action
+
 ## 10. Execution Plan
 
 ### 10.1 Step 0: On-desk Brief Classification
@@ -184,6 +210,7 @@ without drifting from the preset completion matrix.
   - `/monitor`
   - `/offdesk review`
   - dashboard pages if applicable
+  - background ticket and launch spec if a background rail is used
 
 ### 10.5 Step 4: Contract Comparison
 - compare actual results to:

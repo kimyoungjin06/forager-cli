@@ -13,6 +13,10 @@
 - `phase2/data/`
 - `phase2/review/`
 - `phase2/mixed/`
+- review-specific non-happy-path split now includes:
+  - `review/R2_rerun_path.md`
+  - `review/R3_manual_followup_preview.md`
+  - `review/R3_manual_followup_execute.md`
 
 ## Current First Wave
 - happy-path scenario stubs are prepared for:
@@ -43,14 +47,27 @@
       - live progression moved through reusable review seams: review-only routing, reviewer-only role defaults, readonly review contracts, canonical diff-range policy, auth/session scope tracing, and section-specific acceptance for severity findings vs test gaps vs uncertainties
       - final successful run (`T-022`) reached `planning_ready`, triggered one integration retry for dirty-path evidence precision, and then closed as `done`
   - `review/R2_rerun_path.md`
-    - `executed_blocked`
+    - `legacy_blocked_revalidation_required`
     - finding:
       - review rerun-path work promoted reusable review abstractions:
         - review_report single-output ownership
         - review evidence step-shape normalization
         - duplicated stage dedupe / canonical ordering
-      - the current remaining blocker is still structural:
-        - `review_report.md` final acceptance does not yet require canonical diff range plus excluded-candidate / dirty-worktree exclusion evidence strongly enough to permit rerun-path closure
+      - this artifact was recorded before the current `ExecutionBrief + FollowupBrief + reentry rail` model existed
+      - it remains useful as a legacy blocker record, but rerun proof now has to be re-run against:
+        - execution brief status
+        - reentry rail summary
+        - background ticket / launch spec, when used
+  - `review/R3_manual_followup_preview.md`
+    - `planned`
+    - finding:
+      - preview proof is now a first-class manual-followup target
+      - `/followup` must remain read-only and agree with `FollowupBrief.status=preview_only`
+  - `review/R3_manual_followup_execute.md`
+    - `planned`
+    - finding:
+      - execute proof is separate from preview proof
+      - `/followup-exec` is only valid after an explicit executable or partially executable `FollowupBrief` exists
   - `mixed/M1_happy_path.md`
     - `executed_done`
     - finding:
@@ -78,3 +95,11 @@
   - execute proof
     - only valid after an explicit executable `FollowupBrief` exists
     - `/followup-exec` must not be treated as equivalent to preview
+
+## Reentry Rail Rule
+- rerun/manual-followup proof is no longer just a final branch check.
+- every non-happy-path proof should record:
+  - `ExecutionBrief.status`
+  - `FollowupBrief.status`, when present
+  - `reentry_rails_summary`
+  - background ticket / runner target / launch spec / evidence bundle, when used

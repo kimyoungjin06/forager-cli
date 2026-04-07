@@ -157,6 +157,8 @@
   - `rerun`
 - must prove:
   - unsupported or incomplete verdict is not accepted as complete
+  - `reentry_rails_summary` shows rerun scope explicitly without collapsing into manual followup
+  - if background execution is used, the runner target and evidence bundle stay aligned with the retry scope
 
 #### R3. Manual Followup Path
 - intent:
@@ -164,6 +166,12 @@
 - expected branch:
   - `manual followup`
 - must prove:
+  - preview proof:
+    - `FollowupBrief.status=preview_only`
+    - `/followup` and dashboard preview surfaces agree on execution lanes, review lanes, and operator-owned reason
+  - execute proof:
+    - only valid after `FollowupBrief.status in {executable, partially_executable}`
+    - `/followup-exec` reuses the rerun rail without auto-launching review/manual remainder
   - system escalates the risk decision rather than choosing for the operator
 
 ### 4.4 Mixed

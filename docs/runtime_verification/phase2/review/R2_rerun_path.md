@@ -8,7 +8,7 @@
 - branch_target:
   - `rerun`
 - status:
-  - `executed_blocked`
+  - `legacy_blocked_revalidation_required`
 - executed_at:
   - `2026-03-31 23:00 KST`
 - operator:
@@ -25,6 +25,20 @@
 ## 3. Expected Contract
 - expected preset:
   - `review`
+- expected execution brief:
+  - status:
+    - `executable`
+  - executable slice:
+    - `readonly review evidence collection`
+  - blocked slice or operator decision:
+    - `-`
+- expected followup brief:
+  - status:
+    - `none`
+  - execution lanes:
+    - `-`
+  - review lanes:
+    - `-`
 - expected lane shape:
   - execution:
     - reviewer-led readonly lane
@@ -32,6 +46,8 @@
     - reviewer/verifier lane
 - expected completion branch:
   - `rerun`
+- expected reentry rail:
+  - `retry=<lane-scoped rerun> | followup=none | bg=<runner or ->`
 - expected evidence:
   - review_report diff scope evidence
   - changed files
@@ -47,6 +63,12 @@
   - `T-030`
 - planning:
   - `blocked`
+- execution brief:
+  - `not captured in the original live proof; revalidation required under the new model`
+- followup brief:
+  - `none`
+- reentry rails:
+  - `not captured in the original live proof; this scenario predates reentry_rails_summary`
 - stage progression:
   - planning:
     - `phase1 round 1/3`
@@ -77,17 +99,22 @@
   - `pending`
 - dashboard `Recovery`:
   - `pending`
+- background run ticket / runner:
+  - `not applicable in the original blocked proof`
+- launch spec / evidence bundle:
+  - `not applicable in the original blocked proof`
 
 ## 6. Result
 - result:
-  - `blocked`
+  - `legacy_blocked_revalidation_required`
 - mismatch class:
   - `review_final_artifact_contract_gap`
 - mismatch notes:
   - `review-only routing, reviewer-only role defaults, review_report single-output ownership, and evidence step-shape normalization are now present`
-  - `the remaining blocker is the final review_report acceptance contract: canonical diff range, excluded candidates, and dirty-worktree exclusions are still not guaranteed as required report sections`
+  - `the legacy blocker was the final review_report acceptance contract: canonical diff range, excluded candidates, and dirty-worktree exclusions were not guaranteed as required report sections`
+  - `because this proof predates ExecutionBrief, FollowupBrief, and reentry rail surfaces, it no longer qualifies as the current canonical R2 proof`
 - next fix:
-  - `push canonical diff scope and exclusion evidence into review_report required fields / review-lane acceptance so incomplete scope evidence drives rerun instead of plan_gate blocked`
+  - `re-run R2 under the current model and capture: ExecutionBrief.status, reentry_rails_summary, retry scope, and background ticket/launch spec if a background rail is used`
 
 ## 7. Raw References
 - runtime state refs:

@@ -78,7 +78,9 @@
 ## Next Implementation Steps
 1. prove manual-followup path again under the new split:
    - preview proof
+     - `docs/runtime_verification/phase2/review/R3_manual_followup_preview.md`
    - execute proof
+     - `docs/runtime_verification/phase2/review/R3_manual_followup_execute.md`
 2. add richer follow-up launch specs and external runner eligibility
 3. decide whether a dedicated `followup_of` dashboard/history surface is needed
 

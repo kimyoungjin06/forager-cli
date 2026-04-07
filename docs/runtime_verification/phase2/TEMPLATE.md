@@ -27,6 +27,20 @@
 ## 3. Expected Contract
 - expected preset:
   - `...`
+- expected execution brief:
+  - status:
+    - `<executable|partially_executable|underspecified|operator_decision_required|infeasible>`
+  - executable slice:
+    - `...`
+  - blocked slice or operator decision:
+    - `...`
+- expected followup brief:
+  - status:
+    - `<none|preview_only|executable|partially_executable>`
+  - execution lanes:
+    - `...`
+  - review lanes:
+    - `...`
 - expected lane shape:
   - execution:
     - `...`
@@ -34,6 +48,8 @@
     - `...`
 - expected completion branch:
   - `...`
+- expected reentry rail:
+  - `retry=... | followup=... | bg=...`
 - expected evidence:
   - `...`
 
@@ -43,6 +59,12 @@
 - task_short_id:
   - `-`
 - planning:
+  - `-`
+- execution brief:
+  - `-`
+- followup brief:
+  - `-`
+- reentry rails:
   - `-`
 - stage progression:
   - planning:
@@ -70,6 +92,10 @@
 - dashboard `Task Detail`:
   - `-`
 - dashboard `Recovery`:
+  - `-`
+- background run ticket / runner:
+  - `-`
+- launch spec / evidence bundle:
   - `-`
 
 ## 6. Result
