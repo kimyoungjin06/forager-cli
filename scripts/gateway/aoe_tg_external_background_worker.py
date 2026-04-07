@@ -35,6 +35,14 @@ def external_background_result_path(team_dir: Path, ticket_id: str, runner_targe
     return Path(team_dir).expanduser().resolve() / "background_run_results" / f"{runner_token}-{ticket_token}.json"
 
 
+def external_background_ack_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
+    ticket_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
+    ticket_token = "-".join(part for part in ticket_token.split("-") if part) or "run"
+    runner_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(runner_target or "").strip())
+    runner_token = "-".join(part for part in runner_token.split("-") if part) or "external"
+    return Path(team_dir).expanduser().resolve() / "background_run_acks" / f"{runner_token}-{ticket_token}.json"
+
+
 def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
     team_root = Path(team_dir).expanduser().resolve()
     resolved = Path(artifact_path).expanduser().resolve()
@@ -67,6 +75,32 @@ def _read_external_background_result(result_path: Path) -> Dict[str, Any]:
         "reason": _trim(raw.get("reason", ""), 160),
         "summary": _trim(raw.get("summary", ""), 240),
         "evidence_bundle": _trim(raw.get("evidence_bundle", ""), 320),
+        "evidence_artifacts": evidence_artifacts,
+    }
+
+
+def _read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
+    if not ack_path.exists():
+        return {}
+    try:
+        raw = json.loads(ack_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    status = _trim(raw.get("status", ""), 32).lower()
+    if status not in {"claimed", "running", "acknowledged"}:
+        status = "acknowledged"
+    evidence_artifacts = [
+        _trim(item, 240)
+        for item in list(raw.get("evidence_artifacts") or [])
+        if _trim(item, 240)
+    ]
+    return {
+        "ticket_id": _trim(raw.get("ticket_id", ""), 96),
+        "status": status,
+        "worker_id": _trim(raw.get("worker_id", ""), 96),
+        "summary": _trim(raw.get("summary", ""), 240),
         "evidence_artifacts": evidence_artifacts,
     }
 
@@ -141,6 +175,7 @@ def poll_external_background_tickets(
     now_iso: Callable[[], str],
 ) -> Dict[str, Any]:
     team_dir = queue_path.parent
+    acknowledged: List[str] = []
     completed: List[str] = []
     failed: List[str] = []
     changed = False
@@ -149,12 +184,54 @@ def poll_external_background_tickets(
             ticket_id = _trim(row.get("ticket_id", ""), 96)
             if not ticket_id:
                 continue
+            ack_path = external_background_ack_path(team_dir, ticket_id, runner_target)
             result_path = external_background_result_path(team_dir, ticket_id, runner_target)
+            ack = _read_external_background_ack(ack_path)
             result = _read_external_background_result(result_path)
-            if not result:
-                continue
             runtime_handle = _trim(row.get("runtime_handle", ""), 240)
+            if not result:
+                if ack:
+                    evidence_artifacts = list(row.get("evidence_artifacts") or [])
+                    ack_rel = _artifact_path_for_team(team_dir, ack_path)
+                    if ack_rel and ack_rel not in evidence_artifacts:
+                        evidence_artifacts.append(ack_rel)
+                    for rel_path in list(ack.get("evidence_artifacts") or []):
+                        token = _trim(rel_path, 240)
+                        if token and token not in evidence_artifacts:
+                            evidence_artifacts.append(token)
+                    current_bundle = _trim(row.get("evidence_bundle", ""), 320)
+                    already_acked = "external_pickup_acknowledged" in current_bundle and (not ack_rel or ack_rel in evidence_artifacts)
+                    if not already_acked:
+                        summary = _trim(ack.get("summary", ""), 160)
+                        worker_id = _trim(ack.get("worker_id", ""), 96)
+                        runtime_summary = str(row.get("runtime_summary", "")).strip() or f"{runner_target}_handoff={runtime_handle}"
+                        if ack_rel and f"ack={ack_rel}" not in runtime_summary:
+                            runtime_summary = f"{runtime_summary} | ack={ack_rel}"
+                        evidence_bundle = f"status=running | outcome=external_pickup_acknowledged | ack={ack_rel or '-'}"
+                        if worker_id:
+                            evidence_bundle += f" | worker={worker_id}"
+                        if summary:
+                            evidence_bundle += f" | summary={summary}"
+                        advanced = advance_background_run_ticket(
+                            queue_path,
+                            ticket_id,
+                            now_iso=now_iso,
+                            status="running",
+                            runner_target=runner_target,
+                            runtime_handle=runtime_handle,
+                            runtime_summary=runtime_summary,
+                            evidence_bundle=evidence_bundle,
+                            evidence_artifacts=evidence_artifacts,
+                        )
+                        if advanced:
+                            changed = True
+                            acknowledged.append(ticket_id)
+                continue
             evidence_artifacts = list(row.get("evidence_artifacts") or [])
+            for artifact_path in (ack_path,):
+                rel_path = _artifact_path_for_team(team_dir, artifact_path)
+                if ack and rel_path and rel_path not in evidence_artifacts:
+                    evidence_artifacts.append(rel_path)
             for artifact_path in (result_path,):
                 rel_path = _artifact_path_for_team(team_dir, artifact_path)
                 if rel_path and rel_path not in evidence_artifacts:
@@ -199,6 +276,8 @@ def poll_external_background_tickets(
                     failed.append(ticket_id)
     return {
         "changed": changed,
+        "acknowledged_count": len(acknowledged),
+        "acknowledged_ticket_ids": acknowledged,
         "completed_count": len(completed),
         "failed_count": len(failed),
         "completed_ticket_ids": completed,

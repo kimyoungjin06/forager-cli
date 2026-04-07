@@ -313,6 +313,8 @@ def _run_local_background_daemon(
             stale_count = int(stale_result.get("stale_count", 0) or 0)
             if claimed_count > 0:
                 reason = f"drained:{claimed_count}"
+            elif int(external_poll_result.get("acknowledged_count", 0) or 0) > 0:
+                reason = f"external_ack:{int(external_poll_result.get('acknowledged_count', 0) or 0)}"
             elif int(tmux_poll_result.get("completed_count", 0) or 0) > 0 or int(tmux_poll_result.get("failed_count", 0) or 0) > 0:
                 reason = (
                     f"tmux_polled:{int(tmux_poll_result.get('completed_count', 0) or 0)}"

@@ -32,6 +32,7 @@ from aoe_tg_local_background_worker import (
     stop_local_background_daemon,
 )
 from aoe_tg_external_background_worker import (
+    external_background_ack_path,
     emit_external_background_handoff,
     external_background_handoff_path,
     external_background_result_path,
@@ -4709,6 +4710,59 @@ def test_poll_external_background_tickets_marks_completed_from_result_file(tmp_p
     assert "external_result" in updated["evidence_bundle"]
     assert "background_run_results/remote-worker-bgt-remote-001.json" in (updated.get("evidence_artifacts") or [])
     assert "reports/external-summary.md" in (updated.get("evidence_artifacts") or [])
+
+
+def test_poll_external_background_tickets_records_pickup_acknowledgement(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-GHA-ACK-001",
+        request_id="REQ-GHA-ACK-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:20:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="running",
+        runtime_handle="background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+        runtime_summary="github_runner_handoff=background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+        evidence_artifacts=["background_run_handoffs/github-runner-bgt-gha-ack-001.json"],
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:20:01+0900")
+    ack_path = external_background_ack_path(team_dir, "BGT-GHA-ACK-001", "github_runner")
+    ack_path.parent.mkdir(parents=True, exist_ok=True)
+    ack_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-GHA-ACK-001",
+                "status": "running",
+                "worker_id": "gha-runner-01",
+                "summary": "workflow accepted handoff",
+                "evidence_artifacts": ["logs/github-runner-start.txt"],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = poll_external_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-07T10:20:02+0900",
+    )
+
+    assert result["changed"] is True
+    assert result["acknowledged_count"] == 1
+    updated = load_background_runs_state(queue_file)["runs"][0]
+    assert updated["status"] == "running"
+    assert "external_pickup_acknowledged" in updated["evidence_bundle"]
+    assert "worker=gha-runner-01" in updated["evidence_bundle"]
+    assert "ack=background_run_acks/github-runner-bgt-gha-ack-001.json" in updated["evidence_bundle"]
+    assert updated["runtime_summary"].endswith("| ack=background_run_acks/github-runner-bgt-gha-ack-001.json")
+    assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in (updated.get("evidence_artifacts") or [])
+    assert "logs/github-runner-start.txt" in (updated.get("evidence_artifacts") or [])
 
 
 def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -137,6 +137,7 @@
   - `externalizable=true`
   - handoff/result artifacts:
     - `.aoe-team/background_run_handoffs/github-runner-<ticket>.json`
+    - `.aoe-team/background_run_acks/github-runner-<ticket>.json`
     - `.aoe-team/background_run_results/github-runner-<ticket>.json`
 - `remote_worker`
   - `kind=background_dispatch`
@@ -147,6 +148,7 @@
   - `externalizable=true`
   - handoff/result artifacts:
     - `.aoe-team/background_run_handoffs/remote-worker-<ticket>.json`
+    - `.aoe-team/background_run_acks/remote-worker-<ticket>.json`
     - `.aoe-team/background_run_results/remote-worker-<ticket>.json`
 
 ### 5.4 Background Worker State
@@ -183,6 +185,7 @@
   - auto-promote to `local_tmux` only when the launch spec already declares `runner_target=local_tmux` and `externalizable=true`
   - `github_runner` and `remote_worker` stay operator-selected targets only
 - external runners emit a durable handoff manifest and mark the ticket `running`
+- external runners may then write an acknowledgement sidecar to confirm pickup before terminal result exists
 - external runners can later complete the ticket by writing a result sidecar consumed by the local control plane poller
   - automatic target selection stays conservative until explicit remote pickup/acknowledgement exists
   - project operators can cap non-local background launches with `background_runner_slot_limit`
