@@ -18,6 +18,7 @@ from aoe_tg_background_runs import (
     load_background_worker_state,
     load_background_runs_state,
     mark_stale_background_run_tickets,
+    sort_background_run_claim_candidates,
     summarize_background_worker_state,
     summarize_background_runs_state,
     update_background_worker_state,
@@ -4704,6 +4705,45 @@ def test_background_run_queue_claims_next_matching_ticket(tmp_path: Path) -> Non
     assert rows["BGT-005"]["status"] == "queued"
     assert rows["BGT-003"]["status"] == "queued"
     assert rows["BGT-001"]["status"] == "queued"
+
+
+def test_background_run_queue_claims_starved_ticket_before_newer_high_priority_work(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    for ticket_id, launch_mode, created_at in [
+        ("BGT-OLD-001", "detached_no_wait", "2026-04-07T08:00:00+0900"),
+        ("BGT-NEW-001", "dashboard_followup_execute", "2026-04-07T09:55:00+0900"),
+    ]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target="local_background",
+                launch_mode=launch_mode,
+                created_at=created_at,
+                created_by="telegram:939062873",
+                source_surface="run_no_wait",
+                status="queued",
+            ),
+            now_iso=lambda: "2026-04-07T10:00:00+0900",
+        )
+
+    queued = list_background_run_tickets(queue_file, statuses=["queued"], runner_target="local_background")
+    ordered = sort_background_run_claim_candidates(queued, now_iso=lambda: "2026-04-07T10:00:00+0900")
+    assert [row["ticket_id"] for row in ordered[:2]] == ["BGT-OLD-001", "BGT-NEW-001"]
+
+    claimed = claim_next_background_run_ticket(
+        queue_file,
+        now_iso=lambda: "2026-04-07T10:00:00+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-OLD-001"
 
 
 def test_background_run_external_runner_requires_externalizable_launch_spec(tmp_path: Path) -> None:

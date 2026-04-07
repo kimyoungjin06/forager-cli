@@ -32,6 +32,7 @@ BACKGROUND_RUN_CLAIM_LAUNCH_PRIORITY = {
     "offdesk_manual": 40,
     "detached_no_wait": 50,
 }
+BACKGROUND_RUN_CLAIM_STARVATION_SEC = 900
 SLOT_RUNNER_TARGETS = (
     "local_tmux",
     "github_runner",
@@ -550,7 +551,7 @@ def claim_next_background_run_ticket(
     )
     if not candidates:
         return {}
-    candidates = sorted(candidates, key=background_run_claim_sort_key)
+    candidates = sort_background_run_claim_candidates(candidates, now_iso=now_iso)
     return claim_background_run_ticket(
         path,
         str(candidates[0].get("ticket_id", "")).strip(),
@@ -633,6 +634,45 @@ def background_run_claim_sort_key(snapshot: Dict[str, Any]) -> tuple[int, str, s
     time_key = created_at or touched_at
     ticket_id = str(row.get("ticket_id", "")).strip()
     return (launch_priority, time_key, touched_at, ticket_id)
+
+
+def background_run_claim_age_sec(snapshot: Dict[str, Any], *, now_iso: Callable[[], str]) -> int:
+    row = normalize_background_run_ticket_snapshot(snapshot)
+    if not row:
+        return 0
+    current_dt = _parse_iso_datetime(now_iso())
+    created = _parse_iso_datetime(row.get("created_at"))
+    if current_dt is None or created is None:
+        return 0
+    return max(0, int((current_dt - created).total_seconds()))
+
+
+def sort_background_run_claim_candidates(
+    candidates: List[Dict[str, Any]],
+    *,
+    now_iso: Callable[[], str],
+    starvation_sec: int = BACKGROUND_RUN_CLAIM_STARVATION_SEC,
+) -> List[Dict[str, Any]]:
+    normalized = [normalize_background_run_ticket_snapshot(row) for row in candidates]
+    normalized = [row for row in normalized if row]
+    if not normalized:
+        return []
+    base_sorted = sorted(normalized, key=background_run_claim_sort_key)
+    starved_rows = [
+        row
+        for row in base_sorted
+        if background_run_claim_age_sec(row, now_iso=now_iso) >= max(1, int(starvation_sec or 1))
+    ]
+    if not starved_rows:
+        return base_sorted
+    starved_ids = {str(item.get("ticket_id", "")).strip() for item in starved_rows}
+    return sorted(
+        starved_rows,
+        key=lambda row: (
+            -(background_run_claim_age_sec(row, now_iso=now_iso)),
+            background_run_claim_sort_key(row),
+        ),
+    ) + [row for row in base_sorted if str(row.get("ticket_id", "")).strip() not in starved_ids]
 
 
 def summarize_background_runner_scheduling(path: Path) -> Dict[str, Any]:
