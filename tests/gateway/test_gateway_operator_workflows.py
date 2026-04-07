@@ -43,9 +43,11 @@ from aoe_tg_request_contract import (
     background_run_evidence_bundle_from_task,
     build_background_launch_spec,
     build_github_runner_background_launch_spec,
+    build_gateway_run_command_text,
     build_gateway_simulation_command_argv,
     build_local_tmux_background_launch_spec,
     build_local_tmux_gateway_command_launch_spec,
+    build_local_tmux_gateway_run_launch_spec,
     build_remote_worker_background_launch_spec,
     build_runner_background_launch_spec,
     build_background_run_ticket,
@@ -610,7 +612,7 @@ def test_orch_bg_runner_sets_preference_and_status_surfaces_effective_runner(tmp
     assert "background_runner_note: preferred local_tmux is pending until an externalizable launch spec exists" in status_text
 
 
-def test_no_wait_detach_respects_runner_preference_but_falls_back_to_local_background(
+def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -635,11 +637,31 @@ def test_no_wait_detach_respects_runner_preference_but_falls_back_to_local_backg
     logged = []
     saves = []
     daemon = {}
+    launched = {}
 
     monkeypatch.setattr(
         run_detached_flow,
         "ensure_local_background_daemon",
         lambda **kwargs: daemon.update(kwargs) or {"started": True, "thread_name": "aoe-local-bg-test", "runner_target": kwargs.get("runner_target", "")},
+    )
+    monkeypatch.setattr(
+        run_detached_flow,
+        "launch_local_tmux_background_ticket",
+        lambda **kwargs: launched.update(kwargs)
+        or advance_background_run_ticket(
+            kwargs["queue_path"],
+            kwargs["ticket_id"],
+            now_iso=kwargs["now_iso"],
+            status="running",
+            runner_target="local_tmux",
+            launch_mode="detached_no_wait",
+            created_by=kwargs.get("claimed_by", ""),
+            source_surface=kwargs.get("source_surface", ""),
+            runtime_handle="aoe_bg_req_detached_tmux",
+            runtime_summary="tmux_session=aoe_bg_req_detached_tmux",
+            evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_req_detached_tmux",
+            evidence_artifacts=["background_run_logs/req-detached-tmux.log"],
+        ),
     )
 
     ctx = run_handlers.build_run_context(
@@ -750,8 +772,166 @@ def test_no_wait_detach_respects_runner_preference_but_falls_back_to_local_backg
 
     assert handled is True
     assert daemon["runner_target"] == "local_background"
+    assert launched["launch_mode"] == "detached_no_wait"
     task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-TMUX"]
+    assert task["background_run_runner_target"] == "local_tmux"
+    assert task["background_run_status"] == "running"
+    assert task["background_run_runtime_handle"] == "aoe_bg_req_detached_tmux"
+    assert task["background_run_launch_spec_summary"].startswith("background_dispatch | mode=tmux_session_json")
+    assert task["background_run_launch_spec_summary"].endswith("externalizable=yes")
+    queue_file = team_dir / "background_runs.json"
+    rows = json.loads(queue_file.read_text(encoding="utf-8")).get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["runner_target"] == "local_tmux"
+    assert row["status"] == "running"
+    assert row["launch_spec"]["externalizable"] is True
+    assert row["launch_spec"]["mode"] == "tmux_session_json"
+    assert row["launch_spec"]["command_argv"][1] == gateway_cli_entrypoint_path()
+    assert "--simulate-text" in row["launch_spec"]["command_argv"]
+    assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in row["launch_spec"]["command_argv"]
+
+
+def test_no_wait_detach_falls_back_to_local_background_without_manager_state_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "background_runner_target": "local_tmux",
+                "todos": [],
+            }
+        }
+    }
+    daemon = {}
+
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: daemon.update(kwargs) or {"started": True, "thread_name": "aoe-local-bg-test", "runner_target": kwargs.get("runner_target", "")},
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file="",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda *args, **kwargs: True,
+            log_event=lambda **kwargs: None,
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda *args, **kwargs: None,
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: "REQ-DETACHED-FALLBACK",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-13T18:55:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert daemon["runner_target"] == "local_background"
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-FALLBACK"]
     assert task["background_run_runner_target"] == "local_background"
+    assert task["background_run_launch_spec_summary"].startswith("gateway_dispatch | mode=in_process_callback")
 
 
 def test_orch_repair_all_repairs_multiple_projects(tmp_path: Path) -> None:
@@ -3969,6 +4149,45 @@ def test_build_local_tmux_gateway_command_launch_spec_embeds_gateway_payload() -
     assert spec["command_argv"][1] == gateway_cli_entrypoint_path()
     assert "--simulate-text" in spec["command_argv"]
     assert "/retry T-101 lane L1" in spec["command_argv"]
+
+
+def test_build_gateway_run_command_text_preserves_dispatch_options() -> None:
+    command_text = build_gateway_run_command_text(
+        prompt="run it",
+        orch_target="O2",
+        roles=["Codex-Dev", "Codex-Reviewer"],
+        priority="P1",
+        timeout_sec=300,
+        force_mode="dispatch",
+    )
+
+    assert command_text == "aoe orch run --orch O2 --dispatch --roles Codex-Dev,Codex-Reviewer --priority P1 --timeout-sec 300 'run it'"
+
+
+def test_build_local_tmux_gateway_run_launch_spec_embeds_run_cli_payload() -> None:
+    spec = build_local_tmux_gateway_run_launch_spec(
+        request_id="REQ-TMUX-RUN-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        orch_target="O2",
+        prompt="run it",
+        roles=["Codex-Dev"],
+        priority="P2",
+        timeout_sec=120,
+        force_mode="dispatch",
+        simulate_chat_id="local-bg",
+        launch_mode="detached_no_wait",
+        source_surface="run_no_wait",
+        created_by="telegram:939062873",
+    )
+
+    assert spec["runner_target"] == "local_tmux"
+    assert spec["externalizable"] is True
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+    assert "--simulate-text" in spec["command_argv"]
+    assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in spec["command_argv"]
 
 
 def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

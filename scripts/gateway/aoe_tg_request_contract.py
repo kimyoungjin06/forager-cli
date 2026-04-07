@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import shlex
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -682,6 +683,44 @@ def build_gateway_simulation_command_argv(
     return [item for item in argv if str(item).strip()]
 
 
+def build_gateway_run_command_text(
+    *,
+    prompt: str,
+    orch_target: str = "",
+    roles: Optional[List[str]] = None,
+    priority: str = "",
+    timeout_sec: int | None = None,
+    force_mode: str = "dispatch",
+) -> str:
+    prompt_text = _trim(prompt, 2000)
+    if not prompt_text:
+        return ""
+    mode = _trim(force_mode or "dispatch", 32).lower()
+    if mode not in {"dispatch", "direct"}:
+        mode = "dispatch"
+    argv: List[str] = ["aoe"]
+    orch_ref = _trim(orch_target, 64)
+    if orch_ref:
+        argv.extend(["orch", "run", "--orch", orch_ref])
+    else:
+        argv.append("run")
+    argv.append(f"--{mode}")
+    role_tokens = _dedupe_rows(list(roles or []), limit=12, text_limit=64)
+    if role_tokens:
+        argv.extend(["--roles", ",".join(role_tokens)])
+    priority_token = _trim(priority, 16).upper()
+    if priority_token in {"P1", "P2", "P3"}:
+        argv.extend(["--priority", priority_token])
+    try:
+        timeout_value = int(timeout_sec or 0)
+    except Exception:
+        timeout_value = 0
+    if timeout_value > 0:
+        argv.extend(["--timeout-sec", str(timeout_value)])
+    argv.append(prompt_text)
+    return shlex.join([item for item in argv if str(item).strip()])
+
+
 def build_local_tmux_gateway_command_launch_spec(
     *,
     request_id: str,
@@ -713,6 +752,45 @@ def build_local_tmux_gateway_command_launch_spec(
             simulate_live=True,
         ),
         command_cwd=project_root,
+    )
+
+
+def build_local_tmux_gateway_run_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    orch_target: str = "",
+    prompt: str,
+    roles: Optional[List[str]] = None,
+    priority: str = "",
+    timeout_sec: int | None = None,
+    force_mode: str = "dispatch",
+    simulate_chat_id: str = "local-background",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    return build_local_tmux_gateway_command_launch_spec(
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        command_text=build_gateway_run_command_text(
+            prompt=prompt,
+            orch_target=orch_target,
+            roles=roles,
+            priority=priority,
+            timeout_sec=timeout_sec,
+            force_mode=force_mode,
+        ),
+        simulate_chat_id=simulate_chat_id,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
     )
 
 

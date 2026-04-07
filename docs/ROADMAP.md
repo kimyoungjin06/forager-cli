@@ -303,10 +303,11 @@
       - `background_worker.json`
       - `bgw-*`, `bgq-clean`, runner preference
       - `local_tmux` retry/replan launch path
+      - `local_tmux` initial detached no-wait path for serializable gateway runs
       - tmux log/result artifact persistence + polling
     - 남은 것:
       - `followup execute` path는 현재 foreground + `local_tmux`까지만 연결됨
-      - `initial detached no-wait` externalizable 분리
+      - non-serializable `initial detached no-wait` cases의 externalizable 분리
       - `github_runner` / `remote_worker` 실제 실행기
   - 최소 범위:
     - background queue

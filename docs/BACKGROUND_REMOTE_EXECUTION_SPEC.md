@@ -97,11 +97,14 @@
   - `externalizable`
   - `blocked_reason`
   - `summary`
-- Current default:
-  - `kind=gateway_dispatch`
-  - `mode=in_process_callback`
-  - `externalizable=false`
-  - `blocked_reason=requires in-process callback registry`
+- Conservative default:
+  - if the detached run cannot be reconstructed as a stable gateway command:
+    - `kind=gateway_dispatch`
+    - `mode=in_process_callback`
+    - `externalizable=false`
+    - `blocked_reason=requires in-process callback registry`
+  - if the detached run can be reconstructed safely and the project runner preference is `local_tmux`:
+    - use a `local_tmux` launch spec with a gateway simulation payload
 
 #### 5.3.1 Externalizable Runner Defaults
 - `local_tmux`
@@ -118,8 +121,10 @@
     - gateway simulation command
     - shape:
       - `python <repo>/scripts/gateway/aoe-telegram-gateway.py --project-root ... --team-dir ... --manager-state-file ... --simulate-live --simulate-chat-id ... --simulate-text "<command>"`
-    - intended first use:
-      - retry / replan style re-entry commands that already have a stable task reference
+    - current uses:
+      - retry / replan style re-entry commands
+      - executable followup slices
+      - initial `detached no-wait` dispatch when the run can be reconstructed as `aoe orch run --dispatch ...`
   - runtime artifacts:
     - `.aoe-team/background_run_logs/<ticket>.log`
     - `.aoe-team/background_run_results/<ticket>.json`
@@ -329,10 +334,12 @@
 
 ## 11. Open Questions
 - Current `local_background` daemon is an in-process thread because execution targets still live in the gateway process registry. A future external worker requires serializable launch specs instead of in-memory callbacks.
-- Phase 1 launch specs are intentionally honest about the current limitation:
-  - `mode=in_process_callback`
-  - `externalizable=false`
-  This is not a bug; it is the explicit migration seam toward `local_tmux` / `github_runner` / `remote_worker`.
+- Phase 1 launch specs are intentionally honest about the remaining limitation:
+  - serializable detached runs can now use `local_tmux`
+  - non-serializable detached runs still remain:
+    - `mode=in_process_callback`
+    - `externalizable=false`
+  This fallback is not a bug; it remains the migration seam toward `github_runner` / `remote_worker` and any dispatch cases that still depend on in-process callback state.
 - When an external runner attempts to claim a non-externalizable ticket, the ticket must fail with:
   - `reason=launch_spec_not_externalizable`
 - How much of the current tmux/runtime process model should be reused as `local_background`?

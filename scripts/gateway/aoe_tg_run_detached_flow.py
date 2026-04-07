@@ -14,12 +14,14 @@ from aoe_tg_local_background_worker import (
 )
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
+    build_local_tmux_gateway_run_launch_spec,
     build_background_launch_spec,
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
     build_background_run_ticket,
     select_background_runner_target,
 )
+from aoe_tg_tmux_background_worker import launch_local_tmux_background_ticket
 
 
 def maybe_handle_no_wait_dispatch_detach(
@@ -30,6 +32,7 @@ def maybe_handle_no_wait_dispatch_detach(
     args: Any,
     entry: Dict[str, Any],
     key: str,
+    orch_target: str,
     provisional_task: Optional[Dict[str, Any]],
     provisional_req_id: str,
     chat_id: str,
@@ -42,6 +45,9 @@ def maybe_handle_no_wait_dispatch_detach(
     log_event: Callable[..., None],
     record_outcome: Optional[Callable[[Dict[str, Any]], None]],
     execute_dispatch_flow: Callable[[], bool],
+    selected_roles: list[str],
+    effective_priority: str,
+    effective_timeout: int,
     send_planning_detached_notice: Callable[..., bool],
     finalize_provisional_task: Callable[..., None],
     start_background_dispatch_flow: Callable[..., Any],
@@ -51,12 +57,40 @@ def maybe_handle_no_wait_dispatch_detach(
         return None
     team_dir = str(entry.get("team_dir", "")).strip()
     queue_path = background_runs_state_path(team_dir) if team_dir else None
-    launch_spec = build_background_launch_spec(
+    project_root = str(entry.get("project_root", "") or getattr(args, "project_root", "") or "").strip()
+    manager_state_file = str(getattr(args, "manager_state_file", "") or "").strip()
+    preferred_runner_target = str(entry.get("background_runner_target", "")).strip()
+    source_prompt = (
+        str((provisional_task or {}).get("prompt", "")).strip()
+        or str((provisional_task or {}).get("source_prompt", "")).strip()
+    )
+    role_tokens = [str(item).strip() for item in (selected_roles or (provisional_task or {}).get("roles") or []) if str(item).strip()]
+    orch_ref = str(orch_target or entry.get("project_alias", "") or key or "").strip()
+    tmux_launch_spec = {}
+    if preferred_runner_target == "local_tmux" and source_prompt and project_root and team_dir and manager_state_file:
+        tmux_launch_spec = build_local_tmux_gateway_run_launch_spec(
+            request_id=str(provisional_req_id or "").strip(),
+            project_key=str(key or "").strip(),
+            project_root=project_root,
+            team_dir=team_dir,
+            manager_state_file=manager_state_file,
+            orch_target=orch_ref,
+            prompt=source_prompt,
+            roles=role_tokens,
+            priority=str(effective_priority or "").strip(),
+            timeout_sec=int(effective_timeout or 0),
+            force_mode="dispatch",
+            simulate_chat_id=str(chat_id or "local-background").strip() or "local-background",
+            launch_mode="detached_no_wait",
+            source_surface="run_no_wait",
+            created_by=f"telegram:{chat_id}",
+        )
+    fallback_launch_spec = build_background_launch_spec(
         request_id=str(provisional_req_id or "").strip(),
         project_key=str(key or "").strip(),
-        project_root=str(entry.get("project_root", "") or getattr(args, "project_root", "") or "").strip(),
+        project_root=project_root,
         team_dir=team_dir,
-        manager_state_file=str(getattr(args, "manager_state_file", "") or "").strip(),
+        manager_state_file=manager_state_file,
         runner_target="local_background",
         launch_mode="detached_no_wait",
         source_surface="run_no_wait",
@@ -69,11 +103,14 @@ def maybe_handle_no_wait_dispatch_detach(
         externalizable=False,
         blocked_reason="requires in-process callback registry",
     )
+    launch_spec = tmux_launch_spec or fallback_launch_spec
     selected_runner_target = select_background_runner_target(
-        preferred_runner_target=str(entry.get("background_runner_target", "")).strip(),
+        preferred_runner_target=preferred_runner_target,
         launch_spec=launch_spec,
         allow_external_targets=False,
     )
+    if selected_runner_target != "local_tmux":
+        launch_spec = fallback_launch_spec
 
     def _sync_background_ticket(ticket: Dict[str, Any]) -> None:
         if not isinstance(provisional_task, dict):
@@ -94,6 +131,8 @@ def maybe_handle_no_wait_dispatch_detach(
             created_by=str(ticket.get("created_by", f"telegram:{chat_id}")).strip() or f"telegram:{chat_id}",
             source_surface=str(ticket.get("source_surface", "run_no_wait")).strip() or "run_no_wait",
             status=str(ticket.get("status", "")).strip(),
+            runtime_handle=str(ticket.get("runtime_handle", "")).strip(),
+            runtime_summary=str(ticket.get("runtime_summary", "")).strip(),
             evidence_bundle=str(ticket.get("evidence_bundle", "")).strip(),
             evidence_artifacts=list(ticket.get("evidence_artifacts") or []),
             launch_spec=ticket.get("launch_spec") if isinstance(ticket.get("launch_spec"), dict) else launch_spec,
@@ -119,7 +158,7 @@ def maybe_handle_no_wait_dispatch_detach(
             request_id=str(provisional_req_id or "").strip(),
             project_key=str(key or "").strip(),
             execution_brief_status=str(provisional_task.get("execution_brief_status", "")).strip(),
-            runner_target="local_background",
+            runner_target=selected_runner_target,
             launch_mode="detached_no_wait",
             created_at=str(provisional_task.get("background_run_created_at", "")).strip() or now_iso(),
             created_by=f"telegram:{chat_id}",
@@ -158,6 +197,37 @@ def maybe_handle_no_wait_dispatch_detach(
         if not args.dry_run:
             save_manager_state(args.manager_state_file, manager_state)
 
+    def _mark_detached_failure(reason: str) -> None:
+        _persist_background_ticket(status="failed", evidence_bundle=f"status=failed | reason={reason[:160]}")
+        finalize_provisional_task(
+            task=provisional_task,
+            outcome="dispatch_failed",
+            reason=reason,
+            lifecycle_set_stage=lifecycle_set_stage,
+            now_iso=now_iso,
+        )
+        entry["updated_at"] = now_iso()
+        if not args.dry_run:
+            save_manager_state(args.manager_state_file, manager_state)
+        send_dispatch_exception(
+            entry=entry,
+            key=key,
+            todo_id=todo_id,
+            reason=reason,
+            send=send,
+            record_outcome=record_outcome,
+        )
+        log_event(
+            event="dispatch_detach_failed",
+            project=key,
+            request_id=str(provisional_req_id or "").strip(),
+            task=provisional_task if isinstance(provisional_task, dict) else None,
+            stage="planning",
+            status="failed",
+            error_code="E_DISPATCH",
+            detail=reason,
+        )
+
     _persist_background_ticket(status="queued")
 
     send_planning_detached_notice(
@@ -167,6 +237,69 @@ def maybe_handle_no_wait_dispatch_detach(
         request_id=provisional_req_id,
         send=send,
     )
+
+    if queue_path and selected_runner_target == "local_tmux":
+        daemon_started = {}
+        try:
+            daemon_started = ensure_local_background_daemon(
+                queue_path=queue_path,
+                now_iso=now_iso,
+                runner_target="local_background",
+                launch_mode="detached_no_wait",
+                claimed_by=f"daemon:{provisional_req_id or chat_id}",
+                source_surface="run_no_wait",
+                interval_sec=1.0,
+                idle_sec=4.0,
+                stale_after_sec=900,
+                max_items=8,
+            )
+        except Exception as exc:
+            log_event(
+                event="background_daemon_start_failed",
+                project=key,
+                request_id=str(provisional_req_id or "").strip(),
+                task=provisional_task if isinstance(provisional_task, dict) else None,
+                stage="planning",
+                status="failed",
+                detail=str(exc).strip()[:240] or "background daemon start failed",
+            )
+        launched = launch_local_tmux_background_ticket(
+            queue_path=queue_path,
+            ticket_id=str((provisional_task or {}).get("background_run_ticket_id", "")).strip(),
+            now_iso=now_iso,
+            claimed_by=f"tmux:{provisional_req_id or chat_id}",
+            source_surface="run_no_wait",
+            launch_mode="detached_no_wait",
+        )
+        if isinstance(launched, dict) and launched:
+            _sync_background_ticket(launched)
+        status = str((launched or {}).get("status", "")).strip().lower()
+        if status == "failed":
+            reason = str((launched or {}).get("evidence_bundle", "")).strip() or "tmux_background_launch_failed"
+            _mark_detached_failure(reason)
+            return True
+        log_event(
+            event="dispatch_detached",
+            project=key,
+            request_id=str(provisional_req_id or "").strip(),
+            task=provisional_task if isinstance(provisional_task, dict) else None,
+            stage="planning",
+            status=status or "running",
+            detail=(
+                "background tmux launched"
+                + (
+                    f" | worker={str(daemon_started.get('thread_name', '')).strip()}"
+                    if str(daemon_started.get("thread_name", "")).strip()
+                    else ""
+                )
+                + (
+                    f" | session={str((launched or {}).get('runtime_handle', '')).strip()}"
+                    if str((launched or {}).get("runtime_handle", "")).strip()
+                    else ""
+                )
+            ),
+        )
+        return True
 
     if queue_path and isinstance(provisional_task, dict):
         register_local_background_run(
@@ -287,34 +420,7 @@ def maybe_handle_no_wait_dispatch_detach(
         )
     except Exception as exc:
         reason = str(exc).strip().splitlines()[0] if str(exc).strip() else "background_dispatch_failed"
-        _persist_background_ticket(status="failed", evidence_bundle=f"status=failed | reason={reason[:160]}")
-        finalize_provisional_task(
-            task=provisional_task,
-            outcome="dispatch_failed",
-            reason=reason,
-            lifecycle_set_stage=lifecycle_set_stage,
-            now_iso=now_iso,
-        )
-        entry["updated_at"] = now_iso()
-        if not args.dry_run:
-            save_manager_state(args.manager_state_file, manager_state)
-        send_dispatch_exception(
-            entry=entry,
-            key=key,
-            todo_id=todo_id,
-            reason=reason,
-            send=send,
-        )
-        log_event(
-            event="dispatch_detach_failed",
-            project=key,
-            request_id=str(provisional_req_id or "").strip(),
-            task=provisional_task if isinstance(provisional_task, dict) else None,
-            stage="planning",
-            status="failed",
-            error_code="E_DISPATCH",
-            detail=reason,
-        )
+        _mark_detached_failure(reason)
     else:
         log_event(
             event="dispatch_detached",
