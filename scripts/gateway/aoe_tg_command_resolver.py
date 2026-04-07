@@ -333,7 +333,7 @@ def resolve_message_command(
                     out.orch_target = tail[0].strip() if tail else None
                     out.rest = tail[1].strip() if len(tail) > 1 else ""
                     if not out.orch_target or not out.rest:
-                        raise RuntimeError("usage: /orch bg-runner <O#|name> <local_background|local_tmux>")
+                        raise RuntimeError("usage: /orch bg-runner <O#|name> <local_background|local_tmux|github_runner|remote_worker>")
                 elif sub in {"status", "stat"}:
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None

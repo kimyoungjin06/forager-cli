@@ -31,6 +31,10 @@ from aoe_tg_local_background_worker import (
     run_local_background_ticket,
     stop_local_background_daemon,
 )
+from aoe_tg_external_background_worker import (
+    emit_external_background_handoff,
+    external_background_handoff_path,
+)
 from aoe_tg_tmux_background_worker import (
     build_local_tmux_session_name,
     launch_local_tmux_background_ticket,
@@ -42,6 +46,7 @@ from aoe_tg_request_contract import (
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
     build_background_launch_spec,
+    build_external_runner_gateway_command_launch_spec,
     build_github_runner_background_launch_spec,
     build_gateway_run_command_text,
     build_gateway_simulation_command_argv,
@@ -4188,6 +4193,83 @@ def test_build_local_tmux_gateway_run_launch_spec_embeds_run_cli_payload() -> No
     assert spec["command_cwd"] == "/tmp/twinpaper"
     assert "--simulate-text" in spec["command_argv"]
     assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in spec["command_argv"]
+
+
+def test_build_external_runner_gateway_command_launch_spec_embeds_gateway_payload() -> None:
+    spec = build_external_runner_gateway_command_launch_spec(
+        runner_target="github_runner",
+        request_id="REQ-GHA-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        command_text="/retry T-101 lane L1",
+        simulate_chat_id="gha-bg",
+        launch_mode="dashboard_retry",
+        source_surface="dashboard_retry",
+        created_by="dashboard:control",
+    )
+
+    assert spec["runner_target"] == "github_runner"
+    assert spec["mode"] == "github_action_json"
+    assert spec["externalizable"] is True
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+    assert spec["command_argv"][1] == gateway_cli_entrypoint_path()
+    assert "/retry T-101 lane L1" in spec["command_argv"]
+
+
+def test_emit_external_background_handoff_writes_manifest(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-GHA-001",
+        request_id="REQ-GHA-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:00:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+        launch_spec=build_external_runner_gateway_command_launch_spec(
+            runner_target="github_runner",
+            request_id="REQ-GHA-001",
+            project_key="twinpaper",
+            project_root=str(tmp_path),
+            team_dir=str(team_dir),
+            manager_state_file=str(team_dir / "orch_manager_state.json"),
+            command_text="/retry T-101",
+            simulate_chat_id="gha-bg",
+            launch_mode="dashboard_retry",
+            source_surface="dashboard_retry",
+            created_by="dashboard:control",
+        ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:00:01+0900")
+
+    launched = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-GHA-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-07T10:00:02+0900",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+
+    assert launched["status"] == "running"
+    assert launched["runner_target"] == "github_runner"
+    handoff_rel = launched["runtime_handle"]
+    assert handoff_rel.endswith("github-runner-bgt-gha-001.json")
+    assert launched["runtime_summary"] == f"github_runner_handoff={handoff_rel}"
+    handoff_path = external_background_handoff_path(team_dir, "BGT-GHA-001", "github_runner")
+    assert handoff_path.exists()
+    payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    assert payload["runner_target"] == "github_runner"
+    assert payload["ticket_id"] == "BGT-GHA-001"
+    assert payload["launch_spec"]["externalizable"] is True
+    assert handoff_rel in (launched.get("evidence_artifacts") or [])
 
 
 def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

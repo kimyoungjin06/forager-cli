@@ -1118,6 +1118,74 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
     assert launched[0]["runtime_handle"] == "aoe_bg_retry_req_1"
 
 
+def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["background_runner_target"] = "github_runner"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_now_iso", lambda: "2026-04-07T13:00:00+09:00")
+
+    class _GatewayMain:
+        @staticmethod
+        def save_manager_state(path, state):
+            Path(path).write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/retry T-001"
+    assert payload["next_step"] == "/orch status O2"
+    assert payload["background_run"]["runner_target"] == "github_runner"
+    assert payload["background_run"]["status"] == "running"
+    runtime_handle = payload["background_run"]["runtime_handle"]
+    assert runtime_handle.startswith("background_run_handoffs/")
+    assert runtime_handle.endswith(".json")
+    assert payload["background_run"]["runtime_summary"] == f"github_runner_handoff={runtime_handle}"
+    assert payload["transition"]["run_source_request_id"] == "REQ-1"
+    assert payload["task"]["request_id"] == "REQ-1"
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert task["background_run_runner_target"] == "github_runner"
+    assert task["background_run_status"] == "running"
+    assert task["background_run_ticket_id"].startswith("BGT-REQ-1-")
+    assert task["background_run_runtime_handle"] == runtime_handle
+    queue_path = Path(updated["projects"]["alpha"]["team_dir"]) / "background_runs.json"
+    rows = background_runs.load_background_runs_state(queue_path).get("runs") or []
+    launched = [row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-1-")]
+    assert len(launched) == 1
+    assert launched[0]["runner_target"] == "github_runner"
+    assert launched[0]["status"] == "running"
+    assert launched[0]["runtime_handle"] == runtime_handle
+    handoff_path = Path(updated["projects"]["alpha"]["team_dir"]) / runtime_handle
+    assert handoff_path.exists()
+    handoff_payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    assert handoff_payload["runner_target"] == "github_runner"
+    assert handoff_payload["ticket_id"] == launched[0]["ticket_id"]
+    assert handoff_payload["launch_spec"]["externalizable"] is True
+    assert handoff_payload["launch_spec"]["mode"] == "github_action_json"
+    assert any("/retry REQ-1" in token for token in (handoff_payload["launch_spec"].get("command_argv") or []))
+
+
 def test_control_dashboard_post_replan_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

@@ -12,12 +12,14 @@ import aoe_tg_chat_state as chat_state
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
     build_background_run_ticket,
+    build_external_runner_gateway_command_launch_spec,
     build_local_tmux_gateway_command_launch_spec,
     select_background_runner_target,
 )
 import aoe_tg_retry_handlers as retry_handlers
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
+from aoe_tg_external_background_worker import emit_external_background_handoff
 from aoe_tg_tmux_background_worker import launch_local_tmux_background_ticket
 
 from control_dashboard_action_exec_shared import (
@@ -115,7 +117,7 @@ def _set_task_background_ticket(task: Dict[str, Any], ticket: Dict[str, Any], *,
     task["updated_at"] = current_ts
 
 
-def _maybe_execute_retry_background_tmux(
+def _maybe_execute_retry_background_runner(
     transition: Dict[str, Any],
     *,
     manager_state: Dict[str, Any],
@@ -154,27 +156,44 @@ def _maybe_execute_retry_background_tmux(
         outcome_kind = "retry_run"
         success_reason_code = "background_tmux_started"
 
-    launch_spec = build_local_tmux_gateway_command_launch_spec(
-        request_id=source_request_id,
-        project_key=project_key,
-        project_root=str(entry.get("project_root", "")).strip() or str(paths.control_root),
-        team_dir=team_dir_raw,
-        manager_state_file=str(paths.manager_state_file),
-        command_text=command_text,
-        simulate_chat_id=_DASHBOARD_CHAT_ID,
-        launch_mode=launch_mode,
-        source_surface=source_surface,
-        created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-    )
     preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
-    if preferred_runner != "local_tmux":
+    if preferred_runner not in {"local_tmux", "github_runner", "remote_worker"}:
         return None
+    project_root = str(entry.get("project_root", "")).strip() or str(paths.control_root)
+    manager_state_file = str(paths.manager_state_file)
+    if preferred_runner == "local_tmux":
+        launch_spec = build_local_tmux_gateway_command_launch_spec(
+            request_id=source_request_id,
+            project_key=project_key,
+            project_root=project_root,
+            team_dir=team_dir_raw,
+            manager_state_file=manager_state_file,
+            command_text=command_text,
+            simulate_chat_id=_DASHBOARD_CHAT_ID,
+            launch_mode=launch_mode,
+            source_surface=source_surface,
+            created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+        )
+    else:
+        launch_spec = build_external_runner_gateway_command_launch_spec(
+            runner_target=preferred_runner,
+            request_id=source_request_id,
+            project_key=project_key,
+            project_root=project_root,
+            team_dir=team_dir_raw,
+            manager_state_file=manager_state_file,
+            command_text=command_text,
+            simulate_chat_id=_DASHBOARD_CHAT_ID,
+            launch_mode=launch_mode,
+            source_surface=source_surface,
+            created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+        )
     selected_runner = select_background_runner_target(
         preferred_runner_target=preferred_runner,
         launch_spec=launch_spec,
-        allow_external_targets=False,
+        allow_external_targets=True,
     )
-    if selected_runner != "local_tmux":
+    if selected_runner not in {"local_tmux", "github_runner", "remote_worker"}:
         return None
 
     queue_path = background_runs.background_runs_state_path(Path(team_dir_raw))
@@ -184,7 +203,7 @@ def _maybe_execute_retry_background_tmux(
         request_id=source_request_id,
         project_key=project_key,
         execution_brief_status=str((source_task or {}).get("execution_brief_status", "executable")).strip() or "executable",
-        runner_target="local_tmux",
+        runner_target=selected_runner,
         launch_mode=launch_mode,
         created_at=current_ts,
         created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
@@ -193,14 +212,25 @@ def _maybe_execute_retry_background_tmux(
         launch_spec=launch_spec,
     )
     ticket = background_runs.upsert_background_run_ticket(queue_path, ticket, now_iso=_now_iso)
-    launched = launch_local_tmux_background_ticket(
-        queue_path=queue_path,
-        ticket_id=str(ticket.get("ticket_id", "")).strip(),
-        now_iso=_now_iso,
-        claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        source_surface=source_surface,
-        launch_mode=launch_mode,
-    )
+    if selected_runner == "local_tmux":
+        launched = launch_local_tmux_background_ticket(
+            queue_path=queue_path,
+            ticket_id=str(ticket.get("ticket_id", "")).strip(),
+            now_iso=_now_iso,
+            claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+            source_surface=source_surface,
+            launch_mode=launch_mode,
+        )
+    else:
+        launched = emit_external_background_handoff(
+            queue_path=queue_path,
+            ticket_id=str(ticket.get("ticket_id", "")).strip(),
+            runner_target=selected_runner,
+            now_iso=_now_iso,
+            claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+            source_surface=source_surface,
+            launch_mode=launch_mode,
+        )
     ticket_snapshot = launched if isinstance(launched, dict) and launched else ticket
 
     if isinstance(source_task, dict):
@@ -222,18 +252,25 @@ def _maybe_execute_retry_background_tmux(
     background_payload = {
         "ticket_id": str(ticket_snapshot.get("ticket_id", "")).strip() or "-",
         "status": str(ticket_snapshot.get("status", "")).strip() or "-",
-        "runner_target": str(ticket_snapshot.get("runner_target", "")).strip() or "local_tmux",
+        "runner_target": str(ticket_snapshot.get("runner_target", "")).strip() or selected_runner,
         "runtime_handle": str(ticket_snapshot.get("runtime_handle", "")).strip() or "-",
         "runtime_summary": str(ticket_snapshot.get("runtime_summary", "")).strip() or "-",
         "launch_spec": str((ticket_snapshot.get("launch_spec") or {}).get("summary", "")).strip() or "-",
     }
     blocked = str(ticket_snapshot.get("status", "")).strip().lower() == "failed"
-    detail = str(ticket_snapshot.get("evidence_bundle", "")).strip() or "background_tmux_launch_failed"
-    remediation = (
-        f"inspect tmux availability or switch /orch bg-runner {project_ref} local_background before retrying again"
-        if blocked
-        else "inspect tmux session state and runtime status before issuing another background rerun"
-    )
+    detail = str(ticket_snapshot.get("evidence_bundle", "")).strip() or "background_runner_launch_failed"
+    if selected_runner == "local_tmux":
+        remediation = (
+            f"inspect tmux availability or switch /orch bg-runner {project_ref} local_background before retrying again"
+            if blocked
+            else "inspect tmux session state and runtime status before issuing another background rerun"
+        )
+    else:
+        remediation = (
+            f"inspect the emitted {selected_runner} handoff manifest or switch /orch bg-runner {project_ref} local_background before retrying again"
+            if blocked
+            else f"inspect the emitted {selected_runner} handoff manifest and downstream runner pickup before issuing another background rerun"
+        )
     return _json(
         {
             "ok": not blocked,
@@ -261,7 +298,9 @@ def _maybe_execute_retry_background_tmux(
             "outcome": {
                 "kind": outcome_kind,
                 "status": "blocked" if blocked else "executed",
-                "reason_code": "background_tmux_launch_failed" if blocked else success_reason_code,
+                "reason_code": ("background_tmux_launch_failed" if selected_runner == "local_tmux" else "background_external_handoff_failed") if blocked else (
+                    success_reason_code if selected_runner == "local_tmux" else f"background_{selected_runner}_handoff_started"
+                ),
                 "detail": detail,
             },
         },
@@ -607,7 +646,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             },
             status=409,
         )
-    background_result = _maybe_execute_retry_background_tmux(
+    background_result = _maybe_execute_retry_background_runner(
         transition,
         manager_state=manager_state,
         paths=paths,
@@ -724,7 +763,7 @@ def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
             },
             status=409,
         )
-    background_result = _maybe_execute_retry_background_tmux(
+    background_result = _maybe_execute_retry_background_runner(
         transition,
         manager_state=manager_state,
         paths=paths,

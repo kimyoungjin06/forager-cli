@@ -305,10 +305,11 @@
       - `local_tmux` retry/replan launch path
       - `local_tmux` initial detached no-wait path for serializable gateway runs
       - tmux log/result artifact persistence + polling
+      - `github_runner` / `remote_worker` handoff manifest emission for externalizable retry paths
     - 남은 것:
       - `followup execute` path는 현재 foreground + `local_tmux`까지만 연결됨
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
-      - `github_runner` / `remote_worker` 실제 실행기
+      - `github_runner` / `remote_worker` 실제 pickup worker / acknowledgement
   - 최소 범위:
     - background queue
     - request-to-run audit trail

@@ -794,6 +794,45 @@ def build_local_tmux_gateway_run_launch_spec(
     )
 
 
+def build_external_runner_gateway_command_launch_spec(
+    *,
+    runner_target: str,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    command_text: str,
+    simulate_chat_id: str = "local-background",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+) -> Dict[str, Any]:
+    token = _trim(runner_target, 64).lower()
+    if token not in {"github_runner", "remote_worker"}:
+        token = "github_runner"
+    return build_runner_background_launch_spec(
+        runner_target=token,
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+        command_argv=build_gateway_simulation_command_argv(
+            project_root=project_root,
+            team_dir=team_dir,
+            manager_state_file=manager_state_file,
+            simulate_text=command_text,
+            simulate_chat_id=simulate_chat_id,
+            simulate_live=True,
+        ),
+        command_cwd=project_root,
+    )
+
+
 def build_github_runner_background_launch_spec(
     *,
     request_id: str,

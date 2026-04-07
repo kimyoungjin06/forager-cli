@@ -175,7 +175,9 @@
 - Current selection policy:
   - default to `local_background`
   - auto-promote to `local_tmux` only when the launch spec already declares `runner_target=local_tmux` and `externalizable=true`
-  - keep `github_runner` and `remote_worker` spec-defined only until explicit runner selection policy is implemented
+  - `github_runner` and `remote_worker` stay operator-selected targets only
+  - external runners emit a durable handoff manifest and mark the ticket `running`
+  - automatic target selection stays conservative until explicit remote pickup/acknowledgement exists
 
 ### 5.6 Evidence Bundle
 - Durable off-desk result package.
@@ -342,6 +344,13 @@
   This fallback is not a bug; it remains the migration seam toward `github_runner` / `remote_worker` and any dispatch cases that still depend on in-process callback state.
 - When an external runner attempts to claim a non-externalizable ticket, the ticket must fail with:
   - `reason=launch_spec_not_externalizable`
+- When an externalizable external-runner ticket launches today:
+  - a handoff manifest is written under `.aoe-team/background_run_handoffs/`
+  - the ticket records:
+    - `runtime_handle=<handoff artifact path>`
+    - `runtime_summary=<runner>_handoff=<handoff artifact path>`
+    - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
+  - downstream pickup remains out of scope for the current gateway process
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

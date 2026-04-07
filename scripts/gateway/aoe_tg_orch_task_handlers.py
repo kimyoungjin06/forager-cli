@@ -20,7 +20,7 @@ from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issu
 
 
 _SCENARIO_FILENAME = "AOE_TODO.md"
-_BACKGROUND_RUNNER_PREFS = {"local_background", "local_tmux"}
+_BACKGROUND_RUNNER_PREFS = {"local_background", "local_tmux", "github_runner", "remote_worker"}
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -805,7 +805,7 @@ def handle_orch_task_command(
         target = str(rest or "").strip().lower()
         if target not in _BACKGROUND_RUNNER_PREFS:
             send(
-                "usage: /orch bg-runner <O#|name> <local_background|local_tmux>",
+                "usage: /orch bg-runner <O#|name> <local_background|local_tmux|github_runner|remote_worker>",
                 context="orch-bg-runner usage",
                 with_menu=True,
             )
