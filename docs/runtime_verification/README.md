@@ -47,17 +47,14 @@
       - live progression moved through reusable review seams: review-only routing, reviewer-only role defaults, readonly review contracts, canonical diff-range policy, auth/session scope tracing, and section-specific acceptance for severity findings vs test gaps vs uncertainties
       - final successful run (`T-022`) reached `planning_ready`, triggered one integration retry for dirty-path evidence precision, and then closed as `done`
   - `review/R2_rerun_path.md`
-    - `legacy_blocked_revalidation_required`
+    - `bounded_replay_pass`
     - finding:
-      - review rerun-path work promoted reusable review abstractions:
-        - review_report single-output ownership
-        - review evidence step-shape normalization
-        - duplicated stage dedupe / canonical ordering
-      - this artifact was recorded before the current `ExecutionBrief + FollowupBrief + reentry rail` model existed
-      - it remains useful as a legacy blocker record, but rerun proof now has to be re-run against:
-        - execution brief status
-        - reentry rail summary
-        - background ticket / launch spec, when used
+      - bounded replay now proves the current rerun rail:
+        - review-only routing remains in `review`
+        - retry lane selection stays bounded
+        - background retry rails (`local_tmux`, `github_runner`) preserve runner-specific ticket state
+        - run lock / slot saturation block retry coherently
+      - the old `T-030` blocker remains captured only as legacy reference inside the scenario file
   - `review/R3_manual_followup_preview.md`
     - `bounded_replay_pass`
     - finding:

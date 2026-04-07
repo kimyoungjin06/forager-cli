@@ -153,6 +153,14 @@
 #### R2. Rerun Path
 - intent:
   - review result is shallow or required scope was missed
+- current status:
+  - `bounded_replay_pass`
+- current finding:
+  - bounded replay now proves:
+    - review-only rerun prompts stay in `review`
+    - retry lane selection remains bounded
+    - retry background rails preserve runner-specific ticket state
+    - run lock / slot saturation block retry without collapsing into followup
 - expected branch:
   - `rerun`
 - must prove:

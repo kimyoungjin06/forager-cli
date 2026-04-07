@@ -8,9 +8,9 @@
 - branch_target:
   - `rerun`
 - status:
-  - `legacy_blocked_revalidation_required`
+  - `bounded_replay_pass`
 - executed_at:
-  - `2026-03-31 23:00 KST`
+  - `2026-04-07 KST`
 - operator:
   - `Codex`
 
@@ -18,9 +18,9 @@
 - request text:
   - `최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. 범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라.`
 - normalized action:
-  - `dispatch_task`
+  - `retry`
 - target runtime:
-  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build`
+  - `bounded replay fixtures only`
 
 ## 3. Expected Contract
 - expected preset:
@@ -29,7 +29,7 @@
   - status:
     - `executable`
   - executable slice:
-    - `readonly review evidence collection`
+    - `review evidence collection and rerun over declared retry lanes`
   - blocked slice or operator decision:
     - `-`
 - expected followup brief:
@@ -41,7 +41,7 @@
     - `-`
 - expected lane shape:
   - execution:
-    - reviewer-led readonly lane
+    - reviewer-led readonly evidence lane
   - review:
     - reviewer/verifier lane
 - expected completion branch:
@@ -49,77 +49,99 @@
 - expected reentry rail:
   - `retry=<lane-scoped rerun> | followup=none | bg=<runner or ->`
 - expected evidence:
-  - review_report diff scope evidence
-  - changed files
-  - severity findings
-  - test gaps
-  - uncertainties
-  - explicit rerun reason when scope or required sections are incomplete
+  - review-only routing remains `review`
+  - retry transition preserves selected execution/review lanes
+  - invalid lane selection is rejected
+  - background retry rail can use:
+    - foreground bridge
+    - `local_tmux`
+    - `github_runner`
+  - run lock and slot saturation can block retry cleanly
 
 ## 4. Runtime Evidence
 - request_id:
-  - `r_20260331224951_36a2290c`
+  - `REQ-1` (dashboard retry fixture)
+  - `REQ-123` (gateway retry transition fixture)
 - task_short_id:
-  - `T-030`
+  - `T-001`
+  - `T-123`
 - planning:
-  - `blocked`
+  - `bounded replay via gateway/dashboard tests only`
 - execution brief:
-  - `not captured in the original live proof; revalidation required under the new model`
+  - `retry rail active; task fixture exposes rerun targets and reentry rail summary`
 - followup brief:
   - `none`
 - reentry rails:
-  - `not captured in the original live proof; this scenario predates reentry_rails_summary`
+  - `retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background` in dashboard fixture
 - stage progression:
   - planning:
-    - `phase1 round 1/3`
-    - `phase1 round 2/3`
-    - `phase1 round 3/3`
-    - `plan gate blocked`
+    - `review-only prompt remains routed to review preset`
   - execution:
-    - `-`
+    - `foreground retry transition`
+    - `local_tmux background retry`
+    - `github_runner handoff retry`
   - verification:
-    - `-`
+    - `selected retry lanes preserved`
   - integration:
-    - `-`
+    - `not separately exercised in bounded replay`
   - close:
-    - `-`
+    - `retry branch remains open / rerun-oriented rather than done`
 - critic/verifier verdict:
-  - `critic issues remain after auto-replan`
+  - `retry remains lane-scoped and bounded`
 - final branch:
-  - `blocked before rerun`
+  - `rerun`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `pending`
+  - `reentry_rails summary exposes retry scope distinctly from followup`
 - `/monitor`:
-  - `pending`
+  - `not used in bounded replay`
 - `/offdesk review`:
-  - `pending`
+  - `offdesk/runtime hints keep retry as the next actionable branch`
 - dashboard `Task Detail`:
-  - `pending`
+  - `reentry_rails shows retry=blocked:underspecified exec=L1 review=R1`
 - dashboard `Recovery`:
-  - `pending`
+  - `same retry rail is preserved in recovery/nightly surfaces`
 - background run ticket / runner:
-  - `not applicable in the original blocked proof`
+  - `proved for local_tmux and github_runner via dashboard retry tests`
 - launch spec / evidence bundle:
-  - `not applicable in the original blocked proof`
+  - `background retry ticket includes runner-target-specific launch payload and runtime handle/handoff`
 
 ## 6. Result
 - result:
-  - `legacy_blocked_revalidation_required`
+  - `pass`
 - mismatch class:
-  - `review_final_artifact_contract_gap`
+  - `none`
 - mismatch notes:
-  - `review-only routing, reviewer-only role defaults, review_report single-output ownership, and evidence step-shape normalization are now present`
-  - `the legacy blocker was the final review_report acceptance contract: canonical diff range, excluded candidates, and dirty-worktree exclusions were not guaranteed as required report sections`
-  - `because this proof predates ExecutionBrief, FollowupBrief, and reentry rail surfaces, it no longer qualifies as the current canonical R2 proof`
+  - `review-only routing stays in review preset for rerun-oriented review_report prompts`
+  - `retry rail now preserves selected execution/review lane scope`
+  - `retry can be blocked coherently by run lock and slot saturation without drifting into followup`
+  - `legacy live blocker about review_report acceptance remains historical context, not the current canonical proof`
 - next fix:
-  - `re-run R2 under the current model and capture: ExecutionBrief.status, reentry_rails_summary, retry scope, and background ticket/launch spec if a background rail is used`
+  - `promote this bounded replay proof to a later live replay using the current ExecutionBrief + reentry rail surfaces`
 
 ## 7. Raw References
 - runtime state refs:
-  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/orch_manager_state.json`
+  - `tests/gateway/test_gateway_state_helpers.py::test_choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_retry_replan_transition_preserves_selected_lane_targets`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_retry_replan_transition_rejects_invalid_lane_selector`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_executes_retry_bridge`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_uses_local_tmux_background_when_preferred`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_blocks_when_run_lock_is_test_only`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_blocks_when_background_slots_are_exhausted`
 - log refs:
-  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/logs/gateway_events.jsonl`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_state_helpers.py -k 'choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only or apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'resolve_retry_replan_transition_preserves_selected_lane_targets or resolve_retry_replan_transition_rejects_invalid_lane_selector'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_retry_route_executes_retry_bridge or post_retry_route_uses_local_tmux_background_when_preferred or post_retry_route_emits_github_runner_handoff_when_preferred or post_retry_route_blocks_when_run_lock_is_test_only or post_retry_route_blocks_when_background_slots_are_exhausted'`
 - artifact refs:
-  - `review_report.md not produced because the task blocked before execution`
+  - `no live runtime artifacts; proof uses fixture state, response payloads, and background ticket assertions only`
+
+## 8. Legacy Reference
+- previous live artifact:
+  - `2026-03-31`
+  - `T-030`
+  - blocked before execution because the then-current review_report acceptance contract was still incomplete
+- interpretation:
+  - this remains a useful history note for the old planning stack
+  - it is no longer the current canonical R2 proof under the new `ExecutionBrief + FollowupBrief + reentry rail` model
