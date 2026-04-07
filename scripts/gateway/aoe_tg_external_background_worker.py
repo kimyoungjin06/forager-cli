@@ -88,7 +88,7 @@ def _append_external_background_audit(
     )
 
 
-def _read_external_background_result(result_path: Path) -> Dict[str, Any]:
+def read_external_background_result(result_path: Path) -> Dict[str, Any]:
     if not result_path.exists():
         return {}
     try:
@@ -115,7 +115,7 @@ def _read_external_background_result(result_path: Path) -> Dict[str, Any]:
     }
 
 
-def _read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
+def read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
     if not ack_path.exists():
         return {}
     try:
@@ -138,6 +138,32 @@ def _read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
         "worker_id": _trim(raw.get("worker_id", ""), 96),
         "summary": _trim(raw.get("summary", ""), 240),
         "evidence_artifacts": evidence_artifacts,
+    }
+
+
+def read_external_background_handoff(handoff_path: Path) -> Dict[str, Any]:
+    if not handoff_path.exists():
+        return {}
+    try:
+        raw = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    launch_spec = normalize_background_launch_spec_snapshot(raw.get("launch_spec"))
+    task_runtime = raw.get("task_runtime") if isinstance(raw.get("task_runtime"), dict) else {}
+    return {
+        "ticket_id": _trim(raw.get("ticket_id", ""), 96),
+        "runner_target": _trim(raw.get("runner_target", ""), 64).lower(),
+        "request_id": _trim(raw.get("request_id", ""), 96),
+        "project_key": _trim(raw.get("project_key", ""), 64),
+        "launch_mode": _trim(raw.get("launch_mode", ""), 64),
+        "source_surface": _trim(raw.get("source_surface", ""), 64),
+        "created_by": _trim(raw.get("created_by", ""), 96),
+        "emitted_at": _trim(raw.get("emitted_at", ""), 64),
+        "execution_brief_status": _trim(task_runtime.get("execution_brief_status", ""), 48),
+        "launch_spec_summary": _trim(launch_spec.get("summary", ""), 240),
+        "launch_spec_mode": _trim(launch_spec.get("mode", ""), 64),
     }
 
 
@@ -222,8 +248,8 @@ def poll_external_background_tickets(
                 continue
             ack_path = external_background_ack_path(team_dir, ticket_id, runner_target)
             result_path = external_background_result_path(team_dir, ticket_id, runner_target)
-            ack = _read_external_background_ack(ack_path)
-            result = _read_external_background_result(result_path)
+            ack = read_external_background_ack(ack_path)
+            result = read_external_background_result(result_path)
             runtime_handle = _trim(row.get("runtime_handle", ""), 240)
             if not result:
                 if ack:

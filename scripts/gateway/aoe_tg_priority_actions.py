@@ -31,17 +31,17 @@ def external_background_priority_action_snapshot(
         }
     if phase == "pickup_acknowledged":
         return {
-            "action": f"/orch status {project_alias}" if project_alias else "",
+            "action": f"/orch bgx-status {project_alias}" if project_alias else "",
             "reason": note or f"{runner} picked up the background run; await result sidecar",
         }
     if phase == "handoff_emitted":
         return {
-            "action": f"/orch status {project_alias}" if project_alias else "",
+            "action": f"/orch bgx-status {project_alias}" if project_alias else "",
             "reason": note or f"{runner} handoff emitted; awaiting pickup acknowledgement",
         }
     if phase == "awaiting_external_pickup":
         return {
-            "action": f"/orch status {project_alias}" if project_alias else "",
+            "action": f"/orch bgx-status {project_alias}" if project_alias else "",
             "reason": note or f"{runner} launch handed off; waiting for external pickup",
         }
     return {

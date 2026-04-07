@@ -21,6 +21,9 @@ from aoe_tg_external_background_worker import (
     external_background_handoff_path,
     external_background_result_path,
     poll_external_background_tickets,
+    read_external_background_ack,
+    read_external_background_handoff,
+    read_external_background_result,
 )
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
 
@@ -157,6 +160,7 @@ def _repair_registered_project(
 
 def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     alias = _project_alias(entry, key)
+    external_snapshot = _latest_external_background_task_snapshot(entry)
     queue_stale_count = 0
     worker_status = ""
     try:
@@ -205,7 +209,16 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
             [{"text": f"/orch bg-runner {alias} {runner_toggle}"}],
             [{"text": slot_bump_command}],
             [{"text": f"/orch run-lock {alias} {run_lock_toggle}"}],
-            ([{"text": f"/orch bgx-status {alias}"}] if _latest_external_background_task_snapshot(entry) else []),
+            ([{"text": f"/orch bgx-status {alias}"}] if external_snapshot else []),
+            (
+                [
+                    {"text": f"/orch bgx-handoff {alias}"},
+                    {"text": f"/orch bgx-ack {alias}"},
+                    {"text": f"/orch bgx-result {alias}"},
+                ]
+                if external_snapshot
+                else []
+            ),
             [{"text": f"/orch bgw-status {alias}"}]
             + (
                 [{"text": f"/orch bgw-stop {alias}"}]
@@ -368,6 +381,55 @@ def _external_background_artifact_snapshot(entry: Dict[str, Any]) -> Dict[str, s
     snapshot["handoff_exists"] = "yes" if handoff_path.exists() else "no"
     snapshot["ack_exists"] = "yes" if ack_path.exists() else "no"
     snapshot["result_exists"] = "yes" if result_path.exists() else "no"
+    return snapshot
+
+
+def _external_background_next_step_for_inspect(alias: str, snapshot: Dict[str, Any]) -> str:
+    if str(snapshot.get("result_exists", "")).strip().lower() == "yes":
+        return f"/orch bgx-result {alias}"
+    if str(snapshot.get("ack_exists", "")).strip().lower() == "yes":
+        return f"/orch bgx-ack {alias}"
+    if str(snapshot.get("handoff_exists", "")).strip().lower() == "yes":
+        return f"/orch bgx-handoff {alias}"
+    return f"/orch status {alias}"
+
+
+def _external_background_artifact_detail(
+    entry: Dict[str, Any],
+    artifact_kind: str,
+) -> Dict[str, Any]:
+    snapshot = _external_background_artifact_snapshot(entry)
+    if not snapshot:
+        return {}
+
+    kind = str(artifact_kind or "").strip().lower()
+    if kind not in {"handoff", "ack", "result"}:
+        return {}
+
+    team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+    if not team_dir_raw:
+        return snapshot
+    team_dir = Path(team_dir_raw).expanduser().resolve()
+    ticket_id = str(snapshot.get("ticket_id", "")).strip()
+    runner_target = str(snapshot.get("runner_target", "")).strip().lower()
+    if not ticket_id or runner_target not in {"github_runner", "remote_worker"}:
+        return snapshot
+
+    if kind == "handoff":
+        artifact_path = external_background_handoff_path(team_dir, ticket_id, runner_target)
+        parsed = read_external_background_handoff(artifact_path)
+    elif kind == "ack":
+        artifact_path = external_background_ack_path(team_dir, ticket_id, runner_target)
+        parsed = read_external_background_ack(artifact_path)
+    else:
+        artifact_path = external_background_result_path(team_dir, ticket_id, runner_target)
+        parsed = read_external_background_result(artifact_path)
+
+    snapshot["artifact_kind"] = kind
+    snapshot["artifact_path"] = str(artifact_path.relative_to(team_dir)).strip()[:240]
+    snapshot["artifact_exists"] = "yes" if artifact_path.exists() else "no"
+    snapshot["artifact_parsed"] = "yes" if parsed else "no"
+    snapshot["artifact_detail"] = parsed
     return snapshot
 
 
@@ -1327,7 +1389,17 @@ def handle_orch_task_command(
         )
         return True
 
-    if cmd == "orch-bgx-status":
+    if cmd in {"orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result"}:
+        artifact_kind = ""
+        if cmd == "orch-bgx-handoff":
+            artifact_kind = "handoff"
+        elif cmd == "orch-bgx-ack":
+            artifact_kind = "ack"
+        elif cmd == "orch-bgx-result":
+            artifact_kind = "result"
+        context_label = "orch-bgx-status" if not artifact_kind else f"orch-bgx-{artifact_kind}"
+        headline_label = "External Background Status" if not artifact_kind else f"External Background {artifact_kind.title()}"
+        source_command = f"/orch bgx-status {orch_target}" if not artifact_kind else f"/orch bgx-{artifact_kind} {orch_target}"
         try:
             key, entry, _p_args = get_context(orch_target)
         except Exception as exc:
@@ -1339,7 +1411,7 @@ def handle_orch_task_command(
                     "next:\n"
                     "- /focus off\n"
                     "- /map",
-                    context="orch-bgx-status blocked",
+                    context=f"{context_label} blocked",
                     with_menu=True,
                 )
                 return True
@@ -1352,7 +1424,7 @@ def handle_orch_task_command(
                 f"- runtime: {key}\n"
                 "- reason: team_dir missing\n"
                 f"- next: /orch repair {alias}",
-                context="orch-bgx-status blocked",
+                context=f"{context_label} blocked",
                 with_menu=True,
             )
             return True
@@ -1363,11 +1435,11 @@ def handle_orch_task_command(
             if _sync_background_run_snapshots_from_queue(entry, queue_path):
                 entry["updated_at"] = now_iso()
                 save_manager_state(args.manager_state_file, manager_state)
-        snapshot = _external_background_artifact_snapshot(entry)
+        snapshot = _external_background_artifact_snapshot(entry) if not artifact_kind else _external_background_artifact_detail(entry, artifact_kind)
         if not snapshot:
             append_action_audit_row(
                 team_dir,
-                headline="External Background Status | accepted",
+                headline=f"{headline_label} | accepted",
                 status="accepted",
                 outcome_kind="background_external",
                 outcome_status="accepted",
@@ -1375,6 +1447,44 @@ def handle_orch_task_command(
                 outcome_detail="no external background ticket found for this runtime",
                 next_step=f"/orch status {alias}",
                 remediation="inspect /orch status and background runner preference before expecting external lifecycle artifacts",
+                source_command=source_command.replace(str(orch_target or "").strip(), alias),
+                link_label="runtime detail",
+                link_href=_runtime_action_link(alias),
+                at=now_iso(),
+            )
+            send(
+                f"{headline_label.lower()}\n"
+                f"- runtime: {key}\n"
+                "- external: none\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context=context_label,
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        if not artifact_kind:
+            external_priority = external_background_priority_action_snapshot(
+                alias=alias,
+                task_label=str(snapshot.get('label', '')).strip(),
+                background_run_runner_target=str(snapshot.get('runner_target', '')).strip(),
+                background_run_external_phase=str(snapshot.get('phase', '')).strip(),
+                background_run_external_note=str(snapshot.get('note', '')).strip(),
+            )
+            next_step = str(external_priority.get("action", "")).strip()
+            if not next_step or next_step == f"/orch bgx-status {alias}":
+                next_step = _external_background_next_step_for_inspect(alias, snapshot)
+            remediation = str(external_priority.get("reason", "")).strip() or "inspect handoff, pickup ack, and result artifacts before the next operator step"
+            append_action_audit_row(
+                team_dir,
+                headline=f"{headline_label} | accepted",
+                status="accepted",
+                outcome_kind="background_external",
+                outcome_status="accepted",
+                outcome_reason_code=str(snapshot.get("phase", "")).strip() or "present",
+                outcome_detail=str(snapshot.get("note", "")).strip() or "-",
+                next_step=next_step,
+                remediation=remediation,
                 source_command=f"/orch bgx-status {alias}",
                 link_label="runtime detail",
                 link_href=_runtime_action_link(alias),
@@ -1383,51 +1493,84 @@ def handle_orch_task_command(
             send(
                 "external background status\n"
                 f"- runtime: {key}\n"
-                "- external: none\n"
+                f"- task: {str(snapshot.get('label', '')).strip() or '-'}\n"
+                f"- runner: {str(snapshot.get('runner_target', '')).strip() or '-'}\n"
+                f"- phase: {str(snapshot.get('phase', '')).strip() or '-'}\n"
+                f"- note: {str(snapshot.get('note', '')).strip() or '-'}\n"
+                f"- handoff: {str(snapshot.get('handoff_path', '-')).strip() or '-'} | exists={str(snapshot.get('handoff_exists', '-')).strip() or '-'}\n"
+                f"- ack: {str(snapshot.get('ack_path', '-')).strip() or '-'} | exists={str(snapshot.get('ack_exists', '-')).strip() or '-'}\n"
+                f"- result: {str(snapshot.get('result_path', '-')).strip() or '-'} | exists={str(snapshot.get('result_exists', '-')).strip() or '-'}\n"
                 "next:\n"
-                f"- /orch status {alias}",
-                context="orch-bgx-status",
+                f"- {next_step}",
+                context=context_label,
                 with_menu=True,
                 reply_markup=_orch_status_reply_markup(manager_state, key, entry),
             )
             return True
-        external_priority = external_background_priority_action_snapshot(
-            alias=alias,
-            task_label=str(snapshot.get('label', '')).strip(),
-            background_run_runner_target=str(snapshot.get('runner_target', '')).strip(),
-            background_run_external_phase=str(snapshot.get('phase', '')).strip(),
-            background_run_external_note=str(snapshot.get('note', '')).strip(),
-        )
-        next_step = str(external_priority.get("action", "")).strip() or f"/orch status {alias}"
-        remediation = str(external_priority.get("reason", "")).strip() or "inspect handoff, pickup ack, and result artifacts before the next operator step"
+
+        artifact_path = str(snapshot.get("artifact_path", "")).strip() or "-"
+        artifact_exists = str(snapshot.get("artifact_exists", "")).strip() or "no"
+        artifact_parsed = str(snapshot.get("artifact_parsed", "")).strip() or "no"
+        detail = snapshot.get("artifact_detail") if isinstance(snapshot.get("artifact_detail"), dict) else {}
+        next_step = f"/orch bgx-status {alias}"
+        remediation = f"inspect external {artifact_kind} state before taking the next rerun or followup action"
+        outcome_reason_code = f"{artifact_kind}_{'present' if artifact_exists == 'yes' else 'missing'}"
+        outcome_detail = artifact_path if artifact_exists == "yes" else f"{artifact_kind} artifact missing"
         append_action_audit_row(
             team_dir,
-            headline="External Background Status | accepted",
+            headline=f"{headline_label} | accepted",
             status="accepted",
             outcome_kind="background_external",
             outcome_status="accepted",
-            outcome_reason_code=str(snapshot.get("phase", "")).strip() or "present",
-            outcome_detail=str(snapshot.get("note", "")).strip() or "-",
+            outcome_reason_code=outcome_reason_code,
+            outcome_detail=outcome_detail,
             next_step=next_step,
             remediation=remediation,
-            source_command=f"/orch bgx-status {alias}",
+            source_command=f"/orch bgx-{artifact_kind} {alias}",
             link_label="runtime detail",
             link_href=_runtime_action_link(alias),
             at=now_iso(),
         )
+        body_lines = [
+            f"external background {artifact_kind}",
+            f"- runtime: {key}",
+            f"- task: {str(snapshot.get('label', '')).strip() or '-'}",
+            f"- runner: {str(snapshot.get('runner_target', '')).strip() or '-'}",
+            f"- phase: {str(snapshot.get('phase', '')).strip() or '-'}",
+            f"- artifact: {artifact_path} | exists={artifact_exists} | parsed={artifact_parsed}",
+        ]
+        if artifact_kind == "handoff":
+            body_lines.extend(
+                [
+                    f"- emitted_at: {str(detail.get('emitted_at', '')).strip() or '-'}",
+                    f"- launch_mode: {str(detail.get('launch_mode', '')).strip() or '-'}",
+                    f"- source_surface: {str(detail.get('source_surface', '')).strip() or '-'}",
+                    f"- execution_brief: {str(detail.get('execution_brief_status', '')).strip() or '-'}",
+                    f"- launch_spec: {str(detail.get('launch_spec_summary', '')).strip() or '-'}",
+                ]
+            )
+        elif artifact_kind == "ack":
+            body_lines.extend(
+                [
+                    f"- ack_status: {str(detail.get('status', '')).strip() or '-'}",
+                    f"- worker_id: {str(detail.get('worker_id', '')).strip() or '-'}",
+                    f"- summary: {str(detail.get('summary', '')).strip() or '-'}",
+                ]
+            )
+        else:
+            body_lines.extend(
+                [
+                    f"- result_status: {str(detail.get('status', '')).strip() or '-'}",
+                    f"- reason: {str(detail.get('reason', '')).strip() or '-'}",
+                    f"- summary: {str(detail.get('summary', '')).strip() or '-'}",
+                    f"- evidence_bundle: {str(detail.get('evidence_bundle', '')).strip() or '-'}",
+                    f"- evidence_artifacts: {', '.join(str(x).strip() for x in (detail.get('evidence_artifacts') or []) if str(x).strip()) or '-'}",
+                ]
+            )
+        body_lines.extend(["next:", f"- {next_step}"])
         send(
-            "external background status\n"
-            f"- runtime: {key}\n"
-            f"- task: {str(snapshot.get('label', '')).strip() or '-'}\n"
-            f"- runner: {str(snapshot.get('runner_target', '')).strip() or '-'}\n"
-            f"- phase: {str(snapshot.get('phase', '')).strip() or '-'}\n"
-            f"- note: {str(snapshot.get('note', '')).strip() or '-'}\n"
-            f"- handoff: {str(snapshot.get('handoff_path', '-')).strip() or '-'} | exists={str(snapshot.get('handoff_exists', '-')).strip() or '-'}\n"
-            f"- ack: {str(snapshot.get('ack_path', '-')).strip() or '-'} | exists={str(snapshot.get('ack_exists', '-')).strip() or '-'}\n"
-            f"- result: {str(snapshot.get('result_path', '-')).strip() or '-'} | exists={str(snapshot.get('result_exists', '-')).strip() or '-'}\n"
-            "next:\n"
-            f"- {next_step}",
-            context="orch-bgx-status",
+            "\n".join(body_lines),
+            context=context_label,
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )

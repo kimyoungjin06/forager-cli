@@ -195,6 +195,12 @@
     - compact phase + next-step summary
   - `/orch bgx-status O#`
     - latest `handoff`, `ack`, `result` artifact presence and inspect summary
+  - `/orch bgx-handoff O#`
+    - handoff manifest detail
+  - `/orch bgx-ack O#`
+    - pickup acknowledgement detail
+  - `/orch bgx-result O#`
+    - terminal result detail
 - external phase model:
   - `awaiting_external_pickup`
   - `handoff_emitted`
@@ -373,6 +379,8 @@
     - compact runner phase, next step, scheduler head
   - `/orch bgx-status O#`
     - non-local handoff / ack / result inspect view
+  - `/orch bgx-handoff O#`, `/orch bgx-ack O#`, `/orch bgx-result O#`
+    - artifact-specific inspect commands that stay read-only
   - `/offdesk review O#`
     - remediation hint that agrees with the same external phase truth
 

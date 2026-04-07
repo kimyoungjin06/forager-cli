@@ -2824,7 +2824,7 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         background_queue_runner_targets={"github_runner": 1},
     )
     assert external_pickup_priority == {
-        "action": "/orch status O13",
+        "action": "/orch bgx-status O13",
         "reason": "background_run_acks/github-runner-bgt-013.json",
     }
     external_queue_priority = priority_actions.offdesk_priority_action_snapshot(

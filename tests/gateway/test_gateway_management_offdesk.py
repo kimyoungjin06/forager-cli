@@ -1333,8 +1333,8 @@ def test_offdesk_status_surfaces_external_background_phase(tmp_path: Path) -> No
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
 
     assert "last_task_background_external: github_runner | pickup_acknowledged | background_run_acks/github-runner-bgt-ext-001.json" in text
-    assert "active_task_background_external_next: /orch status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
-    assert "first: /orch status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "active_task_background_external_next: /orch bgx-status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "first: /orch bgx-status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
 
 
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:
