@@ -120,10 +120,15 @@ def build_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     review_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_review_lane_ids"))
     if not execution_lane_ids and not review_lane_ids:
         return {}
+    status = "preview_only"
+    if execution_lane_ids and review_lane_ids:
+        status = "partially_executable"
+    elif execution_lane_ids:
+        status = "executable"
     return normalize_followup_brief_snapshot(
         {
             "version": FOLLOWUP_BRIEF_VERSION,
-            "status": "preview_only",
+            "status": status,
             "execution_lane_ids": execution_lane_ids,
             "review_lane_ids": review_lane_ids,
             "reason": str(exec_critic.get("reason", exec_critic.get("note", "")) or "").strip(),
@@ -938,8 +943,11 @@ def sanitize_task_record(
     replan_of = str(task.get("replan_of", "")).strip()
     if replan_of:
         task["replan_of"] = replan_of[:128]
+    followup_of = str(task.get("followup_of", "")).strip()
+    if followup_of:
+        task["followup_of"] = followup_of[:128]
 
-    for child_key in ("retry_children", "replan_children"):
+    for child_key in ("retry_children", "replan_children", "followup_children"):
         raw_children = task.get(child_key)
         if isinstance(raw_children, list):
             normalized_children = []

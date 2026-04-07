@@ -35,7 +35,15 @@ def _should_filter_retry_phase2_plan(
     selected_review_lane_ids: Optional[List[str]] = None,
 ) -> bool:
     if selected_execution_lane_ids or selected_review_lane_ids:
-        return bool(run_control_mode in {"retry", "replan"} and isinstance(run_source_task, dict))
+        return bool(run_control_mode in {"retry", "replan", "followup"} and isinstance(run_source_task, dict))
+    if run_control_mode == "followup" and isinstance(run_source_task, dict):
+        critic = retry_critic if isinstance(retry_critic, dict) else run_source_task.get("exec_critic")
+        if not isinstance(critic, dict):
+            return False
+        return bool(
+            critic.get("manual_followup_execution_lane_ids")
+            or critic.get("manual_followup_review_lane_ids")
+        )
     if run_control_mode != "retry" or not isinstance(run_source_task, dict):
         return bool(
             run_control_mode == "retry"
@@ -83,10 +91,19 @@ def filter_phase2_retry_scope(
     review_rows = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else []
     if not execution_rows:
         return plan_data, {}
+    is_followup = run_control_mode == "followup"
 
     has_operator_lane_selector = bool(selected_execution_lane_ids or selected_review_lane_ids)
-    target_exec_source = selected_execution_lane_ids if has_operator_lane_selector else (critic.get("rerun_execution_lane_ids") or [])
-    target_review_source = selected_review_lane_ids if has_operator_lane_selector else (critic.get("rerun_review_lane_ids") or [])
+    if is_followup:
+        target_exec_source = (
+            selected_execution_lane_ids
+            if has_operator_lane_selector
+            else (critic.get("manual_followup_execution_lane_ids") or [])
+        )
+        target_review_source = []
+    else:
+        target_exec_source = selected_execution_lane_ids if has_operator_lane_selector else (critic.get("rerun_execution_lane_ids") or [])
+        target_review_source = selected_review_lane_ids if has_operator_lane_selector else (critic.get("rerun_review_lane_ids") or [])
     target_exec_ids = {
         str(item).strip()[:32]
         for item in (target_exec_source or [])
@@ -129,21 +146,22 @@ def filter_phase2_retry_scope(
     }
 
     filtered_review: List[Dict[str, Any]] = []
-    for row in review_rows:
-        if not isinstance(row, dict):
-            continue
-        lane_id = _lane_id_token(row)
-        depends_on = {
-            str(item).strip()[:32]
-            for item in (row.get("depends_on") or [])
-            if str(item).strip()
-        }
-        if target_review_ids:
-            if lane_id in target_review_ids:
+    if not is_followup:
+        for row in review_rows:
+            if not isinstance(row, dict):
+                continue
+            lane_id = _lane_id_token(row)
+            depends_on = {
+                str(item).strip()[:32]
+                for item in (row.get("depends_on") or [])
+                if str(item).strip()
+            }
+            if target_review_ids:
+                if lane_id in target_review_ids:
+                    filtered_review.append(copy.deepcopy(row))
+                continue
+            if not depends_on or depends_on.intersection(selected_exec_ids):
                 filtered_review.append(copy.deepcopy(row))
-            continue
-        if not depends_on or depends_on.intersection(selected_exec_ids):
-            filtered_review.append(copy.deepcopy(row))
 
     execution_roles = _dedupe_role_tokens(
         [str(row.get("role", "")).strip() for row in filtered_execution if isinstance(row, dict)]

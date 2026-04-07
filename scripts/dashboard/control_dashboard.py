@@ -22,6 +22,7 @@ import aoe_tg_run_handlers as run_handlers
 import aoe_tg_scheduler_control_handlers as scheduler_control_handlers
 
 from control_dashboard_actions import (
+    _execute_followup_run_transition,
     _execute_retry_run_transition,
     _load_dashboard_manager_state,
     build_dashboard_action_response,

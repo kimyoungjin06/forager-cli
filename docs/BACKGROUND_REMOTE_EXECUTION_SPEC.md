@@ -194,6 +194,11 @@
   - `POST /control/actions/task/followup-execute`
 - Current execute-surface rule:
   - if `FollowupBrief.status=preview_only`, block with `followup_execute_brief_required`
+- When `FollowupBrief.status` is `executable` or `partially_executable`:
+  - launch only `followup_brief_execution_lane_ids`
+  - keep `followup_brief_review_lane_ids` visible as preview/manual scope
+  - reuse the existing run transition rail with `run_control_mode=followup`
+  - allow `local_tmux` background launch when runner preference permits
 - If follow-up work should become executable off-desk, the system must first derive a distinct follow-up execution artifact:
   - `FollowupBrief` or equivalent `ExecutionBrief` subtype
   - explicit executable slice
@@ -201,7 +206,8 @@
   - explicit launch spec
 - detailed model:
   - `docs/FOLLOWUP_BRIEF_SPEC.md`
-- Until that artifact exists, `retry/replan` may use background runner paths, but `/followup` must remain a safe preview.
+- `/followup` itself remains a safe preview.
+- `/followup-exec` is the only mutation surface for executable follow-up slices.
 
 ## 6. State Model
 

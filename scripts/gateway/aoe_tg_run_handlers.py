@@ -119,6 +119,8 @@ _KNOWN_COMMANDS = [
     "cancel",
     "retry",
     "replan",
+    "followup",
+    "followup-exec",
     "request",
     "run",
     "clear",

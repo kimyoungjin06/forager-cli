@@ -35,8 +35,10 @@ def resolve_retry_replan_transition(
     orch_target: Optional[str],
     orch_retry_request_id: Optional[str],
     orch_replan_request_id: Optional[str],
+    orch_followup_execute_request_id: Optional[str],
     orch_retry_lane_ids: Optional[List[str]],
     orch_replan_lane_ids: Optional[List[str]],
+    orch_followup_execute_lane_ids: Optional[List[str]],
     send: Callable[..., bool],
     get_context: Callable[[Optional[str]], tuple[str, Dict[str, Any], Any]],
     get_chat_selected_task_ref: Callable[..., str],
@@ -50,22 +52,28 @@ def resolve_retry_replan_transition(
     touch_chat_recent_task_ref: Callable[..., None],
     set_chat_selected_task_ref: Callable[..., None],
 ) -> Optional[Dict[str, Any]]:
-    if cmd not in {"orch-retry", "orch-replan"}:
+    if cmd not in {"orch-retry", "orch-replan", "orch-followup-exec"}:
         return None
 
     key, entry, p_args = get_context(orch_target)
     req_ref = (
-        (orch_retry_request_id if cmd == "orch-retry" else orch_replan_request_id)
+        (
+            orch_retry_request_id
+            if cmd == "orch-retry"
+            else (orch_replan_request_id if cmd == "orch-replan" else orch_followup_execute_request_id)
+        )
         or get_chat_selected_task_ref(manager_state, chat_id, key)
         or ""
     ).strip()
     requested_execution_lane_ids, requested_review_lane_ids = _normalize_retry_lane_ids(
-        orch_retry_lane_ids if cmd == "orch-retry" else orch_replan_lane_ids
+        orch_retry_lane_ids
+        if cmd == "orch-retry"
+        else (orch_replan_lane_ids if cmd == "orch-replan" else orch_followup_execute_lane_ids)
     )
     if not req_ref:
         send(
             (
-                f"usage: {'/retry' if cmd == 'orch-retry' else '/replan'} <request_or_alias> "
+                f"usage: {('/retry' if cmd == 'orch-retry' else ('/replan' if cmd == 'orch-replan' else '/followup-exec'))} <request_or_alias> "
                 f"[lane <L#|R#,...>]\norch={key}"
             ),
             context=f"{cmd} usage",
@@ -99,7 +107,62 @@ def resolve_retry_replan_transition(
         send(f"no lifecycle record for retry/replan target: {req_ref}", context=f"{cmd} missing task")
         return {"terminal": True}
 
-    if requested_execution_lane_ids or requested_review_lane_ids:
+    if cmd == "orch-followup-exec":
+        followup_brief_status = str(source_task.get("followup_brief_status", "")).strip().lower()
+        if followup_brief_status not in {"executable", "partially_executable"}:
+            send(
+                "follow-up execute requires an executable FollowupBrief.\n"
+                f"request_id={req_id}\n"
+                f"followup_brief={followup_brief_status or 'preview_only'}",
+                context=f"{cmd} blocked",
+            )
+            return {"terminal": True}
+        allowed_execution_lane_ids = {
+            str(item).strip()[:32]
+            for item in (source_task.get("followup_brief_execution_lane_ids") or [])
+            if str(item).strip()
+        }
+        if not allowed_execution_lane_ids:
+            send(
+                "follow-up execute has no executable lane targets.\n"
+                f"request_id={req_id}\n"
+                "allowed execution: none",
+                context=f"{cmd} lane unavailable",
+            )
+            return {"terminal": True}
+        if requested_review_lane_ids:
+            send(
+                (
+                    "follow-up execute only supports execution lanes.\nrequest_id={req_id}\n"
+                    "allowed execution: {execs}\nreview lanes stay in preview/manual scope"
+                ).format(
+                    req_id=req_id,
+                    execs=", ".join(sorted(allowed_execution_lane_ids)) or "-",
+                ),
+                context=f"{cmd} lane invalid",
+            )
+            return {"terminal": True}
+        if requested_execution_lane_ids:
+            selected_execution_lane_ids = [
+                lane for lane in requested_execution_lane_ids if lane in allowed_execution_lane_ids
+            ]
+            if not selected_execution_lane_ids:
+                send(
+                    (
+                        "requested follow-up execute lanes are not allowed for this task.\nrequest_id={req_id}\n"
+                        "allowed execution: {execs}"
+                    ).format(
+                        req_id=req_id,
+                        execs=", ".join(sorted(allowed_execution_lane_ids)) or "-",
+                    ),
+                    context=f"{cmd} lane invalid",
+                )
+                return {"terminal": True}
+            requested_execution_lane_ids = selected_execution_lane_ids
+        else:
+            requested_execution_lane_ids = list(sorted(allowed_execution_lane_ids))
+        requested_review_lane_ids = []
+    elif requested_execution_lane_ids or requested_review_lane_ids:
         exec_critic = source_task.get("exec_critic") if isinstance(source_task.get("exec_critic"), dict) else {}
         allowed_execution_lane_ids = {
             str(item).strip()[:32]
@@ -165,7 +228,11 @@ def resolve_retry_replan_transition(
         "run_roles_override": ",".join(source_roles) if source_roles else None,
         "run_force_mode": "direct" if source_mode == "direct" else "dispatch",
         "run_no_wait_override": False,
-        "run_control_mode": "retry" if cmd == "orch-retry" else "replan",
+        "run_control_mode": (
+            "retry"
+            if cmd == "orch-retry"
+            else ("replan" if cmd == "orch-replan" else "followup")
+        ),
         "run_source_request_id": req_id,
         "run_source_task": source_task,
         "run_selected_execution_lane_ids": requested_execution_lane_ids,

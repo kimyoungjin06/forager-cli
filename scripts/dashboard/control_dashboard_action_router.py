@@ -9,7 +9,12 @@ from urllib.parse import urlparse
 
 import aoe_tg_operator_action_contract as operator_action_contract
 
-from control_dashboard_action_exec import _execute_auto_recover_action, _execute_background_queue_clean_action, _execute_retry_action
+from control_dashboard_action_exec import (
+    _execute_auto_recover_action,
+    _execute_background_queue_clean_action,
+    _execute_followup_action,
+    _execute_retry_action,
+)
 from control_dashboard_audit import _with_action_audit
 from control_dashboard_common import (
     ACTION_PATHS,
@@ -139,106 +144,6 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
         status=200,
     )
 
-
-def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
-    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
-    task_ref = str(payload.get("task_ref", "")).strip()
-    detail = load_task_detail(
-        control_root=config.control_root,
-        team_dir=config.team_dir,
-        manager_state_file=config.manager_state_file,
-        request_id=task_ref,
-    )
-    if detail is None:
-        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"task not found: {task_ref}")
-
-    followup_status = str(detail.followup_brief_status or "").strip() or "-"
-    followup_summary = str(detail.followup_brief_summary or "").strip() or "-"
-    followup_reason = str(detail.followup_brief_reason or "").strip() or "-"
-    exec_lanes = str(detail.followup_brief_execution_lanes or "").strip() or "-"
-    review_lanes = str(detail.followup_brief_review_lanes or "").strip() or "-"
-    task_payload = {
-        "project_alias": detail.project_alias,
-        "request_id": detail.request_id,
-        "label": detail.label,
-        "status": detail.status,
-        "tf_phase": detail.tf_phase,
-        "followup_brief_status": followup_status,
-        "followup_brief_summary": followup_summary,
-        "followup_brief_execution_lanes": exec_lanes,
-        "followup_brief_review_lanes": review_lanes,
-        "followup_brief_reason": followup_reason,
-        "detail_path": f"/control/tasks/by-request/{detail.request_id}",
-        "runtime_path": f"/control/runtimes/{detail.project_alias}",
-    }
-    if followup_status not in {"executable", "partially_executable"}:
-        task_ref_token = operator_action_contract.task_command_ref(detail.label, detail.request_id)
-        return _json(
-            {
-                "ok": False,
-                "implemented": True,
-                "executed": False,
-                "status": "blocked",
-                "error": "followup_execute_brief_required",
-                "method": "POST",
-                "path": spec.get("path", "-"),
-                "mode": spec.get("mode", "-"),
-                "source_command": spec.get("command", "-"),
-                "payload": payload,
-                "next_step": f"/followup {task_ref_token}",
-                "remediation": "derive an explicit executable FollowupBrief before off-desk execution; current /followup remains a safe preview only",
-                "task": task_payload,
-            },
-            status=409,
-        )
-    return _json(
-        {
-            "ok": False,
-            "implemented": False,
-            "executed": False,
-            "status": "blocked",
-            "error": "followup_execute_not_implemented",
-            "method": "POST",
-            "path": spec.get("path", "-"),
-            "mode": spec.get("mode", "-"),
-            "source_command": spec.get("command", "-"),
-            "payload": payload,
-            "next_step": f"/task {detail.label}",
-            "remediation": "wire explicit follow-up execution handlers and launch specs before enabling this phase2 surface",
-            "task": task_payload,
-        },
-        status=501,
-    )
-    if detail is None:
-        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"task not found: {task_ref}")
-    return _json(
-        {
-            "ok": True,
-            "implemented": True,
-            "status": "preview",
-            "method": "POST",
-            "path": spec.get("path", "-"),
-            "mode": spec.get("mode", "-"),
-            "source_command": spec.get("command", "-"),
-            "payload": payload,
-            "next_step": (detail.command_hints[0] if detail.command_hints else f"/task {detail.label}"),
-            "remediation": "inspect the follow-up reason and choose the matching task or backlog drill-down before mutating anything",
-            "preview": {
-                "kind": "task_followup",
-                "project_alias": detail.project_alias,
-                "request_id": detail.request_id,
-                "label": detail.label,
-                "tf_phase": detail.tf_phase,
-                "followup_summary": detail.followup_summary or "-",
-                "completion_followup_when": detail.completion_followup_when or "-",
-                "command_hints": list(detail.command_hints),
-                "phase2_action_hints": list(detail.phase2_action_hints),
-                "detail_path": f"/control/tasks/by-request/{detail.request_id}",
-                "runtime_path": f"/control/runtimes/{detail.project_alias}",
-            },
-        },
-        status=200,
-    )
 
 
 

@@ -92,7 +92,10 @@ def _retry_command_text(transition: Dict[str, Any]) -> str:
         if token and token not in lane_ids:
             lane_ids.append(token)
     run_control_mode = str(transition.get("run_control_mode", "")).strip().lower()
-    head = "/replan" if run_control_mode == "replan" else "/retry"
+    if run_control_mode == "followup":
+        head = "/followup-exec"
+    else:
+        head = "/replan" if run_control_mode == "replan" else "/retry"
     command = f"{head} {source_request_id}"
     if lane_ids:
         command += " lane " + ",".join(lane_ids)
@@ -131,6 +134,26 @@ def _maybe_execute_retry_background_tmux(
     if not source_request_id or not team_dir_raw or not command_text:
         return None
 
+    control_mode = str(transition.get("run_control_mode", "")).strip().lower()
+    if control_mode == "followup":
+        action_path = "/control/actions/task/followup-execute"
+        launch_mode = "dashboard_followup_execute"
+        source_surface = "dashboard_followup_execute"
+        outcome_kind = "followup_execute"
+        success_reason_code = "background_tmux_followup_started"
+    elif control_mode == "replan":
+        action_path = "/control/actions/task/replan"
+        launch_mode = "dashboard_replan"
+        source_surface = "dashboard_replan"
+        outcome_kind = "retry_run"
+        success_reason_code = "background_tmux_replan_started"
+    else:
+        action_path = "/control/actions/task/retry"
+        launch_mode = "dashboard_retry"
+        source_surface = "dashboard_retry"
+        outcome_kind = "retry_run"
+        success_reason_code = "background_tmux_started"
+
     launch_spec = build_local_tmux_gateway_command_launch_spec(
         request_id=source_request_id,
         project_key=project_key,
@@ -139,8 +162,8 @@ def _maybe_execute_retry_background_tmux(
         manager_state_file=str(paths.manager_state_file),
         command_text=command_text,
         simulate_chat_id=_DASHBOARD_CHAT_ID,
-        launch_mode="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
-        source_surface="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
+        launch_mode=launch_mode,
+        source_surface=source_surface,
         created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
     )
     preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
@@ -162,10 +185,10 @@ def _maybe_execute_retry_background_tmux(
         project_key=project_key,
         execution_brief_status=str((source_task or {}).get("execution_brief_status", "executable")).strip() or "executable",
         runner_target="local_tmux",
-        launch_mode="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
+        launch_mode=launch_mode,
         created_at=current_ts,
         created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        source_surface="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
+        source_surface=source_surface,
         status="queued",
         launch_spec=launch_spec,
     )
@@ -175,8 +198,8 @@ def _maybe_execute_retry_background_tmux(
         ticket_id=str(ticket.get("ticket_id", "")).strip(),
         now_iso=_now_iso,
         claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        source_surface="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
-        launch_mode="dashboard_retry" if str(transition.get("run_control_mode", "")).strip().lower() != "replan" else "dashboard_replan",
+        source_surface=source_surface,
+        launch_mode=launch_mode,
     )
     ticket_snapshot = launched if isinstance(launched, dict) and launched else ticket
 
@@ -209,7 +232,7 @@ def _maybe_execute_retry_background_tmux(
     remediation = (
         f"inspect tmux availability or switch /orch bg-runner {project_ref} local_background before retrying again"
         if blocked
-        else "inspect tmux session state and runtime status before issuing another retry"
+        else "inspect tmux session state and runtime status before issuing another background rerun"
     )
     return _json(
         {
@@ -218,7 +241,7 @@ def _maybe_execute_retry_background_tmux(
             "executed": True,
             "status": "blocked" if blocked else "executed",
             "method": "POST",
-            "path": "/control/actions/task/retry",
+            "path": action_path,
             "mode": "phase2",
             "source_command": source_command,
             "payload": payload,
@@ -236,9 +259,9 @@ def _maybe_execute_retry_background_tmux(
             "next_step": f"/orch status {project_ref}",
             "remediation": remediation,
             "outcome": {
-                "kind": "retry_run",
+                "kind": outcome_kind,
                 "status": "blocked" if blocked else "executed",
-                "reason_code": "background_tmux_launch_failed" if blocked else ("background_tmux_replan_started" if str(transition.get("run_control_mode", "")).strip().lower() == "replan" else "background_tmux_started"),
+                "reason_code": "background_tmux_launch_failed" if blocked else success_reason_code,
                 "detail": detail,
             },
         },
@@ -378,6 +401,137 @@ def _execute_retry_run_transition(
     )
 
 
+def _execute_followup_run_transition(
+    transition: Dict[str, Any],
+    *,
+    config: DashboardAppConfig,
+    manager_state: Dict[str, Any],
+    paths: Any,
+    source_command: str,
+    payload: Dict[str, Any],
+) -> Tuple[int, Dict[str, str], bytes]:
+    import aoe_tg_run_handlers as run_handlers
+
+    messages: List[Dict[str, Any]] = []
+    events: List[Dict[str, Any]] = []
+    outcomes: List[Dict[str, Any]] = []
+    source_task = transition.get("run_source_task") if isinstance(transition.get("run_source_task"), dict) else None
+    args = _dashboard_run_args(config, source_task=source_task)
+    ctx = run_handlers.build_run_context(
+        cmd=str(transition.get("cmd", "run")).strip() or "run",
+        args=args,
+        manager_state=manager_state,
+        chat_id=_DASHBOARD_CHAT_ID,
+        text=str(transition.get("run_prompt", "")).strip(),
+        rest=str(transition.get("rest", "")).strip(),
+        orch_target=str(transition.get("orch_target", "")).strip() or None,
+        run_prompt=str(transition.get("run_prompt", "")).strip(),
+        run_roles_override=transition.get("run_roles_override"),
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=transition.get("run_no_wait_override"),
+        run_force_mode=str(transition.get("run_force_mode", "")).strip() or None,
+        run_auto_source="dashboard_followup_execute",
+        run_control_mode=str(transition.get("run_control_mode", "")).strip(),
+        run_source_request_id=str(transition.get("run_source_request_id", "")).strip(),
+        run_source_task=source_task,
+        run_selected_execution_lane_ids=list(transition.get("run_selected_execution_lane_ids") or []),
+        run_selected_review_lane_ids=list(transition.get("run_selected_review_lane_ids") or []),
+    )
+    deps = _build_dashboard_retry_run_deps(
+        config=config,
+        manager_state=manager_state,
+        paths=paths,
+        messages=messages,
+        events=events,
+        outcomes=outcomes,
+    )
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+    if not handled:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "unhandled",
+                "path": "/control/actions/task/followup-execute",
+                "source_command": source_command,
+                "payload": payload,
+                "messages": messages,
+                "events": events,
+                "remediation": "inspect the runtime task detail and follow-up execution contract before attempting the bridge again",
+            },
+            status=500,
+        )
+
+    project_key = str(transition.get("orch_target", "")).strip()
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    entry = projects.get(project_key) if project_key and isinstance(projects.get(project_key), dict) else {}
+    executed_request_id = str(entry.get("last_request_id", "")).strip() if isinstance(entry, dict) else ""
+    executed_task = gateway_task_state.get_task_record(entry, executed_request_id) if isinstance(entry, dict) and executed_request_id else None
+    outcome = _latest_recorded_outcome(outcomes, kind="retry_run")
+    if not outcome:
+        return _missing_outcome_response(
+            path="/control/actions/task/followup-execute",
+            source_command=source_command,
+            payload=payload,
+            kind="followup_execute",
+            messages=messages,
+            events=events,
+            remediation="inspect the follow-up handler contract; dashboard follow-up execution requires structured outcome rows",
+        )
+    blocked = str(outcome.get("status", "")).strip() == "blocked"
+    task_payload = None
+    if isinstance(executed_task, dict) and executed_request_id:
+        task_payload = {
+            "request_id": executed_request_id,
+            "label": gateway_task_view.task_display_label(executed_task, fallback_request_id=executed_request_id),
+            "status": str(executed_task.get("status", "")).strip() or "-",
+            "tf_phase": str(executed_task.get("tf_phase", "")).strip() or "-",
+            "detail_path": f"/control/tasks/by-request/{executed_request_id}",
+        }
+    next_step = str(outcome.get("next_step", "")).strip() or (f"/task {task_payload['label']}" if isinstance(task_payload, dict) else "/monitor")
+    reason_code = str(outcome.get("reason_code", "")).strip() or "-"
+    detail_note = str(outcome.get("detail", "")).strip()
+    remediation = (
+        "review the updated task detail and remaining preview-only follow-up slice before repeating follow-up execution"
+        if not blocked
+        else _retry_blocked_remediation_for_reason(reason_code, detail_note)
+    )
+    return _json(
+        {
+            "ok": not blocked,
+            "implemented": True,
+            "executed": True,
+            "status": "blocked" if blocked else "executed",
+            "method": "POST",
+            "path": "/control/actions/task/followup-execute",
+            "mode": "phase2",
+            "source_command": source_command,
+            "payload": payload,
+            "transition": {
+                "cmd": transition.get("cmd", "run"),
+                "orch_target": transition.get("orch_target", "-"),
+                "run_control_mode": transition.get("run_control_mode", "-"),
+                "run_source_request_id": transition.get("run_source_request_id", "-"),
+                "run_force_mode": transition.get("run_force_mode", "-"),
+                "execution_lane_ids": list(transition.get("run_selected_execution_lane_ids") or []),
+                "review_lane_ids": list(transition.get("run_selected_review_lane_ids") or []),
+            },
+            "messages": messages,
+            "events": events,
+            "outcome": {
+                "kind": "followup_execute",
+                "status": "blocked" if blocked else "executed",
+                "reason_code": reason_code,
+                "detail": str(outcome.get("detail", "")).strip() if outcome else "-",
+            },
+            "task": task_payload,
+            "next_step": next_step,
+            "remediation": remediation,
+        },
+        status=409 if blocked else 200,
+    )
 
 def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
@@ -398,8 +552,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         orch_target=project_key,
         orch_retry_request_id=None if is_replan else task_ref,
         orch_replan_request_id=task_ref if is_replan else None,
+        orch_followup_execute_request_id=None,
         orch_retry_lane_ids=[] if is_replan else list(payload.get("lane_ids") or []),
         orch_replan_lane_ids=list(payload.get("lane_ids") or []) if is_replan else None,
+        orch_followup_execute_lane_ids=None,
         send=_make_send_collector(messages),
         get_context=_dashboard_get_context_factory(manager_state, paths),
         get_chat_selected_task_ref=chat_state.get_chat_selected_task_ref,
@@ -427,12 +583,19 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         )
 
     if bool(transition.get("terminal")):
+        blocked_contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
+        error_code = (
+            "followup_execute_brief_required"
+            if "orch-followup-exec blocked" in blocked_contexts
+            else "followup_execute_blocked"
+        )
         return _json(
             {
                 "ok": False,
                 "implemented": True,
                 "executed": False,
                 "status": "blocked",
+                "error": error_code,
                 "method": "POST",
                 "path": spec.get("path", "-"),
                 "mode": spec.get("mode", "-"),
@@ -463,5 +626,122 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         manager_state=manager_state,
         paths=paths,
         source_command=command_text or ("/replan" if is_replan else "/retry"),
+        payload=payload,
+    )
+
+
+def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    task_ref = str(payload.get("task_ref", "")).strip()
+    command_text = str(spec.get("command", "")).strip()
+    paths, manager_state = _load_dashboard_manager_state(config)
+    project_key = _find_task_project_key(manager_state, task_ref)
+    if not project_key:
+        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"task not found: {task_ref}")
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    entry = projects.get(project_key) if project_key and isinstance(projects.get(project_key), dict) else {}
+    source_request_id = gateway_task_state.resolve_task_request_id(entry, task_ref) if isinstance(entry, dict) else ""
+    source_task = gateway_task_state.get_task_record(entry, source_request_id) if isinstance(entry, dict) and source_request_id else None
+    task_payload = None
+    if isinstance(source_task, dict) and source_request_id:
+        task_payload = {
+            "project_alias": str(entry.get("project_alias", "")).strip() or project_key,
+            "request_id": source_request_id,
+            "label": gateway_task_view.task_display_label(source_task, fallback_request_id=source_request_id),
+            "status": str(source_task.get("status", "")).strip() or "-",
+            "tf_phase": str(source_task.get("tf_phase", "")).strip() or "-",
+            "followup_brief_status": str(source_task.get("followup_brief_status", "")).strip() or "-",
+            "followup_brief_summary": str(source_task.get("followup_brief_summary", "")).strip() or "-",
+            "followup_brief_execution_lanes": ",".join(list(source_task.get("followup_brief_execution_lane_ids") or [])) or "-",
+            "followup_brief_review_lanes": ",".join(list(source_task.get("followup_brief_review_lane_ids") or [])) or "-",
+            "followup_brief_reason": str(source_task.get("followup_brief_reason", "")).strip() or "-",
+            "detail_path": f"/control/tasks/by-request/{source_request_id}",
+            "runtime_path": f"/control/runtimes/{str(entry.get('project_alias', '')).strip() or project_key}",
+        }
+
+    messages: List[Dict[str, Any]] = []
+    transition = retry_handlers.resolve_retry_replan_transition(
+        cmd="orch-followup-exec",
+        args=_dashboard_action_args(config),
+        manager_state=manager_state,
+        chat_id=_DASHBOARD_CHAT_ID,
+        orch_target=project_key,
+        orch_retry_request_id=None,
+        orch_replan_request_id=None,
+        orch_followup_execute_request_id=task_ref,
+        orch_retry_lane_ids=None,
+        orch_replan_lane_ids=None,
+        orch_followup_execute_lane_ids=list(payload.get("lane_ids") or []),
+        send=_make_send_collector(messages),
+        get_context=_dashboard_get_context_factory(manager_state, paths),
+        get_chat_selected_task_ref=chat_state.get_chat_selected_task_ref,
+        resolve_chat_task_ref=chat_state.resolve_chat_task_ref,
+        resolve_task_request_id=gateway_task_state.resolve_task_request_id,
+        get_task_record=gateway_task_state.get_task_record,
+        run_request_query=lambda *_args, **_kwargs: {},
+        sync_task_lifecycle=lambda **_kwargs: None,
+        resolve_verifier_candidates=lambda _raw: [],
+        dedupe_roles=gateway_task_view.dedupe_roles,
+        touch_chat_recent_task_ref=chat_state.touch_chat_recent_task_ref,
+        set_chat_selected_task_ref=chat_state.set_chat_selected_task_ref,
+    )
+    if not isinstance(transition, dict):
+        return _json(
+            {
+                "ok": False,
+                "error": "followup_execute_transition_unavailable",
+                "path": spec.get("path", "-"),
+                "source_command": spec.get("command", "-"),
+                "payload": payload,
+                "remediation": "inspect the FollowupBrief and task lifecycle; follow-up transition could not be derived from the current runtime state",
+            },
+            status=500,
+        )
+
+    if bool(transition.get("terminal")):
+        blocked_contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
+        error_code = (
+            "followup_execute_brief_required"
+            if "orch-followup-exec blocked" in blocked_contexts
+            else "followup_execute_blocked"
+        )
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "error": error_code,
+                "method": "POST",
+                "path": spec.get("path", "-"),
+                "mode": spec.get("mode", "-"),
+                "source_command": spec.get("command", "-"),
+                "payload": payload,
+                "messages": messages,
+                "next_step": f"/followup {task_ref}",
+                "remediation": "derive an explicit executable FollowupBrief before off-desk execution; current /followup remains a safe preview only",
+                "task": task_payload,
+            },
+            status=409,
+        )
+    background_result = _maybe_execute_retry_background_tmux(
+        transition,
+        manager_state=manager_state,
+        paths=paths,
+        source_command=command_text or "/followup-exec",
+        payload=payload,
+    )
+    if background_result is not None:
+        return background_result
+    import sys
+
+    compatibility_module = sys.modules.get("control_dashboard")
+    execute_followup = getattr(compatibility_module, "_execute_followup_run_transition", _execute_followup_run_transition)
+    return execute_followup(
+        transition,
+        config=config,
+        manager_state=manager_state,
+        paths=paths,
+        source_command=command_text or "/followup-exec",
         payload=payload,
     )

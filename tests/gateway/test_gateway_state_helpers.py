@@ -1616,14 +1616,14 @@ def test_apply_exec_critic_lifecycle_marks_manual_followup_lane_targets() -> Non
 
     assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L1", "L2"]
     assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
-    assert task["followup_brief_status"] == "preview_only"
+    assert task["followup_brief_status"] == "partially_executable"
     assert task["followup_brief_execution_lane_ids"] == ["L1", "L2"]
     assert task["followup_brief_review_lane_ids"] == ["R1"]
     assert task["followup_brief_reason"] == "operator decision required"
     summary = gw.summarize_task_lifecycle("Demo", task)
     assert "exec_manual_followup_targets: execution=L1, L2 review=R1" in summary
-    assert "followup_brief: preview_only" in summary
-    assert "followup_brief_summary: preview_only | execution=L1,L2 | review=R1" in summary
+    assert "followup_brief: partially_executable" in summary
+    assert "followup_brief_summary: partially_executable | execution=L1,L2 | review=R1" in summary
 
 
 def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets() -> None:
@@ -1716,10 +1716,27 @@ def test_apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_manual_follow
 
     assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L1"]
     assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
-    assert task["followup_brief_status"] == "preview_only"
+    assert task["followup_brief_status"] == "partially_executable"
     assert task["followup_brief_execution_lane_ids"] == ["L1"]
     assert task["followup_brief_review_lane_ids"] == ["R1"]
     assert task["followup_brief_reason"] == "manual follow-up should start from the primary build lane"
+
+
+def test_build_followup_brief_snapshot_marks_execution_only_slice_executable() -> None:
+    task = {
+        "exec_critic": {
+            "manual_followup_execution_lane_ids": ["L3"],
+            "manual_followup_review_lane_ids": [],
+            "reason": "rerun the packaging lane only",
+        }
+    }
+
+    brief = task_state.build_followup_brief_snapshot(task)
+
+    assert brief["status"] == "executable"
+    assert brief["execution_lane_ids"] == ["L3"]
+    assert brief["review_lane_ids"] == []
+    assert brief["reason"] == "rerun the packaging lane only"
 
 
 def test_blocked_state_helpers_render_manual_followup_summary() -> None:

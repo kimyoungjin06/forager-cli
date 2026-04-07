@@ -1343,6 +1343,146 @@ def test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief
     assert payload["task"]["followup_brief_review_lanes"] == "R1"
 
 
+def test_control_dashboard_post_followup_execute_route_runs_partially_executable_brief(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["followup_brief_status"] = "partially_executable"
+    task["followup_brief_summary"] = "partially_executable | execution=L2 | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
+    task["followup_brief_reason"] = "operator must still approve the review wording"
+    task["exec_critic"] = {
+        "manual_followup_execution_lane_ids": ["L2"],
+        "manual_followup_review_lane_ids": ["R1"],
+        "reason": "operator must still approve the review wording",
+    }
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    def _fake_handle_run_or_unknown_command(*, ctx, deps):
+        assert ctx.run_control_mode == "followup"
+        assert ctx.run_source_request_id == "REQ-1"
+        assert ctx.run_selected_execution_lane_ids == ["L2"]
+        assert ctx.run_selected_review_lane_ids == []
+        deps.core.record_outcome(
+            {
+                "kind": "retry_run",
+                "status": "executed",
+                "reason_code": "followup_execution_started",
+                "next_step": "/task T-001",
+                "detail": "follow-up execution started from L2",
+            }
+        )
+        return True
+
+    monkeypatch.setattr(dashboard_app.run_handlers, "handle_run_or_unknown_command", _fake_handle_run_or_unknown_command)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup-execute",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L2"]}).encode("utf-8"),
+        content_type="application/json; charset=utf-8",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert payload["status"] == "executed"
+    assert payload["mode"] == "phase2"
+    assert payload["source_command"] == "/followup-exec T-001 lane L2"
+    assert payload["transition"]["run_control_mode"] == "followup"
+    assert payload["transition"]["execution_lane_ids"] == ["L2"]
+    assert payload["transition"]["review_lane_ids"] == []
+    assert payload["outcome"]["kind"] == "followup_execute"
+    assert payload["next_step"] == "/task T-001"
+
+
+def test_control_dashboard_post_followup_execute_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["background_runner_target"] = "local_tmux"
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["followup_brief_status"] = "partially_executable"
+    task["followup_brief_summary"] = "partially_executable | execution=L2 | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
+    task["followup_brief_reason"] = "operator keeps the review slice"
+    task["exec_critic"] = {
+        "manual_followup_execution_lane_ids": ["L2"],
+        "manual_followup_review_lane_ids": ["R1"],
+        "reason": "operator keeps the review slice",
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_now_iso", lambda: "2026-04-07T10:00:00+09:00")
+
+    class _GatewayMain:
+        @staticmethod
+        def save_manager_state(path, state):
+            Path(path).write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
+
+    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+        claimed = background_runs.claim_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            claimed_by=claimed_by,
+            source_surface=source_surface,
+        )
+        assert claimed["status"] == "dispatching"
+        return background_runs.advance_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            status="running",
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            created_by=claimed_by,
+            source_surface=source_surface,
+            runtime_handle="aoe_bg_followup_req_1",
+            runtime_summary="tmux_session=aoe_bg_followup_req_1",
+            evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_followup_req_1",
+        )
+
+    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup-execute",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L2"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/followup-exec T-001 lane L2"
+    assert payload["background_run"]["runner_target"] == "local_tmux"
+    assert payload["background_run"]["status"] == "running"
+    assert payload["background_run"]["runtime_handle"] == "aoe_bg_followup_req_1"
+    assert payload["transition"]["run_control_mode"] == "followup"
+    assert payload["next_step"] == "/orch status O2"
+
+
 def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

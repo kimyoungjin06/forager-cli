@@ -56,21 +56,31 @@
   - must refuse execution when `followup_brief_status=preview_only`
 
 ## Current Implementation
-- `preview_only` is implemented and surfaced in:
+- `FollowupBrief` is implemented and surfaced in:
   - `/task`
   - dashboard task detail
   - dashboard runtime detail
-- `followup execute` surface now exists as a separate command/action contract.
+- conservative derivation is now implemented:
+  - `preview_only`
+    - no execution slice exists
+  - `executable`
+    - execution slice exists and no review/manual slice remains
+  - `partially_executable`
+    - execution slice exists but review/manual slice remains visible
+- `followup execute` surface now reuses the existing rerun rail:
+  - foreground run bridge
+  - `local_tmux` background launch when runner preference allows it
 - current behavior:
   - if `preview_only`, block with `followup_execute_brief_required`
-  - if `executable` or `partially_executable`, the surface exists but execution wiring is still pending
+  - if `executable` or `partially_executable`, launch only the declared execution lanes
+  - review/manual remainder stays in preview scope and is not auto-launched
 
 ## Next Implementation Steps
-1. derive executable follow-up slices from critic/runtime state
-2. attach launch spec / runner target for executable follow-up
-3. prove manual-followup path again under the new split:
+1. prove manual-followup path again under the new split:
    - preview proof
    - execute proof
+2. add richer follow-up launch specs and external runner eligibility
+3. decide whether a dedicated `followup_of` dashboard/history surface is needed
 
 ## Benchmark References
 - `OpenCode` plan/build split and permission boundary:

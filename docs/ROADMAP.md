@@ -269,8 +269,8 @@
       - off-desk priority가 brief blocked 상태를 직접 읽음
     - 남은 것:
       - preset별 executable slice 정교화
-      - followup용 별도 executable brief 설계
-      - current `FollowupBrief` preview surface를 executable surface로 확장
+      - followup lineage/history surface 정리
+      - `FollowupBrief` external runner eligibility 정교화
   - 새 상태모델:
     - `executable`
     - `underspecified`
@@ -305,7 +305,7 @@
       - `local_tmux` retry/replan launch path
       - tmux log/result artifact persistence + polling
     - 남은 것:
-      - `followup execute` path는 아직 launch wiring 미완료
+      - `followup execute` path는 현재 foreground + `local_tmux`까지만 연결됨
       - `initial detached no-wait` externalizable 분리
       - `github_runner` / `remote_worker` 실제 실행기
   - 최소 범위:

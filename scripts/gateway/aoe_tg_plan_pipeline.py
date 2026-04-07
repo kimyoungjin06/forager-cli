@@ -292,7 +292,7 @@ def compute_dispatch_plan(
     plan_last_round = 0
     planning_enabled = bool(args.task_planning) or (run_control_mode == "replan")
     reuse_source_plan = (
-        run_control_mode == "retry"
+        run_control_mode in {"retry", "followup"}
         and isinstance(run_source_task, dict)
         and isinstance(run_source_task.get("plan"), dict)
     )
@@ -705,7 +705,7 @@ def apply_plan_and_lineage(
     elif plan_error:
         lifecycle_set_stage(task, "planning", "done", note=f"fallback_no_plan: {plan_error}")
 
-    if run_control_mode not in {"retry", "replan"} or (not run_source_request_id):
+    if run_control_mode not in {"retry", "replan", "followup"} or (not run_source_request_id):
         task["tf_phase"] = normalize_tf_phase(derive_tf_phase(task), "queued")
         tf_phase_reason = derive_tf_phase_reason(task)
         if tf_phase_reason:
@@ -726,6 +726,9 @@ def apply_plan_and_lineage(
     if run_control_mode == "retry":
         task["retry_of"] = run_source_request_id
         child_field = "retry_children"
+    elif run_control_mode == "followup":
+        task["followup_of"] = run_source_request_id
+        child_field = "followup_children"
     else:
         task["replan_of"] = run_source_request_id
         child_field = "replan_children"

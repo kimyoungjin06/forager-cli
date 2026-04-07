@@ -1308,11 +1308,6 @@ def handle_orch_task_command(
             selected_execution_lane_ids = list(allowed_execution_lane_ids)
             selected_review_lane_ids = list(allowed_review_lane_ids)
 
-        touch_chat_recent_task_ref(manager_state, chat_id, key, req_id)
-        set_chat_selected_task_ref(manager_state, chat_id, key, req_id)
-        if not args.dry_run:
-            save_manager_state(args.manager_state_file, manager_state)
-
         label = task_display_label(task or {}, fallback_request_id=req_id)
         reason = (
             str(task.get("followup_brief_reason", "")).strip()
@@ -1363,28 +1358,7 @@ def handle_orch_task_command(
                 reply_markup=_orch_task_reply_markup(key, entry, req_id, task),
             )
             return True
-
-        send(
-            "\n".join(
-                [
-                    f"runtime: {key}",
-                    "follow-up execute pending",
-                    f"task: {label}",
-                    f"request_id: {req_id}",
-                    f"followup_brief: {followup_brief_status}",
-                    f"execution lanes: {', '.join(selected_execution_lane_ids) or '-'}",
-                    f"review lanes: {', '.join(selected_review_lane_ids) or '-'}",
-                    "reason: explicit executable follow-up handler is not wired yet",
-                    "",
-                    "next:",
-                    f"- /task {label}",
-                    f"- /orch status {alias}",
-                ]
-            ),
-            context="orch-followup-exec pending",
-            reply_markup=_orch_task_reply_markup(key, entry, req_id, task),
-        )
-        return True
+        return False
 
     if cmd == "orch-pick":
         key, entry, _p_args = get_context(orch_target)
