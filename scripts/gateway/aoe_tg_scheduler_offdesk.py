@@ -172,6 +172,15 @@ def _handle_offdesk_command(
                                 note=note or "-",
                             )
                         )
+                        external_action = str(focus_report.get("priority_action", "")).strip()
+                        external_reason = str(focus_report.get("priority_reason", "")).strip()
+                        if external_action:
+                            lines.append(
+                                "- active_task_background_external_next: {action} | {reason}".format(
+                                    action=external_action,
+                                    reason=external_reason or "-",
+                                )
+                            )
         compact_lines = ops_scope_compact_lines(manager_state, 4, status_level)
         if compact_lines:
             lines.extend(["", "ops projects:"] + compact_lines)

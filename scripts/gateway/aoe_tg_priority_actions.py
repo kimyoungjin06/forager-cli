@@ -8,6 +8,48 @@ from typing import Any, Dict, List, Optional
 from aoe_tg_orch_contract import normalize_tf_phase
 
 
+def external_background_priority_action_snapshot(
+    *,
+    alias: str,
+    task_label: str = "",
+    background_run_runner_target: str = "",
+    background_run_external_phase: str = "",
+    background_run_external_note: str = "",
+) -> Dict[str, str]:
+    project_alias = str(alias or "").strip()
+    runner = str(background_run_runner_target or "").strip().lower()
+    phase = str(background_run_external_phase or "").strip().lower()
+    note = str(background_run_external_note or "").strip()
+    label = str(task_label or "").strip()
+
+    if runner not in {"github_runner", "remote_worker"}:
+        return {"action": "", "reason": ""}
+    if phase == "result_received":
+        return {
+            "action": f"/offdesk review {project_alias}" if project_alias else (f"/task {label}" if label else ""),
+            "reason": note or f"{runner} result received; inspect task state and decide the next operator action",
+        }
+    if phase == "pickup_acknowledged":
+        return {
+            "action": f"/orch status {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} picked up the background run; await result sidecar",
+        }
+    if phase == "handoff_emitted":
+        return {
+            "action": f"/orch status {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} handoff emitted; awaiting pickup acknowledgement",
+        }
+    if phase == "awaiting_external_pickup":
+        return {
+            "action": f"/orch status {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} launch handed off; waiting for external pickup",
+        }
+    return {
+        "action": f"/orch status {project_alias}" if project_alias and (phase or note) else "",
+        "reason": note or (f"{runner} external background lifecycle requires operator status review" if runner and (phase or note) else ""),
+    }
+
+
 def task_lane_target_snapshot(task: Dict[str, Any]) -> Dict[str, List[str]]:
     exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
     return {
@@ -160,26 +202,15 @@ def offdesk_priority_action_snapshot(
             "reason": reason,
         }
     if background_runner in {"github_runner", "remote_worker"} and background_status in {"queued", "dispatching", "running"}:
-        if background_external_phase == "result_received":
-            return {
-                "action": f"/orch status {alias}",
-                "reason": background_external_note or f"{background_runner} result received; sync task state before the next operator action",
-            }
-        if background_external_phase == "pickup_acknowledged":
-            return {
-                "action": f"/orch status {alias}",
-                "reason": background_external_note or f"{background_runner} picked up the background run; await result sidecar",
-            }
-        if background_external_phase == "handoff_emitted":
-            return {
-                "action": f"/orch status {alias}",
-                "reason": background_external_note or f"{background_runner} handoff emitted; awaiting pickup acknowledgement",
-            }
-        if background_external_phase == "awaiting_external_pickup":
-            return {
-                "action": f"/orch status {alias}",
-                "reason": background_external_note or f"{background_runner} launch handed off; waiting for external pickup",
-            }
+        external_priority = external_background_priority_action_snapshot(
+            alias=alias,
+            task_label=active_task_label,
+            background_run_runner_target=background_runner,
+            background_run_external_phase=background_external_phase,
+            background_run_external_note=background_external_note,
+        )
+        if str(external_priority.get("action", "")).strip():
+            return external_priority
     if worker_status in {"stale", "error"}:
         reason = worker_summary or f"background worker is {worker_status}"
         return {

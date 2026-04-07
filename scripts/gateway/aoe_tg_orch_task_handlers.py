@@ -14,6 +14,7 @@ from aoe_tg_request_contract import (
     build_background_launch_spec,
     select_background_runner_target,
 )
+from aoe_tg_priority_actions import external_background_priority_action_snapshot
 from aoe_tg_run_lock import normalize_run_lock_mode, project_run_lock_mode, project_run_lock_note
 from aoe_tg_external_background_worker import poll_external_background_tickets
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
@@ -859,7 +860,15 @@ def handle_orch_task_command(
         slots_line = f"background_slots: {slot_runner_prefix}limit={slot_limit} active={active_slots} | {slot_summary}\n"
         external_snapshot = _latest_external_background_task_snapshot(entry)
         external_line = ""
+        external_next_line = ""
         if external_snapshot:
+            external_priority = external_background_priority_action_snapshot(
+                alias=str(entry.get("project_alias", "")).strip().upper() or str(key).strip(),
+                task_label=str(external_snapshot.get("label", "")).strip(),
+                background_run_runner_target=str(external_snapshot.get("runner_target", "")).strip(),
+                background_run_external_phase=str(external_snapshot.get("phase", "")).strip(),
+                background_run_external_note=str(external_snapshot.get("note", "")).strip(),
+            )
             external_line = (
                 "background_external: {label} | {runner} | {phase} | {note}\n".format(
                     label=external_snapshot.get("label", "-"),
@@ -868,10 +877,17 @@ def handle_orch_task_command(
                     note=external_snapshot.get("note", "-"),
                 )
             )
+            if str(external_priority.get("action", "")).strip():
+                external_next_line = (
+                    "background_external_next: {action} | {reason}\n".format(
+                        action=str(external_priority.get("action", "")).strip(),
+                        reason=str(external_priority.get("reason", "")).strip() or "-",
+                    )
+                )
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

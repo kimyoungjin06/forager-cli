@@ -32,6 +32,7 @@ from aoe_tg_package_paths import team_tmux_script
 from aoe_tg_run_lock import project_run_lock_mode, project_run_lock_note
 from aoe_tg_runtime_core import provider_capacity_state_path as runtime_provider_capacity_state_path
 from aoe_tg_priority_actions import (
+    external_background_priority_action_snapshot,
     offdesk_priority_action_snapshot,
     task_lane_target_snapshot,
 )
@@ -1163,6 +1164,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         if task_background_runner in {"github_runner", "remote_worker"} and (
             task_background_external_phase or task_background_external_note
         ):
+            task_background_external_next = external_background_priority_action_snapshot(
+                alias=alias,
+                task_label=str(latest_task.get("label", "")).strip(),
+                background_run_runner_target=task_background_runner,
+                background_run_external_phase=task_background_external_phase,
+                background_run_external_note=task_background_external_note,
+            )
             lines.append(
                 "  active_task_background_external: {runner} | {phase} | {note}".format(
                     runner=task_background_runner or "-",
@@ -1170,6 +1178,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                     note=task_background_external_note or "-",
                 )
             )
+            if str(task_background_external_next.get("action", "")).strip():
+                lines.append(
+                    "  active_task_background_external_next: {action} | {reason}".format(
+                        action=str(task_background_external_next.get("action", "")).strip(),
+                        reason=str(task_background_external_next.get("reason", "")).strip() or "-",
+                    )
+                )
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()

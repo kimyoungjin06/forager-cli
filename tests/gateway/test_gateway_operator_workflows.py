@@ -669,6 +669,7 @@ def test_orch_status_surfaces_external_background_phase(tmp_path: Path) -> None:
     text, context, _reply_markup = sent[-1]
     assert context == "status"
     assert "background_external: T-401 | github_runner | pickup_acknowledged | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "background_external_next: /orch status O2 | background_run_acks/github-runner-bgt-ext-001.json" in text
 
 
 def test_orch_status_surfaces_background_scheduler_head(tmp_path: Path) -> None:
