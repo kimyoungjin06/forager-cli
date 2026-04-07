@@ -555,6 +555,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_launch_spec = str(task.get("background_run_launch_spec_summary", "")).strip()
     if background_launch_spec:
         lines.append("background_run_launch_spec: " + background_launch_spec[:240])
+    reentry_rails_summary = str(task.get("reentry_rails_summary", "")).strip()
+    if reentry_rails_summary:
+        lines.append("reentry_rails: " + reentry_rails_summary[:240])
 
     try:
         plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))

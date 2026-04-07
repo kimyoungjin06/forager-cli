@@ -13,6 +13,8 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_ops_policy as ops_policy
+import aoe_tg_background_runs as background_runs
+import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 import aoe_tg_task_view as task_view
@@ -35,6 +37,35 @@ from control_dashboard_state_common import (
     _runtime_path,
 )
 from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
+
+
+_SLOT_RUNNER_TARGETS = ["local_tmux", "github_runner", "remote_worker"]
+
+
+def _background_slot_limit(entry: Dict[str, Any]) -> int:
+    try:
+        value = int(entry.get("background_runner_slot_limit", 1) or 1)
+    except Exception:
+        value = 1
+    return max(1, min(value, 32))
+
+
+def _background_slot_active(team_dir: Path) -> int:
+    return background_runs.count_background_run_tickets(
+        background_runs.background_runs_state_path(team_dir),
+        statuses=["queued", "dispatching", "running"],
+        runner_targets=_SLOT_RUNNER_TARGETS,
+    )
+
+
+def _background_slot_pressure(limit: int, active: int) -> str:
+    safe_limit = max(1, int(limit or 1))
+    safe_active = max(0, int(active or 0))
+    if safe_active >= safe_limit:
+        return f"saturated ({safe_active}/{safe_limit})"
+    if safe_active > 0:
+        return f"active ({safe_active}/{safe_limit})"
+    return f"idle (0/{safe_limit})"
 
 
 def _observatory_lane_rows(snapshot: Dict[str, Any]) -> List[LaneObservatoryDTO]:
@@ -192,6 +223,14 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             str(item).strip() for item in (task.get("followup_brief_review_lane_ids") or []) if str(item).strip()
         ) or "-"
         rate_limit_summary = _task_rate_limit_summary(task)
+        run_lock_mode = run_lock.project_run_lock_mode(entry)
+        run_lock_note = run_lock.project_run_lock_note(entry) or "-"
+        background_slot_limit = _background_slot_limit(entry)
+        background_slot_active = 0
+        team_dir_raw = str(entry.get("team_dir", "")).strip()
+        if team_dir_raw:
+            background_slot_active = _background_slot_active(Path(team_dir_raw))
+        background_slot_pressure = _background_slot_pressure(background_slot_limit, background_slot_active)
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),
@@ -241,6 +280,12 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             followup_brief_execution_lanes=followup_brief_execution_lanes,
             followup_brief_review_lanes=followup_brief_review_lanes,
             followup_brief_reason=str(task.get("followup_brief_reason", "")).strip() or "-",
+            reentry_rails_summary=str(task.get("reentry_rails_summary", "")).strip() or "-",
+            run_lock_mode=run_lock_mode,
+            run_lock_note=run_lock_note,
+            background_slot_limit=background_slot_limit,
+            background_slot_active=background_slot_active,
+            background_slot_pressure=background_slot_pressure,
             completion_focus=str(contract.get("focus", "")).strip() or "-",
             completion_done_when=str(contract.get("done_when", "")).strip() or "-",
             completion_rerun_when=str(contract.get("rerun_when", "")).strip() or "-",

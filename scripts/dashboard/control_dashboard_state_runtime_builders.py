@@ -200,6 +200,9 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_followup_brief_reason=(
                     str((active_task or {}).get("followup_brief_reason", "")).strip() or "-"
                 ),
+                active_task_reentry_rails_summary=(
+                    str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
+                ),
                 active_task_background_run_status=(
                     str((active_task or {}).get("background_run_status", "")).strip() or "-"
                 ),
@@ -485,6 +488,9 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         or "-",
         active_task_followup_brief_reason=(
             str((active_task or {}).get("followup_brief_reason", "")).strip() or "-"
+        ),
+        active_task_reentry_rails_summary=(
+            str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
         ),
         active_task_background_run_status=str((active_task or {}).get("background_run_status", "")).strip() or "-",
         active_task_background_run_runner_target=(

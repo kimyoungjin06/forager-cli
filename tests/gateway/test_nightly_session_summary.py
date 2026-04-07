@@ -51,6 +51,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["background_worker_summary"] != "-"
     assert runtimes[0]["background_queue_summary"] != "-"
     assert "depth=" in runtimes[0]["background_queue_summary"]
+    assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
     assert runtimes[0]["background_slot_active"] == 0
@@ -95,6 +96,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "Sync Preview | preview" in markdown
     assert "link: runtime detail -> /control/runtimes/O2" in markdown
     assert "background_queue:" in markdown
+    assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown
     assert "background_slots: active=0 limit=1" in markdown
     assert "background_slot_pressure: idle (0/1)" in markdown

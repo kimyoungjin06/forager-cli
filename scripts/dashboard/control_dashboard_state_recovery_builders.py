@@ -171,6 +171,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_preset=str(row.get("active_task_preset", "")).strip() or "-",
                 active_task_phase2_shape=str(row.get("active_task_phase2_shape", "")).strip() or "-",
                 active_task_phase2_quality=str(row.get("active_task_phase2_quality", "")).strip() or "-",
+                active_task_reentry_rails_summary=str(row.get("active_task_reentry_rails_summary", "")).strip() or "-",
                 active_task_background_run_status=str(row.get("active_task_background_run_status", "")).strip() or "-",
                 active_task_background_run_runner_target=str(row.get("active_task_background_run_runner_target", "")).strip() or "-",
                 active_task_background_run_ticket_id=str(row.get("active_task_background_run_ticket_id", "")).strip() or "-",

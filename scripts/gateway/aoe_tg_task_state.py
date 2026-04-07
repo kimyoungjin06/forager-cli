@@ -27,6 +27,7 @@ LANE_VERDICTS = ("success", "retry", "fail", "intervention")
 PLAN_CONVERGENCE_STATUSES = ("ready", "blocked", "stalled", "failed", "pending")
 FOLLOWUP_BRIEF_VERSION = "2026-04-06.v1"
 FOLLOWUP_BRIEF_STATUSES = ("preview_only", "executable", "partially_executable")
+_BRIEF_BLOCKED_STATUSES = {"underspecified", "operator_decision_required", "infeasible"}
 
 
 def _normalize_lane_status(raw: Any, default: str = "pending") -> str:
@@ -147,6 +148,51 @@ def apply_followup_brief_snapshot(target: Dict[str, Any], brief: Dict[str, Any])
     target["followup_brief_review_lane_ids"] = list(snapshot.get("review_lane_ids") or [])
     target["followup_brief_reason"] = snapshot.get("reason", "")
     return target
+
+
+def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return ""
+    targets = task_lane_target_snapshot(task)
+    rerun_exec = [str(x).strip() for x in (targets.get("rerun_execution_lane_ids") or []) if str(x).strip()]
+    rerun_review = [str(x).strip() for x in (targets.get("rerun_review_lane_ids") or []) if str(x).strip()]
+    rerun_status = "none"
+    brief_status = str(task.get("execution_brief_status", "")).strip().lower()
+    if rerun_exec or rerun_review:
+        if brief_status in _BRIEF_BLOCKED_STATUSES:
+            rerun_status = f"blocked:{brief_status}"
+        elif brief_status == "partially_executable":
+            rerun_status = "partial"
+        else:
+            rerun_status = "ready"
+    followup_status = str(task.get("followup_brief_status", "")).strip().lower()
+    followup_exec = [str(x).strip() for x in (task.get("followup_brief_execution_lane_ids") or []) if str(x).strip()]
+    followup_review = [str(x).strip() for x in (task.get("followup_brief_review_lane_ids") or []) if str(x).strip()]
+    if not followup_status:
+        followup_status = "none"
+    background_status = str(task.get("background_run_status", "")).strip().lower()
+    background_runner = str(task.get("background_run_runner_target", "")).strip().lower()
+    background_part = ""
+    if background_status or background_runner:
+        background_part = "bg={status}{runner}".format(
+            status=background_status or "-",
+            runner=(f"/{background_runner}" if background_runner else ""),
+        )
+    summary_parts = [
+        "retry={status}{exec_part}{review_part}".format(
+            status=rerun_status,
+            exec_part=(f" exec={','.join(rerun_exec)}" if rerun_exec else ""),
+            review_part=(f" review={','.join(rerun_review)}" if rerun_review else ""),
+        ),
+        "followup={status}{exec_part}{review_part}".format(
+            status=followup_status,
+            exec_part=(f" exec={','.join(followup_exec)}" if followup_exec else ""),
+            review_part=(f" review={','.join(followup_review)}" if followup_review else ""),
+        ),
+    ]
+    if background_part:
+        summary_parts.append(background_part)
+    return " | ".join(summary_parts)[:320]
 
 
 def _normalize_plan_issue_codes(raw: Any, *, limit: int = 12) -> List[str]:
@@ -1110,6 +1156,12 @@ def sanitize_task_record(
             "background_run_launch_spec_externalizable",
         ):
             task.pop(key, None)
+
+    reentry_rails_summary = build_reentry_rails_summary(task)
+    if reentry_rails_summary:
+        task["reentry_rails_summary"] = reentry_rails_summary
+    else:
+        task.pop("reentry_rails_summary", None)
 
     plan = task.get("plan")
     if isinstance(plan, dict):

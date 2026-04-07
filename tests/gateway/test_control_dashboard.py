@@ -425,6 +425,10 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "underspecified" in overview_text
     assert "brief_summary" in overview_text
     assert "blocked=acceptance_gap" in overview_text
+    assert "reentry_rails" in overview_text
+    assert "retry=blocked:underspecified exec=L1 review=R1" in overview_text
+    assert "followup=none" in overview_text
+    assert "bg=running/local_background" in overview_text
     assert "execution_brief_summary" in overview_text
     assert "underspecified=1" in overview_text
     assert "background_run_summary" in overview_text
@@ -562,6 +566,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "R1" in text
     assert "followup_reason" in text
     assert "analysis handoff wording" in text
+    assert "reentry_rails" in text
+    assert "retry=blocked:underspecified exec=L1 review=R1" in text
+    assert "followup=preview_only exec=L2 review=R1" in text
+    assert "bg=running/local_background" in text
     assert "background_run" in text
     assert "runner_target" in text
     assert "local_background" in text
@@ -695,6 +703,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "followup_review_lanes" in text
     assert "followup_reason" in text
     assert "analysis handoff wording" in text
+    assert "reentry_rails" in text
+    assert "retry=blocked:underspecified exec=L1 review=R1" in text
+    assert "followup=preview_only exec=L2 review=R1" in text
+    assert "bg=running/local_background" in text
     assert "background_run" in text
     assert "runner_target" in text
     assert "local_background" in text
@@ -741,6 +753,10 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "underspecified" in text
     assert "brief_summary" in text
     assert "blocked=acceptance_gap" in text
+    assert "reentry_rails" in text
+    assert "retry=blocked:underspecified exec=L1 review=R1" in text
+    assert "followup=none" in text
+    assert "bg=running/local_background" in text
     assert "execution_brief_summary" in text
     assert "underspecified=1" in text
     assert "background_run_summary" in text
@@ -786,6 +802,10 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "O2 Alpha" in text
     assert "analysis-check" in text
     assert "evidence quality, reasoning coherence, missing caveats" in text
+    assert "reentry_rails" in text
+    assert "retry=blocked:underspecified exec=L1 review=R1" in text
+    assert "followup=none" in text
+    assert "bg=running/local_background" in text
     assert "state_root_mode" in text
     assert str(team_dir.resolve()) in text
     assert "latest_intent_command" in text
