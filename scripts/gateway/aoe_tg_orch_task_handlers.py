@@ -805,6 +805,7 @@ def handle_orch_task_command(
             status = f"[WARN] status unavailable: {exc}"
         queue_line = ""
         worker_line = ""
+        scheduler_line = ""
         try:
             team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
             if str(team_dir):
@@ -816,15 +817,18 @@ def handle_orch_task_command(
                         entry["updated_at"] = now_iso()
                         save_manager_state(args.manager_state_file, manager_state)
                 queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
+                scheduler_snapshot = background_runs.summarize_background_runner_scheduling(queue_path)
                 worker_snapshot = background_runs.summarize_background_worker_state(
                     background_runs.background_worker_state_path(team_dir),
                     now_iso=now_iso,
                 )
                 queue_line = f"background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}\n"
+                scheduler_line = f"background_scheduler: {str(scheduler_snapshot.get('summary', '-')).strip() or '-'}\n"
                 worker_line = f"background_worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
         except Exception:
             queue_line = ""
             worker_line = ""
+            scheduler_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
         run_lock_mode, run_lock_note = _project_run_lock_status(entry)
         preferred_runner = _background_runner_preference(entry)
@@ -867,7 +871,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{worker_line}{external_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

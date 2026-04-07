@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
 from aoe_tg_background_runs import (
     background_runs_state_path,
+    summarize_background_runner_scheduling,
     background_worker_state_path,
     summarize_background_runs_state,
     summarize_background_runner_slots,
@@ -700,6 +701,11 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         if team_dir is not None
         else {}
     )
+    scheduler_snapshot = (
+        summarize_background_runner_scheduling(background_runs_state_path(team_dir))
+        if team_dir is not None
+        else {}
+    )
     worker_snapshot = (
         summarize_background_worker_state(
             background_worker_state_path(team_dir),
@@ -991,6 +997,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"  scenario_include: {include_display}",
         f"  queue: open={counts['open']} running={counts['running']} blocked={counts['blocked']} followup={manual_followup_count} pending={'yes' if pending_flag else 'no'} proposals={open_proposals}",
         f"  background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}",
+        f"  background_scheduler: {str(scheduler_snapshot.get('summary', '-')).strip() or '-'}",
         f"  run_lock: {run_lock_mode}",
         f"  run_lock_note: {run_lock_note or '-'}",
         f"  background_slots: runner={slot_runner_target or '-'} active={background_slot_active} limit={background_slot_limit} | {background_slot_pressure} | {background_slot_summary}",

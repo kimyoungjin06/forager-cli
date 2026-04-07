@@ -25,6 +25,13 @@ BACKGROUND_WORKER_STATUSES = (
     "stopped",
     "error",
 )
+BACKGROUND_RUN_CLAIM_LAUNCH_PRIORITY = {
+    "dashboard_followup_execute": 10,
+    "dashboard_replan": 20,
+    "dashboard_retry": 30,
+    "offdesk_manual": 40,
+    "detached_no_wait": 50,
+}
 SLOT_RUNNER_TARGETS = (
     "local_tmux",
     "github_runner",
@@ -543,6 +550,7 @@ def claim_next_background_run_ticket(
     )
     if not candidates:
         return {}
+    candidates = sorted(candidates, key=background_run_claim_sort_key)
     return claim_background_run_ticket(
         path,
         str(candidates[0].get("ticket_id", "")).strip(),
@@ -612,6 +620,46 @@ def _parse_iso_datetime(raw: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def background_run_claim_sort_key(snapshot: Dict[str, Any]) -> tuple[int, str, str, str]:
+    row = normalize_background_run_ticket_snapshot(snapshot)
+    if not row:
+        return (999, "", "", "")
+    launch_mode = str(row.get("launch_mode", "")).strip().lower()
+    launch_priority = int(BACKGROUND_RUN_CLAIM_LAUNCH_PRIORITY.get(launch_mode, 100) or 100)
+    created_at = str(row.get("created_at", "")).strip()
+    touched_at = str(row.get("touched_at", "")).strip()
+    time_key = created_at or touched_at
+    ticket_id = str(row.get("ticket_id", "")).strip()
+    return (launch_priority, time_key, touched_at, ticket_id)
+
+
+def summarize_background_runner_scheduling(path: Path) -> Dict[str, Any]:
+    per_runner: Dict[str, Dict[str, Any]] = {}
+    parts: List[str] = []
+    for runner_target in ("local_background", "local_tmux", "github_runner", "remote_worker"):
+        queued_rows = sorted(
+            list_background_run_tickets(path, statuses=["queued", "stale"], runner_target=runner_target),
+            key=background_run_claim_sort_key,
+        )
+        head = queued_rows[0] if queued_rows else {}
+        head_ticket_id = str(head.get("ticket_id", "")).strip()
+        head_launch_mode = str(head.get("launch_mode", "")).strip().lower()
+        row = {
+            "queued_count": len(queued_rows),
+            "head_ticket_id": head_ticket_id,
+            "head_launch_mode": head_launch_mode,
+        }
+        per_runner[runner_target] = row
+        if head_ticket_id:
+            parts.append(
+                f"{runner_target}:head={head_ticket_id}/{head_launch_mode or '-'} queued={len(queued_rows)}"
+            )
+    return {
+        "by_runner": per_runner,
+        "summary": " | ".join(parts) if parts else "-",
+    }
 
 
 def summarize_background_runs_state(path: Path) -> Dict[str, Any]:
