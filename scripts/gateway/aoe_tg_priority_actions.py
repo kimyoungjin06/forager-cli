@@ -8,6 +8,40 @@ from typing import Any, Dict, List, Optional
 from aoe_tg_orch_contract import normalize_tf_phase
 
 
+def _background_scheduler_head_fragment(
+    summary: str,
+    *,
+    preferred_runner: str = "",
+    queue_targets: Optional[Dict[str, int]] = None,
+) -> str:
+    safe_summary = str(summary or "").strip()
+    if not safe_summary or safe_summary == "-":
+        return ""
+    parts = [str(part).strip() for part in safe_summary.split(" | ") if str(part).strip()]
+    if not parts:
+        return ""
+    candidates: List[str] = []
+    safe_runner = str(preferred_runner or "").strip().lower()
+    if safe_runner:
+        candidates.append(safe_runner)
+    if isinstance(queue_targets, dict):
+        candidates.extend(
+            str(key).strip().lower()
+            for key, value in sorted(queue_targets.items())
+            if str(key).strip() and int(value or 0) > 0
+        )
+    seen: set[str] = set()
+    for runner in candidates:
+        if not runner or runner in seen:
+            continue
+        seen.add(runner)
+        prefix = runner + ":"
+        for part in parts:
+            if part.lower().startswith(prefix):
+                return part
+    return parts[0]
+
+
 def external_background_priority_action_snapshot(
     *,
     alias: str,
@@ -192,6 +226,11 @@ def offdesk_priority_action_snapshot(
     slot_saturated = slot_runner in {"local_tmux", "github_runner", "remote_worker"} and slot_active >= slot_limit
     queue_targets = background_queue_runner_targets if isinstance(background_queue_runner_targets, dict) else {}
     local_background_queue_depth = max(0, int(queue_targets.get("local_background", 0) or 0))
+    scheduler_head = _background_scheduler_head_fragment(
+        background_scheduler_summary,
+        preferred_runner=slot_runner,
+        queue_targets=queue_targets,
+    )
     if brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
         reason = brief_decision
         if not reason and brief_blocked:
@@ -244,6 +283,8 @@ def offdesk_priority_action_snapshot(
         reason = f"background runner slots are saturated ({slot_active}/{slot_limit})"
         if slot_runner:
             reason = f"background runner slots are saturated for {slot_runner} ({slot_active}/{slot_limit})"
+        if scheduler_head:
+            reason += f"; scheduler {scheduler_head}"
         return {
             "action": f"/orch status {alias}",
             "reason": reason,
@@ -259,6 +300,8 @@ def offdesk_priority_action_snapshot(
         reason = f"background runner slots are saturated ({slot_active}/{slot_limit})"
         if slot_runner:
             reason = f"background runner slots are saturated for {slot_runner} ({slot_active}/{slot_limit})"
+        if scheduler_head:
+            reason += f"; scheduler {scheduler_head}"
         return {
             "action": f"/orch status {alias}",
             "reason": reason,
@@ -273,6 +316,8 @@ def offdesk_priority_action_snapshot(
             reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
             if target_summary:
                 reason += f" ({target_summary})"
+            if scheduler_head:
+                reason += f"; scheduler {scheduler_head}"
             reason += "; local background worker is stopped"
             return {
                 "action": f"/orch bgw-start {alias}",
@@ -281,6 +326,8 @@ def offdesk_priority_action_snapshot(
         reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
         if target_summary:
             reason += f" ({target_summary})"
+        if scheduler_head:
+            reason += f"; scheduler {scheduler_head}"
         return {
             "action": f"/orch status {alias}",
             "reason": reason,

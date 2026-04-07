@@ -2724,13 +2724,14 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         background_queue_depth=1,
         background_queue_stale_count=0,
         background_queue_runner_targets={"local_tmux": 1},
+        background_scheduler_summary="local_tmux:head=BGT-TMUX-001/dashboard_retry queued=1",
         background_slot_runner_target="local_tmux",
         background_slot_limit=1,
         background_slot_active=1,
     )
     assert saturated_retry_priority == {
         "action": "/orch status O12",
-        "reason": "background runner slots are saturated for local_tmux (1/1)",
+        "reason": "background runner slots are saturated for local_tmux (1/1); scheduler local_tmux:head=BGT-TMUX-001/dashboard_retry queued=1",
     }
     stopped_worker_priority = priority_actions.offdesk_priority_action_snapshot(
         alias="O10",
@@ -2756,12 +2757,13 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         background_queue_depth=2,
         background_queue_stale_count=0,
         background_queue_runner_targets={"local_background": 2},
+        background_scheduler_summary="local_background:head=BGT-LB-001/detached_no_wait queued=2 starved=yes",
         background_worker_status="stopped",
         background_worker_summary="status=stopped | target=local_background | queue=2",
     )
     assert stopped_worker_priority == {
         "action": "/orch bgw-start O10",
-        "reason": "background queue has 2 queued/running tickets (local_background=2); local background worker is stopped",
+        "reason": "background queue has 2 queued/running tickets (local_background=2); scheduler local_background:head=BGT-LB-001/detached_no_wait queued=2 starved=yes; local background worker is stopped",
     }
     queued_priority = priority_actions.offdesk_priority_action_snapshot(
         alias="O8",
@@ -2787,12 +2789,13 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         background_queue_depth=2,
         background_queue_stale_count=0,
         background_queue_runner_targets={"local_background": 2},
+        background_scheduler_summary="local_background:head=BGT-LB-001/detached_no_wait queued=2 starved=yes",
         background_worker_status="running",
         background_worker_summary="status=running | target=local_background | queue=2",
     )
     assert queued_priority == {
         "action": "/orch status O8",
-        "reason": "background queue has 2 queued/running tickets (local_background=2)",
+        "reason": "background queue has 2 queued/running tickets (local_background=2); scheduler local_background:head=BGT-LB-001/detached_no_wait queued=2 starved=yes",
     }
     external_pickup_priority = priority_actions.offdesk_priority_action_snapshot(
         alias="O13",
@@ -2851,12 +2854,13 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         background_queue_depth=1,
         background_queue_stale_count=0,
         background_queue_runner_targets={"github_runner": 1},
+        background_scheduler_summary="github_runner:head=BGT-GHA-001/dashboard_retry queued=1",
         background_worker_status="stopped",
         background_worker_summary="status=stopped | target=local_background | queue=0",
     )
     assert external_queue_priority == {
         "action": "/orch status O14",
-        "reason": "background queue has 1 queued/running tickets (github_runner=1)",
+        "reason": "background queue has 1 queued/running tickets (github_runner=1); scheduler github_runner:head=BGT-GHA-001/dashboard_retry queued=1",
     }
 
 
