@@ -190,6 +190,16 @@
   - automatic target selection stays conservative until explicit remote pickup/acknowledgement exists
   - project operators can cap non-local background launches with `background_runner_slot_limit`
   - when active non-local tickets already fill the slot budget, new retry/replan/followup-exec and serializable no-wait launches must block instead of overcommitting
+- operator inspect surfaces for non-local runners:
+  - `/orch status O#`
+    - compact phase + next-step summary
+  - `/orch bgx-status O#`
+    - latest `handoff`, `ack`, `result` artifact presence and inspect summary
+- external phase model:
+  - `awaiting_external_pickup`
+  - `handoff_emitted`
+  - `pickup_acknowledged`
+  - `result_received`
 
 ### 5.6 Evidence Bundle
 - Durable off-desk result package.
@@ -265,6 +275,25 @@
   - `background_run_logs/<ticket>.log`
   - `background_run_results/<ticket>.json`
 
+### 6.4 Queue Scheduling Policy
+- slot accounting is partitioned by `runner_target`:
+  - `local_tmux`
+  - `github_runner`
+  - `remote_worker`
+- same-runner queue claim ordering uses launch-mode priority first:
+  - `dashboard_followup_execute`
+  - `dashboard_replan`
+  - `dashboard_retry`
+  - `offdesk_manual`
+  - `detached_no_wait`
+- starvation guard:
+  - if an older queued ticket exceeds the guard threshold, it may claim ahead of newer higher-priority work on the same runner
+  - current bounded-replay guard is age-based on `created_at`
+- operator surfaces should be able to report:
+  - current queue head
+  - current queue head launch mode
+  - whether the head was promoted by starvation guard
+
 ## 7. Required Guarantees
 1. A run cannot start without a stored `ExecutionBrief`.
 2. A run cannot start if `execution_brief_status` is not in:
@@ -333,10 +362,19 @@
   - runner target
   - latest launch ticket
   - evidence bundle availability
+  - external phase and next step for non-local runners
+  - queue depth / slot pressure by runner when background work is active
 - Recovery must expose:
   - stale background runs
   - failed launches
   - missing evidence bundles
+- Gateway/operator surfaces must expose:
+  - `/orch status O#`
+    - compact runner phase, next step, scheduler head
+  - `/orch bgx-status O#`
+    - non-local handoff / ack / result inspect view
+  - `/offdesk review O#`
+    - remediation hint that agrees with the same external phase truth
 
 ## 10. Implementation Order
 1. `ExecutionBrief` gate in off-desk action path

@@ -56,7 +56,14 @@
     - foreground bridge
     - `local_tmux`
     - `github_runner`
+  - non-local retry rails expose:
+    - `handoff_emitted`
+    - `pickup_acknowledged`
+    - `result_received`
+    - `awaiting_external_pickup`
+    through `/orch status` and `/orch bgx-status`
   - run lock and slot saturation can block retry cleanly
+  - queue claim ordering prefers bounded retry work while still allowing older queued work to escape starvation
 
 ## 4. Runtime Evidence
 - request_id:
@@ -73,6 +80,7 @@
   - `none`
 - reentry rails:
   - `retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background` in dashboard fixture
+  - `background_external_phase=handoff_emitted|pickup_acknowledged|result_received` in gateway status fixtures
 - stage progression:
   - planning:
     - `review-only prompt remains routed to review preset`
@@ -98,6 +106,10 @@
   - `not used in bounded replay`
 - `/offdesk review`:
   - `offdesk/runtime hints keep retry as the next actionable branch`
+- `/orch status`:
+  - `background_external` and `background_external_next` expose the current external runner phase and operator next step
+- `/orch bgx-status`:
+  - `handoff`, `ack`, and `result` artifact presence is inspectable for the latest external retry ticket
 - dashboard `Task Detail`:
   - `reentry_rails shows retry=blocked:underspecified exec=L1 review=R1`
 - dashboard `Recovery`:
@@ -116,6 +128,8 @@
   - `review-only routing stays in review preset for rerun-oriented review_report prompts`
   - `retry rail now preserves selected execution/review lane scope`
   - `retry can be blocked coherently by run lock and slot saturation without drifting into followup`
+  - `external retry lifecycle is now operator-visible through phase-aware status and inspect surfaces`
+  - `same-runner claim ordering now includes a starvation guard instead of only launch-mode priority`
   - `legacy live blocker about review_report acceptance remains historical context, not the current canonical proof`
 - next fix:
   - `promote this bounded replay proof to a later live replay using the current ExecutionBrief + reentry rail surfaces`
@@ -130,10 +144,14 @@
   - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred`
   - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_blocks_when_run_lock_is_test_only`
   - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_blocks_when_background_slots_are_exhausted`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_status_surfaces_external_background_phase`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_bgx_status_surfaces_external_artifacts_and_audit`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_background_run_queue_claims_starved_ticket_before_newer_high_priority_work`
 - log refs:
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_state_helpers.py -k 'choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only or apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'resolve_retry_replan_transition_preserves_selected_lane_targets or resolve_retry_replan_transition_rejects_invalid_lane_selector'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_retry_route_executes_retry_bridge or post_retry_route_uses_local_tmux_background_when_preferred or post_retry_route_emits_github_runner_handoff_when_preferred or post_retry_route_blocks_when_run_lock_is_test_only or post_retry_route_blocks_when_background_slots_are_exhausted'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_status_surfaces_external_background_phase or orch_bgx_status_surfaces_external_artifacts_and_audit or background_run_queue_claims_starved_ticket_before_newer_high_priority_work'`
 - artifact refs:
   - `no live runtime artifacts; proof uses fixture state, response payloads, and background ticket assertions only`
 

@@ -92,6 +92,14 @@ without drifting from the preset completion matrix.
   - `executable`
   - `partially_executable`?
 - if a background rail was used, did the ticket / launch spec / evidence bundle agree with the operator-visible next action?
+- if a non-local background rail was used, did:
+  - `/orch status`
+  - `/orch bgx-status`
+  - `/offdesk review`
+  all expose the same external phase and next step?
+- if multiple queued tickets competed for the same runner, did claim ordering respect:
+  - launch-mode priority
+  - starvation guard for older queued work?
 
 ### 5.5 Surface Parity
 - did `/task`, `/monitor`, `/offdesk review`, dashboard `Task Detail`, and dashboard `Recovery` all expose the same essential interpretation?
@@ -137,6 +145,8 @@ without drifting from the preset completion matrix.
   - `/offdesk review`
   - dashboard task/recovery view when relevant
   - background ticket / launch spec / evidence bundle when a background rail is involved
+  - `/orch bgx-status` when a non-local runner is involved
+  - scheduler/claim-order evidence when bounded replay covers queue ordering
 
 ## 8. Pass Criteria
 
@@ -181,6 +191,8 @@ without drifting from the preset completion matrix.
 - retry and followup scopes are conflated
 - `preview_only` followup is treated like executable followup
 - background runner / launch spec / evidence bundle disagree with visible next action
+- external runner phase differs across `/orch status`, `/orch bgx-status`, or offdesk surfaces
+- queue claim ordering starves older work despite the documented guard
 
 ## 10. Execution Plan
 

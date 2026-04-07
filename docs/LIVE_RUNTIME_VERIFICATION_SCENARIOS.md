@@ -160,13 +160,17 @@
     - review-only rerun prompts stay in `review`
     - retry lane selection remains bounded
     - retry background rails preserve runner-specific ticket state
+    - external retry rails surface `handoff/ack/result` phase and next-step guidance coherently
     - run lock / slot saturation block retry without collapsing into followup
+    - queue claim ordering preserves bounded retry priority without starving older queued work
 - expected branch:
   - `rerun`
 - must prove:
   - unsupported or incomplete verdict is not accepted as complete
   - `reentry_rails_summary` shows rerun scope explicitly without collapsing into manual followup
   - if background execution is used, the runner target and evidence bundle stay aligned with the retry scope
+  - if a non-local runner is used, `/orch status` and `/orch bgx-status` expose the same external phase and next step
+  - bounded retry scheduling does not let newer high-priority work starve older queued work indefinitely
 
 #### R3. Manual Followup Path
 - intent:

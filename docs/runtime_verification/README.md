@@ -53,7 +53,9 @@
         - review-only routing remains in `review`
         - retry lane selection stays bounded
         - background retry rails (`local_tmux`, `github_runner`) preserve runner-specific ticket state
+        - external retry rails surface phase-aware next-step guidance through `/orch status` and `/orch bgx-status`
         - run lock / slot saturation block retry coherently
+        - background queue claim ordering keeps retry priority bounded without starving older queued work
       - the old `T-030` blocker remains captured only as legacy reference inside the scenario file
   - `review/R3_manual_followup_preview.md`
     - `bounded_replay_pass`
@@ -100,3 +102,5 @@
   - `FollowupBrief.status`, when present
   - `reentry_rails_summary`
   - background ticket / runner target / launch spec / evidence bundle, when used
+  - external phase / next-step parity, when a non-local runner is used
+  - queue scheduling evidence, when bounded replay covers retry ordering
