@@ -39,33 +39,21 @@ from control_dashboard_state_common import (
 from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
 
 
-_SLOT_RUNNER_TARGETS = ["local_tmux", "github_runner", "remote_worker"]
+def _selected_slot_runner(entry: Dict[str, Any], task: Dict[str, Any]) -> str:
+    task_runner = str(task.get("background_run_runner_target", "")).strip().lower()
+    if task_runner in background_runs.SLOT_RUNNER_TARGETS:
+        return task_runner
+    preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
+    return preferred_runner if preferred_runner in background_runs.SLOT_RUNNER_TARGETS else ""
 
 
-def _background_slot_limit(entry: Dict[str, Any]) -> int:
-    try:
-        value = int(entry.get("background_runner_slot_limit", 1) or 1)
-    except Exception:
-        value = 1
-    return max(1, min(value, 32))
-
-
-def _background_slot_active(team_dir: Path) -> int:
-    return background_runs.count_background_run_tickets(
+def _background_slot_snapshot(entry: Dict[str, Any], task: Dict[str, Any], team_dir: Path) -> Dict[str, Any]:
+    return background_runs.summarize_background_runner_slots(
         background_runs.background_runs_state_path(team_dir),
+        entry,
+        selected_runner=_selected_slot_runner(entry, task),
         statuses=["queued", "dispatching", "running"],
-        runner_targets=_SLOT_RUNNER_TARGETS,
     )
-
-
-def _background_slot_pressure(limit: int, active: int) -> str:
-    safe_limit = max(1, int(limit or 1))
-    safe_active = max(0, int(active or 0))
-    if safe_active >= safe_limit:
-        return f"saturated ({safe_active}/{safe_limit})"
-    if safe_active > 0:
-        return f"active ({safe_active}/{safe_limit})"
-    return f"idle (0/{safe_limit})"
 
 
 def _observatory_lane_rows(snapshot: Dict[str, Any]) -> List[LaneObservatoryDTO]:
@@ -225,12 +213,19 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         rate_limit_summary = _task_rate_limit_summary(task)
         run_lock_mode = run_lock.project_run_lock_mode(entry)
         run_lock_note = run_lock.project_run_lock_note(entry) or "-"
-        background_slot_limit = _background_slot_limit(entry)
+        background_slot_limit = 1
         background_slot_active = 0
+        background_slot_pressure = "not_applicable | -"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
-            background_slot_active = _background_slot_active(Path(team_dir_raw))
-        background_slot_pressure = _background_slot_pressure(background_slot_limit, background_slot_active)
+            slot_snapshot = _background_slot_snapshot(entry, task, Path(team_dir_raw))
+            background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+            background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
+            background_slot_pressure = (
+                (str(slot_snapshot.get("selected_pressure", "")).strip() or "not_applicable")
+                + " | "
+                + (str(slot_snapshot.get("summary", "")).strip() or "-")
+            )
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),

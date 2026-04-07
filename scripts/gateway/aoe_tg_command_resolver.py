@@ -343,9 +343,9 @@ def resolve_message_command(
                 elif sub in {"bg-slots", "background-slots"}:
                     out.cmd = "orch-bg-slots"
                     out.orch_target = tail[0].strip() if tail else None
-                    out.rest = tail[1].strip() if len(tail) > 1 else ""
+                    out.rest = " ".join(part.strip() for part in tail[1:] if part.strip())
                     if not out.orch_target or not out.rest:
-                        raise RuntimeError("usage: /orch bg-slots <O#|name> <limit>")
+                        raise RuntimeError("usage: /orch bg-slots <O#|name> [<local_tmux|github_runner|remote_worker>] <limit>")
                 elif sub in {"status", "stat"}:
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None

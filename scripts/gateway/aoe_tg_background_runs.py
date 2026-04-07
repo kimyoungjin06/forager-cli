@@ -25,6 +25,11 @@ BACKGROUND_WORKER_STATUSES = (
     "stopped",
     "error",
 )
+SLOT_RUNNER_TARGETS = (
+    "local_tmux",
+    "github_runner",
+    "remote_worker",
+)
 
 
 def background_runs_state_path(team_dir: Path, *, filename: str = BACKGROUND_RUNS_FILENAME) -> Path:
@@ -61,6 +66,84 @@ def _normalize_int(raw: Any, default: int = 0) -> int:
     except Exception:
         value = int(default)
     return max(0, value)
+
+
+def normalize_background_runner_slot_limit(raw: Any, default: int = 1, *, max_value: int = 32) -> int:
+    try:
+        value = int(raw or default)
+    except Exception:
+        value = int(default)
+    return max(1, min(value, max_value))
+
+
+def normalize_background_runner_slot_limits(
+    raw: Any,
+    *,
+    default_limit: int = 1,
+    max_value: int = 32,
+) -> Dict[str, int]:
+    source = raw if isinstance(raw, dict) else {}
+    normalized: Dict[str, int] = {}
+    for runner_target in SLOT_RUNNER_TARGETS:
+        normalized[runner_target] = normalize_background_runner_slot_limit(
+            source.get(runner_target),
+            default_limit,
+            max_value=max_value,
+        )
+    return normalized
+
+
+def background_runner_slot_limit_for_entry(
+    entry: Dict[str, Any] | None,
+    runner_target: str = "",
+    *,
+    default_limit: int = 1,
+    max_value: int = 32,
+) -> int:
+    row = entry if isinstance(entry, dict) else {}
+    default_slot_limit = normalize_background_runner_slot_limit(
+        row.get("background_runner_slot_limit"),
+        default_limit,
+        max_value=max_value,
+    )
+    runner = str(runner_target or "").strip().lower()
+    if runner not in SLOT_RUNNER_TARGETS:
+        return default_slot_limit
+    limits = normalize_background_runner_slot_limits(
+        row.get("background_runner_slot_limits"),
+        default_limit=default_slot_limit,
+        max_value=max_value,
+    )
+    return int(limits.get(runner, default_slot_limit) or default_slot_limit)
+
+
+def background_runner_slot_limits_for_entry(
+    entry: Dict[str, Any] | None,
+    *,
+    default_limit: int = 1,
+    max_value: int = 32,
+) -> Dict[str, int]:
+    row = entry if isinstance(entry, dict) else {}
+    default_slot_limit = normalize_background_runner_slot_limit(
+        row.get("background_runner_slot_limit"),
+        default_limit,
+        max_value=max_value,
+    )
+    return normalize_background_runner_slot_limits(
+        row.get("background_runner_slot_limits"),
+        default_limit=default_slot_limit,
+        max_value=max_value,
+    )
+
+
+def background_runner_slot_pressure(limit: int, active: int) -> str:
+    safe_limit = max(1, int(limit or 1))
+    safe_active = max(0, int(active or 0))
+    if safe_active >= safe_limit:
+        return f"saturated ({safe_active}/{safe_limit})"
+    if safe_active > 0:
+        return f"active ({safe_active}/{safe_limit})"
+    return f"idle (0/{safe_limit})"
 
 
 def load_background_runs_state(path: Path) -> Dict[str, Any]:
@@ -316,6 +399,78 @@ def count_background_run_tickets(
             continue
         count += 1
     return count
+
+
+def count_background_run_tickets_by_runner(
+    path: Path,
+    *,
+    statuses: List[str] | None = None,
+    runner_targets: List[str] | None = None,
+) -> Dict[str, int]:
+    allowed_targets = [
+        str(item or "").strip().lower()
+        for item in list(runner_targets or SLOT_RUNNER_TARGETS)
+        if str(item or "").strip()
+    ]
+    counts: Dict[str, int] = {target: 0 for target in allowed_targets}
+    for snapshot in list_background_run_tickets(path, statuses=statuses):
+        row_target = str(snapshot.get("runner_target", "")).strip().lower()
+        if row_target not in counts:
+            continue
+        counts[row_target] = int(counts.get(row_target, 0) or 0) + 1
+    return counts
+
+
+def summarize_background_runner_slots(
+    path: Path,
+    entry: Dict[str, Any] | None,
+    *,
+    selected_runner: str = "",
+    statuses: List[str] | None = None,
+    max_value: int = 32,
+) -> Dict[str, Any]:
+    limits = background_runner_slot_limits_for_entry(
+        entry,
+        default_limit=1,
+        max_value=max_value,
+    )
+    active_by_runner = count_background_run_tickets_by_runner(
+        path,
+        statuses=statuses,
+        runner_targets=list(SLOT_RUNNER_TARGETS),
+    )
+    selected = str(selected_runner or "").strip().lower()
+    if selected not in SLOT_RUNNER_TARGETS:
+        selected = ""
+    selected_limit = (
+        int(limits.get(selected, 0) or 0)
+        if selected
+        else normalize_background_runner_slot_limit(
+            (entry or {}).get("background_runner_slot_limit") if isinstance(entry, dict) else 1,
+            1,
+            max_value=max_value,
+        )
+    )
+    selected_active = int(active_by_runner.get(selected, 0) or 0) if selected else 0
+    summary = " ".join(
+        f"{runner_target}={int(active_by_runner.get(runner_target, 0) or 0)}/{int(limits.get(runner_target, 1) or 1)}"
+        for runner_target in SLOT_RUNNER_TARGETS
+    )
+    return {
+        "selected_runner": selected,
+        "selected_limit": selected_limit,
+        "selected_active": selected_active,
+        "selected_pressure": background_runner_slot_pressure(selected_limit, selected_active),
+        "default_limit": normalize_background_runner_slot_limit(
+            (entry or {}).get("background_runner_slot_limit") if isinstance(entry, dict) else 1,
+            1,
+            max_value=max_value,
+        ),
+        "limits_by_runner": limits,
+        "active_by_runner": active_by_runner,
+        "total_active": sum(int(active_by_runner.get(key, 0) or 0) for key in SLOT_RUNNER_TARGETS),
+        "summary": summary,
+    }
 
 
 def claim_background_run_ticket(

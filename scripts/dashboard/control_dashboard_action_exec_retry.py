@@ -163,14 +163,6 @@ def _run_lock_block_response(
     )
 
 
-def _background_slot_limit(entry: Dict[str, Any]) -> int:
-    try:
-        value = int(entry.get("background_runner_slot_limit", 1) or 1)
-    except Exception:
-        value = 1
-    return max(1, min(value, 8))
-
-
 def _background_slots_exhausted_response(
     *,
     entry: Dict[str, Any],
@@ -202,8 +194,8 @@ def _background_slots_exhausted_response(
                 "run_source_request_id": transition.get("run_source_request_id", "-"),
                 "run_force_mode": transition.get("run_force_mode", "-"),
             },
-            "next_step": f"/orch bg-slots {alias} {slot_limit + 1 if slot_limit < 8 else slot_limit}",
-            "remediation": f"background runner slots are saturated ({active_slots}/{slot_limit}); wait for current jobs to finish or raise the slot limit deliberately",
+            "next_step": f"/orch bg-slots {alias} {runner_target} {slot_limit + 1 if slot_limit < 8 else slot_limit}",
+            "remediation": f"background runner slots are saturated for {runner_target} ({active_slots}/{slot_limit}); wait for current jobs to finish or raise that runner limit deliberately",
             "outcome": {
                 "kind": "background_slots",
                 "status": "blocked",
@@ -307,12 +299,15 @@ def _maybe_execute_retry_background_runner(
             payload=payload,
             path=action_path,
         )
-    slot_limit = _background_slot_limit(entry)
-    active_slots = background_runs.count_background_run_tickets(
+    slot_snapshot = background_runs.summarize_background_runner_slots(
         background_runs.background_runs_state_path(Path(team_dir_raw)),
+        entry,
+        selected_runner=selected_runner,
         statuses=["dispatching", "running"],
-        runner_targets=["local_tmux", "github_runner", "remote_worker"],
+        max_value=8,
     )
+    slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+    active_slots = int(slot_snapshot.get("selected_active", 0) or 0)
     if active_slots >= slot_limit:
         return _background_slots_exhausted_response(
             entry=entry,

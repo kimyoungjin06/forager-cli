@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional
 
 from aoe_tg_background_runs import (
     background_runs_state_path,
-    count_background_run_tickets,
+    summarize_background_runner_slots,
     upsert_background_run_ticket,
 )
 from aoe_tg_local_background_worker import (
@@ -114,19 +114,18 @@ def maybe_handle_no_wait_dispatch_detach(
     if selected_runner_target != "local_tmux":
         launch_spec = fallback_launch_spec
 
-    slot_limit = 1
-    try:
-        slot_limit = max(1, min(int(entry.get("background_runner_slot_limit", 1) or 1), 8))
-    except Exception:
-        slot_limit = 1
     if selected_runner_target in {"local_tmux", "github_runner", "remote_worker"} and queue_path:
-        active_slots = count_background_run_tickets(
+        slot_snapshot = summarize_background_runner_slots(
             queue_path,
+            entry,
+            selected_runner=selected_runner_target,
             statuses=["dispatching", "running"],
-            runner_targets=["local_tmux", "github_runner", "remote_worker"],
+            max_value=8,
         )
+        slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+        active_slots = int(slot_snapshot.get("selected_active", 0) or 0)
         if active_slots >= slot_limit:
-            reason = f"background runner slots exhausted ({active_slots}/{slot_limit})"
+            reason = f"background runner slots exhausted for {selected_runner_target} ({active_slots}/{slot_limit})"
             if isinstance(provisional_task, dict):
                 ticket = build_background_run_ticket(
                     request_id=str(provisional_req_id or "").strip(),
@@ -153,7 +152,7 @@ def maybe_handle_no_wait_dispatch_detach(
                 if not args.dry_run:
                     save_manager_state(args.manager_state_file, manager_state)
             send(
-                f"detached dispatch blocked\n- runtime: {key}\n- reason: {reason}\n- next: /orch bg-slots {orch_ref} {slot_limit + 1 if slot_limit < 8 else slot_limit}",
+                f"detached dispatch blocked\n- runtime: {key}\n- reason: {reason}\n- next: /orch bg-slots {orch_ref} {selected_runner_target} {slot_limit + 1 if slot_limit < 8 else slot_limit}",
                 context="dispatch-detach blocked",
             )
             log_event(

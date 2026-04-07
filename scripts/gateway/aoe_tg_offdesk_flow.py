@@ -15,8 +15,8 @@ from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
 from aoe_tg_background_runs import (
     background_runs_state_path,
     background_worker_state_path,
-    count_background_run_tickets,
     summarize_background_runs_state,
+    summarize_background_runner_slots,
     summarize_background_worker_state,
 )
 from aoe_tg_ops_policy import list_ops_projects, summarize_ops_scope
@@ -710,24 +710,22 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     )
     run_lock_mode = project_run_lock_mode(entry)
     run_lock_note = project_run_lock_note(entry)
-    try:
-        background_slot_limit = max(1, min(int(entry.get("background_runner_slot_limit", 1) or 1), 32))
-    except Exception:
-        background_slot_limit = 1
-    background_slot_active = (
-        count_background_run_tickets(
+    preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
+    slot_runner_target = preferred_runner if preferred_runner in _SLOT_RUNNER_TARGETS else ""
+    slot_snapshot = (
+        summarize_background_runner_slots(
             background_runs_state_path(team_dir),
+            entry,
+            selected_runner=slot_runner_target,
             statuses=["queued", "dispatching", "running"],
-            runner_targets=_SLOT_RUNNER_TARGETS,
         )
         if team_dir is not None
-        else 0
+        else {}
     )
-    background_slot_pressure = (
-        f"saturated ({background_slot_active}/{background_slot_limit})"
-        if background_slot_active >= background_slot_limit
-        else (f"active ({background_slot_active}/{background_slot_limit})" if background_slot_active > 0 else f"idle (0/{background_slot_limit})")
-    )
+    background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+    background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
+    background_slot_pressure = str(slot_snapshot.get("selected_pressure", "")).strip() or "not_applicable"
+    background_slot_summary = str(slot_snapshot.get("summary", "")).strip() or "-"
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -768,6 +766,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         attention.append("running")
         severity_score += 15
     queue_stale_count = int(queue_snapshot.get("stale_count", 0) or 0)
+    queue_target_counts = dict(queue_snapshot.get("target_counts", {})) if isinstance(queue_snapshot.get("target_counts"), dict) else {}
+    local_background_queue_depth = max(0, int(queue_target_counts.get("local_background", 0) or 0))
     if queue_stale_count > 0:
         status = "warn" if status == "ready" else status
         notes.append(f"background queue contains stale tickets ({queue_stale_count})")
@@ -781,19 +781,21 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         notes.append(run_lock_note or "test_only run lock is active")
         attention.append("run_lock:test_only")
         severity_score += 20
-    if background_slot_active >= background_slot_limit:
+    if slot_runner_target and background_slot_active >= background_slot_limit:
         status = "warn" if status == "ready" else status
-        notes.append(f"background runner slots saturated ({background_slot_active}/{background_slot_limit})")
-        attention.append(f"slots:{background_slot_active}/{background_slot_limit}")
+        notes.append(
+            f"background runner slots saturated for {slot_runner_target} ({background_slot_active}/{background_slot_limit})"
+        )
+        attention.append(f"slots:{slot_runner_target}:{background_slot_active}/{background_slot_limit}")
         severity_score += 25
     if worker_status in {"stale", "error"}:
         status = "warn" if status == "ready" else status
         notes.append(worker_summary or f"background worker is {worker_status}")
         attention.append(f"bgw:{worker_status}")
         severity_score += 30
-    elif queue_depth > 0 and worker_status in {"", "-", "stopped"}:
+    elif local_background_queue_depth > 0 and worker_status in {"", "-", "stopped"}:
         status = "warn" if status == "ready" else status
-        notes.append(f"background worker is stopped while queue depth is {queue_depth}")
+        notes.append(f"background worker is stopped while local background queue depth is {local_background_queue_depth}")
         attention.append("bgw:stopped")
         severity_score += 25
     if counts["blocked"] > 0:
@@ -975,6 +977,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         background_worker_summary=worker_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
+        background_slot_runner_target=slot_runner_target,
         background_slot_limit=background_slot_limit,
         background_slot_active=background_slot_active,
     )
@@ -990,7 +993,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"  background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}",
         f"  run_lock: {run_lock_mode}",
         f"  run_lock_note: {run_lock_note or '-'}",
-        f"  background_slots: active={background_slot_active} limit={background_slot_limit} | {background_slot_pressure}",
+        f"  background_slots: runner={slot_runner_target or '-'} active={background_slot_active} limit={background_slot_limit} | {background_slot_pressure} | {background_slot_summary}",
         f"  background_worker: {worker_summary or '-'}",
         f"  proposal_triage: priorities={proposal_triage.get('priority_summary', '-')} | kinds={proposal_triage.get('kind_summary', '-')}",
         f"  syncback: done={syncback_counts['done']} reopen={syncback_counts['reopen']} append={syncback_counts['append']} blocked_notes={syncback_counts['blocked']}",

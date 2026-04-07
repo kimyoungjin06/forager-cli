@@ -40,33 +40,18 @@ from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
 from control_dashboard_state_task_builders import _build_runtime_recent_task_rows
 
 
-_SLOT_RUNNER_TARGETS = ["local_tmux", "github_runner", "remote_worker"]
+def _preferred_slot_runner(entry: Dict[str, Any]) -> str:
+    token = str(entry.get("background_runner_target", "")).strip().lower()
+    return token if token in background_runs.SLOT_RUNNER_TARGETS else ""
 
 
-def _background_slot_limit(entry: Dict[str, Any]) -> int:
-    try:
-        value = int(entry.get("background_runner_slot_limit", 1) or 1)
-    except Exception:
-        value = 1
-    return max(1, min(value, 32))
-
-
-def _background_slot_active(team_dir: Path) -> int:
-    return background_runs.count_background_run_tickets(
+def _background_slot_snapshot(entry: Dict[str, Any], team_dir: Path) -> Dict[str, Any]:
+    return background_runs.summarize_background_runner_slots(
         background_runs.background_runs_state_path(team_dir),
+        entry,
+        selected_runner=_preferred_slot_runner(entry),
         statuses=["queued", "dispatching", "running"],
-        runner_targets=_SLOT_RUNNER_TARGETS,
     )
-
-
-def _background_slot_pressure(limit: int, active: int) -> str:
-    safe_limit = max(1, int(limit or 1))
-    safe_active = max(0, int(active or 0))
-    if safe_active >= safe_limit:
-        return f"saturated ({safe_active}/{safe_limit})"
-    if safe_active > 0:
-        return f"active ({safe_active}/{safe_limit})"
-    return f"idle (0/{safe_limit})"
 
 
 def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any]) -> List[RuntimeCardDTO]:
@@ -94,13 +79,12 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         run_lock_note = "-"
         background_slot_limit = 1
         background_slot_active = 0
-        background_slot_pressure = "idle (0/1)"
+        background_slot_pressure = "not_applicable"
         if resolved is not None:
             _key, entry = resolved
             team_dir = Path(str(entry.get("team_dir", "")).strip() or ".")
             run_lock_mode = run_lock.project_run_lock_mode(entry)
             run_lock_note = run_lock.project_run_lock_note(entry) or "-"
-            background_slot_limit = _background_slot_limit(entry)
             if str(entry.get("team_dir", "")).strip():
                 snapshot = background_runs.summarize_background_runs_state(
                     background_runs.background_runs_state_path(team_dir)
@@ -108,8 +92,14 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 queue_summary = str(snapshot.get("summary", "")).strip() or "-"
                 queue_depth = int(snapshot.get("depth", 0) or 0)
                 queue_stale_count = int(snapshot.get("stale_count", 0) or 0)
-                background_slot_active = _background_slot_active(team_dir)
-                background_slot_pressure = _background_slot_pressure(background_slot_limit, background_slot_active)
+                slot_snapshot = _background_slot_snapshot(entry, team_dir)
+                background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+                background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
+                background_slot_pressure = (
+                    (str(slot_snapshot.get("selected_pressure", "")).strip() or "not_applicable")
+                    + " | "
+                    + (str(slot_snapshot.get("summary", "")).strip() or "-")
+                )
                 worker_snapshot = background_runs.summarize_background_worker_state(
                     background_runs.background_worker_state_path(team_dir)
                 )
@@ -380,15 +370,23 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         queue_snapshot = background_runs.summarize_background_runs_state(
             background_runs.background_runs_state_path(team_dir)
         )
-        background_slot_active = _background_slot_active(team_dir)
+        slot_snapshot = _background_slot_snapshot(entry, team_dir)
+        background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+        background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
+        background_slot_pressure = (
+            (str(slot_snapshot.get("selected_pressure", "")).strip() or "not_applicable")
+            + " | "
+            + (str(slot_snapshot.get("summary", "")).strip() or "-")
+        )
         worker_snapshot = background_runs.summarize_background_worker_state(
             background_runs.background_worker_state_path(team_dir)
         )
     else:
         queue_snapshot = {}
         worker_snapshot = {}
+        background_slot_limit = 1
         background_slot_active = 0
-    background_slot_limit = _background_slot_limit(entry)
+        background_slot_pressure = "not_applicable | -"
     run_lock_mode = run_lock.project_run_lock_mode(entry)
     run_lock_note = run_lock.project_run_lock_note(entry) or "-"
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
@@ -536,7 +534,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,
         background_slot_active=background_slot_active,
-        background_slot_pressure=_background_slot_pressure(background_slot_limit, background_slot_active),
+        background_slot_pressure=background_slot_pressure,
         background_worker_status=str(worker_snapshot.get("status", "")).strip() or "-",
         background_worker_summary=str(worker_snapshot.get("summary", "")).strip() or "-",
         background_queue_summary=str(queue_snapshot.get("summary", "")).strip() or "-",

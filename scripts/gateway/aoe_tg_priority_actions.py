@@ -124,6 +124,7 @@ def offdesk_priority_action_snapshot(
     background_worker_summary: str = "",
     run_lock_mode: str = "",
     run_lock_note: str = "",
+    background_slot_runner_target: str = "",
     background_slot_limit: int = 1,
     background_slot_active: int = 0,
     active_task_background_run_status: str = "",
@@ -142,9 +143,12 @@ def offdesk_priority_action_snapshot(
     worker_summary = str(background_worker_summary or "").strip()
     lock_mode = str(run_lock_mode or "").strip().lower()
     lock_note = str(run_lock_note or "").strip()
+    slot_runner = str(background_slot_runner_target or "").strip().lower()
     slot_limit = max(1, int(background_slot_limit or 1))
     slot_active = max(0, int(background_slot_active or 0))
-    slot_saturated = slot_active >= slot_limit
+    slot_saturated = slot_runner in {"local_tmux", "github_runner", "remote_worker"} and slot_active >= slot_limit
+    queue_targets = background_queue_runner_targets if isinstance(background_queue_runner_targets, dict) else {}
+    local_background_queue_depth = max(0, int(queue_targets.get("local_background", 0) or 0))
     if brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
         reason = brief_decision
         if not reason and brief_blocked:
@@ -205,9 +209,12 @@ def offdesk_priority_action_snapshot(
             "reason": lock_note or "test_only run lock is active",
         }
     if task_requires_launch and slot_saturated:
+        reason = f"background runner slots are saturated ({slot_active}/{slot_limit})"
+        if slot_runner:
+            reason = f"background runner slots are saturated for {slot_runner} ({slot_active}/{slot_limit})"
         return {
             "action": f"/orch status {alias}",
-            "reason": f"background runner slots are saturated ({slot_active}/{slot_limit})",
+            "reason": reason,
         }
     if task_action:
         return task_priority
@@ -217,18 +224,20 @@ def offdesk_priority_action_snapshot(
             "reason": lock_note or "test_only run lock is active",
         }
     if slot_saturated:
+        reason = f"background runner slots are saturated ({slot_active}/{slot_limit})"
+        if slot_runner:
+            reason = f"background runner slots are saturated for {slot_runner} ({slot_active}/{slot_limit})"
         return {
             "action": f"/orch status {alias}",
-            "reason": f"background runner slots are saturated ({slot_active}/{slot_limit})",
+            "reason": reason,
         }
     if int(background_queue_depth or 0) > 0:
-        targets = background_queue_runner_targets if isinstance(background_queue_runner_targets, dict) else {}
         target_summary = ",".join(
             f"{str(key).strip()}={int(value or 0)}"
-            for key, value in sorted(targets.items())
+            for key, value in sorted(queue_targets.items())
             if str(key).strip() and int(value or 0) > 0
         )
-        if worker_status in {"", "-", "stopped"}:
+        if local_background_queue_depth > 0 and worker_status in {"", "-", "stopped"}:
             reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
             if target_summary:
                 reason += f" ({target_summary})"

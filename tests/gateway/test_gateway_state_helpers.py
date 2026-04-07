@@ -2691,12 +2691,13 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         background_queue_depth=1,
         background_queue_stale_count=0,
         background_queue_runner_targets={"local_tmux": 1},
+        background_slot_runner_target="local_tmux",
         background_slot_limit=1,
         background_slot_active=1,
     )
     assert saturated_retry_priority == {
         "action": "/orch status O12",
-        "reason": "background runner slots are saturated (1/1)",
+        "reason": "background runner slots are saturated for local_tmux (1/1)",
     }
     stopped_worker_priority = priority_actions.offdesk_priority_action_snapshot(
         alias="O10",
@@ -2792,6 +2793,37 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
     assert external_pickup_priority == {
         "action": "/orch status O13",
         "reason": "background_run_acks/github-runner-bgt-013.json",
+    }
+    external_queue_priority = priority_actions.offdesk_priority_action_snapshot(
+        alias="O14",
+        active_task_label="",
+        active_task_tf_phase="queued",
+        active_task_execution_brief_status="",
+        active_task_execution_brief_blocked_slice=[],
+        active_task_execution_brief_operator_decision="",
+        active_task_targets=None,
+        active_task_rate_limit=None,
+        syncback_pending=False,
+        followup_count=0,
+        proposal_count=0,
+        bootstrap_recommended=False,
+        blocked_count=0,
+        open_count=1,
+        sync_quality="canonical",
+        sync_quality_warn=False,
+        sync_stale=False,
+        canonical_exists=True,
+        include_ok=True,
+        last_sync_mode="scenario",
+        background_queue_depth=1,
+        background_queue_stale_count=0,
+        background_queue_runner_targets={"github_runner": 1},
+        background_worker_status="stopped",
+        background_worker_summary="status=stopped | target=local_background | queue=0",
+    )
+    assert external_queue_priority == {
+        "action": "/orch status O14",
+        "reason": "background queue has 1 queued/running tickets (github_runner=1)",
     }
 
 
@@ -3744,6 +3776,12 @@ def test_parse_focus_and_unlock_commands() -> None:
     assert tg_parse.parse_cli_message("aoe orch bg-runner O2 github_runner") == {"cmd": "orch-bg-runner", "orch": "O2", "runner_target": "github_runner"}
     assert tg_parse.parse_cli_message("aoe orch bg-runner O2 remote_worker") == {"cmd": "orch-bg-runner", "orch": "O2", "runner_target": "remote_worker"}
     assert tg_parse.parse_cli_message("aoe orch bg-slots O2 2") == {"cmd": "orch-bg-slots", "orch": "O2", "slot_limit": "2"}
+    assert tg_parse.parse_cli_message("aoe orch bg-slots O2 github_runner 3") == {
+        "cmd": "orch-bg-slots",
+        "orch": "O2",
+        "runner_target": "github_runner",
+        "slot_limit": "3",
+    }
     assert tg_parse.parse_cli_message("aoe orch run-lock O2 test_only") == {"cmd": "orch-run-lock", "orch": "O2", "run_lock_mode": "test_only"}
 
     manager_state = _empty_state()

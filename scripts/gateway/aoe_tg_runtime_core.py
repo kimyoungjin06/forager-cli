@@ -23,6 +23,14 @@ def _normalize_slot_limit(raw: Any, default: int = 1) -> int:
     return max(1, min(value, 32))
 
 
+def _normalize_slot_limits_map(raw: Any, default: int = 1) -> Dict[str, int]:
+    source = raw if isinstance(raw, dict) else {}
+    normalized: Dict[str, int] = {}
+    for key in ("local_tmux", "github_runner", "remote_worker"):
+        normalized[key] = _normalize_slot_limit(source.get(key), default)
+    return normalized
+
+
 def resolve_project_root(raw: str) -> Path:
     return Path(raw).expanduser().resolve()
 
@@ -176,6 +184,7 @@ def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callab
                 "project_alias": "O1",
                 "background_runner_target": "local_background",
                 "background_runner_slot_limit": 1,
+                "background_runner_slot_limits": {},
                 "run_lock_mode": "open",
                 "project_root": str(project_root),
                 "team_dir": str(team_dir),
@@ -483,6 +492,10 @@ def load_manager_state(
             "background_runner_target": str(raw_entry.get("background_runner_target", "local_background")).strip().lower()
             or "local_background",
             "background_runner_slot_limit": _normalize_slot_limit(raw_entry.get("background_runner_slot_limit"), 1),
+            "background_runner_slot_limits": _normalize_slot_limits_map(
+                raw_entry.get("background_runner_slot_limits"),
+                _normalize_slot_limit(raw_entry.get("background_runner_slot_limit"), 1),
+            ),
             "run_lock_mode": str(raw_entry.get("run_lock_mode", "open")).strip().lower() or "open",
             "project_root": str(root_path),
             "team_dir": str(Path(td).expanduser().resolve()),
@@ -586,6 +599,7 @@ def ensure_default_project_registered(
             "project_alias": "O1",
             "background_runner_target": "local_background",
             "background_runner_slot_limit": 1,
+            "background_runner_slot_limits": {},
             "run_lock_mode": "open",
             "project_root": str(project_root),
             "team_dir": str(team_dir),
@@ -614,6 +628,10 @@ def ensure_default_project_registered(
             entry["project_alias"] = normalize_project_alias(str(entry.get("project_alias", "")))
             entry["background_runner_target"] = str(entry.get("background_runner_target", "local_background")).strip().lower() or "local_background"
             entry["background_runner_slot_limit"] = _normalize_slot_limit(entry.get("background_runner_slot_limit"), 1)
+            entry["background_runner_slot_limits"] = _normalize_slot_limits_map(
+                entry.get("background_runner_slot_limits"),
+                entry["background_runner_slot_limit"],
+            )
             entry["run_lock_mode"] = str(entry.get("run_lock_mode", "open")).strip().lower() or "open"
             entry["system_project"] = bool_from_json(entry.get("system_project"), str(entry.get("name", "")).strip().lower() == "default")
             entry["ops_hidden"] = bool_from_json(entry.get("ops_hidden"), bool(entry.get("system_project")))

@@ -178,7 +178,13 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
     runner_toggle = "local_background" if runner_pref == "local_tmux" else "local_tmux"
     run_lock_mode = project_run_lock_mode(entry)
     run_lock_toggle = "open" if run_lock_mode == "test_only" else "test_only"
-    slot_limit = _background_runner_slot_limit(entry)
+    slot_runner_target = runner_pref if runner_pref in {"local_tmux", "github_runner", "remote_worker"} else ""
+    slot_limit = _background_runner_slot_limit_for_target(entry, slot_runner_target)
+    slot_bump_command = (
+        f"/orch bg-slots {alias} {slot_runner_target} {slot_limit + 1 if slot_limit < _BACKGROUND_SLOT_MAX else _BACKGROUND_SLOT_MIN}"
+        if slot_runner_target
+        else f"/orch bg-slots {alias} {slot_limit + 1 if slot_limit < _BACKGROUND_SLOT_MAX else _BACKGROUND_SLOT_MIN}"
+    )
     issue = project_runtime_issue(entry)
     if issue:
         keyboard: List[List[Dict[str, str]]] = [
@@ -191,7 +197,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
             [{"text": f"/todo {alias}"}, {"text": f"/todo {alias} followup"}, {"text": f"/orch monitor {alias}"}],
             ([{"text": f"/orch bgq-clean {alias}"}] if queue_stale_count > 0 else []),
             [{"text": f"/orch bg-runner {alias} {runner_toggle}"}],
-            [{"text": f"/orch bg-slots {alias} {slot_limit + 1 if slot_limit < _BACKGROUND_SLOT_MAX else _BACKGROUND_SLOT_MIN}"}],
+            [{"text": slot_bump_command}],
             [{"text": f"/orch run-lock {alias} {run_lock_toggle}"}],
             [{"text": f"/orch bgw-status {alias}"}]
             + (
@@ -219,11 +225,46 @@ def _background_runner_preference(entry: Dict[str, Any]) -> str:
 
 
 def _background_runner_slot_limit(entry: Dict[str, Any]) -> int:
-    try:
-        value = int(entry.get("background_runner_slot_limit", 1) or 1)
-    except Exception:
-        value = 1
-    return max(_BACKGROUND_SLOT_MIN, min(value, _BACKGROUND_SLOT_MAX))
+    return background_runs.background_runner_slot_limit_for_entry(
+        entry,
+        "",
+        default_limit=1,
+        max_value=_BACKGROUND_SLOT_MAX,
+    )
+
+
+def _background_runner_slot_limit_for_target(entry: Dict[str, Any], runner_target: str) -> int:
+    return background_runs.background_runner_slot_limit_for_entry(
+        entry,
+        runner_target,
+        default_limit=1,
+        max_value=_BACKGROUND_SLOT_MAX,
+    )
+
+
+def _background_runner_slot_limits(entry: Dict[str, Any]) -> Dict[str, int]:
+    return background_runs.background_runner_slot_limits_for_entry(
+        entry,
+        default_limit=_background_runner_slot_limit(entry),
+        max_value=_BACKGROUND_SLOT_MAX,
+    )
+
+
+def _background_slot_command_target(rest: str) -> tuple[str, int] | None:
+    tokens = [str(part).strip() for part in str(rest or "").split() if str(part).strip()]
+    if not tokens:
+        return None
+    if len(tokens) == 1:
+        try:
+            return "", max(_BACKGROUND_SLOT_MIN, min(int(tokens[0]), _BACKGROUND_SLOT_MAX))
+        except Exception:
+            return None
+    if len(tokens) == 2 and tokens[0].lower() in {"local_tmux", "github_runner", "remote_worker"}:
+        try:
+            return tokens[0].lower(), max(_BACKGROUND_SLOT_MIN, min(int(tokens[1]), _BACKGROUND_SLOT_MAX))
+        except Exception:
+            return None
+    return None
 
 
 def _background_runner_status(entry: Dict[str, Any], key: str) -> tuple[str, str, str]:
@@ -786,23 +827,32 @@ def handle_orch_task_command(
             worker_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
         run_lock_mode, run_lock_note = _project_run_lock_status(entry)
-        slot_limit = _background_runner_slot_limit(entry)
+        preferred_runner = _background_runner_preference(entry)
+        slot_runner_target = preferred_runner if preferred_runner in {"local_tmux", "github_runner", "remote_worker"} else ""
+        slot_limit = _background_runner_slot_limit_for_target(entry, slot_runner_target)
         active_slots = 0
+        slot_summary = "-"
         try:
             team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
             if str(team_dir):
-                active_slots = background_runs.count_background_run_tickets(
+                slot_snapshot = background_runs.summarize_background_runner_slots(
                     background_runs.background_runs_state_path(team_dir),
+                    entry,
+                    selected_runner=slot_runner_target,
                     statuses=["queued", "dispatching", "running"],
-                    runner_targets=["local_tmux", "github_runner", "remote_worker"],
+                    max_value=_BACKGROUND_SLOT_MAX,
                 )
+                active_slots = int(slot_snapshot.get("selected_active", 0) or 0)
+                slot_summary = str(slot_snapshot.get("summary", "")).strip() or "-"
         except Exception:
             active_slots = 0
+            slot_summary = "-"
         runner_line = f"background_runner: pref={runner_pref} | effective={runner_effective}\n"
         runner_note_line = f"background_runner_note: {runner_note}\n" if runner_note else ""
         run_lock_line = f"run_lock: {run_lock_mode}\n"
         run_lock_note_line = f"run_lock_note: {run_lock_note}\n" if run_lock_note else ""
-        slots_line = f"background_slots: limit={slot_limit} active={active_slots}\n"
+        slot_runner_prefix = f"runner={slot_runner_target} " if slot_runner_target else ""
+        slots_line = f"background_slots: {slot_runner_prefix}limit={slot_limit} active={active_slots} | {slot_summary}\n"
         external_snapshot = _latest_external_background_task_snapshot(entry)
         external_line = ""
         if external_snapshot:
@@ -1016,38 +1066,51 @@ def handle_orch_task_command(
                 return True
             raise
         alias = _project_alias(entry, key)
-        try:
-            target = max(_BACKGROUND_SLOT_MIN, min(int(str(rest or "").strip()), _BACKGROUND_SLOT_MAX))
-        except Exception:
+        parsed_slot = _background_slot_command_target(str(rest or "").strip())
+        if not parsed_slot:
             send(
-                "usage: /orch bg-slots <O#|name> <limit>",
+                "usage: /orch bg-slots <O#|name> [<local_tmux|github_runner|remote_worker>] <limit>",
                 context="orch-bg-slots usage",
                 with_menu=True,
             )
             return True
-        entry["background_runner_slot_limit"] = target
+        runner_target, target = parsed_slot
+        if runner_target:
+            limits = entry.get("background_runner_slot_limits") if isinstance(entry.get("background_runner_slot_limits"), dict) else {}
+            limits = dict(limits)
+            limits[runner_target] = target
+            entry["background_runner_slot_limits"] = limits
+        else:
+            entry["background_runner_slot_limit"] = target
         entry["updated_at"] = now_iso()
         save_manager_state(args.manager_state_file, manager_state)
         team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser().resolve()
+        detail = f"runner_target={runner_target} slot_limit={target}" if runner_target else f"slot_limit={target}"
         append_action_audit_row(
             team_dir,
             headline="Background Slots | configured",
             status="configured",
             outcome_kind="background_slots",
             outcome_status="configured",
-            outcome_reason_code=str(target),
-            outcome_detail=f"slot_limit={target}",
+            outcome_reason_code=(runner_target or str(target)),
+            outcome_detail=detail,
             next_step=f"/orch status {alias}",
-            remediation="future tmux/external background launches will respect this active slot limit",
-            source_command=f"/orch bg-slots {alias} {target}",
+            remediation="future background launches for the selected runner will respect this active slot limit",
+            source_command=(f"/orch bg-slots {alias} {runner_target} {target}" if runner_target else f"/orch bg-slots {alias} {target}"),
             link_label="runtime detail",
             link_href=_runtime_action_link(alias),
             at=now_iso(),
         )
+        limit_summary = " ".join(
+            f"{name}={value}"
+            for name, value in _background_runner_slot_limits(entry).items()
+        )
         send(
             "background slots\n"
             f"- runtime: {key}\n"
-            f"- limit: {target}\n"
+            + (f"- runner: {runner_target}\n" if runner_target else "")
+            + f"- limit: {target}\n"
+            + f"- by_runner: {limit_summary}\n"
             "next:\n"
             f"- /orch status {alias}",
             context="orch-bg-slots",

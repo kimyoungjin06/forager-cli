@@ -1148,27 +1148,33 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
         if sub in {"bg-slots", "background-slots"}:
             orch_name: Optional[str] = None
             slot_limit: Optional[str] = None
+            runner_target: Optional[str] = None
             i = 0
             while i < len(sub_argv):
                 tok = sub_argv[i]
                 if tok == "--orch":
                     i += 1
                     if i >= len(sub_argv):
-                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] <limit>")
+                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] [<local_tmux|github_runner|remote_worker>] <limit>")
                     orch_name = sub_argv[i].strip()
                 elif tok.startswith("--"):
                     raise RuntimeError(f"unknown option: {tok}")
                 else:
                     if orch_name is None:
                         orch_name = tok.strip()
+                    elif runner_target is None and tok.strip().lower() in {"local_tmux", "github_runner", "remote_worker"}:
+                        runner_target = tok.strip().lower()
                     elif slot_limit is None:
                         slot_limit = tok.strip()
                     else:
-                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] <limit>")
+                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] [<local_tmux|github_runner|remote_worker>] <limit>")
                 i += 1
             if not orch_name or not slot_limit:
-                raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] <limit>")
-            return {"cmd": "orch-bg-slots", "orch": orch_name, "slot_limit": slot_limit}
+                raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] [<local_tmux|github_runner|remote_worker>] <limit>")
+            payload = {"cmd": "orch-bg-slots", "orch": orch_name, "slot_limit": slot_limit}
+            if runner_target:
+                payload["runner_target"] = runner_target
+            return payload
 
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None

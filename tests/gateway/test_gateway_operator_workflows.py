@@ -251,6 +251,25 @@ def test_resolve_message_command_parses_slash_orch_bg_slots() -> None:
     assert resolved.rest == "2"
 
 
+def test_resolve_message_command_parses_slash_orch_bg_slots_with_runner() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bg-slots O2 github_runner 3",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bg-slots"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "github_runner 3"
+
+
 def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     state = _empty_state()
     project_root = tmp_path / "TwinPaper"
@@ -765,11 +784,20 @@ def test_orch_bg_runner_sets_preference_and_status_surfaces_effective_runner(tmp
     assert "- limit: 2" in slots_text
     assert state["projects"]["twinpaper"]["background_runner_slot_limit"] == 2
 
+    common_kwargs["rest"] = "github_runner 3"
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bg-slots", **common_kwargs) is True
+    slots_text, slots_context, _ = sent[-1]
+    assert slots_context == "orch-bg-slots"
+    assert "- runner: github_runner" in slots_text
+    assert "- limit: 3" in slots_text
+    assert state["projects"]["twinpaper"]["background_runner_slot_limits"]["github_runner"] == 3
+
     common_kwargs["rest"] = ""
     assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
     status_text, status_context, _ = sent[-1]
     assert status_context == "status"
-    assert "background_slots: limit=2 active=0" in status_text
+    assert "background_slots: runner=local_tmux limit=2 active=0" in status_text
+    assert "github_runner=0/3" in status_text
 
 
 def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
@@ -780,6 +808,22 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     team_dir = project_root / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
     (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    upsert_background_run_ticket(
+        team_dir / "background_runs.json",
+        build_background_run_ticket(
+            ticket_id="BGT-EXTERNAL-BUSY-001",
+            request_id="REQ-EXTERNAL-BUSY-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="dashboard_retry",
+            created_at="2026-03-13T18:54:00+0900",
+            created_by="dashboard:control",
+            source_surface="dashboard_retry",
+            status="running",
+        ),
+        now_iso=lambda: "2026-03-13T18:54:01+0900",
+    )
     manager_state = {
         "projects": {
             "twinpaper": {
@@ -941,8 +985,7 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     assert task["background_run_launch_spec_summary"].endswith("externalizable=yes")
     queue_file = team_dir / "background_runs.json"
     rows = json.loads(queue_file.read_text(encoding="utf-8")).get("runs") or []
-    assert len(rows) == 1
-    row = rows[0]
+    row = next(row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-DETACHED-TMUX-"))
     assert row["runner_target"] == "local_tmux"
     assert row["status"] == "running"
     assert row["launch_spec"]["externalizable"] is True
@@ -1408,7 +1451,7 @@ def test_no_wait_detach_blocks_when_background_slots_are_exhausted(
     assert handled is True
     assert sent
     assert sent[-1][0] == "dispatch-detach blocked"
-    assert "/orch bg-slots O2 2" in sent[-1][1]
+    assert "/orch bg-slots O2 local_tmux 2" in sent[-1][1]
     task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-SLOTS"]
     assert task["background_run_status"] == "failed"
     assert task["background_run_evidence_bundle"] == "status=failed | reason=background_runner_slots_exhausted"

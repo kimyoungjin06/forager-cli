@@ -1351,8 +1351,90 @@ def test_control_dashboard_post_retry_route_blocks_when_background_slots_are_exh
     assert headers["Content-Type"].startswith("application/json")
     assert payload["status"] == "blocked"
     assert payload["error"] == "background_runner_slots_exhausted"
-    assert payload["next_step"] == "/orch bg-slots O2 2"
-    assert "slots are saturated (1/1)" in payload["remediation"]
+    assert payload["next_step"] == "/orch bg-slots O2 local_tmux 2"
+    assert "slots are saturated for local_tmux (1/1)" in payload["remediation"]
+
+
+def test_control_dashboard_post_retry_route_ignores_busy_other_runner_slots(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["background_runner_target"] = "local_tmux"
+    state["projects"]["alpha"]["background_runner_slot_limit"] = 1
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    queue_path = Path(state["projects"]["alpha"]["team_dir"]) / "background_runs.json"
+    background_runs.upsert_background_run_ticket(
+        queue_path,
+        build_background_run_ticket(
+            ticket_id="BGT-EXT-001",
+            request_id="REQ-EXT-001",
+            project_key="alpha",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="dashboard_retry",
+            created_at="2026-04-07T14:00:00+09:00",
+            created_by="dashboard:control",
+            source_surface="dashboard_retry",
+            status="running",
+        ),
+        now_iso=lambda: "2026-04-07T14:00:01+09:00",
+    )
+
+    monkeypatch.setattr(retry_exec, "_now_iso", lambda: "2026-04-07T14:10:00+09:00")
+
+    class _GatewayMain:
+        @staticmethod
+        def save_manager_state(path, state):
+            Path(path).write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
+
+    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+        claimed = background_runs.claim_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            claimed_by=claimed_by,
+            source_surface=source_surface,
+        )
+        assert claimed["status"] == "dispatching"
+        return background_runs.advance_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            status="running",
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            created_by=claimed_by,
+            source_surface=source_surface,
+            runtime_handle="aoe_bg_retry_req_1",
+            runtime_summary="tmux_session=aoe_bg_retry_req_1",
+            evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_retry_req_1",
+        )
+
+    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["background_run"]["runner_target"] == "local_tmux"
 
 
 def test_control_dashboard_post_replan_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:
