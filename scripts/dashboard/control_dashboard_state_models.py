@@ -101,6 +101,8 @@ class RuntimeCardDTO:
     active_task_background_run_ticket_id: str
     active_task_background_run_runtime_handle: str
     active_task_background_run_runtime_summary: str
+    active_task_background_run_external_phase: str
+    active_task_background_run_external_note: str
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
@@ -188,6 +190,8 @@ class TaskDetailDTO:
     background_run_launch_mode: str = ""
     background_run_runtime_handle: str = ""
     background_run_runtime_summary: str = ""
+    background_run_external_phase: str = ""
+    background_run_external_note: str = ""
     background_run_evidence_bundle: str = ""
     background_run_evidence_artifacts: str = ""
     background_run_launch_spec_summary: str = ""
@@ -256,6 +260,8 @@ class RuntimeDetailDTO:
     active_task_background_run_launch_mode: str
     active_task_background_run_runtime_handle: str
     active_task_background_run_runtime_summary: str
+    active_task_background_run_external_phase: str
+    active_task_background_run_external_note: str
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
@@ -355,6 +361,8 @@ class RecoveryRuntimeDTO:
     active_task_background_run_ticket_id: str
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
+    active_task_background_run_external_phase: str
+    active_task_background_run_external_note: str
     active_task_background_run_launch_spec_summary: str
     run_lock_mode: str
     run_lock_note: str

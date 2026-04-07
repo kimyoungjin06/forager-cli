@@ -177,6 +177,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_background_run_ticket_id=str(row.get("active_task_background_run_ticket_id", "")).strip() or "-",
                 active_task_background_run_evidence_bundle=str(row.get("active_task_background_run_evidence_bundle", "")).strip() or "-",
                 active_task_background_run_evidence_artifacts=str(row.get("active_task_background_run_evidence_artifacts", "")).strip() or "-",
+                active_task_background_run_external_phase=str(row.get("active_task_background_run_external_phase", "")).strip() or "-",
+                active_task_background_run_external_note=str(row.get("active_task_background_run_external_note", "")).strip() or "-",
                 active_task_background_run_launch_spec_summary=str(row.get("active_task_background_run_launch_spec_summary", "")).strip() or "-",
                 run_lock_mode=str(row.get("run_lock_mode", "")).strip() or "-",
                 run_lock_note=str(row.get("run_lock_note", "")).strip() or "-",

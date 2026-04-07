@@ -28,6 +28,7 @@ PLAN_CONVERGENCE_STATUSES = ("ready", "blocked", "stalled", "failed", "pending")
 FOLLOWUP_BRIEF_VERSION = "2026-04-06.v1"
 FOLLOWUP_BRIEF_STATUSES = ("preview_only", "executable", "partially_executable")
 _BRIEF_BLOCKED_STATUSES = {"underspecified", "operator_decision_required", "infeasible"}
+_EXTERNAL_BACKGROUND_RUNNERS = {"github_runner", "remote_worker"}
 
 
 def _normalize_lane_status(raw: Any, default: str = "pending") -> str:
@@ -193,6 +194,57 @@ def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
     if background_part:
         summary_parts.append(background_part)
     return " | ".join(summary_parts)[:320]
+
+
+def _background_run_artifact_paths(task: Dict[str, Any]) -> List[str]:
+    return [
+        str(item).strip()
+        for item in (task.get("background_run_evidence_artifacts") or [])
+        if str(item).strip()
+    ]
+
+
+def _find_background_artifact(task: Dict[str, Any], prefix: str) -> str:
+    for item in _background_run_artifact_paths(task):
+        if item.startswith(prefix):
+            return item[:240]
+    return ""
+
+
+def derive_background_run_external_snapshot(task: Dict[str, Any]) -> Dict[str, str]:
+    if not isinstance(task, dict):
+        return {}
+    runner_target = str(task.get("background_run_runner_target", "")).strip().lower()
+    if runner_target not in _EXTERNAL_BACKGROUND_RUNNERS:
+        return {}
+    status = str(task.get("background_run_status", "")).strip().lower()
+    runtime_summary = str(task.get("background_run_runtime_summary", "")).strip()
+    evidence_bundle = str(task.get("background_run_evidence_bundle", "")).strip()
+    handoff_path = _find_background_artifact(task, "background_run_handoffs/")
+    ack_path = _find_background_artifact(task, "background_run_acks/")
+    result_path = _find_background_artifact(task, "background_run_results/")
+
+    phase = ""
+    note = ""
+    if result_path or status in {"completed", "failed"}:
+        phase = "result_received"
+        note = result_path or evidence_bundle or status
+    elif ack_path or "external_pickup_acknowledged" in evidence_bundle or "ack=" in runtime_summary:
+        phase = "pickup_acknowledged"
+        note = ack_path or runtime_summary or evidence_bundle
+    elif handoff_path or "external_handoff_emitted" in evidence_bundle or "_handoff=" in runtime_summary:
+        phase = "handoff_emitted"
+        note = handoff_path or runtime_summary or evidence_bundle
+    elif status in {"queued", "dispatching", "running"}:
+        phase = "awaiting_external_pickup"
+        note = f"{runner_target} awaiting pickup"
+
+    if not phase:
+        return {}
+    return {
+        "phase": phase[:64],
+        "note": note[:240],
+    }
 
 
 def _normalize_plan_issue_codes(raw: Any, *, limit: int = 12) -> List[str]:
@@ -1156,6 +1208,14 @@ def sanitize_task_record(
             "background_run_launch_spec_externalizable",
         ):
             task.pop(key, None)
+
+    background_run_external_snapshot = derive_background_run_external_snapshot(task)
+    if background_run_external_snapshot:
+        task["background_run_external_phase"] = background_run_external_snapshot.get("phase", "")
+        task["background_run_external_note"] = background_run_external_snapshot.get("note", "")
+    else:
+        task.pop("background_run_external_phase", None)
+        task.pop("background_run_external_note", None)
 
     reentry_rails_summary = build_reentry_rails_summary(task)
     if reentry_rails_summary:

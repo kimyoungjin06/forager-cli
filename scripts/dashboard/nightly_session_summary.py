@@ -164,6 +164,8 @@ def build_nightly_session_summary(
                 "active_task_background_run_status": detail.active_task_background_run_status,
                 "active_task_background_run_runner_target": detail.active_task_background_run_runner_target,
                 "active_task_background_run_ticket_id": detail.active_task_background_run_ticket_id,
+                "active_task_background_run_external_phase": detail.active_task_background_run_external_phase,
+                "active_task_background_run_external_note": detail.active_task_background_run_external_note,
                 "active_task_background_run_evidence_bundle": detail.active_task_background_run_evidence_bundle,
                 "active_task_background_run_evidence_artifacts": detail.active_task_background_run_evidence_artifacts,
                 "active_task_background_run_launch_spec_summary": detail.active_task_background_run_launch_spec_summary,

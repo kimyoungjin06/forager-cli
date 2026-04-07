@@ -307,6 +307,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             background_run_launch_mode=str(task.get("background_run_launch_mode", "")).strip() or "-",
             background_run_runtime_handle=str(task.get("background_run_runtime_handle", "")).strip() or "-",
             background_run_runtime_summary=str(task.get("background_run_runtime_summary", "")).strip() or "-",
+            background_run_external_phase=str(task.get("background_run_external_phase", "")).strip() or "-",
+            background_run_external_note=str(task.get("background_run_external_note", "")).strip() or "-",
             background_run_evidence_bundle=str(task.get("background_run_evidence_bundle", "")).strip() or "-",
             background_run_evidence_artifacts=", ".join(
                 str(item).strip() for item in (task.get("background_run_evidence_artifacts") or []) if str(item).strip()

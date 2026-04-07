@@ -218,6 +218,12 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_background_run_runtime_summary=(
                     str((active_task or {}).get("background_run_runtime_summary", "")).strip() or "-"
                 ),
+                active_task_background_run_external_phase=(
+                    str((active_task or {}).get("background_run_external_phase", "")).strip() or "-"
+                ),
+                active_task_background_run_external_note=(
+                    str((active_task or {}).get("background_run_external_note", "")).strip() or "-"
+                ),
                 active_task_background_run_evidence_bundle=(
                     str((active_task or {}).get("background_run_evidence_bundle", "")).strip() or "-"
                 ),
@@ -507,6 +513,12 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         ),
         active_task_background_run_runtime_summary=(
             str((active_task or {}).get("background_run_runtime_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_external_phase=(
+            str((active_task or {}).get("background_run_external_phase", "")).strip() or "-"
+        ),
+        active_task_background_run_external_note=(
+            str((active_task or {}).get("background_run_external_note", "")).strip() or "-"
         ),
         active_task_background_run_evidence_bundle=(
             str((active_task or {}).get("background_run_evidence_bundle", "")).strip() or "-"

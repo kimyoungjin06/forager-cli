@@ -1401,6 +1401,43 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
     assert "phase2_evidence: Findings are summarized with concrete evidence. | Open questions or weak spots are called out explicitly." in summary
 
 
+def test_task_lifecycle_summary_includes_external_background_phase() -> None:
+    task = gw.sanitize_task_record(
+        {
+            "request_id": "REQ-EXT",
+            "short_id": "T-302",
+            "prompt": "Poll external runner state",
+            "status": "running",
+            "mode": "dispatch",
+            "roles": ["Codex-Dev"],
+            "background_run_ticket_id": "BGT-GHA-ACK-001",
+            "background_run_status": "running",
+            "background_run_runner_target": "github_runner",
+            "background_run_launch_mode": "dashboard_retry",
+            "background_run_runtime_handle": "background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+            "background_run_runtime_summary": (
+                "github_runner_handoff=background_run_handoffs/github-runner-bgt-gha-ack-001.json"
+                " | ack=background_run_acks/github-runner-bgt-gha-ack-001.json"
+            ),
+            "background_run_evidence_bundle": (
+                "status=running | outcome=external_pickup_acknowledged"
+                " | ack=background_run_acks/github-runner-bgt-gha-ack-001.json"
+            ),
+            "background_run_evidence_artifacts": [
+                "background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+                "background_run_acks/github-runner-bgt-gha-ack-001.json",
+            ],
+            "stages": {"planning": "running"},
+        },
+        "REQ-EXT",
+    )
+
+    summary = task_view.summarize_task_lifecycle("Demo", task)
+
+    assert "background_run_external: pickup_acknowledged" in summary
+    assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in summary
+
+
 def test_task_lifecycle_summary_includes_backend_contract_snapshot() -> None:
     summary = gw.summarize_task_lifecycle(
         "Demo",

@@ -732,6 +732,56 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "/request REQ-1" in text
 
 
+def test_control_dashboard_surfaces_external_background_phase_in_runtime_and_offdesk(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_runner_target"] = "github_runner"
+    task["background_run_status"] = "running"
+    task["background_run_ticket_id"] = "BGT-GHA-ACK-001"
+    task["background_run_launch_mode"] = "dashboard_retry"
+    task["background_run_runtime_handle"] = "background_run_handoffs/github-runner-bgt-gha-ack-001.json"
+    task["background_run_runtime_summary"] = (
+        "github_runner_handoff=background_run_handoffs/github-runner-bgt-gha-ack-001.json"
+        " | ack=background_run_acks/github-runner-bgt-gha-ack-001.json"
+    )
+    task["background_run_evidence_bundle"] = (
+        "status=running | outcome=external_pickup_acknowledged"
+        " | ack=background_run_acks/github-runner-bgt-gha-ack-001.json"
+    )
+    task["background_run_evidence_artifacts"] = [
+        "background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+        "background_run_acks/github-runner-bgt-gha-ack-001.json",
+    ]
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    runtime_status, runtime_headers, runtime_body = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)
+    offdesk_status, offdesk_headers, offdesk_body = dashboard_app.build_dashboard_response("/control/offdesk", config)
+
+    runtime_text = runtime_body.decode("utf-8")
+    offdesk_text = offdesk_body.decode("utf-8")
+
+    assert runtime_status == 200
+    assert runtime_headers["Content-Type"].startswith("text/html")
+    assert "background_external" in runtime_text
+    assert "pickup_acknowledged" in runtime_text
+    assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in runtime_text
+
+    assert offdesk_status == 200
+    assert offdesk_headers["Content-Type"].startswith("text/html")
+    assert "background_external" in offdesk_text
+    assert "pickup_acknowledged" in offdesk_text
+    assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in offdesk_text
+
+
 def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
