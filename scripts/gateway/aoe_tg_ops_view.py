@@ -61,6 +61,7 @@ def render_project_snapshot_lines(*, key: str, entry: Dict[str, Any], locked: bo
 
     latest_task = "-"
     latest_key = ""
+    latest_task_row: Dict[str, Any] = {}
     tasks = entry.get("tasks")
     if isinstance(tasks, dict):
         for req_id, task in tasks.items():
@@ -79,6 +80,7 @@ def render_project_snapshot_lines(*, key: str, entry: Dict[str, Any], locked: bo
                     latest_task += f" {prompt}"
                 if status != "-":
                     latest_task += f" [{status}]"
+                latest_task_row = task
 
     marker = " [locked]" if locked else ""
     lines = [
@@ -91,6 +93,17 @@ def render_project_snapshot_lines(*, key: str, entry: Dict[str, Any], locked: bo
         f"- last_sync: {sync_disp}",
         f"- last_task: {latest_task}",
     ]
+    external_runner = str(latest_task_row.get("background_run_runner_target", "")).strip().lower()
+    external_phase = str(latest_task_row.get("background_run_external_phase", "")).strip().lower()
+    external_note = str(latest_task_row.get("background_run_external_note", "")).strip()
+    if external_runner in {"github_runner", "remote_worker"} and (external_phase or external_note):
+        lines.append(
+            "- last_task_background_external: {runner} | {phase} | {note}".format(
+                runner=external_runner or "-",
+                phase=external_phase or "-",
+                note=external_note or "-",
+            )
+        )
     blocked_head = blocked_head_summary(todos)
     if blocked_head:
         blocked_line = f"- blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"

@@ -141,6 +141,37 @@ def _handle_offdesk_command(
         snapshot_lines = focused_project_snapshot_lines(manager_state)
         if status_level == "long" and snapshot_lines:
             lines.extend([""] + snapshot_lines)
+        if status_level == "long":
+            try:
+                focus_targets = offdesk_prepare_targets(manager_state, "")
+            except Exception:
+                focus_targets = []
+            if focus_targets:
+                focus_reports = [offdesk_prepare_project_report(manager_state, key, entry) for key, entry in focus_targets[:1]]
+                focus_reports = sort_offdesk_reports(focus_reports)
+                if focus_reports:
+                    focus_report = focus_reports[0]
+                    lines.extend(
+                        [
+                            "",
+                            "focused review:",
+                            "- first: {action} | {reason}".format(
+                                action=str(focus_report.get("priority_action", "")).strip() or "-",
+                                reason=str(focus_report.get("priority_reason", "")).strip() or "-",
+                            ),
+                        ]
+                    )
+                    runner = str(focus_report.get("active_task_background_run_runner_target", "")).strip().lower()
+                    phase = str(focus_report.get("active_task_background_run_external_phase", "")).strip().lower()
+                    note = str(focus_report.get("active_task_background_run_external_note", "")).strip()
+                    if runner in {"github_runner", "remote_worker"} and (phase or note):
+                        lines.append(
+                            "- active_task_background_external: {runner} | {phase} | {note}".format(
+                                runner=runner or "-",
+                                phase=phase or "-",
+                                note=note or "-",
+                            )
+                        )
         compact_lines = ops_scope_compact_lines(manager_state, 4, status_level)
         if compact_lines:
             lines.extend(["", "ops projects:"] + compact_lines)
@@ -655,4 +686,3 @@ def _handle_offdesk_command(
     body += "next:\n- /offdesk status\n- /queue\n- /room tail 30\n- /auto status"
     send(body, context="offdesk-on", with_menu=True)
     return True
-

@@ -1296,7 +1296,7 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     _write_action_audit_log(tmp_path)
     state = gw.default_manager_state(tmp_path, team_dir)
 
-    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status")
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
 
     assert "offdesk mode" in text
     assert "- latest_intent: offdesk | offdesk_prepare" in text
@@ -1305,6 +1305,35 @@ def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
     assert "- latest_action: Retry | blocked | reason=planning_gate" in text
     assert "- latest_action_next: /offdesk review" in text
     assert f"- state_root: legacy | {team_dir.resolve()}" in text
+
+
+def test_offdesk_status_surfaces_external_background_phase(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    state = gw.default_manager_state(tmp_path, team_dir)
+    state["projects"]["default"]["project_alias"] = "O1"
+    state["projects"]["default"]["display_name"] = "default"
+    state["projects"]["default"]["system_project"] = False
+    state["projects"]["default"]["ops_hidden"] = False
+    state["projects"]["default"].pop("ops_hidden_reason", None)
+    state["projects"]["default"]["tasks"] = {
+        "REQ-EXT-001": {
+            "request_id": "REQ-EXT-001",
+            "short_id": "T-401",
+            "alias": "external-run",
+            "status": "running",
+            "updated_at": "2026-04-07T22:00:00+09:00",
+            "background_run_status": "running",
+            "background_run_runner_target": "github_runner",
+            "background_run_external_phase": "pickup_acknowledged",
+            "background_run_external_note": "background_run_acks/github-runner-bgt-ext-001.json",
+        }
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
+
+    assert "last_task_background_external: github_runner | pickup_acknowledged | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "first: /orch status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
 
 
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:

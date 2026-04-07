@@ -126,10 +126,18 @@ def offdesk_priority_action_snapshot(
     run_lock_note: str = "",
     background_slot_limit: int = 1,
     background_slot_active: int = 0,
+    active_task_background_run_status: str = "",
+    active_task_background_run_runner_target: str = "",
+    active_task_background_run_external_phase: str = "",
+    active_task_background_run_external_note: str = "",
 ) -> Dict[str, str]:
     brief_status = str(active_task_execution_brief_status or "").strip().lower()
     brief_blocked = [str(x).strip() for x in (active_task_execution_brief_blocked_slice or []) if str(x).strip()]
     brief_decision = str(active_task_execution_brief_operator_decision or "").strip()
+    background_status = str(active_task_background_run_status or "").strip().lower()
+    background_runner = str(active_task_background_run_runner_target or "").strip().lower()
+    background_external_phase = str(active_task_background_run_external_phase or "").strip().lower()
+    background_external_note = str(active_task_background_run_external_note or "").strip()
     worker_status = str(background_worker_status or "").strip().lower()
     worker_summary = str(background_worker_summary or "").strip()
     lock_mode = str(run_lock_mode or "").strip().lower()
@@ -147,6 +155,27 @@ def offdesk_priority_action_snapshot(
             "action": f"/offdesk review {alias}",
             "reason": reason,
         }
+    if background_runner in {"github_runner", "remote_worker"} and background_status in {"queued", "dispatching", "running"}:
+        if background_external_phase == "result_received":
+            return {
+                "action": f"/orch status {alias}",
+                "reason": background_external_note or f"{background_runner} result received; sync task state before the next operator action",
+            }
+        if background_external_phase == "pickup_acknowledged":
+            return {
+                "action": f"/orch status {alias}",
+                "reason": background_external_note or f"{background_runner} picked up the background run; await result sidecar",
+            }
+        if background_external_phase == "handoff_emitted":
+            return {
+                "action": f"/orch status {alias}",
+                "reason": background_external_note or f"{background_runner} handoff emitted; awaiting pickup acknowledgement",
+            }
+        if background_external_phase == "awaiting_external_pickup":
+            return {
+                "action": f"/orch status {alias}",
+                "reason": background_external_note or f"{background_runner} launch handed off; waiting for external pickup",
+            }
     if worker_status in {"stale", "error"}:
         reason = worker_summary or f"background worker is {worker_status}"
         return {

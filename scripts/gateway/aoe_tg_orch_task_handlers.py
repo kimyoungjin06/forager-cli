@@ -262,6 +262,44 @@ def _project_run_lock_status(entry: Dict[str, Any]) -> tuple[str, str]:
     return mode, project_run_lock_note(entry)
 
 
+def _latest_external_background_task_snapshot(entry: Dict[str, Any]) -> Dict[str, str]:
+    tasks = entry.get("tasks") if isinstance(entry, dict) else {}
+    if not isinstance(tasks, dict):
+        return {}
+
+    def _sort_key(req_id: str, task: Dict[str, Any]) -> tuple[int, str, str]:
+        status = str(task.get("status", "pending")).strip().lower()
+        priority = {"running": 4, "pending": 3, "failed": 2, "completed": 1}.get(status, 0)
+        updated = str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip()
+        return (priority, updated, str(req_id or "").strip())
+
+    best_req = ""
+    best_task: Dict[str, Any] | None = None
+    for req_id, task in tasks.items():
+        if not isinstance(task, dict):
+            continue
+        runner = str(task.get("background_run_runner_target", "")).strip().lower()
+        if runner not in {"github_runner", "remote_worker"}:
+            continue
+        phase = str(task.get("background_run_external_phase", "")).strip().lower()
+        note = str(task.get("background_run_external_note", "")).strip()
+        if not phase and not note:
+            continue
+        if best_task is None or _sort_key(str(req_id), task) > _sort_key(best_req, best_task):
+            best_req = str(req_id)
+            best_task = task
+
+    if not isinstance(best_task, dict):
+        return {}
+    return {
+        "request_id": best_req,
+        "label": str(best_task.get("short_id", "")).strip().upper() or str(best_task.get("alias", "")).strip() or best_req,
+        "runner_target": str(best_task.get("background_run_runner_target", "")).strip().lower(),
+        "phase": str(best_task.get("background_run_external_phase", "")).strip().lower(),
+        "note": str(best_task.get("background_run_external_note", "")).strip(),
+    }
+
+
 def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path: Path) -> bool:
     tasks = entry.get("tasks") if isinstance(entry.get("tasks"), dict) else {}
     if not isinstance(tasks, dict) or not tasks:
@@ -765,10 +803,21 @@ def handle_orch_task_command(
         run_lock_line = f"run_lock: {run_lock_mode}\n"
         run_lock_note_line = f"run_lock_note: {run_lock_note}\n" if run_lock_note else ""
         slots_line = f"background_slots: limit={slot_limit} active={active_slots}\n"
+        external_snapshot = _latest_external_background_task_snapshot(entry)
+        external_line = ""
+        if external_snapshot:
+            external_line = (
+                "background_external: {label} | {runner} | {phase} | {note}\n".format(
+                    label=external_snapshot.get("label", "-"),
+                    runner=external_snapshot.get("runner_target", "-"),
+                    phase=external_snapshot.get("phase", "-"),
+                    note=external_snapshot.get("note", "-"),
+                )
+            )
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{worker_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{worker_line}{external_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

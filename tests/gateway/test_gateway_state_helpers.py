@@ -2760,6 +2760,39 @@ def test_priority_actions_module_matches_task_and_offdesk_policies() -> None:
         "action": "/orch status O8",
         "reason": "background queue has 2 queued/running tickets (local_background=2)",
     }
+    external_pickup_priority = priority_actions.offdesk_priority_action_snapshot(
+        alias="O13",
+        active_task_label="T-013 | external-retry",
+        active_task_tf_phase="running",
+        active_task_execution_brief_status="executable",
+        active_task_execution_brief_blocked_slice=[],
+        active_task_execution_brief_operator_decision="",
+        active_task_targets=None,
+        active_task_rate_limit=None,
+        active_task_background_run_status="running",
+        active_task_background_run_runner_target="github_runner",
+        active_task_background_run_external_phase="pickup_acknowledged",
+        active_task_background_run_external_note="background_run_acks/github-runner-bgt-013.json",
+        syncback_pending=False,
+        followup_count=0,
+        proposal_count=0,
+        bootstrap_recommended=False,
+        blocked_count=0,
+        open_count=1,
+        sync_quality="canonical",
+        sync_quality_warn=False,
+        sync_stale=False,
+        canonical_exists=True,
+        include_ok=True,
+        last_sync_mode="scenario",
+        background_queue_depth=1,
+        background_queue_stale_count=0,
+        background_queue_runner_targets={"github_runner": 1},
+    )
+    assert external_pickup_priority == {
+        "action": "/orch status O13",
+        "reason": "background_run_acks/github-runner-bgt-013.json",
+    }
 
 
 def test_task_operator_commands_suppress_retry_when_execution_brief_is_blocked() -> None:

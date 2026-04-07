@@ -396,6 +396,10 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "execution_brief_executable_slice": [str(x).strip() for x in (best_task.get("execution_brief_executable_slice") or []) if str(x).strip()],
         "execution_brief_blocked_slice": [str(x).strip() for x in (best_task.get("execution_brief_blocked_slice") or []) if str(x).strip()],
         "execution_brief_operator_decision": str(best_task.get("execution_brief_operator_decision", "")).strip(),
+        "background_run_status": str(best_task.get("background_run_status", "")).strip(),
+        "background_run_runner_target": str(best_task.get("background_run_runner_target", "")).strip(),
+        "background_run_external_phase": str(best_task.get("background_run_external_phase", "")).strip(),
+        "background_run_external_note": str(best_task.get("background_run_external_note", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -808,6 +812,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     task_execution_brief_summary = str(latest_task.get("execution_brief_summary", "")).strip()
     task_execution_brief_blocked = list(latest_task.get("execution_brief_blocked_slice") or [])
     task_execution_brief_decision = str(latest_task.get("execution_brief_operator_decision", "")).strip()
+    task_background_status = str(latest_task.get("background_run_status", "")).strip().lower()
+    task_background_runner = str(latest_task.get("background_run_runner_target", "")).strip().lower()
+    task_background_external_phase = str(latest_task.get("background_run_external_phase", "")).strip().lower()
+    task_background_external_note = str(latest_task.get("background_run_external_note", "")).strip()
     active_rate_limit = latest_task.get("rate_limit") if isinstance(latest_task.get("rate_limit"), dict) else {}
     capacity_pressure = _capacity_pressure_snapshot(active_rate_limit)
     if task_execution_brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
@@ -940,6 +948,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         active_task_execution_brief_operator_decision=task_execution_brief_decision,
         active_task_targets=latest_task.get("lane_targets") if isinstance(latest_task.get("lane_targets"), dict) else None,
         active_task_rate_limit=latest_task.get("rate_limit") if isinstance(latest_task.get("rate_limit"), dict) else None,
+        active_task_background_run_status=task_background_status,
+        active_task_background_run_runner_target=task_background_runner,
+        active_task_background_run_external_phase=task_background_external_phase,
+        active_task_background_run_external_note=task_background_external_note,
         syncback_pending=syncback_pending,
         followup_count=manual_followup_count,
         proposal_count=open_proposals,
@@ -1138,6 +1150,16 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                     review_ids=",".join(manual_review) if manual_review else "-",
                 )
             )
+        if task_background_runner in {"github_runner", "remote_worker"} and (
+            task_background_external_phase or task_background_external_note
+        ):
+            lines.append(
+                "  active_task_background_external: {runner} | {phase} | {note}".format(
+                    runner=task_background_runner or "-",
+                    phase=task_background_external_phase or "-",
+                    note=task_background_external_note or "-",
+                )
+            )
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()
@@ -1171,6 +1193,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "active_task_label": str(latest_task.get("label", "")).strip(),
         "active_task_tf_phase": str(latest_task.get("tf_phase", "")).strip(),
         "active_task_status": str(latest_task.get("status", "")).strip(),
+        "active_task_background_run_status": str(latest_task.get("background_run_status", "")).strip(),
+        "active_task_background_run_runner_target": str(latest_task.get("background_run_runner_target", "")).strip(),
+        "active_task_background_run_external_phase": str(latest_task.get("background_run_external_phase", "")).strip(),
+        "active_task_background_run_external_note": str(latest_task.get("background_run_external_note", "")).strip(),
         "active_task_phase1_role_preset": str(latest_task.get("phase1_role_preset", "")).strip(),
         "active_task_phase2_team_preset": str(latest_task.get("phase2_team_preset", "")).strip(),
         "active_task_phase2_execution_roles": list(latest_task.get("phase2_execution_roles") or []),
