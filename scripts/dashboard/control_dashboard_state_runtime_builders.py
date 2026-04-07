@@ -71,6 +71,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             if isinstance(candidate, dict):
                 active_task = candidate
         queue_summary = "-"
+        scheduler_summary = "-"
         queue_depth = 0
         queue_stale_count = 0
         worker_status = "-"
@@ -89,7 +90,12 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 snapshot = background_runs.summarize_background_runs_state(
                     background_runs.background_runs_state_path(team_dir)
                 )
+                scheduler_snapshot = background_runs.summarize_background_runner_scheduling(
+                    background_runs.background_runs_state_path(team_dir),
+                    now_iso=lambda: runtime_read.now_iso(),
+                )
                 queue_summary = str(snapshot.get("summary", "")).strip() or "-"
+                scheduler_summary = str(scheduler_snapshot.get("summary", "")).strip() or "-"
                 queue_depth = int(snapshot.get("depth", 0) or 0)
                 queue_stale_count = int(snapshot.get("stale_count", 0) or 0)
                 slot_snapshot = _background_slot_snapshot(entry, team_dir)
@@ -234,6 +240,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 background_worker_status=worker_status,
                 background_worker_summary=worker_summary,
                 background_queue_summary=queue_summary,
+                background_scheduler_summary=scheduler_summary,
                 background_queue_depth=queue_depth,
                 background_queue_stale_count=queue_stale_count,
                 runtime_safe_action_buttons=runtime_safe_action_buttons,
@@ -370,6 +377,10 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         queue_snapshot = background_runs.summarize_background_runs_state(
             background_runs.background_runs_state_path(team_dir)
         )
+        scheduler_snapshot = background_runs.summarize_background_runner_scheduling(
+            background_runs.background_runs_state_path(team_dir),
+            now_iso=lambda: runtime_read.now_iso(),
+        )
         slot_snapshot = _background_slot_snapshot(entry, team_dir)
         background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
         background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
@@ -383,6 +394,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         )
     else:
         queue_snapshot = {}
+        scheduler_snapshot = {}
         worker_snapshot = {}
         background_slot_limit = 1
         background_slot_active = 0
@@ -538,6 +550,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         background_worker_status=str(worker_snapshot.get("status", "")).strip() or "-",
         background_worker_summary=str(worker_snapshot.get("summary", "")).strip() or "-",
         background_queue_summary=str(queue_snapshot.get("summary", "")).strip() or "-",
+        background_scheduler_summary=str(scheduler_snapshot.get("summary", "")).strip() or "-",
         background_queue_depth=int(queue_snapshot.get("depth", 0) or 0),
         background_queue_stale_count=int(queue_snapshot.get("stale_count", 0) or 0),
         active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",

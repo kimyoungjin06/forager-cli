@@ -434,6 +434,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "background_run_summary" in overview_text
     assert "status running=1" in overview_text
     assert "target local_background=1" in overview_text
+    assert "background_scheduler" in overview_text
     assert "background_worker_summary" in overview_text
     assert "status=running" in overview_text
     assert "Project Progress Board" in overview_text
@@ -710,6 +711,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "background_run" in text
     assert "runner_target" in text
     assert "local_background" in text
+    assert "background_scheduler" in text
     assert "background_ticket" in text
     assert "BGT-001" in text
     assert "runtime_handle" in text
@@ -811,6 +813,7 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "underspecified=1" in text
     assert "background_run_summary" in text
     assert "status running=1" in text
+    assert "background_scheduler" in text
     assert "Project Progress Board" in text
     assert "reports/summary.md" in text
     assert "acceptance_gap" in text
@@ -868,6 +871,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "underspecified=1" in text
     assert "background_run_summary" in text
     assert "status running=1" in text
+    assert "background_scheduler" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text

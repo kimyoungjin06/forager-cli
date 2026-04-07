@@ -114,6 +114,7 @@ class RuntimeCardDTO:
     background_worker_status: str
     background_worker_summary: str
     background_queue_summary: str
+    background_scheduler_summary: str
     background_queue_depth: int
     background_queue_stale_count: int
     runtime_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
@@ -273,6 +274,7 @@ class RuntimeDetailDTO:
     background_worker_status: str
     background_worker_summary: str
     background_queue_summary: str
+    background_scheduler_summary: str
     background_queue_depth: int
     background_queue_stale_count: int
     active_task_completion_focus: str
@@ -372,6 +374,7 @@ class RecoveryRuntimeDTO:
     background_worker_status: str
     background_worker_summary: str
     background_queue_summary: str
+    background_scheduler_summary: str
     background_queue_depth: int
     background_queue_stale_count: int
     active_task_completion_focus: str

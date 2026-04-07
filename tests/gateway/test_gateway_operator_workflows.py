@@ -1087,8 +1087,8 @@ def test_orch_status_surfaces_background_scheduler_head(tmp_path: Path) -> None:
     assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
     text, context, _reply_markup = sent[-1]
     assert context == "status"
-    assert "background_scheduler: local_background:head=BGT-LB-002/dashboard_followup_execute queued=2" in text
-    assert "github_runner:head=BGT-EXT-001/dashboard_retry queued=1" in text
+    assert "background_scheduler: local_background:head=BGT-LB-001/detached_no_wait queued=2 starved=yes" in text
+    assert "github_runner:head=BGT-EXT-001/dashboard_retry queued=1 starved=yes" in text
 
 
 def test_orch_bg_runner_sets_preference_and_status_surfaces_effective_runner(tmp_path: Path) -> None:

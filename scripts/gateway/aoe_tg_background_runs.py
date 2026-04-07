@@ -675,26 +675,36 @@ def sort_background_run_claim_candidates(
     ) + [row for row in base_sorted if str(row.get("ticket_id", "")).strip() not in starved_ids]
 
 
-def summarize_background_runner_scheduling(path: Path) -> Dict[str, Any]:
+def summarize_background_runner_scheduling(
+    path: Path,
+    *,
+    now_iso: Callable[[], str] | None = None,
+) -> Dict[str, Any]:
     per_runner: Dict[str, Dict[str, Any]] = {}
     parts: List[str] = []
+    current_iso = now_iso or (lambda: datetime.now(timezone.utc).isoformat())
     for runner_target in ("local_background", "local_tmux", "github_runner", "remote_worker"):
-        queued_rows = sorted(
+        queued_rows = sort_background_run_claim_candidates(
             list_background_run_tickets(path, statuses=["queued", "stale"], runner_target=runner_target),
-            key=background_run_claim_sort_key,
+            now_iso=current_iso,
         )
         head = queued_rows[0] if queued_rows else {}
         head_ticket_id = str(head.get("ticket_id", "")).strip()
         head_launch_mode = str(head.get("launch_mode", "")).strip().lower()
+        head_age_sec = background_run_claim_age_sec(head, now_iso=current_iso) if head else 0
+        head_starved = bool(head_age_sec >= max(1, int(BACKGROUND_RUN_CLAIM_STARVATION_SEC or 1))) if head else False
         row = {
             "queued_count": len(queued_rows),
             "head_ticket_id": head_ticket_id,
             "head_launch_mode": head_launch_mode,
+            "head_age_sec": head_age_sec,
+            "head_starved": head_starved,
         }
         per_runner[runner_target] = row
         if head_ticket_id:
             parts.append(
                 f"{runner_target}:head={head_ticket_id}/{head_launch_mode or '-'} queued={len(queued_rows)}"
+                + (" starved=yes" if head_starved else "")
             )
     return {
         "by_runner": per_runner,

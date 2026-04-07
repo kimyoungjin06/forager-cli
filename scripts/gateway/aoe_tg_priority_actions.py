@@ -162,6 +162,7 @@ def offdesk_priority_action_snapshot(
     background_queue_depth: int = 0,
     background_queue_stale_count: int = 0,
     background_queue_runner_targets: Optional[Dict[str, int]] = None,
+    background_scheduler_summary: str = "",
     background_worker_status: str = "",
     background_worker_summary: str = "",
     run_lock_mode: str = "",

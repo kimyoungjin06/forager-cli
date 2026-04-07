@@ -703,7 +703,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         else {}
     )
     scheduler_snapshot = (
-        summarize_background_runner_scheduling(background_runs_state_path(team_dir))
+        summarize_background_runner_scheduling(
+            background_runs_state_path(team_dir),
+            now_iso=lambda: datetime.now(timezone.utc).isoformat(),
+        )
         if team_dir is not None
         else {}
     )
@@ -980,6 +983,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             if isinstance(queue_snapshot.get("target_counts"), dict)
             else {}
         ),
+        background_scheduler_summary=str(scheduler_snapshot.get("summary", "")).strip() or "-",
         background_worker_status=worker_status,
         background_worker_summary=worker_summary,
         run_lock_mode=run_lock_mode,

@@ -909,7 +909,10 @@ def handle_orch_task_command(
                         entry["updated_at"] = now_iso()
                         save_manager_state(args.manager_state_file, manager_state)
                 queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
-                scheduler_snapshot = background_runs.summarize_background_runner_scheduling(queue_path)
+                scheduler_snapshot = background_runs.summarize_background_runner_scheduling(
+                    queue_path,
+                    now_iso=now_iso,
+                )
                 worker_snapshot = background_runs.summarize_background_worker_state(
                     background_runs.background_worker_state_path(team_dir),
                     now_iso=now_iso,
