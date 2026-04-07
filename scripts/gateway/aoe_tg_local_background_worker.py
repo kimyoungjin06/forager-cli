@@ -18,6 +18,7 @@ from aoe_tg_background_runs import (
     summarize_background_runs_state,
     update_background_worker_state,
 )
+from aoe_tg_external_background_worker import poll_external_background_tickets
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
 
 _LOCAL_BACKGROUND_REGISTRY: Dict[str, Dict[str, Any]] = {}
@@ -291,6 +292,10 @@ def _run_local_background_daemon(
                 queue_path=queue_path,
                 now_iso=now_iso,
             )
+            external_poll_result = poll_external_background_tickets(
+                queue_path=queue_path,
+                now_iso=now_iso,
+            )
             drained = drain_local_background_queue(
                 queue_path=queue_path,
                 now_iso=now_iso,
@@ -312,6 +317,11 @@ def _run_local_background_daemon(
                 reason = (
                     f"tmux_polled:{int(tmux_poll_result.get('completed_count', 0) or 0)}"
                     f"/{int(tmux_poll_result.get('failed_count', 0) or 0)}"
+                )
+            elif int(external_poll_result.get("completed_count", 0) or 0) > 0 or int(external_poll_result.get("failed_count", 0) or 0) > 0:
+                reason = (
+                    f"external_polled:{int(external_poll_result.get('completed_count', 0) or 0)}"
+                    f"/{int(external_poll_result.get('failed_count', 0) or 0)}"
                 )
             elif stale_count > 0:
                 reason = f"stale_marked:{stale_count}"

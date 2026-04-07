@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
     claim_background_run_ticket,
+    list_background_run_tickets,
 )
 from aoe_tg_request_contract import normalize_background_launch_spec_snapshot
 
@@ -26,6 +27,14 @@ def external_background_handoff_path(team_dir: Path, ticket_id: str, runner_targ
     return Path(team_dir).expanduser().resolve() / "background_run_handoffs" / f"{runner_token}-{ticket_token}.json"
 
 
+def external_background_result_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
+    ticket_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
+    ticket_token = "-".join(part for part in ticket_token.split("-") if part) or "run"
+    runner_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(runner_target or "").strip())
+    runner_token = "-".join(part for part in runner_token.split("-") if part) or "external"
+    return Path(team_dir).expanduser().resolve() / "background_run_results" / f"{runner_token}-{ticket_token}.json"
+
+
 def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
     team_root = Path(team_dir).expanduser().resolve()
     resolved = Path(artifact_path).expanduser().resolve()
@@ -33,6 +42,33 @@ def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
         return str(resolved.relative_to(team_root)).strip()
     except Exception:
         return str(resolved).strip()
+
+
+def _read_external_background_result(result_path: Path) -> Dict[str, Any]:
+    if not result_path.exists():
+        return {}
+    try:
+        raw = json.loads(result_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    status = _trim(raw.get("status", ""), 32).lower()
+    if status not in {"completed", "failed"}:
+        return {}
+    evidence_artifacts = [
+        _trim(item, 240)
+        for item in list(raw.get("evidence_artifacts") or [])
+        if _trim(item, 240)
+    ]
+    return {
+        "ticket_id": _trim(raw.get("ticket_id", ""), 96),
+        "status": status,
+        "reason": _trim(raw.get("reason", ""), 160),
+        "summary": _trim(raw.get("summary", ""), 240),
+        "evidence_bundle": _trim(raw.get("evidence_bundle", ""), 320),
+        "evidence_artifacts": evidence_artifacts,
+    }
 
 
 def emit_external_background_handoff(
@@ -97,3 +133,74 @@ def emit_external_background_handoff(
         evidence_bundle=f"status=running | outcome=external_handoff_emitted | handoff={handoff_artifact}",
         evidence_artifacts=[handoff_artifact],
     )
+
+
+def poll_external_background_tickets(
+    *,
+    queue_path: Path,
+    now_iso: Callable[[], str],
+) -> Dict[str, Any]:
+    team_dir = queue_path.parent
+    completed: List[str] = []
+    failed: List[str] = []
+    changed = False
+    for runner_target in ("github_runner", "remote_worker"):
+        for row in list_background_run_tickets(queue_path, statuses=["running"], runner_target=runner_target):
+            ticket_id = _trim(row.get("ticket_id", ""), 96)
+            if not ticket_id:
+                continue
+            result_path = external_background_result_path(team_dir, ticket_id, runner_target)
+            result = _read_external_background_result(result_path)
+            if not result:
+                continue
+            runtime_handle = _trim(row.get("runtime_handle", ""), 240)
+            evidence_artifacts = list(row.get("evidence_artifacts") or [])
+            for artifact_path in (result_path,):
+                rel_path = _artifact_path_for_team(team_dir, artifact_path)
+                if rel_path and rel_path not in evidence_artifacts:
+                    evidence_artifacts.append(rel_path)
+            for rel_path in list(result.get("evidence_artifacts") or []):
+                token = _trim(rel_path, 240)
+                if token and token not in evidence_artifacts:
+                    evidence_artifacts.append(token)
+            status = str(result.get("status", "")).strip().lower()
+            if status not in {"completed", "failed"}:
+                continue
+            evidence_bundle = _trim(result.get("evidence_bundle", ""), 320)
+            if not evidence_bundle:
+                summary = _trim(result.get("summary", ""), 200)
+                reason = _trim(result.get("reason", ""), 160)
+                if status == "completed":
+                    evidence_bundle = (
+                        f"status=completed | outcome=external_result | runner={runner_target}"
+                        + (f" | summary={summary}" if summary else "")
+                    )
+                else:
+                    evidence_bundle = (
+                        f"status=failed | reason={reason or 'external_result_failed'} | runner={runner_target}"
+                        + (f" | summary={summary}" if summary else "")
+                    )
+            advanced = advance_background_run_ticket(
+                queue_path,
+                ticket_id,
+                now_iso=now_iso,
+                status=status,
+                runner_target=runner_target,
+                runtime_handle=runtime_handle,
+                runtime_summary=(str(row.get("runtime_summary", "")).strip() or f"{runner_target}_handoff={runtime_handle}"),
+                evidence_bundle=evidence_bundle,
+                evidence_artifacts=evidence_artifacts,
+            )
+            if advanced:
+                changed = True
+                if status == "completed":
+                    completed.append(ticket_id)
+                else:
+                    failed.append(ticket_id)
+    return {
+        "changed": changed,
+        "completed_count": len(completed),
+        "failed_count": len(failed),
+        "completed_ticket_ids": completed,
+        "failed_ticket_ids": failed,
+    }

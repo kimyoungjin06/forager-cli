@@ -135,6 +135,9 @@
   - `argv=["worker-run","--runner","github_runner"]`
   - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR","GITHUB_TOKEN","GITHUB_REPOSITORY"]`
   - `externalizable=true`
+  - handoff/result artifacts:
+    - `.aoe-team/background_run_handoffs/github-runner-<ticket>.json`
+    - `.aoe-team/background_run_results/github-runner-<ticket>.json`
 - `remote_worker`
   - `kind=background_dispatch`
   - `mode=remote_worker_json`
@@ -142,6 +145,9 @@
   - `argv=["worker-run","--runner","remote_worker"]`
   - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR","AOE_REMOTE_ENDPOINT"]`
   - `externalizable=true`
+  - handoff/result artifacts:
+    - `.aoe-team/background_run_handoffs/remote-worker-<ticket>.json`
+    - `.aoe-team/background_run_results/remote-worker-<ticket>.json`
 
 ### 5.4 Background Worker State
 - Durable heartbeat/state object for the active local worker.
@@ -176,7 +182,8 @@
   - default to `local_background`
   - auto-promote to `local_tmux` only when the launch spec already declares `runner_target=local_tmux` and `externalizable=true`
   - `github_runner` and `remote_worker` stay operator-selected targets only
-  - external runners emit a durable handoff manifest and mark the ticket `running`
+- external runners emit a durable handoff manifest and mark the ticket `running`
+- external runners can later complete the ticket by writing a result sidecar consumed by the local control plane poller
   - automatic target selection stays conservative until explicit remote pickup/acknowledgement exists
   - project operators can cap non-local background launches with `background_runner_slot_limit`
   - when active non-local tickets already fill the slot budget, new retry/replan/followup-exec and serializable no-wait launches must block instead of overcommitting

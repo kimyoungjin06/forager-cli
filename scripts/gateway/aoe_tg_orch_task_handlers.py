@@ -15,6 +15,7 @@ from aoe_tg_request_contract import (
     select_background_runner_target,
 )
 from aoe_tg_run_lock import normalize_run_lock_mode, project_run_lock_mode, project_run_lock_note
+from aoe_tg_external_background_worker import poll_external_background_tickets
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
@@ -730,7 +731,8 @@ def handle_orch_task_command(
             if str(team_dir):
                 queue_path = background_runs.background_runs_state_path(team_dir)
                 tmux_poll = poll_local_tmux_background_tickets(queue_path=queue_path, now_iso=now_iso)
-                if bool(tmux_poll.get("changed")) and (not args.dry_run):
+                external_poll = poll_external_background_tickets(queue_path=queue_path, now_iso=now_iso)
+                if (bool(tmux_poll.get("changed")) or bool(external_poll.get("changed"))) and (not args.dry_run):
                     if _sync_background_run_snapshots_from_queue(entry, queue_path):
                         entry["updated_at"] = now_iso()
                         save_manager_state(args.manager_state_file, manager_state)
@@ -753,7 +755,7 @@ def handle_orch_task_command(
             if str(team_dir):
                 active_slots = background_runs.count_background_run_tickets(
                     background_runs.background_runs_state_path(team_dir),
-                    statuses=["dispatching", "running"],
+                    statuses=["queued", "dispatching", "running"],
                     runner_targets=["local_tmux", "github_runner", "remote_worker"],
                 )
         except Exception:
@@ -1122,7 +1124,8 @@ def handle_orch_task_command(
             )
             return True
         tmux_poll = poll_local_tmux_background_tickets(queue_path=queue_path, now_iso=now_iso)
-        if bool(tmux_poll.get("changed")) and (not args.dry_run):
+        external_poll = poll_external_background_tickets(queue_path=queue_path, now_iso=now_iso)
+        if (bool(tmux_poll.get("changed")) or bool(external_poll.get("changed"))) and (not args.dry_run):
             if _sync_background_run_snapshots_from_queue(entry, queue_path):
                 entry["updated_at"] = now_iso()
                 save_manager_state(args.manager_state_file, manager_state)
