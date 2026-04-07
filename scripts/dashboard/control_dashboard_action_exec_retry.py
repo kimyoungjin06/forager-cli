@@ -17,6 +17,7 @@ from aoe_tg_request_contract import (
     select_background_runner_target,
 )
 import aoe_tg_retry_handlers as retry_handlers
+from aoe_tg_run_lock import project_run_lock_blocks_launch, project_run_lock_mode, project_run_lock_note
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
 from aoe_tg_external_background_worker import emit_external_background_handoff
@@ -117,6 +118,51 @@ def _set_task_background_ticket(task: Dict[str, Any], ticket: Dict[str, Any], *,
     task["updated_at"] = current_ts
 
 
+def _run_lock_block_response(
+    *,
+    entry: Dict[str, Any],
+    transition: Dict[str, Any],
+    source_command: str,
+    payload: Dict[str, Any],
+    path: str,
+) -> Tuple[int, Dict[str, str], bytes] | None:
+    mode = project_run_lock_mode(entry)
+    note = project_run_lock_note(entry)
+    if mode != "test_only":
+        return None
+    alias = _project_status_ref(str(transition.get("orch_target", "")).strip(), entry)
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "blocked",
+            "error": "run_lock_test_only",
+            "method": "POST",
+            "path": path,
+            "mode": "phase2",
+            "source_command": source_command,
+            "payload": payload,
+            "transition": {
+                "cmd": transition.get("cmd", "run"),
+                "orch_target": transition.get("orch_target", "-"),
+                "run_control_mode": transition.get("run_control_mode", "-"),
+                "run_source_request_id": transition.get("run_source_request_id", "-"),
+                "run_force_mode": transition.get("run_force_mode", "-"),
+            },
+            "next_step": f"/orch run-lock {alias} open",
+            "remediation": note or "clear the test-only run lock before launching a non-test retry or follow-up job",
+            "outcome": {
+                "kind": "run_lock",
+                "status": "blocked",
+                "reason_code": "run_lock_test_only",
+                "detail": f"run_lock_mode={mode}",
+            },
+        },
+        status=409,
+    )
+
+
 def _maybe_execute_retry_background_runner(
     transition: Dict[str, Any],
     *,
@@ -195,6 +241,20 @@ def _maybe_execute_retry_background_runner(
     )
     if selected_runner not in {"local_tmux", "github_runner", "remote_worker"}:
         return None
+    if project_run_lock_blocks_launch(
+        entry,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        source_command=command_text,
+        launch_spec=launch_spec,
+    ):
+        return _run_lock_block_response(
+            entry=entry,
+            transition=transition,
+            source_command=source_command,
+            payload=payload,
+            path=action_path,
+        )
 
     queue_path = background_runs.background_runs_state_path(Path(team_dir_raw))
     current_ts = _now_iso()
@@ -646,6 +706,17 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             },
             status=409,
         )
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    if isinstance(projects.get(project_key), dict):
+        run_lock_response = _run_lock_block_response(
+            entry=projects.get(project_key),
+            transition=transition,
+            source_command=command_text or ("/replan" if is_replan else "/retry"),
+            payload=payload,
+            path=str(spec.get("path", "")).strip() or "/control/actions/task/retry",
+        )
+        if run_lock_response is not None:
+            return run_lock_response
     background_result = _maybe_execute_retry_background_runner(
         transition,
         manager_state=manager_state,
@@ -763,6 +834,16 @@ def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
             },
             status=409,
         )
+    if isinstance(entry, dict):
+        run_lock_response = _run_lock_block_response(
+            entry=entry,
+            transition=transition,
+            source_command=command_text or "/followup-exec",
+            payload=payload,
+            path=str(spec.get("path", "")).strip() or "/control/actions/task/followup-execute",
+        )
+        if run_lock_response is not None:
+            return run_lock_response
     background_result = _maybe_execute_retry_background_runner(
         transition,
         manager_state=manager_state,

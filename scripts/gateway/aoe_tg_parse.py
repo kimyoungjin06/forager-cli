@@ -1120,6 +1120,31 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux|github_runner|remote_worker>")
             return {"cmd": "orch-bg-runner", "orch": orch_name, "runner_target": runner_target}
 
+        if sub in {"run-lock", "execution-lock"}:
+            orch_name: Optional[str] = None
+            run_lock_mode: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is None:
+                        orch_name = tok.strip()
+                    elif run_lock_mode is None:
+                        run_lock_mode = tok.strip().lower()
+                    else:
+                        raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
+                i += 1
+            if not orch_name or not run_lock_mode:
+                raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
+            return {"cmd": "orch-run-lock", "orch": orch_name, "run_lock_mode": run_lock_mode}
+
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None
             i = 0

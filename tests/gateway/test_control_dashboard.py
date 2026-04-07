@@ -1186,6 +1186,36 @@ def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_pre
     assert any("/retry REQ-1" in token for token in (handoff_payload["launch_spec"].get("command_argv") or []))
 
 
+def test_control_dashboard_post_retry_route_blocks_when_run_lock_is_test_only(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["run_lock_mode"] = "test_only"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["error"] == "run_lock_test_only"
+    assert payload["next_step"] == "/orch run-lock O2 open"
+    assert "only small test launches are allowed" in payload["remediation"]
+
+
 def test_control_dashboard_post_replan_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

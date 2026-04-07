@@ -21,6 +21,7 @@ from aoe_tg_request_contract import (
     build_background_run_ticket,
     select_background_runner_target,
 )
+from aoe_tg_run_lock import project_run_lock_blocks_launch, project_run_lock_note
 from aoe_tg_tmux_background_worker import launch_local_tmux_background_ticket
 
 
@@ -111,6 +112,54 @@ def maybe_handle_no_wait_dispatch_detach(
     )
     if selected_runner_target != "local_tmux":
         launch_spec = fallback_launch_spec
+
+    if project_run_lock_blocks_launch(
+        entry,
+        launch_mode="detached_no_wait",
+        source_surface="run_no_wait",
+        source_command=source_prompt,
+        launch_spec=launch_spec,
+    ):
+        reason = project_run_lock_note(entry) or "test-only run lock blocked detached no-wait dispatch"
+        if isinstance(provisional_task, dict):
+            ticket = build_background_run_ticket(
+                request_id=str(provisional_req_id or "").strip(),
+                project_key=str(key or "").strip(),
+                execution_brief_status=str(provisional_task.get("execution_brief_status", "")).strip(),
+                runner_target=selected_runner_target,
+                launch_mode="detached_no_wait",
+                created_at=now_iso(),
+                created_by=f"telegram:{chat_id}",
+                source_surface="run_no_wait",
+                status="failed",
+                evidence_bundle="status=failed | reason=run_lock_test_only",
+                launch_spec=launch_spec,
+            )
+            apply_background_run_ticket_snapshot(provisional_task, ticket)
+            provisional_task.setdefault("result", {})
+            if isinstance(provisional_task.get("result"), dict):
+                provisional_task["result"]["background_run_status"] = "failed"
+                provisional_task["result"]["background_run_runner_target"] = selected_runner_target
+                provisional_task["result"]["background_run_ticket_id"] = str(ticket.get("ticket_id", "")).strip()
+                provisional_task["result"]["background_run_evidence_bundle"] = "status=failed | reason=run_lock_test_only"
+            provisional_task["updated_at"] = now_iso()
+            entry["updated_at"] = now_iso()
+            if not args.dry_run:
+                save_manager_state(args.manager_state_file, manager_state)
+        send(
+            f"detached dispatch blocked\n- runtime: {key}\n- reason: {reason}\n- next: /orch run-lock {orch_ref} open",
+            context="dispatch-detach blocked",
+        )
+        log_event(
+            event="dispatch_detach_blocked",
+            project=key,
+            request_id=str(provisional_req_id or "").strip(),
+            task=provisional_task if isinstance(provisional_task, dict) else None,
+            stage="planning",
+            status="blocked",
+            detail=reason[:240],
+        )
+        return True
 
     def _sync_background_ticket(ticket: Dict[str, Any]) -> None:
         if not isinstance(provisional_task, dict):

@@ -210,6 +210,25 @@ def test_resolve_message_command_parses_slash_orch_bg_runner() -> None:
     assert resolved.rest == "local_tmux"
 
 
+def test_resolve_message_command_parses_slash_orch_run_lock() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch run-lock O2 test_only",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-run-lock"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "test_only"
+
+
 def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     state = _empty_state()
     project_root = tmp_path / "TwinPaper"
@@ -616,6 +635,20 @@ def test_orch_bg_runner_sets_preference_and_status_surfaces_effective_runner(tmp
     assert "background_runner: pref=local_tmux | effective=local_background" in status_text
     assert "background_runner_note: preferred local_tmux is pending until an externalizable launch spec exists" in status_text
 
+    common_kwargs["rest"] = "test_only"
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-run-lock", **common_kwargs) is True
+    lock_text, lock_context, _ = sent[-1]
+    assert lock_context == "orch-run-lock"
+    assert "- mode: test_only" in lock_text
+    assert state["projects"]["twinpaper"]["run_lock_mode"] == "test_only"
+
+    common_kwargs["rest"] = ""
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    status_text, status_context, _ = sent[-1]
+    assert status_context == "status"
+    assert "run_lock: test_only" in status_text
+    assert "run_lock_note: test_only lock is active; only small test launches are allowed" in status_text
+
 
 def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     tmp_path: Path,
@@ -937,6 +970,158 @@ def test_no_wait_detach_falls_back_to_local_background_without_manager_state_fil
     task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-FALLBACK"]
     assert task["background_run_runner_target"] == "local_background"
     assert task["background_run_launch_spec_summary"].startswith("gateway_dispatch | mode=in_process_callback")
+
+
+def test_no_wait_detach_blocks_when_run_lock_is_test_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "background_runner_target": "local_tmux",
+                "run_lock_mode": "test_only",
+                "todos": [],
+            }
+        }
+    }
+    sent = []
+    logged = []
+
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("daemon should not start under test-only run lock")),
+    )
+    monkeypatch.setattr(
+        run_detached_flow,
+        "launch_local_tmux_background_ticket",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("tmux launch should not start under test-only run lock")),
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda *args, **kwargs: None,
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: "REQ-DETACHED-LOCKED",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-13T18:55:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert sent
+    assert sent[-1][0] == "dispatch-detach blocked"
+    assert "/orch run-lock O2 open" in sent[-1][1]
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-LOCKED"]
+    assert task["background_run_status"] == "failed"
+    assert task["background_run_evidence_bundle"] == "status=failed | reason=run_lock_test_only"
+    assert any(row.get("event") == "dispatch_detach_blocked" for row in logged)
 
 
 def test_orch_repair_all_repairs_multiple_projects(tmp_path: Path) -> None:

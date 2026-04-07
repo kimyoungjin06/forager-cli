@@ -14,6 +14,7 @@ from aoe_tg_request_contract import (
     build_background_launch_spec,
     select_background_runner_target,
 )
+from aoe_tg_run_lock import normalize_run_lock_mode, project_run_lock_mode, project_run_lock_note
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
@@ -21,6 +22,7 @@ from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issu
 
 _SCENARIO_FILENAME = "AOE_TODO.md"
 _BACKGROUND_RUNNER_PREFS = {"local_background", "local_tmux", "github_runner", "remote_worker"}
+_RUN_LOCK_MODES = {"open", "test_only"}
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -171,6 +173,8 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
     hide_button = f"/orch {'unhide' if project_hidden_from_ops(entry) else 'hide'} {alias}"
     runner_pref = str(entry.get("background_runner_target", "")).strip().lower() or "local_background"
     runner_toggle = "local_background" if runner_pref == "local_tmux" else "local_tmux"
+    run_lock_mode = project_run_lock_mode(entry)
+    run_lock_toggle = "open" if run_lock_mode == "test_only" else "test_only"
     issue = project_runtime_issue(entry)
     if issue:
         keyboard: List[List[Dict[str, str]]] = [
@@ -183,6 +187,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
             [{"text": f"/todo {alias}"}, {"text": f"/todo {alias} followup"}, {"text": f"/orch monitor {alias}"}],
             ([{"text": f"/orch bgq-clean {alias}"}] if queue_stale_count > 0 else []),
             [{"text": f"/orch bg-runner {alias} {runner_toggle}"}],
+            [{"text": f"/orch run-lock {alias} {run_lock_toggle}"}],
             [{"text": f"/orch bgw-status {alias}"}]
             + (
                 [{"text": f"/orch bgw-stop {alias}"}]
@@ -237,6 +242,11 @@ def _background_runner_status(entry: Dict[str, Any], key: str) -> tuple[str, str
     if preferred != effective:
         note = f"preferred {preferred} is pending until an externalizable launch spec exists"
     return preferred, effective, note
+
+
+def _project_run_lock_status(entry: Dict[str, Any]) -> tuple[str, str]:
+    mode = project_run_lock_mode(entry)
+    return mode, project_run_lock_note(entry)
 
 
 def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path: Path) -> bool:
@@ -723,12 +733,15 @@ def handle_orch_task_command(
             queue_line = ""
             worker_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
+        run_lock_mode, run_lock_note = _project_run_lock_status(entry)
         runner_line = f"background_runner: pref={runner_pref} | effective={runner_effective}\n"
         runner_note_line = f"background_runner_note: {runner_note}\n" if runner_note else ""
+        run_lock_line = f"run_lock: {run_lock_mode}\n"
+        run_lock_note_line = f"run_lock_note: {run_lock_note}\n" if run_lock_note else ""
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{queue_line}{worker_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{queue_line}{worker_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
@@ -842,6 +855,68 @@ def handle_orch_task_command(
         send(
             "\n".join(lines),
             context="orch-bg-runner",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd == "orch-run-lock":
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "run lock update blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context="orch-run-lock blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        target = normalize_run_lock_mode(rest)
+        if target not in _RUN_LOCK_MODES:
+            send(
+                "usage: /orch run-lock <O#|name> <open|test_only>",
+                context="orch-run-lock usage",
+                with_menu=True,
+            )
+            return True
+        entry["run_lock_mode"] = target
+        entry["updated_at"] = now_iso()
+        save_manager_state(args.manager_state_file, manager_state)
+        note = project_run_lock_note(entry)
+        team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser().resolve()
+        append_action_audit_row(
+            team_dir,
+            headline="Run Lock | configured",
+            status="configured",
+            outcome_kind="run_lock",
+            outcome_status="configured",
+            outcome_reason_code=target,
+            outcome_detail=(f"mode={target}" + (f" | note={note}" if note else "")),
+            next_step=f"/orch status {alias}",
+            remediation=(note or "future rerun and detached execution will follow this lock mode"),
+            source_command=f"/orch run-lock {alias} {target}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
+        lines = [
+            "run lock",
+            f"- runtime: {key}",
+            f"- mode: {target}",
+        ]
+        if note:
+            lines.append(f"- note: {note}")
+        lines.extend(["next:", f"- /orch status {alias}"])
+        send(
+            "\n".join(lines),
+            context="orch-run-lock",
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )
