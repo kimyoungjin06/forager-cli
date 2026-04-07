@@ -9,11 +9,11 @@
   - `manual_followup`
   - `execute_surface`
 - status:
-  - `planned`
+  - `bounded_replay_pass`
 - executed_at:
-  - `-`
+  - `2026-04-07 KST`
 - operator:
-  - `-`
+  - `Codex`
 
 ## 2. Input
 - request text:
@@ -56,63 +56,77 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `-`
+  - `REQ-1` (dashboard fixture)
+  - `REQ-123` (gateway followup fixture)
 - task_short_id:
-  - `-`
+  - `T-001`
+  - `T-123`
 - planning:
-  - `pending replay under current model`
+  - `bounded replay via gateway/dashboard tests only`
 - execution brief:
-  - `-`
+  - `partially_executable` / execution slice only
 - followup brief:
-  - `-`
+  - `partially_executable | execution=L2 | review=R1`
+  - `executable | execution=L3 | review=-` in direct snapshot helper
 - reentry rails:
-  - `-`
+  - `followup rail executes only selected execution lanes`
 - stage progression:
   - planning:
-    - `-`
+    - `fixture replay only`
   - execution:
-    - `-`
+    - `foreground followup transition`
+    - `local_tmux background transition`
   - verification:
-    - `-`
+    - `review lanes explicitly excluded from auto-launch`
   - integration:
     - `-`
   - close:
-    - `-`
+    - `transition recorded as followup execute`
 - critic/verifier verdict:
-  - `-`
+  - `execute surface launches only execution slice and keeps review/manual remainder visible`
 - final branch:
-  - `-`
+  - `manual_followup execute_surface`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `must show executable or partially executable FollowupBrief state`
+  - `summary helper exposes executable/partially_executable FollowupBrief state`
 - `/monitor`:
-  - `capture if a rerun rail is launched`
+  - `not used in bounded replay`
 - `/offdesk review`:
-  - `must keep operator-owned remainder visible`
+  - `operator-owned review remainder remains visible; not auto-launched`
 - dashboard `Task Detail`:
-  - `must show followup brief status, lane split, and reentry rail`
+  - `proof covered by task/runtime detail fixture tests`
 - dashboard `Recovery`:
-  - `must preserve the same interpretation if the task stalls`
+  - `not separately exercised in this bounded replay slice`
 - background run ticket / runner:
-  - `capture when local_tmux or external rail is used`
+  - `proved for local_tmux via dashboard followup execute background test`
 - launch spec / evidence bundle:
-  - `capture when a background rail is used`
+  - `background ticket contains runner_target=local_tmux and runtime_handle when preferred`
 
 ## 6. Result
 - result:
-  - `planned`
+  - `pass`
 - mismatch class:
-  - `-`
+  - `none`
 - mismatch notes:
-  - `-`
+  - `followup-exec now reuses the rerun rail as a dedicated control mode`
+  - `selected review lanes are rejected for execute surface`
+  - `preview_only and executable surfaces are no longer conflated`
 - next fix:
-  - `run a bounded replay under the new followup execute rail and capture lane-scoped evidence only`
+  - `promote to a later live replay with background ticket capture if a full runtime proof is needed`
 
 ## 7. Raw References
 - runtime state refs:
-  - `-`
+  - `tests/gateway/test_gateway_state_helpers.py::test_build_followup_brief_snapshot_marks_execution_only_slice_executable`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_uses_execution_slice_only`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_rejects_review_lane_selection`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_runs_partially_executable_brief`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_uses_local_tmux_background_when_preferred`
+  - `tests/gateway/test_operator_action_contract.py::test_partition_task_operator_commands_adds_followup_execute_when_followup_brief_is_executable`
 - log refs:
-  - `-`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_state_helpers.py -k 'build_followup_brief_snapshot_marks_execution_only_slice_executable or task_lifecycle_summary'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_followup_execute_blocks_preview_only_followup_brief or resolve_followup_execute_transition_uses_execution_slice_only or resolve_followup_execute_transition_rejects_review_lane_selection'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_followup_execute_route_blocks_preview_only_brief or post_followup_execute_route_uses_local_tmux_background_when_preferred or task_detail_route_redirects_alias_to_request_id or runtime_detail_route_renders_runtime_scope'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_operator_action_contract.py -k 'partition_task_operator_commands_adds_followup_execute_when_followup_brief_is_executable or http_action_spec_maps_followup_execute_to_post_contract'`
 - artifact refs:
-  - `-`
+  - `no live artifacts; proof uses fixture state, response payloads, and background ticket assertions only`

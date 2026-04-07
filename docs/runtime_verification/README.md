@@ -59,15 +59,15 @@
         - reentry rail summary
         - background ticket / launch spec, when used
   - `review/R3_manual_followup_preview.md`
-    - `planned`
+    - `bounded_replay_pass`
     - finding:
       - preview proof is now a first-class manual-followup target
-      - `/followup` must remain read-only and agree with `FollowupBrief.status=preview_only`
+      - bounded replay now proves `/followup` remains read-only and agrees with `FollowupBrief.status=preview_only`
   - `review/R3_manual_followup_execute.md`
-    - `planned`
+    - `bounded_replay_pass`
     - finding:
       - execute proof is separate from preview proof
-      - `/followup-exec` is only valid after an explicit executable or partially executable `FollowupBrief` exists
+      - bounded replay now proves `/followup-exec` is only valid after an explicit executable or partially executable `FollowupBrief` exists
   - `mixed/M1_happy_path.md`
     - `executed_done`
     - finding:

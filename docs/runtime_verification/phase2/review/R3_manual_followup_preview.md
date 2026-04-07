@@ -9,11 +9,11 @@
   - `manual_followup`
   - `preview_surface`
 - status:
-  - `planned`
+  - `bounded_replay_pass`
 - executed_at:
-  - `-`
+  - `2026-04-07 KST`
 - operator:
-  - `-`
+  - `Codex`
 
 ## 2. Input
 - request text:
@@ -56,44 +56,48 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `-`
+  - `REQ-1` (dashboard fixture)
+  - `REQ-123` (gateway followup fixture)
 - task_short_id:
-  - `-`
+  - `T-001`
+  - `T-123`
 - planning:
-  - `pending replay under current model`
+  - `not a live job; bounded replay via existing gateway/dashboard tests only`
 - execution brief:
-  - `-`
+  - `underspecified` in dashboard fixture (`retry=blocked:underspecified ...`)
 - followup brief:
-  - `-`
+  - `preview_only | execution=L2 | review=R1` in dashboard fixture
+  - `preview_only | execution=L2 | review=R2` in gateway fixture
 - reentry rails:
-  - `-`
+  - `retry=blocked:underspecified exec=L1 review=R1 | followup=preview_only exec=L2 review=R1 | bg=running/local_background`
 - stage progression:
   - planning:
-    - `-`
+    - `fixture replay only`
   - execution:
-    - `-`
+    - `not launched`
   - verification:
-    - `-`
+    - `safe preview parity only`
   - integration:
     - `-`
   - close:
-    - `-`
+    - `blocked from execute surface`
 - critic/verifier verdict:
-  - `-`
+  - `followup execute remains blocked while preview_only`
 - final branch:
-  - `-`
+  - `manual_followup preview_only`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `must show followup_brief + reentry_rails`
+  - `task detail fixture shows followup_brief + reentry_rails + operator reason`
 - `/monitor`:
-  - `capture if task remains active`
+  - `not used in bounded replay`
 - `/offdesk review`:
-  - `must remain preview-oriented and not offer mutation as the default next step`
+  - `safe next step remains /offdesk review or /followup, not execute`
 - dashboard `Task Detail`:
-  - `must show FollowupBrief preview state and operator-owned reason`
+  - `proved by tests/gateway/test_control_dashboard.py::test_control_dashboard_task_detail_route_redirects_alias_to_request_id`
+  - `shows preview_only, lane split, reason, and reentry_rails`
 - dashboard `Recovery`:
-  - `must preserve preview-only manual-followup interpretation when the task is blocked or stale`
+  - `preview interpretation covered by structured recovery/dashboard surfaces in bounded replay fixtures`
 - background run ticket / runner:
   - `none expected`
 - launch spec / evidence bundle:
@@ -101,18 +105,22 @@
 
 ## 6. Result
 - result:
-  - `planned`
+  - `pass`
 - mismatch class:
-  - `-`
+  - `none`
 - mismatch notes:
-  - `-`
+  - `preview surface is now explicitly distinct from execute surface`
+  - `/followup-exec` rejects preview_only and routes operator back to safe preview`
 - next fix:
-  - `run a bounded replay or isolated fixture under the current model and capture preview parity`
+  - `promote the same proof to a later live runtime replay if needed, but no additional core change is required for preview split`
 
 ## 7. Raw References
 - runtime state refs:
-  - `-`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_task_detail_route_redirects_alias_to_request_id`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_followup_execute_blocks_preview_only_followup_brief`
 - log refs:
-  - `-`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_followup_execute_blocks_preview_only_followup_brief or resolve_followup_execute_transition_uses_execution_slice_only or resolve_followup_execute_transition_rejects_review_lane_selection'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_followup_execute_route_blocks_preview_only_brief or post_followup_execute_route_uses_local_tmux_background_when_preferred or task_detail_route_redirects_alias_to_request_id or runtime_detail_route_renders_runtime_scope'`
 - artifact refs:
-  - `-`
+  - `no runtime artifacts; proof uses test fixtures and response payload assertions only`

@@ -7201,14 +7201,17 @@ def test_orch_followup_summarizes_allowed_lane_targets() -> None:
     assert "/followup T-123 lane R2" in buttons
 
 
-def test_orch_followup_execute_blocks_preview_only_followup_brief() -> None:
+def test_orch_followup_execute_blocks_preview_only_followup_brief(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    manager_state_file = team_dir / "orch_manager_state.json"
     manager_state = _empty_state()
     manager_state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
         "project_alias": "O2",
         "project_root": str(ROOT),
-        "team_dir": str(ROOT / ".aoe-team"),
+        "team_dir": str(team_dir),
         "last_request_id": "REQ-123",
         "tasks": {
             "REQ-123": {
@@ -7237,7 +7240,7 @@ def test_orch_followup_execute_blocks_preview_only_followup_brief() -> None:
         args=argparse.Namespace(
             require_verifier=False,
             verifier_roles="",
-            manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+            manager_state_file=manager_state_file,
             dry_run=True,
         ),
         manager_state=manager_state,
@@ -7260,7 +7263,7 @@ def test_orch_followup_execute_blocks_preview_only_followup_brief() -> None:
         orch_followup_execute_lane_ids=["L2"],
         send=lambda text, **kwargs: sent.append((text, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
         log_event=lambda **kwargs: None,
-        get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(ROOT / ".aoe-team"))),
+        get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(team_dir))),
         latest_task_request_refs=lambda *args, **kwargs: [],
         set_chat_recent_task_refs=lambda *args, **kwargs: None,
         save_manager_state=lambda *args, **kwargs: None,
