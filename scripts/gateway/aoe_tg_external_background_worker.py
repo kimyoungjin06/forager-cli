@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List
+from urllib.parse import quote
 
+from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
     claim_background_run_ticket,
@@ -50,6 +52,40 @@ def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
         return str(resolved.relative_to(team_root)).strip()
     except Exception:
         return str(resolved).strip()
+
+
+def _append_external_background_audit(
+    *,
+    team_dir: Path,
+    ticket: Dict[str, Any],
+    runner_target: str,
+    phase: str,
+    note: str,
+    source_command: str,
+    outcome_reason_code: str,
+    next_step: str,
+    remediation: str,
+    at: str,
+) -> bool:
+    request_id = _trim(ticket.get("request_id", ""), 96)
+    link_href = f"/control/tasks/by-request/{quote(request_id, safe='')}" if request_id else "-"
+    link_label = "task detail" if request_id else "runtime detail"
+    label = request_id or _trim(ticket.get("ticket_id", ""), 96) or "-"
+    return append_action_audit_row(
+        str(team_dir),
+        headline=f"External Background {phase} | {label}",
+        status="updated",
+        outcome_kind="background_external",
+        outcome_status="updated",
+        outcome_reason_code=outcome_reason_code,
+        outcome_detail=note,
+        next_step=next_step,
+        remediation=remediation,
+        source_command=source_command,
+        link_label=link_label,
+        link_href=link_href,
+        at=at,
+    )
 
 
 def _read_external_background_result(result_path: Path) -> Dict[str, Any]:
@@ -226,6 +262,20 @@ def poll_external_background_tickets(
                         if advanced:
                             changed = True
                             acknowledged.append(ticket_id)
+                            _append_external_background_audit(
+                                team_dir=team_dir,
+                                ticket={**row, **advanced},
+                                runner_target=runner_target,
+                                phase="Pickup Ack",
+                                note=ack_rel or summary or worker_id or ticket_id,
+                                source_command=f"/external ack {runner_target} {ticket_id}",
+                                outcome_reason_code="external_pickup_acknowledged",
+                                next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
+                                remediation=(
+                                    f"{runner_target} picked up the background run; wait for the result sidecar before taking the next operator action"
+                                ),
+                                at=now_iso(),
+                            )
                 continue
             evidence_artifacts = list(row.get("evidence_artifacts") or [])
             for artifact_path in (ack_path,):
@@ -272,8 +322,32 @@ def poll_external_background_tickets(
                 changed = True
                 if status == "completed":
                     completed.append(ticket_id)
+                    _append_external_background_audit(
+                        team_dir=team_dir,
+                        ticket={**row, **advanced},
+                        runner_target=runner_target,
+                        phase="Result",
+                        note=evidence_bundle,
+                        source_command=f"/external result {runner_target} {ticket_id}",
+                        outcome_reason_code="external_result_completed",
+                        next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
+                        remediation="inspect the task detail and evidence bundle before issuing another rerun or follow-up action",
+                        at=now_iso(),
+                    )
                 else:
                     failed.append(ticket_id)
+                    _append_external_background_audit(
+                        team_dir=team_dir,
+                        ticket={**row, **advanced},
+                        runner_target=runner_target,
+                        phase="Result",
+                        note=evidence_bundle,
+                        source_command=f"/external result {runner_target} {ticket_id}",
+                        outcome_reason_code="external_result_failed",
+                        next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
+                        remediation="inspect the failed external result and evidence bundle before retrying or changing runner target",
+                        at=now_iso(),
+                    )
     return {
         "changed": changed,
         "acknowledged_count": len(acknowledged),

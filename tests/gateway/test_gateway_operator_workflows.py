@@ -4943,6 +4943,14 @@ def test_poll_external_background_tickets_marks_completed_from_result_file(tmp_p
     assert "external_result" in updated["evidence_bundle"]
     assert "background_run_results/remote-worker-bgt-remote-001.json" in (updated.get("evidence_artifacts") or [])
     assert "reports/external-summary.md" in (updated.get("evidence_artifacts") or [])
+    audit_rows = [
+        json.loads(line)
+        for line in (tmp_path / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert audit_rows[-1]["outcome_reason_code"] == "external_result_completed"
+    assert audit_rows[-1]["source_command"] == "/external result remote_worker BGT-REMOTE-001"
+    assert audit_rows[-1]["link_href"] == "/control/tasks/by-request/REQ-REMOTE-001"
 
 
 def test_poll_external_background_tickets_records_pickup_acknowledgement(tmp_path: Path) -> None:
@@ -4996,6 +5004,14 @@ def test_poll_external_background_tickets_records_pickup_acknowledgement(tmp_pat
     assert updated["runtime_summary"].endswith("| ack=background_run_acks/github-runner-bgt-gha-ack-001.json")
     assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in (updated.get("evidence_artifacts") or [])
     assert "logs/github-runner-start.txt" in (updated.get("evidence_artifacts") or [])
+    audit_rows = [
+        json.loads(line)
+        for line in (tmp_path / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert audit_rows[-1]["outcome_reason_code"] == "external_pickup_acknowledged"
+    assert audit_rows[-1]["source_command"] == "/external ack github_runner BGT-GHA-ACK-001"
+    assert audit_rows[-1]["link_href"] == "/control/tasks/by-request/REQ-GHA-ACK-001"
 
 
 def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
