@@ -302,6 +302,8 @@
       - same-process `local_background` daemon
       - `background_worker.json`
       - `bgw-*`, `bgq-clean`, runner preference
+      - `run_lock_mode=test_only` to suppress non-test internal launches during development
+      - `background_runner_slot_limit` to cap concurrent tmux/external launches per runtime
       - `local_tmux` retry/replan launch path
       - `local_tmux` initial detached no-wait path for serializable gateway runs
       - tmux log/result artifact persistence + polling

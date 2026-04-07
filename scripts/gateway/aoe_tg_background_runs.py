@@ -293,6 +293,31 @@ def list_background_run_tickets(
     return rows
 
 
+def count_background_run_tickets(
+    path: Path,
+    *,
+    statuses: List[str] | None = None,
+    runner_targets: List[str] | None = None,
+) -> int:
+    allowed_statuses = {
+        str(item or "").strip().lower()
+        for item in list(statuses or [])
+        if str(item or "").strip()
+    }
+    allowed_targets = {
+        str(item or "").strip().lower()
+        for item in list(runner_targets or [])
+        if str(item or "").strip()
+    }
+    count = 0
+    for snapshot in list_background_run_tickets(path, statuses=list(allowed_statuses) or None):
+        row_target = str(snapshot.get("runner_target", "")).strip().lower()
+        if allowed_targets and row_target not in allowed_targets:
+            continue
+        count += 1
+    return count
+
+
 def claim_background_run_ticket(
     path: Path,
     ticket_id: str,

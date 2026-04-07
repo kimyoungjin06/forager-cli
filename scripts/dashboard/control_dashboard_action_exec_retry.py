@@ -163,6 +163,58 @@ def _run_lock_block_response(
     )
 
 
+def _background_slot_limit(entry: Dict[str, Any]) -> int:
+    try:
+        value = int(entry.get("background_runner_slot_limit", 1) or 1)
+    except Exception:
+        value = 1
+    return max(1, min(value, 8))
+
+
+def _background_slots_exhausted_response(
+    *,
+    entry: Dict[str, Any],
+    transition: Dict[str, Any],
+    source_command: str,
+    payload: Dict[str, Any],
+    path: str,
+    runner_target: str,
+    active_slots: int,
+    slot_limit: int,
+) -> Tuple[int, Dict[str, str], bytes]:
+    alias = _project_status_ref(str(transition.get("orch_target", "")).strip(), entry)
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "blocked",
+            "error": "background_runner_slots_exhausted",
+            "method": "POST",
+            "path": path,
+            "mode": "phase2",
+            "source_command": source_command,
+            "payload": payload,
+            "transition": {
+                "cmd": transition.get("cmd", "run"),
+                "orch_target": transition.get("orch_target", "-"),
+                "run_control_mode": transition.get("run_control_mode", "-"),
+                "run_source_request_id": transition.get("run_source_request_id", "-"),
+                "run_force_mode": transition.get("run_force_mode", "-"),
+            },
+            "next_step": f"/orch bg-slots {alias} {slot_limit + 1 if slot_limit < 8 else slot_limit}",
+            "remediation": f"background runner slots are saturated ({active_slots}/{slot_limit}); wait for current jobs to finish or raise the slot limit deliberately",
+            "outcome": {
+                "kind": "background_slots",
+                "status": "blocked",
+                "reason_code": "background_runner_slots_exhausted",
+                "detail": f"runner_target={runner_target} active={active_slots} limit={slot_limit}",
+            },
+        },
+        status=409,
+    )
+
+
 def _maybe_execute_retry_background_runner(
     transition: Dict[str, Any],
     *,
@@ -254,6 +306,23 @@ def _maybe_execute_retry_background_runner(
             source_command=source_command,
             payload=payload,
             path=action_path,
+        )
+    slot_limit = _background_slot_limit(entry)
+    active_slots = background_runs.count_background_run_tickets(
+        background_runs.background_runs_state_path(Path(team_dir_raw)),
+        statuses=["dispatching", "running"],
+        runner_targets=["local_tmux", "github_runner", "remote_worker"],
+    )
+    if active_slots >= slot_limit:
+        return _background_slots_exhausted_response(
+            entry=entry,
+            transition=transition,
+            source_command=source_command,
+            payload=payload,
+            path=action_path,
+            runner_target=selected_runner,
+            active_slots=active_slots,
+            slot_limit=slot_limit,
         )
 
     queue_path = background_runs.background_runs_state_path(Path(team_dir_raw))

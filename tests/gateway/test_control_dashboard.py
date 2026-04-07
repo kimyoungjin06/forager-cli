@@ -19,6 +19,7 @@ for path in (GW_DIR, DASH_DIR):
 from _gateway_test_support import gw  # noqa: E402
 import aoe_tg_background_runs as background_runs  # noqa: E402
 import aoe_tg_operator_summary as operator_summary  # noqa: E402
+from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
 import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
@@ -1214,6 +1215,54 @@ def test_control_dashboard_post_retry_route_blocks_when_run_lock_is_test_only(tm
     assert payload["error"] == "run_lock_test_only"
     assert payload["next_step"] == "/orch run-lock O2 open"
     assert "only small test launches are allowed" in payload["remediation"]
+
+
+def test_control_dashboard_post_retry_route_blocks_when_background_slots_are_exhausted(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["background_runner_target"] = "local_tmux"
+    state["projects"]["alpha"]["background_runner_slot_limit"] = 1
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    queue_path = Path(state["projects"]["alpha"]["team_dir"]) / "background_runs.json"
+    background_runs.upsert_background_run_ticket(
+        queue_path,
+        build_background_run_ticket(
+            ticket_id="BGT-BUSY-001",
+            request_id="REQ-BUSY-001",
+            project_key="alpha",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="dashboard_retry",
+            created_at="2026-04-07T14:00:00+09:00",
+            created_by="dashboard:control",
+            source_surface="dashboard_retry",
+            status="running",
+        ),
+        now_iso=lambda: "2026-04-07T14:00:01+09:00",
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["error"] == "background_runner_slots_exhausted"
+    assert payload["next_step"] == "/orch bg-slots O2 2"
+    assert "slots are saturated (1/1)" in payload["remediation"]
 
 
 def test_control_dashboard_post_replan_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:

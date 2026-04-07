@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Optional
 
 from aoe_tg_background_runs import (
     background_runs_state_path,
+    count_background_run_tickets,
     upsert_background_run_ticket,
 )
 from aoe_tg_local_background_worker import (
@@ -112,6 +113,59 @@ def maybe_handle_no_wait_dispatch_detach(
     )
     if selected_runner_target != "local_tmux":
         launch_spec = fallback_launch_spec
+
+    slot_limit = 1
+    try:
+        slot_limit = max(1, min(int(entry.get("background_runner_slot_limit", 1) or 1), 8))
+    except Exception:
+        slot_limit = 1
+    if selected_runner_target in {"local_tmux", "github_runner", "remote_worker"} and queue_path:
+        active_slots = count_background_run_tickets(
+            queue_path,
+            statuses=["dispatching", "running"],
+            runner_targets=["local_tmux", "github_runner", "remote_worker"],
+        )
+        if active_slots >= slot_limit:
+            reason = f"background runner slots exhausted ({active_slots}/{slot_limit})"
+            if isinstance(provisional_task, dict):
+                ticket = build_background_run_ticket(
+                    request_id=str(provisional_req_id or "").strip(),
+                    project_key=str(key or "").strip(),
+                    execution_brief_status=str(provisional_task.get("execution_brief_status", "")).strip(),
+                    runner_target=selected_runner_target,
+                    launch_mode="detached_no_wait",
+                    created_at=now_iso(),
+                    created_by=f"telegram:{chat_id}",
+                    source_surface="run_no_wait",
+                    status="failed",
+                    evidence_bundle="status=failed | reason=background_runner_slots_exhausted",
+                    launch_spec=launch_spec,
+                )
+                apply_background_run_ticket_snapshot(provisional_task, ticket)
+                provisional_task.setdefault("result", {})
+                if isinstance(provisional_task.get("result"), dict):
+                    provisional_task["result"]["background_run_status"] = "failed"
+                    provisional_task["result"]["background_run_runner_target"] = selected_runner_target
+                    provisional_task["result"]["background_run_ticket_id"] = str(ticket.get("ticket_id", "")).strip()
+                    provisional_task["result"]["background_run_evidence_bundle"] = "status=failed | reason=background_runner_slots_exhausted"
+                provisional_task["updated_at"] = now_iso()
+                entry["updated_at"] = now_iso()
+                if not args.dry_run:
+                    save_manager_state(args.manager_state_file, manager_state)
+            send(
+                f"detached dispatch blocked\n- runtime: {key}\n- reason: {reason}\n- next: /orch bg-slots {orch_ref} {slot_limit + 1 if slot_limit < 8 else slot_limit}",
+                context="dispatch-detach blocked",
+            )
+            log_event(
+                event="dispatch_detach_blocked",
+                project=key,
+                request_id=str(provisional_req_id or "").strip(),
+                task=provisional_task if isinstance(provisional_task, dict) else None,
+                stage="planning",
+                status="blocked",
+                detail=reason[:240],
+            )
+            return True
 
     if project_run_lock_blocks_launch(
         entry,

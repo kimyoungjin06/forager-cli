@@ -15,6 +15,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 
+def _normalize_slot_limit(raw: Any, default: int = 1) -> int:
+    try:
+        value = int(raw or default)
+    except Exception:
+        value = int(default)
+    return max(1, min(value, 32))
+
+
 def resolve_project_root(raw: str) -> Path:
     return Path(raw).expanduser().resolve()
 
@@ -167,6 +175,7 @@ def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callab
                 "display_name": "default",
                 "project_alias": "O1",
                 "background_runner_target": "local_background",
+                "background_runner_slot_limit": 1,
                 "run_lock_mode": "open",
                 "project_root": str(project_root),
                 "team_dir": str(team_dir),
@@ -473,6 +482,7 @@ def load_manager_state(
             "project_alias": normalize_project_alias(str(raw_entry.get("project_alias", ""))),
             "background_runner_target": str(raw_entry.get("background_runner_target", "local_background")).strip().lower()
             or "local_background",
+            "background_runner_slot_limit": _normalize_slot_limit(raw_entry.get("background_runner_slot_limit"), 1),
             "run_lock_mode": str(raw_entry.get("run_lock_mode", "open")).strip().lower() or "open",
             "project_root": str(root_path),
             "team_dir": str(Path(td).expanduser().resolve()),
@@ -575,6 +585,7 @@ def ensure_default_project_registered(
             "display_name": "default",
             "project_alias": "O1",
             "background_runner_target": "local_background",
+            "background_runner_slot_limit": 1,
             "run_lock_mode": "open",
             "project_root": str(project_root),
             "team_dir": str(team_dir),
@@ -602,6 +613,7 @@ def ensure_default_project_registered(
                 entry["todos"] = []
             entry["project_alias"] = normalize_project_alias(str(entry.get("project_alias", "")))
             entry["background_runner_target"] = str(entry.get("background_runner_target", "local_background")).strip().lower() or "local_background"
+            entry["background_runner_slot_limit"] = _normalize_slot_limit(entry.get("background_runner_slot_limit"), 1)
             entry["run_lock_mode"] = str(entry.get("run_lock_mode", "open")).strip().lower() or "open"
             entry["system_project"] = bool_from_json(entry.get("system_project"), str(entry.get("name", "")).strip().lower() == "default")
             entry["ops_hidden"] = bool_from_json(entry.get("ops_hidden"), bool(entry.get("system_project")))

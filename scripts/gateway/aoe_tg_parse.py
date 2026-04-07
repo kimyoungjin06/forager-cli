@@ -1145,6 +1145,31 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
             return {"cmd": "orch-run-lock", "orch": orch_name, "run_lock_mode": run_lock_mode}
 
+        if sub in {"bg-slots", "background-slots"}:
+            orch_name: Optional[str] = None
+            slot_limit: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] <limit>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is None:
+                        orch_name = tok.strip()
+                    elif slot_limit is None:
+                        slot_limit = tok.strip()
+                    else:
+                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] <limit>")
+                i += 1
+            if not orch_name or not slot_limit:
+                raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] <limit>")
+            return {"cmd": "orch-bg-slots", "orch": orch_name, "slot_limit": slot_limit}
+
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None
             i = 0

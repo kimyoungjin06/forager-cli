@@ -178,6 +178,8 @@
   - `github_runner` and `remote_worker` stay operator-selected targets only
   - external runners emit a durable handoff manifest and mark the ticket `running`
   - automatic target selection stays conservative until explicit remote pickup/acknowledgement exists
+  - project operators can cap non-local background launches with `background_runner_slot_limit`
+  - when active non-local tickets already fill the slot budget, new retry/replan/followup-exec and serializable no-wait launches must block instead of overcommitting
 
 ### 5.6 Evidence Bundle
 - Durable off-desk result package.
@@ -342,6 +344,7 @@
     - `mode=in_process_callback`
     - `externalizable=false`
   This fallback is not a bug; it remains the migration seam toward `github_runner` / `remote_worker` and any dispatch cases that still depend on in-process callback state.
+- During development, operators can set `run_lock_mode=test_only` to prevent non-test internal jobs from launching while still allowing small test paths and state verification.
 - When an external runner attempts to claim a non-externalizable ticket, the ticket must fail with:
   - `reason=launch_spec_not_externalizable`
 - When an externalizable external-runner ticket launches today:

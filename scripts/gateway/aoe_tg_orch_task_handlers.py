@@ -23,6 +23,8 @@ from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issu
 _SCENARIO_FILENAME = "AOE_TODO.md"
 _BACKGROUND_RUNNER_PREFS = {"local_background", "local_tmux", "github_runner", "remote_worker"}
 _RUN_LOCK_MODES = {"open", "test_only"}
+_BACKGROUND_SLOT_MIN = 1
+_BACKGROUND_SLOT_MAX = 8
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -175,6 +177,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
     runner_toggle = "local_background" if runner_pref == "local_tmux" else "local_tmux"
     run_lock_mode = project_run_lock_mode(entry)
     run_lock_toggle = "open" if run_lock_mode == "test_only" else "test_only"
+    slot_limit = _background_runner_slot_limit(entry)
     issue = project_runtime_issue(entry)
     if issue:
         keyboard: List[List[Dict[str, str]]] = [
@@ -187,6 +190,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
             [{"text": f"/todo {alias}"}, {"text": f"/todo {alias} followup"}, {"text": f"/orch monitor {alias}"}],
             ([{"text": f"/orch bgq-clean {alias}"}] if queue_stale_count > 0 else []),
             [{"text": f"/orch bg-runner {alias} {runner_toggle}"}],
+            [{"text": f"/orch bg-slots {alias} {slot_limit + 1 if slot_limit < _BACKGROUND_SLOT_MAX else _BACKGROUND_SLOT_MIN}"}],
             [{"text": f"/orch run-lock {alias} {run_lock_toggle}"}],
             [{"text": f"/orch bgw-status {alias}"}]
             + (
@@ -211,6 +215,14 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
 def _background_runner_preference(entry: Dict[str, Any]) -> str:
     token = str(entry.get("background_runner_target", "")).strip().lower()
     return token if token in _BACKGROUND_RUNNER_PREFS else "local_background"
+
+
+def _background_runner_slot_limit(entry: Dict[str, Any]) -> int:
+    try:
+        value = int(entry.get("background_runner_slot_limit", 1) or 1)
+    except Exception:
+        value = 1
+    return max(_BACKGROUND_SLOT_MIN, min(value, _BACKGROUND_SLOT_MAX))
 
 
 def _background_runner_status(entry: Dict[str, Any], key: str) -> tuple[str, str, str]:
@@ -734,14 +746,27 @@ def handle_orch_task_command(
             worker_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
         run_lock_mode, run_lock_note = _project_run_lock_status(entry)
+        slot_limit = _background_runner_slot_limit(entry)
+        active_slots = 0
+        try:
+            team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
+            if str(team_dir):
+                active_slots = background_runs.count_background_run_tickets(
+                    background_runs.background_runs_state_path(team_dir),
+                    statuses=["dispatching", "running"],
+                    runner_targets=["local_tmux", "github_runner", "remote_worker"],
+                )
+        except Exception:
+            active_slots = 0
         runner_line = f"background_runner: pref={runner_pref} | effective={runner_effective}\n"
         runner_note_line = f"background_runner_note: {runner_note}\n" if runner_note else ""
         run_lock_line = f"run_lock: {run_lock_mode}\n"
         run_lock_note_line = f"run_lock_note: {run_lock_note}\n" if run_lock_note else ""
+        slots_line = f"background_slots: limit={slot_limit} active={active_slots}\n"
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{queue_line}{worker_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{slots_line}{queue_line}{worker_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
@@ -917,6 +942,64 @@ def handle_orch_task_command(
         send(
             "\n".join(lines),
             context="orch-run-lock",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd == "orch-bg-slots":
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "background slot update blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context="orch-bg-slots blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        try:
+            target = max(_BACKGROUND_SLOT_MIN, min(int(str(rest or "").strip()), _BACKGROUND_SLOT_MAX))
+        except Exception:
+            send(
+                "usage: /orch bg-slots <O#|name> <limit>",
+                context="orch-bg-slots usage",
+                with_menu=True,
+            )
+            return True
+        entry["background_runner_slot_limit"] = target
+        entry["updated_at"] = now_iso()
+        save_manager_state(args.manager_state_file, manager_state)
+        team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser().resolve()
+        append_action_audit_row(
+            team_dir,
+            headline="Background Slots | configured",
+            status="configured",
+            outcome_kind="background_slots",
+            outcome_status="configured",
+            outcome_reason_code=str(target),
+            outcome_detail=f"slot_limit={target}",
+            next_step=f"/orch status {alias}",
+            remediation="future tmux/external background launches will respect this active slot limit",
+            source_command=f"/orch bg-slots {alias} {target}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
+        send(
+            "background slots\n"
+            f"- runtime: {key}\n"
+            f"- limit: {target}\n"
+            "next:\n"
+            f"- /orch status {alias}",
+            context="orch-bg-slots",
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )
