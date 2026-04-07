@@ -15,6 +15,7 @@ from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
 from aoe_tg_background_runs import (
     background_runs_state_path,
     background_worker_state_path,
+    count_background_run_tickets,
     summarize_background_runs_state,
     summarize_background_worker_state,
 )
@@ -27,6 +28,7 @@ from aoe_tg_ops_view import (
     render_project_snapshot_lines,
 )
 from aoe_tg_package_paths import team_tmux_script
+from aoe_tg_run_lock import project_run_lock_mode, project_run_lock_note
 from aoe_tg_runtime_core import provider_capacity_state_path as runtime_provider_capacity_state_path
 from aoe_tg_priority_actions import (
     offdesk_priority_action_snapshot,
@@ -42,6 +44,9 @@ from aoe_tg_todo_policy import (
     proposal_confidence,
 )
 from aoe_tg_todo_state import preview_syncback_plan, sorted_open_proposals
+
+
+_SLOT_RUNNER_TARGETS = ["local_tmux", "github_runner", "remote_worker"]
 
 
 def cmd_prefix() -> str:
@@ -684,18 +689,40 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             sync_stale = False
     manual_followup_count = blocked_bucket_count(todos, "manual_followup")
     blocked_head = blocked_head_summary(todos)
+    team_dir_raw = str(entry.get("team_dir", "")).strip()
+    team_dir = Path(team_dir_raw) if team_dir_raw else None
     queue_snapshot = (
-        summarize_background_runs_state(background_runs_state_path(Path(str(entry.get("team_dir", "")).strip())))
-        if str(entry.get("team_dir", "")).strip()
+        summarize_background_runs_state(background_runs_state_path(team_dir))
+        if team_dir is not None
         else {}
     )
     worker_snapshot = (
         summarize_background_worker_state(
-            background_worker_state_path(Path(str(entry.get("team_dir", "")).strip())),
+            background_worker_state_path(team_dir),
             now_iso=lambda: datetime.now(timezone.utc).isoformat(),
         )
-        if str(entry.get("team_dir", "")).strip()
+        if team_dir is not None
         else {}
+    )
+    run_lock_mode = project_run_lock_mode(entry)
+    run_lock_note = project_run_lock_note(entry)
+    try:
+        background_slot_limit = max(1, min(int(entry.get("background_runner_slot_limit", 1) or 1), 32))
+    except Exception:
+        background_slot_limit = 1
+    background_slot_active = (
+        count_background_run_tickets(
+            background_runs_state_path(team_dir),
+            statuses=["queued", "dispatching", "running"],
+            runner_targets=_SLOT_RUNNER_TARGETS,
+        )
+        if team_dir is not None
+        else 0
+    )
+    background_slot_pressure = (
+        f"saturated ({background_slot_active}/{background_slot_limit})"
+        if background_slot_active >= background_slot_limit
+        else (f"active ({background_slot_active}/{background_slot_limit})" if background_slot_active > 0 else f"idle (0/{background_slot_limit})")
     )
     notes: List[str] = []
     attention: List[str] = []
@@ -745,6 +772,16 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     worker_status = str(worker_snapshot.get("status", "")).strip().lower()
     worker_summary = str(worker_snapshot.get("summary", "")).strip()
     queue_depth = int(queue_snapshot.get("depth", 0) or 0)
+    if run_lock_mode == "test_only":
+        status = "warn" if status == "ready" else status
+        notes.append(run_lock_note or "test_only run lock is active")
+        attention.append("run_lock:test_only")
+        severity_score += 20
+    if background_slot_active >= background_slot_limit:
+        status = "warn" if status == "ready" else status
+        notes.append(f"background runner slots saturated ({background_slot_active}/{background_slot_limit})")
+        attention.append(f"slots:{background_slot_active}/{background_slot_limit}")
+        severity_score += 25
     if worker_status in {"stale", "error"}:
         status = "warn" if status == "ready" else status
         notes.append(worker_summary or f"background worker is {worker_status}")
@@ -924,6 +961,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         ),
         background_worker_status=worker_status,
         background_worker_summary=worker_summary,
+        run_lock_mode=run_lock_mode,
+        run_lock_note=run_lock_note,
+        background_slot_limit=background_slot_limit,
+        background_slot_active=background_slot_active,
     )
 
     lines = [
@@ -935,6 +976,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"  scenario_include: {include_display}",
         f"  queue: open={counts['open']} running={counts['running']} blocked={counts['blocked']} followup={manual_followup_count} pending={'yes' if pending_flag else 'no'} proposals={open_proposals}",
         f"  background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}",
+        f"  run_lock: {run_lock_mode}",
+        f"  run_lock_note: {run_lock_note or '-'}",
+        f"  background_slots: active={background_slot_active} limit={background_slot_limit} | {background_slot_pressure}",
         f"  background_worker: {worker_summary or '-'}",
         f"  proposal_triage: priorities={proposal_triage.get('priority_summary', '-')} | kinds={proposal_triage.get('kind_summary', '-')}",
         f"  syncback: done={syncback_counts['done']} reopen={syncback_counts['reopen']} append={syncback_counts['append']} blocked_notes={syncback_counts['blocked']}",

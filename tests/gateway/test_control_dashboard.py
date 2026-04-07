@@ -438,6 +438,11 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "confirm acceptance scope before off-desk execution" in overview_text
     assert "background_run" in overview_text
     assert "BGT-001" in overview_text
+    assert "run_lock" in overview_text
+    assert "open" in overview_text
+    assert "background_slots" in overview_text
+    assert "active=0 limit=1" in overview_text
+    assert "idle (0/1)" in overview_text
     assert "runtime_handle" in overview_text
     assert "aoe_bg_bgt_001" in overview_text
     assert "runtime_summary" in overview_text
@@ -560,6 +565,11 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "background_run" in text
     assert "runner_target" in text
     assert "local_background" in text
+    assert "run_lock" in text
+    assert "open" in text
+    assert "background_slots" in text
+    assert "active=0 limit=1" in text
+    assert "idle (0/1)" in text
     assert "background_ticket" in text
     assert "BGT-001" in text
     assert "runtime_handle" in text
@@ -740,6 +750,11 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "acceptance_gap" in text
     assert "confirm acceptance scope before off-desk execution" in text
     assert "local_background" in text
+    assert "run_lock" in text
+    assert "open" in text
+    assert "background_slots" in text
+    assert "active=0 limit=1" in text
+    assert "idle (0/1)" in text
     assert "BGT-001" in text
     assert "runtime_handle" in text
     assert "aoe_bg_bgt_001" in text
@@ -803,6 +818,11 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "background_run" in text
     assert "BGT-001" in text
     assert "local_background" in text
+    assert "run_lock" in text
+    assert "open" in text
+    assert "background_slots" in text
+    assert "active=0 limit=1" in text
+    assert "idle (0/1)" in text
 
 
 def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:

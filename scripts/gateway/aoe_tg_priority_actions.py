@@ -122,12 +122,21 @@ def offdesk_priority_action_snapshot(
     background_queue_runner_targets: Optional[Dict[str, int]] = None,
     background_worker_status: str = "",
     background_worker_summary: str = "",
+    run_lock_mode: str = "",
+    run_lock_note: str = "",
+    background_slot_limit: int = 1,
+    background_slot_active: int = 0,
 ) -> Dict[str, str]:
     brief_status = str(active_task_execution_brief_status or "").strip().lower()
     brief_blocked = [str(x).strip() for x in (active_task_execution_brief_blocked_slice or []) if str(x).strip()]
     brief_decision = str(active_task_execution_brief_operator_decision or "").strip()
     worker_status = str(background_worker_status or "").strip().lower()
     worker_summary = str(background_worker_summary or "").strip()
+    lock_mode = str(run_lock_mode or "").strip().lower()
+    lock_note = str(run_lock_note or "").strip()
+    slot_limit = max(1, int(background_slot_limit or 1))
+    slot_active = max(0, int(background_slot_active or 0))
+    slot_saturated = slot_active >= slot_limit
     if brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
         reason = brief_decision
         if not reason and brief_blocked:
@@ -159,8 +168,30 @@ def offdesk_priority_action_snapshot(
         manual_followup_review_lane_ids=list((active_task_targets or {}).get("manual_followup_review_lane_ids") or []),
         rate_limit=active_task_rate_limit if isinstance(active_task_rate_limit, dict) else None,
     )
-    if str(task_priority.get("action", "")).strip():
+    task_action = str(task_priority.get("action", "")).strip()
+    task_requires_launch = task_action.startswith("/retry ")
+    if task_requires_launch and lock_mode == "test_only":
+        return {
+            "action": f"/orch status {alias}",
+            "reason": lock_note or "test_only run lock is active",
+        }
+    if task_requires_launch and slot_saturated:
+        return {
+            "action": f"/orch status {alias}",
+            "reason": f"background runner slots are saturated ({slot_active}/{slot_limit})",
+        }
+    if task_action:
         return task_priority
+    if lock_mode == "test_only":
+        return {
+            "action": f"/orch status {alias}",
+            "reason": lock_note or "test_only run lock is active",
+        }
+    if slot_saturated:
+        return {
+            "action": f"/orch status {alias}",
+            "reason": f"background runner slots are saturated ({slot_active}/{slot_limit})",
+        }
     if int(background_queue_depth or 0) > 0:
         targets = background_queue_runner_targets if isinstance(background_queue_runner_targets, dict) else {}
         target_summary = ",".join(

@@ -74,6 +74,9 @@
       <p><strong>background_ticket</strong> {{ runtime.active_task_background_run_ticket_id }}</p>
       <p><strong>evidence_bundle</strong> {{ runtime.active_task_background_run_evidence_bundle }}</p>
       <p><strong>evidence_artifacts</strong> {{ runtime.active_task_background_run_evidence_artifacts }}</p>
+      <p><strong>run_lock</strong> {{ runtime.run_lock_mode }}</p>
+      <p><strong>run_lock_note</strong> {{ runtime.run_lock_note }}</p>
+      <p><strong>background_slots</strong> active={{ runtime.background_slot_active }} limit={{ runtime.background_slot_limit }} | {{ runtime.background_slot_pressure }}</p>
       <p><strong>background_worker</strong> {{ runtime.background_worker_summary }}</p>
       <p><strong>background_queue</strong> {{ runtime.background_queue_summary }}</p>
       <p><strong>completion_focus</strong> {{ runtime.active_task_completion_focus }}</p>

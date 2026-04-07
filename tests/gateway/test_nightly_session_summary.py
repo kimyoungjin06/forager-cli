@@ -51,6 +51,10 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["background_worker_summary"] != "-"
     assert runtimes[0]["background_queue_summary"] != "-"
     assert "depth=" in runtimes[0]["background_queue_summary"]
+    assert runtimes[0]["run_lock_mode"] == "open"
+    assert runtimes[0]["background_slot_limit"] == 1
+    assert runtimes[0]["background_slot_active"] == 0
+    assert runtimes[0]["background_slot_pressure"] == "idle (0/1)"
     assert runtimes[0]["task_teams"][0]["request_id"] == "REQ-1"
     assert runtimes[0]["active_task_completion_contract"]["focus"] == "evidence quality, reasoning coherence, missing caveats"
     assert runtimes[0]["task_teams"][0]["completion_contract"]["done_when"] == "conclusion is supported by inspectable evidence and explicit caveats"
@@ -91,6 +95,9 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "Sync Preview | preview" in markdown
     assert "link: runtime detail -> /control/runtimes/O2" in markdown
     assert "background_queue:" in markdown
+    assert "run_lock: open" in markdown
+    assert "background_slots: active=0 limit=1" in markdown
+    assert "background_slot_pressure: idle (0/1)" in markdown
     assert "background_worker_summary:" in markdown
     assert "background_queue_depth:" in markdown
     assert "operator_hints: /offdesk review O2, /monitor O2, /todo O2, /offdesk review" in markdown

@@ -38,6 +38,9 @@
         <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
         <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
         <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+        <p><strong>run_lock</strong> {{ card.run_lock_mode }}</p>
+        <p><strong>run_lock_note</strong> {{ card.run_lock_note }}</p>
+        <p><strong>background_slots</strong> active={{ card.background_slot_active }} limit={{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</p>
         <p><strong>runtime_handle</strong> {{ card.active_task_background_run_runtime_handle }}</p>
         <p><strong>runtime_summary</strong> {{ card.active_task_background_run_runtime_summary }}</p>
         <p><strong>evidence_artifacts</strong> {{ card.active_task_background_run_evidence_artifacts }}</p>
@@ -72,6 +75,9 @@
       <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
       <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
       <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+      <p><strong>run_lock</strong> {{ card.run_lock_mode }}</p>
+      <p><strong>run_lock_note</strong> {{ card.run_lock_note }}</p>
+      <p><strong>background_slots</strong> active={{ card.background_slot_active }} limit={{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</p>
       <p><strong>runtime_handle</strong> {{ card.active_task_background_run_runtime_handle }}</p>
       <p><strong>runtime_summary</strong> {{ card.active_task_background_run_runtime_summary }}</p>
       <p><strong>evidence_artifacts</strong> {{ card.active_task_background_run_evidence_artifacts }}</p>
@@ -112,7 +118,7 @@
         <td><a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a><br><span class="muted">{{ card.active_task_status }}/{{ card.active_task_phase }}</span></td>
         <td>{{ card.active_task_execution_brief_status }}<br><span class="muted">{{ card.active_task_execution_brief_summary }}</span></td>
         <td>{{ card.active_task_background_run_status }}<br><span class="muted">{{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</span><br><span class="muted">{{ card.active_task_background_run_runtime_handle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_bundle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_artifacts }}</span></td>
-        <td>{{ card.background_worker_summary }}<br><span class="muted">{{ card.background_queue_summary }}</span></td>
+        <td>{{ card.background_worker_summary }}<br><span class="muted">{{ card.background_queue_summary }}</span><br><span class="muted">run_lock={{ card.run_lock_mode }}</span><br><span class="muted">slots {{ card.background_slot_active }}/{{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</span></td>
         <td>{{ card.active_task_execution_brief_executable_slice }}</td>
         <td>{{ card.active_task_execution_brief_blocked_slice }}</td>
         <td>{{ card.active_task_execution_brief_operator_decision }}</td>

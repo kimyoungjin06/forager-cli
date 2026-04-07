@@ -15,6 +15,7 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_background_runs as background_runs
+import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 
@@ -39,6 +40,35 @@ from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
 from control_dashboard_state_task_builders import _build_runtime_recent_task_rows
 
 
+_SLOT_RUNNER_TARGETS = ["local_tmux", "github_runner", "remote_worker"]
+
+
+def _background_slot_limit(entry: Dict[str, Any]) -> int:
+    try:
+        value = int(entry.get("background_runner_slot_limit", 1) or 1)
+    except Exception:
+        value = 1
+    return max(1, min(value, 32))
+
+
+def _background_slot_active(team_dir: Path) -> int:
+    return background_runs.count_background_run_tickets(
+        background_runs.background_runs_state_path(team_dir),
+        statuses=["queued", "dispatching", "running"],
+        runner_targets=_SLOT_RUNNER_TARGETS,
+    )
+
+
+def _background_slot_pressure(limit: int, active: int) -> str:
+    safe_limit = max(1, int(limit or 1))
+    safe_active = max(0, int(active or 0))
+    if safe_active >= safe_limit:
+        return f"saturated ({safe_active}/{safe_limit})"
+    if safe_active > 0:
+        return f"active ({safe_active}/{safe_limit})"
+    return f"idle (0/{safe_limit})"
+
+
 def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any]) -> List[RuntimeCardDTO]:
     reports = _runtime_reports(manager_state, provider_state)
 
@@ -60,9 +90,17 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         queue_stale_count = 0
         worker_status = "-"
         worker_summary = "-"
+        run_lock_mode = "open"
+        run_lock_note = "-"
+        background_slot_limit = 1
+        background_slot_active = 0
+        background_slot_pressure = "idle (0/1)"
         if resolved is not None:
             _key, entry = resolved
             team_dir = Path(str(entry.get("team_dir", "")).strip() or ".")
+            run_lock_mode = run_lock.project_run_lock_mode(entry)
+            run_lock_note = run_lock.project_run_lock_note(entry) or "-"
+            background_slot_limit = _background_slot_limit(entry)
             if str(entry.get("team_dir", "")).strip():
                 snapshot = background_runs.summarize_background_runs_state(
                     background_runs.background_runs_state_path(team_dir)
@@ -70,6 +108,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 queue_summary = str(snapshot.get("summary", "")).strip() or "-"
                 queue_depth = int(snapshot.get("depth", 0) or 0)
                 queue_stale_count = int(snapshot.get("stale_count", 0) or 0)
+                background_slot_active = _background_slot_active(team_dir)
+                background_slot_pressure = _background_slot_pressure(background_slot_limit, background_slot_active)
                 worker_snapshot = background_runs.summarize_background_worker_state(
                     background_runs.background_worker_state_path(team_dir)
                 )
@@ -187,6 +227,11 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_background_run_launch_spec_summary=(
                     str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
                 ),
+                run_lock_mode=run_lock_mode,
+                run_lock_note=run_lock_note,
+                background_slot_limit=background_slot_limit,
+                background_slot_active=background_slot_active,
+                background_slot_pressure=background_slot_pressure,
                 background_worker_status=worker_status,
                 background_worker_summary=worker_summary,
                 background_queue_summary=queue_summary,
@@ -202,11 +247,13 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
     return cards
 
 
-def _runtime_card_sort_key(card: RuntimeCardDTO) -> tuple[int, int, int, int, int, int, str]:
+def _runtime_card_sort_key(card: RuntimeCardDTO) -> tuple[int, int, int, int, int, int, int, str]:
     brief_status = str(card.active_task_execution_brief_status or "").strip().lower()
     brief_blocked = 1 if brief_status in {"underspecified", "operator_decision_required", "infeasible"} else 0
+    slot_saturated = 1 if int(card.background_slot_active or 0) >= max(1, int(card.background_slot_limit or 1)) else 0
     return (
         -int(card.background_queue_stale_count or 0),
+        -slot_saturated,
         -int(card.background_queue_depth or 0),
         -brief_blocked,
         -int(card.severity_score or 0),
@@ -324,12 +371,17 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         queue_snapshot = background_runs.summarize_background_runs_state(
             background_runs.background_runs_state_path(team_dir)
         )
+        background_slot_active = _background_slot_active(team_dir)
         worker_snapshot = background_runs.summarize_background_worker_state(
             background_runs.background_worker_state_path(team_dir)
         )
     else:
         queue_snapshot = {}
         worker_snapshot = {}
+        background_slot_active = 0
+    background_slot_limit = _background_slot_limit(entry)
+    run_lock_mode = run_lock.project_run_lock_mode(entry)
+    run_lock_note = run_lock.project_run_lock_note(entry) or "-"
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
     active_followup_summary = _task_followup_summary(active_task) if isinstance(active_task, dict) else "-"
     active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
@@ -462,6 +514,11 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         active_task_background_run_launch_spec_summary=(
             str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
         ),
+        run_lock_mode=run_lock_mode,
+        run_lock_note=run_lock_note,
+        background_slot_limit=background_slot_limit,
+        background_slot_active=background_slot_active,
+        background_slot_pressure=_background_slot_pressure(background_slot_limit, background_slot_active),
         background_worker_status=str(worker_snapshot.get("status", "")).strip() or "-",
         background_worker_summary=str(worker_snapshot.get("summary", "")).strip() or "-",
         background_queue_summary=str(queue_snapshot.get("summary", "")).strip() or "-",

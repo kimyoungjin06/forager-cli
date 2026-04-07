@@ -57,6 +57,9 @@
     <li><span>evidence_artifacts</span><strong>{{ detail.active_task_background_run_evidence_artifacts }}</strong></li>
     <li><span>background_worker</span><strong>{{ detail.background_worker_summary }}</strong></li>
     <li><span>background_queue</span><strong>{{ detail.background_queue_summary }}</strong></li>
+    <li><span>run_lock</span><strong>{{ detail.run_lock_mode }}</strong></li>
+    <li><span>run_lock_note</span><strong>{{ detail.run_lock_note }}</strong></li>
+    <li><span>background_slots</span><strong>active={{ detail.background_slot_active }} limit={{ detail.background_slot_limit }} | {{ detail.background_slot_pressure }}</strong></li>
     <li><span>completion_focus</span><strong>{{ detail.active_task_completion_focus }}</strong></li>
     <li><span>done_when</span><strong>{{ detail.active_task_completion_done }}</strong></li>
     <li><span>rerun_when</span><strong>{{ detail.active_task_completion_rerun }}</strong></li>

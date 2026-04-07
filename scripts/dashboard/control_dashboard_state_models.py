@@ -103,6 +103,11 @@ class RuntimeCardDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    run_lock_mode: str
+    run_lock_note: str
+    background_slot_limit: int
+    background_slot_active: int
+    background_slot_pressure: str
     background_worker_status: str
     background_worker_summary: str
     background_queue_summary: str
@@ -246,6 +251,11 @@ class RuntimeDetailDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    run_lock_mode: str
+    run_lock_note: str
+    background_slot_limit: int
+    background_slot_active: int
+    background_slot_pressure: str
     background_worker_status: str
     background_worker_summary: str
     background_queue_summary: str
@@ -337,6 +347,11 @@ class RecoveryRuntimeDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    run_lock_mode: str
+    run_lock_note: str
+    background_slot_limit: int
+    background_slot_active: int
+    background_slot_pressure: str
     background_worker_status: str
     background_worker_summary: str
     background_queue_summary: str
