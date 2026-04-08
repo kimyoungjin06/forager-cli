@@ -51,6 +51,8 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["background_worker_summary"] != "-"
     assert runtimes[0]["background_queue_summary"] != "-"
     assert "depth=" in runtimes[0]["background_queue_summary"]
+    assert runtimes[0]["background_scheduler_summary"] == "-"
+    assert runtimes[0]["background_scheduler_note"] == "no queued scheduler head"
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -103,6 +105,8 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "background_slot_pressure: idle (0/1)" in markdown
     assert "github_runner=0/1" in markdown
     assert "background_worker_summary:" in markdown
+    assert "background_scheduler:" in markdown
+    assert "background_scheduler_note: no queued scheduler head" in markdown
     assert "background_queue_depth:" in markdown
     assert "operator_hints: /offdesk review O2, /monitor O2, /todo O2, /offdesk review" in markdown
     assert "analysis-check (REQ-1)" in markdown

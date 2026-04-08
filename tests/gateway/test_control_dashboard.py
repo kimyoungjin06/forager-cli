@@ -872,6 +872,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "background_run_summary" in text
     assert "status running=1" in text
     assert "background_scheduler" in text
+    assert "background_scheduler_note" in text
+    assert "no queued scheduler head" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text

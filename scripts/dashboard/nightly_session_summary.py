@@ -26,6 +26,7 @@ from control_dashboard_state import (
     now_iso,
     task_detail_from_state,
 )
+from control_dashboard_state_common import _background_scheduler_note
 
 
 def _safe_stamp(iso_text: str) -> str:
@@ -177,6 +178,8 @@ def build_nightly_session_summary(
                 "background_worker_status": detail.background_worker_status,
                 "background_worker_summary": detail.background_worker_summary,
                 "background_queue_summary": detail.background_queue_summary,
+                "background_scheduler_summary": detail.background_scheduler_summary,
+                "background_scheduler_note": _background_scheduler_note(detail.background_scheduler_summary),
                 "background_queue_depth": detail.background_queue_depth,
                 "background_queue_stale_count": detail.background_queue_stale_count,
                 "active_task_completion_contract": {
@@ -296,6 +299,8 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- background_worker: {runtime.get('background_worker_summary', '-')}",
                 f"- background_queue_depth: {runtime.get('background_queue_depth', 0)}",
                 f"- background_queue_stale_count: {runtime.get('background_queue_stale_count', 0)}",
+                f"- background_scheduler: {runtime.get('background_scheduler_summary', '-')}",
+                f"- background_scheduler_note: {runtime.get('background_scheduler_note', '-')}",
                 f"- proposals: {runtime.get('proposal_summary', '-')}",
                 f"- sync: {runtime.get('sync_summary', '-')}",
                 f"- provider_pressure: {runtime.get('provider_pressure_summary', '-')}",

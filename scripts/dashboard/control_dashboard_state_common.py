@@ -132,6 +132,19 @@ def _compose_lane_summary(row: Dict[str, Any]) -> str:
     return " | ".join(lane_parts)
 
 
+def _background_scheduler_note(summary: str) -> str:
+    safe = str(summary or "").strip()
+    if not safe or safe == "-":
+        return "no queued scheduler head"
+    parts = [str(part).strip() for part in safe.split(" | ") if str(part).strip()]
+    if not parts:
+        return "no queued scheduler head"
+    starved = next((part for part in parts if "starved=yes" in part), "")
+    if starved:
+        return f"starvation guard candidate: {starved}"
+    return f"scheduler head: {parts[0]}"
+
+
 def _task_phase1_summary(task: Dict[str, Any]) -> str:
     mode = str(task.get("phase1_mode", "")).strip() or "single"
     rounds = max(0, int(task.get("phase1_rounds", 0) or 0)) or 1

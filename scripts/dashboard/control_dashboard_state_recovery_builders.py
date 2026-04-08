@@ -15,6 +15,7 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_operator_summary as operator_summary
 
 from control_dashboard_state_common import (
+    _background_scheduler_note,
     _detail_path,
     _recovery_control_action_buttons,
     _runtime_action_buttons,
@@ -189,6 +190,9 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 background_worker_summary=str(row.get("background_worker_summary", "")).strip() or "-",
                 background_queue_summary=str(row.get("background_queue_summary", "")).strip() or "-",
                 background_scheduler_summary=str(row.get("background_scheduler_summary", "")).strip() or "-",
+                background_scheduler_note=_background_scheduler_note(
+                    str(row.get("background_scheduler_summary", "")).strip() or "-"
+                ),
                 background_queue_depth=int(row.get("background_queue_depth", 0) or 0),
                 background_queue_stale_count=int(row.get("background_queue_stale_count", 0) or 0),
                 active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",

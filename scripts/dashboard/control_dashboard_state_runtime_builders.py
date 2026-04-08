@@ -20,6 +20,7 @@ import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 
 from control_dashboard_state_common import (
+    _background_scheduler_note,
     _compose_backend_summary,
     _compose_phase2_quality,
     _compose_phase2_shape,
@@ -241,6 +242,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 background_worker_summary=worker_summary,
                 background_queue_summary=queue_summary,
                 background_scheduler_summary=scheduler_summary,
+                background_scheduler_note=_background_scheduler_note(scheduler_summary),
                 background_queue_depth=queue_depth,
                 background_queue_stale_count=queue_stale_count,
                 runtime_safe_action_buttons=runtime_safe_action_buttons,
@@ -551,6 +553,9 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         background_worker_summary=str(worker_snapshot.get("summary", "")).strip() or "-",
         background_queue_summary=str(queue_snapshot.get("summary", "")).strip() or "-",
         background_scheduler_summary=str(scheduler_snapshot.get("summary", "")).strip() or "-",
+        background_scheduler_note=_background_scheduler_note(
+            str(scheduler_snapshot.get("summary", "")).strip() or "-"
+        ),
         background_queue_depth=int(queue_snapshot.get("depth", 0) or 0),
         background_queue_stale_count=int(queue_snapshot.get("stale_count", 0) or 0),
         active_task_completion_focus=str(active_contract.get("focus", "")).strip() or "-",
