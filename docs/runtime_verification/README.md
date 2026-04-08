@@ -112,8 +112,10 @@
 - do not skip directly from `planned` to `executed_done` for new non-happy-path rails
 
 ## Current Promotion Decision
-- first `live_rehearsal_ready` candidate:
+- first live rehearsal completed:
   - `review/R3_manual_followup_preview.md`
+- result:
+  - `executed_done`
 - reason:
   - read-only operator-surface proof
   - no internal launch

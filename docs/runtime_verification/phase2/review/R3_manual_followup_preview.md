@@ -9,15 +9,15 @@
   - `manual_followup`
   - `preview_surface`
 - status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - promotion_gate:
   - `preview/execute split and dashboard parity are already proven`
 - live_gate:
   - `safe under test-only posture because preview is read-only and launches no internal work`
 - executed_at:
-  - `2026-04-07 KST`
+  - `2026-04-08 KST`
 - operator:
   - `Codex`
 
@@ -27,7 +27,7 @@
 - normalized action:
   - `dispatch_task`
 - target runtime:
-  - `-`
+  - `tmp/r3_preview_live_i7mloegr`
 
 ## 3. Expected Contract
 - expected preset:
@@ -62,48 +62,46 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `REQ-1` (dashboard fixture)
-  - `REQ-123` (gateway followup fixture)
+  - `REQ-1` (isolated live rehearsal runtime)
 - task_short_id:
   - `T-001`
-  - `T-123`
 - planning:
-  - `not a live job; bounded replay via existing gateway/dashboard tests only`
+  - `isolated live rehearsal with a seeded runtime; no internal job launched`
 - execution brief:
   - `underspecified` in dashboard fixture (`retry=blocked:underspecified ...`)
 - followup brief:
-  - `preview_only | execution=L2 | review=R1` in dashboard fixture
-  - `preview_only | execution=L2 | review=R2` in gateway fixture
+  - `preview_only | execution=L2 | review=R1`
 - reentry rails:
   - `retry=blocked:underspecified exec=L1 review=R1 | followup=preview_only exec=L2 review=R1 | bg=running/local_background`
 - stage progression:
   - planning:
-    - `fixture replay only`
+    - `seeded runtime only`
   - execution:
     - `not launched`
   - verification:
-    - `safe preview parity only`
+    - `read-only surface parity captured live`
   - integration:
     - `-`
   - close:
     - `blocked from execute surface`
 - critic/verifier verdict:
-  - `followup execute remains blocked while preview_only`
+  - `followup preview is available and execute remains absent from visible operator actions`
 - final branch:
   - `manual_followup preview_only`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `task detail fixture shows followup_brief + reentry_rails + operator reason`
+  - `dashboard task detail and gateway /task target agree on preview_only, lanes, and operator-owned reason`
 - `/monitor`:
-  - `not used in bounded replay`
+  - `not required for this read-only rehearsal`
 - `/offdesk review`:
-  - `safe next step remains /offdesk review or /followup, not execute`
+  - `safe next step remains review/status inspection; no execute hint is surfaced`
 - dashboard `Task Detail`:
-  - `proved by tests/gateway/test_control_dashboard.py::test_control_dashboard_task_detail_route_redirects_alias_to_request_id`
   - `shows preview_only, lane split, reason, and reentry_rails`
+  - visible action label includes `Follow-up Preview`
+  - visible action label does not include `Follow-up Execute`
 - dashboard `Recovery`:
-  - `preview interpretation covered by structured recovery/dashboard surfaces in bounded replay fixtures`
+  - `not required for the first read-only rehearsal`
 - background run ticket / runner:
   - `none expected`
 - launch spec / evidence bundle:
@@ -115,21 +113,22 @@
 - mismatch class:
   - `none`
 - mismatch notes:
-  - `preview surface is now explicitly distinct from execute surface`
-  - `/followup-exec` rejects preview_only and routes operator back to safe preview`
+  - `preview surface is explicitly distinct from execute surface`
+  - `/followup` gateway output, `/orch status`, `/offdesk review`, and dashboard task/runtime detail agree on preview-only posture`
+  - dashboard HTML still contains the followup-execute endpoint path in script/form wiring, but no visible `Follow-up Execute` action is rendered`
 - next fix:
-  - `capture one read-only live rehearsal over /followup, /task, /offdesk review, and dashboard parity without launching any internal job`
+  - `select the next live candidate among launch-bearing rails only after explicit runner-safety approval`
 
 ## 7. Raw References
 - runtime state refs:
-  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_task_detail_route_redirects_alias_to_request_id`
-  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief`
-  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_followup_execute_blocks_preview_only_followup_brief`
+  - `tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json`
 - log refs:
-  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_followup_execute_blocks_preview_only_followup_brief or resolve_followup_execute_transition_uses_execution_slice_only or resolve_followup_execute_transition_rejects_review_lane_selection'`
-  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_followup_execute_route_blocks_preview_only_brief or post_followup_execute_route_uses_local_tmux_background_when_preferred or task_detail_route_redirects_alias_to_request_id or runtime_detail_route_renders_runtime_scope'`
+  - `uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_preview_live_i7mloegr --workspace-root tmp/r3_preview_live_i7mloegr --team-dir tmp/r3_preview_live_i7mloegr/.aoe-team --manager-state-file tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O2'`
+  - `uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_preview_live_i7mloegr --workspace-root tmp/r3_preview_live_i7mloegr --team-dir tmp/r3_preview_live_i7mloegr/.aoe-team --manager-state-file tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-001'`
+  - `uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_preview_live_i7mloegr --workspace-root tmp/r3_preview_live_i7mloegr --team-dir tmp/r3_preview_live_i7mloegr/.aoe-team --manager-state-file tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O2'`
 - artifact refs:
-  - `no runtime artifacts; proof uses test fixtures and response payload assertions only`
+  - `dashboard task detail: /control/tasks/by-request/REQ-1`
+  - `dashboard runtime detail: /control/runtimes/O2`
 
 ## 8. Live Rehearsal Runbook
 - rehearsal scope:
