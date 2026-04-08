@@ -59,10 +59,11 @@
       - preview proof is now a first-class manual-followup target
       - read-only live rehearsal proved `/followup` remains read-only and agrees with `FollowupBrief.status=preview_only`
   - `review/R3_manual_followup_execute.md`
-    - `bounded_replay_pass`
+    - `live_rehearsal_ready`
     - finding:
       - execute proof is separate from preview proof
       - bounded replay now proves `/followup-exec` is only valid after an explicit executable or partially executable `FollowupBrief` exists
+      - an isolated seed helper and live rehearsal runbook now exist for the first launch-bearing followup execute rehearsal
   - `review/R4_external_background_rail.md`
     - `bounded_replay_pass`
     - finding:
@@ -118,10 +119,9 @@
 - runbook:
   - embedded in `review/R2_rerun_path.md`
 - still bounded replay only:
-  - `review/R3_manual_followup_execute.md`
   - `review/R4_external_background_rail.md`
 - reason:
-  - these still depend on launch-bearing rails, runner safety, or external pickup guarantees
+  - `R4` still depends on launch-bearing rails, runner safety, or external pickup guarantees
 - next launch-bearing candidate:
   - `review/R3_manual_followup_execute.md`
 - candidate reason:
@@ -135,7 +135,7 @@
     - `local_tmux` only
     - no external runner target
 - runbook:
-  - pending
+  - embedded in `review/R3_manual_followup_execute.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:

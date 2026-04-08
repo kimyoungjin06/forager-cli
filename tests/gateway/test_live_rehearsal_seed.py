@@ -12,7 +12,10 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
-from aoe_tg_live_rehearsal_seed import seed_r2_review_rerun_runtime  # noqa: E402
+from aoe_tg_live_rehearsal_seed import (  # noqa: E402
+    seed_r2_review_rerun_runtime,
+    seed_r3_manual_followup_execute_runtime,
+)
 
 
 def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path: Path) -> None:
@@ -43,3 +46,33 @@ def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path:
     assert task["reentry_rails_summary"] == "retry=ready exec=L1 review=R1 | followup=none"
     assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
     assert payload["trigger_command"] == "/retry T-201 lane L1"
+
+
+def test_seed_r3_manual_followup_execute_runtime_creates_isolated_followup_candidate(tmp_path: Path) -> None:
+    payload = seed_r3_manual_followup_execute_runtime(
+        tmp_path / "control",
+        run_lock_mode="test_only",
+        runner_target="local_tmux",
+        local_tmux_slot_limit=1,
+    )
+
+    control_root = Path(payload["control_root"])
+    team_dir = Path(payload["team_dir"])
+    manager_state_file = Path(payload["manager_state_file"])
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    project = state["projects"]["alpha"]
+    task = project["tasks"]["REQ-R3-001"]
+
+    assert project["project_alias"] == "O3"
+    assert project["run_lock_mode"] == "test_only"
+    assert project["background_runner_target"] == "local_tmux"
+    assert project["background_runner_slot_limits"]["local_tmux"] == 1
+    assert task["execution_brief_status"] == "partially_executable"
+    assert task["followup_brief_status"] == "partially_executable"
+    assert task["followup_brief_execution_lane_ids"] == ["L2"]
+    assert task["followup_brief_review_lane_ids"] == ["R1"]
+    assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L2"]
+    assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
+    assert task["reentry_rails_summary"] == "retry=none | followup=partially_executable exec=L2 review=R1"
+    assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
+    assert payload["trigger_command"] == "/followup-exec T-301 lane L2"

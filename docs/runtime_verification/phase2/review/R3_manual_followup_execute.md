@@ -9,13 +9,13 @@
   - `manual_followup`
   - `execute_surface`
 - status:
-  - `bounded_replay_pass`
+  - `live_rehearsal_ready`
 - proof_mode:
   - `bounded_replay`
 - promotion_gate:
-  - `followup execute now reuses the rerun rail with explicit execution-only scope`
+  - `followup execute now reuses the rerun rail with explicit execution-only scope and an isolated seed helper exists`
 - live_gate:
-  - `defer while test-only run lock remains active and no live followup execute rehearsal is required`
+  - `ready for an isolated local_tmux rehearsal with run_lock=open and slot limit 1`
 - executed_at:
   - `2026-04-07 KST`
 - operator:
@@ -27,7 +27,7 @@
 - normalized action:
   - `followup_execute`
 - target runtime:
-  - `-`
+  - `seed helper available via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario r3-execute`
 
 ## 3. Expected Contract
 - expected preset:
@@ -119,7 +119,7 @@
   - `selected review lanes are rejected for execute surface`
   - `preview_only and executable surfaces are no longer conflated`
 - next fix:
-  - `promote to a later live replay with background ticket capture if a full runtime proof is needed`
+  - `perform one isolated local_tmux live rehearsal and capture the resulting background ticket/runtime handle`
 
 ## 7. Raw References
 - runtime state refs:
@@ -136,3 +136,82 @@
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_operator_action_contract.py -k 'partition_task_operator_commands_adds_followup_execute_when_followup_brief_is_executable or http_action_spec_maps_followup_execute_to_post_contract'`
 - artifact refs:
   - `no live artifacts; proof uses fixture state, response payloads, and background ticket assertions only`
+
+## 8. Live Rehearsal Runbook
+- rehearsal scope:
+  - `single execution-lane followup over local_tmux only`
+- safety posture:
+  - use an isolated runtime
+  - seed it with:
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario r3-execute --control-root tmp/r3_execute_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - temporarily set:
+    - `run_lock_mode=open`
+    - `background_runner_target=local_tmux`
+    - `background_runner_slot_limits.local_tmux=1`
+  - keep:
+    - `github_runner=0/disabled for this rehearsal`
+    - `remote_worker=0/disabled for this rehearsal`
+- required target state:
+  - a review task exists with:
+    - `ExecutionBrief.status=partially_executable`
+    - `FollowupBrief.status=partially_executable` or `executable`
+    - explicit execution lane targets
+    - manual review remainder still visible
+  - `/task`, `/followup`, and dashboard already agree on execution lane `L2` and review remainder `R1` before launch
+- preflight:
+  - verify `/orch status <orch>` shows:
+    - `run_lock=open`
+    - `background_slots` with `local_tmux=0/1`
+    - no active external runner target
+  - verify `/task <task>` shows:
+    - `followup_brief=partially_executable` or `executable`
+    - `followup=... exec=L2 review=R1`
+  - verify `/followup <task>` opens and still describes:
+    - execution lane `L2`
+    - review/manual remainder `R1`
+  - verify `/offdesk review <orch>` does not redirect into retry-only or external-runner remediation
+- trigger:
+  - launch exactly one bounded followup execute through one operator surface:
+    - `/followup-exec <task> lane <L#>`
+    - or dashboard followup-execute action for the same lane scope
+  - do not launch review lanes through the execute surface
+- capture during rehearsal:
+  - `/orch status <orch>` before launch
+  - `/task <task>` before launch
+  - `/followup <task>` before launch
+  - `/offdesk review <orch>` before launch
+  - the followup-execute trigger response
+  - `/orch status <orch>` after launch
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+- pass criteria:
+  - followup execute stays execution-only
+  - runner target is `local_tmux`
+  - a background ticket is created with a `local_tmux` runtime handle
+  - `reentry_rails_summary` remains `manual followup` and does not collapse into retry
+  - review/manual remainder stays visible after launch
+  - no external phase or `/orch bgx-status` dependency appears
+  - slot usage remains bounded at `local_tmux=1/1`
+- fail conditions:
+  - followup execute auto-launches review/manual remainder
+  - runner target drifts to `github_runner` or `remote_worker`
+  - background launch exceeds the declared execution lane scope
+  - slot pressure allows a second concurrent local_tmux launch
+  - operator surfaces disagree on followup branch or next step
+- evidence to retain:
+  - command transcript snippets for:
+    - `/orch status <orch>`
+    - `/task <task>`
+    - `/followup <task>`
+    - `/offdesk review <orch>`
+    - followup-execute trigger
+  - task/runtime copied field values for:
+    - `background_ticket`
+    - `runner_target`
+    - `runtime_handle`
+    - `followup_brief`
+    - `reentry_rails`
+    - `background_slots`
+  - final outcome note:
+    - `executed_done` if the bounded local_tmux followup execute remains execution-only and inspectable
+    - `executed_blocked` if lane drift, runner drift, or review-auto-launch occurs

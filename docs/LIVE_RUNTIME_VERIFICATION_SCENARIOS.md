@@ -184,8 +184,9 @@
   - review surfaces a real tradeoff but acceptance threshold belongs to the operator
 - current promotion decision:
   - `preview_surface` completed the first read-only live rehearsal and is now `executed_done`
-  - `execute_surface` is the next launch-bearing candidate and remains bounded replay only until its isolated local_tmux rehearsal is captured
+  - `execute_surface` is now `live_rehearsal_ready` with an isolated seed helper and runbook
   - the read-only live rehearsal runbook is embedded in `docs/runtime_verification/phase2/review/R3_manual_followup_preview.md`
+  - the launch-bearing followup execute runbook is embedded in `docs/runtime_verification/phase2/review/R3_manual_followup_execute.md`
   - preview rehearsal also confirmed the current seed contract requirement:
     - `/followup` opens only when `FollowupBrief` and `exec_critic.manual_followup_*` stay aligned
 - expected branch:
