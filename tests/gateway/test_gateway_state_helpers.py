@@ -1438,6 +1438,41 @@ def test_task_lifecycle_summary_includes_external_background_phase() -> None:
     assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in summary
 
 
+def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -> None:
+    project_root = tmp_path / "Alpha"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "RUNBOOK.md").write_text("# Runbook\n", encoding="utf-8")
+    (docs_dir / "REQUEST_CONTRACT_SPEC.md").write_text("# Spec\n", encoding="utf-8")
+
+    summary = task_view.summarize_task_lifecycle(
+        "Demo",
+        {
+            "request_id": "REQ-CTX",
+            "short_id": "T-410",
+            "prompt": "Preview follow-up context selection.",
+            "status": "running",
+            "mode": "dispatch",
+            "roles": ["Codex-Reviewer"],
+            "followup_brief_status": "preview_only",
+            "followup_brief_reason": "operator-owned handoff wording",
+            "phase2_team_preset": "review",
+            "context": {
+                "team_dir": str(team_dir),
+                "project_root": str(project_root),
+                "project_alias": "O2",
+                "project_key": "alpha",
+                "task_short_id": "T-410",
+            },
+        },
+    )
+
+    assert "context_pack: profile=followup_preview" in summary
+    assert "context_pack_docs: docs/RUNBOOK.md, docs/REQUEST_CONTRACT_SPEC.md" in summary
+
+
 def test_task_lifecycle_summary_includes_backend_contract_snapshot() -> None:
     summary = gw.summarize_task_lifecycle(
         "Demo",

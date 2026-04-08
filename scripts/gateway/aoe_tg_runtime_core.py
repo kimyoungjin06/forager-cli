@@ -124,6 +124,16 @@ def document_registry_path(team_dir: Path | str, filename: str = "document_regis
     return Path(team_dir).expanduser().resolve() / str(filename or "document_registry.json").strip()
 
 
+def context_pack_dir(team_dir: Path | str, dirname: str = "context_packs") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(dirname or "context_packs").strip()
+
+
+def context_pack_path(team_dir: Path | str, *, request_id: str, profile: str) -> Path:
+    safe_request = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(request_id or "").strip()).strip("._-")
+    safe_profile = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(profile or "").strip()).strip("._-")
+    return context_pack_dir(team_dir) / (safe_request or "runtime") / f"{safe_profile or 'default'}.json"
+
+
 def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
 

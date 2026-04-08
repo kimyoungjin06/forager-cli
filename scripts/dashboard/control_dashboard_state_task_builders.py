@@ -14,6 +14,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_background_runs as background_runs
+import aoe_tg_context_pack as context_pack
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
@@ -216,6 +217,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         background_slot_limit = 1
         background_slot_active = 0
         background_slot_pressure = "not_applicable | -"
+        pack_profile = "-"
+        pack_summary = "-"
+        pack_docs = "-"
+        pack_excluded = "-"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             slot_snapshot = _background_slot_snapshot(entry, task, Path(team_dir_raw))
@@ -226,6 +231,16 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
                 + " | "
                 + (str(slot_snapshot.get("summary", "")).strip() or "-")
             )
+            pack = context_pack.load_context_pack(
+                Path(team_dir_raw),
+                entry=entry,
+                task=task,
+                project_root=entry.get("project_root"),
+            )
+            pack_profile = str(pack.get("profile", "")).strip() or "-"
+            pack_summary = str(pack.get("summary", "")).strip() or "-"
+            pack_docs = str(pack.get("docs_summary", "")).strip() or "-"
+            pack_excluded = str(pack.get("excluded_summary", "")).strip() or "-"
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),
@@ -275,6 +290,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             followup_brief_execution_lanes=followup_brief_execution_lanes,
             followup_brief_review_lanes=followup_brief_review_lanes,
             followup_brief_reason=str(task.get("followup_brief_reason", "")).strip() or "-",
+            context_pack_profile=pack_profile,
+            context_pack_summary=pack_summary,
+            context_pack_docs=pack_docs,
+            context_pack_excluded=pack_excluded,
             reentry_rails_summary=str(task.get("reentry_rails_summary", "")).strip() or "-",
             run_lock_mode=run_lock_mode,
             run_lock_note=run_lock_note,

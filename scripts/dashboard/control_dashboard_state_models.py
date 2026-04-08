@@ -175,6 +175,10 @@ class TaskDetailDTO:
     followup_brief_execution_lanes: str = ""
     followup_brief_review_lanes: str = ""
     followup_brief_reason: str = ""
+    context_pack_profile: str = ""
+    context_pack_summary: str = ""
+    context_pack_docs: str = ""
+    context_pack_excluded: str = ""
     reentry_rails_summary: str = ""
     run_lock_mode: str = ""
     run_lock_note: str = ""
@@ -259,6 +263,10 @@ class RuntimeDetailDTO:
     active_task_followup_brief_execution_lanes: str
     active_task_followup_brief_review_lanes: str
     active_task_followup_brief_reason: str
+    active_task_context_pack_profile: str
+    active_task_context_pack_summary: str
+    active_task_context_pack_docs: str
+    active_task_context_pack_excluded: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str

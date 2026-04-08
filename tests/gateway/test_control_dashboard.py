@@ -569,6 +569,9 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "R1" in text
     assert "followup_reason" in text
     assert "analysis handoff wording" in text
+    assert "context_pack" in text
+    assert "profile=followup_preview" in text
+    assert "context_pack_docs" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=preview_only exec=L2 review=R1" in text
@@ -706,6 +709,9 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "followup_review_lanes" in text
     assert "followup_reason" in text
     assert "analysis handoff wording" in text
+    assert "context_pack" in text
+    assert "profile=followup_preview" in text
+    assert "context_pack_docs" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=preview_only exec=L2 review=R1" in text

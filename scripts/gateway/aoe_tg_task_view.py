@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from aoe_tg_action_audit import load_latest_action_audit_for_task
+from aoe_tg_context_pack import load_context_pack
 from aoe_tg_operator_summary import task_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
@@ -299,6 +300,22 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
             latest_intent=latest_intent,
             latest_action=latest_action,
         )
+        team_dir_raw = str(context.get("team_dir", "")).strip()
+        if team_dir_raw:
+            pack = load_context_pack(
+                team_dir_raw,
+                entry={
+                    "name": context.get("project_key", ""),
+                    "project_alias": context.get("project_alias", ""),
+                    "project_root": context.get("project_root", ""),
+                },
+                task=task,
+                project_root=context.get("project_root", ""),
+            )
+            lines.append(f"context_pack: {str(pack.get('summary', '')).strip() or '-'}")
+            lines.append(f"context_pack_docs: {str(pack.get('docs_summary', '')).strip() or '-'}")
+            if str(pack.get("excluded_summary", "")).strip() and str(pack.get("excluded_summary", "")).strip() != "-":
+                lines.append(f"context_pack_excluded: {str(pack.get('excluded_summary', '')).strip()}")
 
     lines.append("lifecycle:")
     for name in LIFECYCLE_STAGES:

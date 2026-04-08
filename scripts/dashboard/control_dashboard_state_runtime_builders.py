@@ -15,6 +15,7 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_background_runs as background_runs
+import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_document_registry as document_registry
 import aoe_tg_run_lock as run_lock
@@ -436,6 +437,21 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     ) if str(entry.get("team_dir", "")).strip() else "-"
     model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
     model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
+    active_task_context_pack_profile = "-"
+    active_task_context_pack_summary = "-"
+    active_task_context_pack_docs = "-"
+    active_task_context_pack_excluded = "-"
+    if isinstance(active_task, dict) and str(entry.get("team_dir", "")).strip():
+        pack = context_pack.load_context_pack(
+            team_dir,
+            entry=entry,
+            task=active_task,
+            project_root=entry.get("project_root"),
+        )
+        active_task_context_pack_profile = str(pack.get("profile", "")).strip() or "-"
+        active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
+        active_task_context_pack_docs = str(pack.get("docs_summary", "")).strip() or "-"
+        active_task_context_pack_excluded = str(pack.get("excluded_summary", "")).strip() or "-"
     run_lock_mode = run_lock.project_run_lock_mode(entry)
     run_lock_note = run_lock.project_run_lock_note(entry) or "-"
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
@@ -542,6 +558,10 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         active_task_followup_brief_reason=(
             str((active_task or {}).get("followup_brief_reason", "")).strip() or "-"
         ),
+        active_task_context_pack_profile=active_task_context_pack_profile,
+        active_task_context_pack_summary=active_task_context_pack_summary,
+        active_task_context_pack_docs=active_task_context_pack_docs,
+        active_task_context_pack_excluded=active_task_context_pack_excluded,
         active_task_reentry_rails_summary=(
             str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
         ),
