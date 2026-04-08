@@ -563,11 +563,26 @@
 - [ ] `Document Registry + Dashboard Convergence`
   - 목표:
     - runtime-centric dashboard에 project document flow를 붙여 개별 프로젝트 진행도를 ondesk/dashboard에서 함께 판단할 수 있게 한다
+  - 현재 상태:
+    - `PLANNED`
+    - 기준 spec:
+      - `docs/WORKSPACE_ONBOARDING_SPEC.md`
+      - `docs/DOCUMENT_REGISTRY_SPEC.md`
+      - `docs/CONTEXT_PACK_COMPILER_SPEC.md`
   - 구현 축:
+    - `WorkspaceBrief`
+    - `DocumentRegistry`
+    - `ContextPack Compiler`
     - `Project Flow Compiler`
     - per-project compiled flow artifact
     - doc/runtime drift detection
     - dashboard `Project Runtime Detail` `Document Flow` card
+  - 실행 순서:
+    1. workspace onboarding 계약 고정
+    2. document registry artifact 추가
+    3. task-scoped context pack compiler 추가
+    4. dashboard read-only `Document Flow` / `Knowledge` card 연결
+    5. 그 다음 `Project Flow Compiler`와 drift detection 강화
 - [x] `Project Flow Compiler` spec
   - 문서:
     - `docs/PROJECT_FLOW_COMPILER_SPEC.md`

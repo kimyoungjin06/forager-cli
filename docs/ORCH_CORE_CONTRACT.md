@@ -29,6 +29,29 @@ Mother-Orch control-plane actions are defined separately in:
 - `scripts/gateway/aoe_tg_orch_actions.py`
 - `docs/MOTHER_ORCH_ACTION_API.md`
 
+## 1.5 Workspace And Knowledge Inputs
+
+The control-plane contract also assumes three upstream knowledge objects:
+
+- `WorkspaceBrief`
+  - project/runtime workspace truth
+  - root paths, doc roots, todo owner, routing defaults
+- `DocumentRegistry`
+  - canonical document metadata truth
+  - document type, freshness, canonical status
+- `ContextPack`
+  - task-scoped compiled context truth
+  - what a given on-desk/off-desk operation is actually allowed to carry
+
+Important policy:
+
+- these are upstream control-plane objects, not planner-owned objects
+- TF planners and executor adapters must not silently replace them with runner-local filesystem guesses
+- references:
+  - `docs/WORKSPACE_ONBOARDING_SPEC.md`
+  - `docs/DOCUMENT_REGISTRY_SPEC.md`
+  - `docs/CONTEXT_PACK_COMPILER_SPEC.md`
+
 ## 2. Contract Objects
 
 ### 2.0 RequestContract
@@ -53,6 +76,7 @@ Required fields:
 Operational meaning:
 
 - plain text remains the operator-facing UI
+- `WorkspaceBrief` should already have established the project/runtime workspace boundary
 - `RequestContract` becomes the intake-normalization truth once extracted
 - planner/critic logic should depend on structured fields before it depends on prompt wording
 

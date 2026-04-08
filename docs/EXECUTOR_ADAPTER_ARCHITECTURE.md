@@ -29,6 +29,9 @@
 
 ### 3.1 Control Plane Core
 - Owns:
+  - workspace registration
+  - document registry
+  - context-pack compilation
   - request normalization
   - execution/followup feasibility
   - background ticket lifecycle
@@ -62,12 +65,15 @@
 
 ## 4. Control Plane Ownership
 - We keep these native:
-  1. `RequestContract -> ExecutionBrief -> OrchTaskSpec`
-  2. `FollowupBrief`
-  3. `Background Run Ticket`
-  4. `run_lock_mode`
-  5. runner-target slot and scheduler policy
-  6. `/task`, `/orch status`, `/offdesk review`, dashboard, recovery, audit
+  1. `WorkspaceBrief`
+  2. `DocumentRegistry`
+  3. `ContextPack`
+  4. `RequestContract -> ExecutionBrief -> OrchTaskSpec`
+  5. `FollowupBrief`
+  6. `Background Run Ticket`
+  7. `run_lock_mode`
+  8. runner-target slot and scheduler policy
+  9. `/task`, `/orch status`, `/offdesk review`, dashboard, recovery, audit
 - These are not executor-specific and should not leak runner implementation details into their core schema.
 
 ## 5. Adapter Contract
@@ -133,3 +139,6 @@
   - layer placement for on-desk shells, off-desk control, and model-routing policy
 - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
   - modular endpoint registry and routing seam for Ollama/API-served models
+- `docs/WORKSPACE_ONBOARDING_SPEC.md`
+- `docs/DOCUMENT_REGISTRY_SPEC.md`
+- `docs/CONTEXT_PACK_COMPILER_SPEC.md`

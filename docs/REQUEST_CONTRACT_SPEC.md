@@ -23,6 +23,9 @@
 
 ## 3. Core Principle
 - `plain text = UI`
+- `workspace brief = project/runtime workspace truth`
+- `document registry = canonical document metadata truth`
+- `context pack = task-scoped compiled context truth`
 - `request contract = intake normalization truth`
 - `execution brief = on-desk execution truth`
 - `OrchTaskSpec = planner-facing execution object`
@@ -36,12 +39,17 @@ Operational meaning:
 ## 4. Position In The System
 
 ### 4.1 Before
+- `project/workspace selection by convention`
+- `document discovery by convention`
 - `text`
 - `intent routing`
 - `prompt -> preset inference`
 - `planner/critic + acceptance floor patches`
 
 ### 4.2 After
+- `workspace onboarding`
+- `document registry refresh`
+- `context pack compilation as needed`
 - `text`
 - `intent routing`
 - `request contract extraction`
@@ -88,12 +96,15 @@ Operational meaning:
 - `RequestContract` is not a second planner input beside `OrchTaskSpec`.
 - It is the canonical normalization layer that must be applied before `ExecutionBrief` and `OrchTaskSpec` are assembled.
 - The enforced order is:
-  1. plain text intake
-  2. request contract extraction
-  3. contract completeness gate
-  4. execution brief assembly
-  5. `ExecutionBrief -> OrchTaskSpec` assembly
-  6. TF planning
+  1. workspace onboarding / workspace brief
+  2. document registry refresh
+  3. context-pack compilation as needed
+  4. plain text intake
+  5. request contract extraction
+  6. contract completeness gate
+  7. execution brief assembly
+  8. `ExecutionBrief -> OrchTaskSpec` assembly
+  9. TF planning
 
 Policy:
 - TF planner should receive `OrchTaskSpec` plus contract-derived metadata, not two competing truths.
@@ -101,6 +112,10 @@ Policy:
 - runner-specific execution should consume that brief through the executor adapter boundary documented in `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`.
 - `OrchTaskSpec` remains the planner-facing object.
 - `RequestContract` remains the intake-normalization truth that constrains how `OrchTaskSpec` is built.
+- upstream knowledge/context seams are documented in:
+  - `docs/WORKSPACE_ONBOARDING_SPEC.md`
+  - `docs/DOCUMENT_REGISTRY_SPEC.md`
+  - `docs/CONTEXT_PACK_COMPILER_SPEC.md`
 - When the two disagree, the implementation is wrong; planner code must not silently pick one.
 
 ### 5.4 Relation To ExecutionBrief
