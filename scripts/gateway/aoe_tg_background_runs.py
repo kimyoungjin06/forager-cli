@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
+from aoe_tg_executor_adapter import (
+    EXECUTOR_SLOT_RUNNER_TARGETS,
+    normalize_executor_runner_target,
+)
 from aoe_tg_request_contract import (
     background_run_ticket_external_worker_allowed,
     background_runner_requires_externalizable_spec,
@@ -33,11 +37,7 @@ BACKGROUND_RUN_CLAIM_LAUNCH_PRIORITY = {
     "detached_no_wait": 50,
 }
 BACKGROUND_RUN_CLAIM_STARVATION_SEC = 900
-SLOT_RUNNER_TARGETS = (
-    "local_tmux",
-    "github_runner",
-    "remote_worker",
-)
+SLOT_RUNNER_TARGETS = EXECUTOR_SLOT_RUNNER_TARGETS
 
 
 def background_runs_state_path(team_dir: Path, *, filename: str = BACKGROUND_RUNS_FILENAME) -> Path:
@@ -114,7 +114,7 @@ def background_runner_slot_limit_for_entry(
         default_limit,
         max_value=max_value,
     )
-    runner = str(runner_target or "").strip().lower()
+    runner = normalize_executor_runner_target(runner_target)
     if runner not in SLOT_RUNNER_TARGETS:
         return default_slot_limit
     limits = normalize_background_runner_slot_limits(
@@ -367,7 +367,7 @@ def list_background_run_tickets(
         for item in list(statuses or [])
         if str(item or "").strip()
     }
-    requested_runner = str(runner_target or "").strip().lower()
+    requested_runner = normalize_executor_runner_target(runner_target)
     rows: List[Dict[str, Any]] = []
     state = load_background_runs_state(path)
     for row in list(state.get("runs") or []):
@@ -377,7 +377,7 @@ def list_background_run_tickets(
         status = str(snapshot.get("status", "")).strip().lower()
         if allowed_statuses and status not in allowed_statuses:
             continue
-        row_runner = str(snapshot.get("runner_target", "")).strip().lower()
+        row_runner = normalize_executor_runner_target(snapshot.get("runner_target", ""))
         if requested_runner and row_runner and row_runner != requested_runner:
             continue
         rows.append(snapshot)
@@ -402,7 +402,7 @@ def count_background_run_tickets(
     }
     count = 0
     for snapshot in list_background_run_tickets(path, statuses=list(allowed_statuses) or None):
-        row_target = str(snapshot.get("runner_target", "")).strip().lower()
+        row_target = normalize_executor_runner_target(snapshot.get("runner_target", ""))
         if allowed_targets and row_target not in allowed_targets:
             continue
         count += 1
@@ -422,7 +422,7 @@ def count_background_run_tickets_by_runner(
     ]
     counts: Dict[str, int] = {target: 0 for target in allowed_targets}
     for snapshot in list_background_run_tickets(path, statuses=statuses):
-        row_target = str(snapshot.get("runner_target", "")).strip().lower()
+        row_target = normalize_executor_runner_target(snapshot.get("runner_target", ""))
         if row_target not in counts:
             continue
         counts[row_target] = int(counts.get(row_target, 0) or 0) + 1
@@ -447,7 +447,7 @@ def summarize_background_runner_slots(
         statuses=statuses,
         runner_targets=list(SLOT_RUNNER_TARGETS),
     )
-    selected = str(selected_runner or "").strip().lower()
+    selected = normalize_executor_runner_target(selected_runner)
     if selected not in SLOT_RUNNER_TARGETS:
         selected = ""
     selected_limit = (
@@ -500,7 +500,10 @@ def claim_background_run_ticket(
     current_status = str(current.get("status", "")).strip().lower()
     if current_status not in {"queued", "stale"}:
         return current
-    requested_runner = str(runner_target or current.get("runner_target", "")).strip() or "local_background"
+    requested_runner = normalize_executor_runner_target(
+        runner_target or current.get("runner_target", ""),
+        "local_background",
+    ) or "local_background"
     if (
         background_runner_requires_externalizable_spec(requested_runner)
         and not background_run_ticket_external_worker_allowed(
@@ -543,7 +546,7 @@ def claim_next_background_run_ticket(
     claimed_by: str = "",
     source_surface: str = "",
 ) -> Dict[str, Any]:
-    requested_runner = str(runner_target or "").strip() or "local_background"
+    requested_runner = normalize_executor_runner_target(runner_target, "local_background") or "local_background"
     candidates = list_background_run_tickets(
         path,
         statuses=["queued", "stale"],
@@ -722,7 +725,7 @@ def summarize_background_runs_state(path: Path) -> Dict[str, Any]:
         if not snapshot:
             continue
         status = str(snapshot.get("status", "")).strip().lower()
-        target = str(snapshot.get("runner_target", "")).strip().lower()
+        target = normalize_executor_runner_target(snapshot.get("runner_target", ""))
         if status:
             status_counts[status] = int(status_counts.get(status, 0) or 0) + 1
         if target:

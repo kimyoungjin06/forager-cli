@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
+from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
 from aoe_tg_background_runs import (
     background_runs_state_path,
     summarize_background_runner_scheduling,
@@ -48,7 +49,7 @@ from aoe_tg_todo_policy import (
 from aoe_tg_todo_state import preview_syncback_plan, sorted_open_proposals
 
 
-_SLOT_RUNNER_TARGETS = ["local_tmux", "github_runner", "remote_worker"]
+_SLOT_RUNNER_TARGETS = list(EXECUTOR_SLOT_RUNNER_TARGETS)
 
 
 def cmd_prefix() -> str:

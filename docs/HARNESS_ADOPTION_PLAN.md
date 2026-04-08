@@ -12,6 +12,8 @@
 1. Preserve the existing operating model.
 - `Control Plane`, `Project Runtime`, and `Task Team` remain canonical.
 - We are improving the harness around the system, not replacing the core model.
+- Native runner logic is not the product boundary.
+- We should own the control plane and plug execution substrates in through adapters.
 
 2. Prefer observability and recoverability over more modes.
 - New modes, aliases, and keyword-heavy UX are out of scope.
@@ -34,9 +36,10 @@
 1. `Session Search`
 2. `Task Team Observatory`
 3. `Execution Brief`
-4. `Background / Remote Execution`
-5. `Project Progress Board`
-6. `Centralized State Root`
+4. `Execution Adapter Layer`
+5. `Background / Remote Execution`
+6. `Project Progress Board`
+7. `Centralized State Root`
 
 ### 3.2 Medium-Term Adoption
 1. `Doctor / Setup / Migration Discipline`
@@ -86,6 +89,31 @@
 - Deep rerun/manual-followup proof remains necessary, but it is no longer the main strategic driver.
 - reference rule:
   - every new benchmark-driven package under Sections `6B`, `7`, `8`, and later roadmap imports must point back to `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md` reference IDs
+
+### 3.7 Control Plane + Adapter Boundary
+- Canonical core to keep native:
+  - `RequestContract`
+  - `ExecutionBrief`
+  - `FollowupBrief`
+  - `Background Run Ticket`
+  - run locks / slot policy / scheduler policy
+  - dashboard / off-desk / recovery / audit
+- Adapter-owned responsibility:
+  - runner capability checks
+  - runner-specific launch spec translation
+  - tmux / GitHub runner / remote worker handoff and result normalization
+- Commodity executor layer to reuse:
+  - tmux
+  - gateway CLI replay payloads
+  - GitHub Actions / runner pickup
+  - remote worker substrate
+- Detailed contract:
+  - `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`
+- refs:
+  - `REF-OH-1`
+  - `REF-CC-2`
+  - `REF-GHCA-1`
+  - `REF-API-1`
 
 ## 4. Package A: Session Search
 

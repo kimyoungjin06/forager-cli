@@ -9,6 +9,12 @@ import shlex
 import sys
 from typing import Any, Dict, List, Optional
 
+from aoe_tg_executor_adapter import (
+    EXECUTOR_EXTERNAL_RUNNER_TARGETS,
+    EXECUTOR_RUNNER_TARGETS,
+    executor_requires_externalizable_launch_spec,
+    normalize_executor_runner_target,
+)
 from aoe_tg_orch_roles import classify_dispatch_role_preset, normalize_role_preset
 from aoe_tg_request_contract_data import (
     data_request_contract_matches,
@@ -44,17 +50,8 @@ BACKGROUND_RUN_STATUSES = (
     "canceled",
     "stale",
 )
-BACKGROUND_RUNNER_TARGETS = (
-    "local_background",
-    "local_tmux",
-    "github_runner",
-    "remote_worker",
-)
-BACKGROUND_EXTERNAL_RUNNER_TARGETS = (
-    "local_tmux",
-    "github_runner",
-    "remote_worker",
-)
+BACKGROUND_RUNNER_TARGETS = EXECUTOR_RUNNER_TARGETS
+BACKGROUND_EXTERNAL_RUNNER_TARGETS = EXECUTOR_EXTERNAL_RUNNER_TARGETS
 BACKGROUND_RUNNER_DEFAULT_MODES = {
     "local_background": "in_process_callback",
     "local_tmux": "tmux_session_json",
@@ -243,7 +240,7 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
     snapshot: Dict[str, Any] = {
         "version": _trim(raw.get("version", BACKGROUND_LAUNCH_SPEC_VERSION), 48) or BACKGROUND_LAUNCH_SPEC_VERSION,
     }
-    runner_target = _trim(raw.get("runner_target", ""), 64).lower()
+    runner_target = normalize_executor_runner_target(raw.get("runner_target", ""))
     if runner_target in BACKGROUND_RUNNER_TARGETS:
         snapshot["runner_target"] = runner_target
     for key, limit in (
@@ -306,7 +303,7 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
     status = _trim(raw.get("status", ""), 32).lower()
     if status not in BACKGROUND_RUN_STATUSES:
         status = ""
-    runner_target = _trim(raw.get("runner_target", ""), 64).lower()
+    runner_target = normalize_executor_runner_target(raw.get("runner_target", ""))
     if runner_target not in BACKGROUND_RUNNER_TARGETS:
         runner_target = ""
 
@@ -882,8 +879,7 @@ def build_remote_worker_background_launch_spec(
 
 
 def background_runner_requires_externalizable_spec(runner_target: Any) -> bool:
-    token = _trim(runner_target, 64).lower()
-    return token in BACKGROUND_EXTERNAL_RUNNER_TARGETS
+    return executor_requires_externalizable_launch_spec(runner_target)
 
 
 def background_run_ticket_external_worker_allowed(ticket: Dict[str, Any]) -> bool:
@@ -903,13 +899,9 @@ def select_background_runner_target(
     launch_spec: Any = None,
     allow_external_targets: bool = False,
 ) -> str:
-    preferred = _trim(preferred_runner_target, 64).lower()
-    if preferred not in BACKGROUND_RUNNER_TARGETS:
-        preferred = ""
+    preferred = normalize_executor_runner_target(preferred_runner_target)
     snapshot = normalize_background_launch_spec_snapshot(launch_spec)
-    spec_runner = _trim(snapshot.get("runner_target", ""), 64).lower()
-    if spec_runner not in BACKGROUND_RUNNER_TARGETS:
-        spec_runner = ""
+    spec_runner = normalize_executor_runner_target(snapshot.get("runner_target", ""))
     candidate = preferred or spec_runner or "local_background"
     if candidate == "local_tmux" and bool(snapshot.get("externalizable", False)):
         return "local_tmux"

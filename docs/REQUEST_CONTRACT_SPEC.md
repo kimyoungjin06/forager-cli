@@ -98,6 +98,7 @@ Operational meaning:
 Policy:
 - TF planner should receive `OrchTaskSpec` plus contract-derived metadata, not two competing truths.
 - `ExecutionBrief` is the on-desk/operator-facing execution handoff that decides what off-desk is allowed to do.
+- runner-specific execution should consume that brief through the executor adapter boundary documented in `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`.
 - `OrchTaskSpec` remains the planner-facing object.
 - `RequestContract` remains the intake-normalization truth that constrains how `OrchTaskSpec` is built.
 - When the two disagree, the implementation is wrong; planner code must not silently pick one.

@@ -166,6 +166,23 @@
 5. operator dashboard as the primary runtime shell
 6. git-native evidence and review artifacts
 
+## 5A. What We Keep Vs What We Rent
+- Keep native:
+  - operator control plane
+  - request/brief/ticket schemas
+  - run lock / slot / scheduler policy
+  - audit / recovery / dashboard truth
+- Rent or reuse:
+  - local process/session executors
+  - tmux-backed launchers
+  - GitHub runner pickup
+  - remote worker pickup
+  - third-party coding shells
+- Required seam:
+  - an `Executor Adapter` layer that translates control-plane truth into runner-specific execution and back
+- reference:
+  - `REF-API-1`
+
 ## 6. What Not To Copy
 1. prompt wording
 2. provider-specific role names
@@ -196,6 +213,7 @@
   - remote worker / runner support
   - request-to-run audit trail
   - durable off-desk evidence bundle
+  - executor adapter seam
 
 ### 7.3 Lane C: Operator Dashboard
 - Primary references:
@@ -247,6 +265,9 @@
   4. planning convergence metadata
   5. the emerging on-desk / off-desk split
 - The correct strategy is to lean harder into that operating shell, not to out-compete upstream projects on prompt-level planner refinement.
+- That implies a product boundary:
+  - `aoe_orch_control` should become the control plane plus adapter layer
+  - not a monolithic native harness that re-implements every executor surface
 
 ## 10. Sources
 ### 10.1 Reference Discipline

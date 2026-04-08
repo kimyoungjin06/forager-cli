@@ -4,6 +4,7 @@
 - Move off-desk work off foreground live sessions and into durable execution rails.
 - Keep `ExecutionBrief` as the operator-approved handoff object.
 - Ensure every off-desk run leaves an auditable trail and an evidence bundle.
+- Keep runner-specific behavior behind an executor adapter seam instead of treating every runner as native harness logic.
 
 ## 2. Benchmark References
 - `REF-OH-1`: OpenHands local/cloud/operator console direction
@@ -26,6 +27,7 @@
 - This spec does not define planner prompt wording.
 - This spec does not replace `Task Team` or `Phase2` planning.
 - This spec does not require cloud execution first; local background execution is the first milestone.
+- This spec does not require the control plane to own every executor implementation end-to-end.
 
 ## 5. Core Objects
 
@@ -218,6 +220,25 @@
   - `handoff_emitted`
   - `pickup_acknowledged`
   - `result_received`
+
+### 5.6 Executor Adapter Boundary
+- The control plane owns:
+  - `ExecutionBrief`
+  - `FollowupBrief`
+  - `Background Run Ticket`
+  - run lock / slot / scheduler policy
+  - audit and operator surfaces
+- Executor adapters own:
+  - runner capability checks
+  - runner-specific launch spec materialization
+  - tmux launch, external handoff, pickup/result normalization
+- Current adapter inventory:
+  - `local_background`
+  - `local_tmux`
+  - `github_runner`
+  - `remote_worker`
+- Detailed architecture:
+  - `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`
 
 ### 5.6 Evidence Bundle
 - Durable off-desk result package.

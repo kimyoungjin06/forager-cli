@@ -120,6 +120,22 @@
     7. only then continue deep rerun/manual-followup verification
   - reference discipline:
     - benchmark-driven imports must cite `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md` reference IDs
+- [x] control plane + executor adapter architecture fixed
+  - 문서:
+    - `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`
+    - `docs/HARNESS_ADOPTION_PLAN.md`
+    - `docs/BACKGROUND_REMOTE_EXECUTION_SPEC.md`
+  - 핵심 판단:
+    - 우리 제품 경계는 `native harness monolith`가 아니라 `operator control plane + execution adapters`
+    - canonical core는:
+      - `RequestContract`
+      - `ExecutionBrief`
+      - `FollowupBrief`
+      - `Background Run Ticket`
+      - run lock / slot / scheduler / audit / dashboard
+    - runner-specific launch and pickup behavior는 adapter 책임으로 분리
+  - 구현 기준선:
+    - `scripts/gateway/aoe_tg_executor_adapter.py`
 
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료

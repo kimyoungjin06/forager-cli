@@ -109,6 +109,7 @@ Important policy:
   - blocked slice
 - `operator_decision_required` must name the exact unresolved decision instead of translating it into planner guesswork
 - `underspecified` and `infeasible` requests must not silently fall through into normal planning
+- runner-specific execution must consume the brief through an executor adapter seam rather than re-deriving scope from runner-local inputs
 
 ### 2.1 OrchTaskSpec
 
