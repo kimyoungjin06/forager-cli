@@ -16,6 +16,7 @@ import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_background_runs as background_runs
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
+import aoe_tg_document_registry as document_registry
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
@@ -82,6 +83,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         model_routing_summary = "-"
         model_registry_summary = "-"
         workspace_summary = "-"
+        document_registry_summary = "-"
         run_lock_mode = "open"
         run_lock_note = "-"
         background_slot_limit = 1
@@ -118,6 +120,11 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 worker_status = str(worker_snapshot.get("status", "")).strip() or "-"
                 worker_summary = str(worker_snapshot.get("summary", "")).strip() or "-"
                 workspace_summary = workspace_brief.summarize_workspace_brief(
+                    team_dir,
+                    entry=entry,
+                    project_root=entry.get("project_root"),
+                )
+                document_registry_summary = document_registry.summarize_document_registry(
                     team_dir,
                     entry=entry,
                     project_root=entry.get("project_root"),
@@ -246,6 +253,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
                 ),
                 workspace_summary=workspace_summary,
+                document_registry_summary=document_registry_summary,
                 model_routing_summary=model_routing_summary,
                 model_registry_summary=model_registry_summary,
                 run_lock_mode=run_lock_mode,
@@ -421,6 +429,11 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         entry=entry,
         project_root=entry.get("project_root"),
     ) if str(entry.get("team_dir", "")).strip() else "-"
+    document_registry_summary = document_registry.summarize_document_registry(
+        team_dir,
+        entry=entry,
+        project_root=entry.get("project_root"),
+    ) if str(entry.get("team_dir", "")).strip() else "-"
     model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
     model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
     run_lock_mode = run_lock.project_run_lock_mode(entry)
@@ -567,6 +580,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
         ),
         workspace_summary=workspace_summary,
+        document_registry_summary=document_registry_summary,
         model_routing_summary=model_routing_summary,
         model_registry_summary=model_registry_summary,
         run_lock_mode=run_lock_mode,

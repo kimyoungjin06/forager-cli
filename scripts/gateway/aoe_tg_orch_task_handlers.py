@@ -10,6 +10,7 @@ from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
 from aoe_tg_model_endpoint_adapter import summarize_model_endpoint_registry, summarize_model_routing
+from aoe_tg_document_registry import summarize_document_registry
 from aoe_tg_workspace_brief import summarize_workspace_brief
 from aoe_tg_package_paths import package_root
 from aoe_tg_request_contract import (
@@ -924,6 +925,7 @@ def handle_orch_task_command(
         scheduler_line = ""
         model_routing_line = ""
         model_registry_line = ""
+        document_registry_line = ""
         workspace_line = ""
         try:
             team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
@@ -954,6 +956,9 @@ def handle_orch_task_command(
                 workspace_line = (
                     f"workspace: {summarize_workspace_brief(team_dir, entry=entry, project_root=entry.get('project_root'))}\n"
                 )
+                document_registry_line = (
+                    f"document_registry: {summarize_document_registry(team_dir, entry=entry, project_root=entry.get('project_root'))}\n"
+                )
                 queue_line = f"background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}\n"
                 scheduler_line = f"background_scheduler: {str(scheduler_snapshot.get('summary', '-')).strip() or '-'}\n"
                 worker_line = f"background_worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
@@ -963,6 +968,7 @@ def handle_orch_task_command(
             scheduler_line = ""
             model_routing_line = ""
             model_registry_line = ""
+            document_registry_line = ""
             workspace_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
         run_lock_mode, run_lock_note = _project_run_lock_status(entry)
@@ -1022,7 +1028,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{model_routing_line}{model_registry_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

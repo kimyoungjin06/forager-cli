@@ -120,6 +120,10 @@ def workspace_brief_path(team_dir: Path | str, filename: str = "workspace_brief.
     return Path(team_dir).expanduser().resolve() / str(filename or "workspace_brief.json").strip()
 
 
+def document_registry_path(team_dir: Path | str, filename: str = "document_registry.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "document_registry.json").strip()
+
+
 def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
 

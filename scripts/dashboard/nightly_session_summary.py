@@ -171,6 +171,7 @@ def build_nightly_session_summary(
                 "active_task_background_run_evidence_artifacts": detail.active_task_background_run_evidence_artifacts,
                 "active_task_background_run_launch_spec_summary": detail.active_task_background_run_launch_spec_summary,
                 "workspace_summary": detail.workspace_summary,
+                "document_registry_summary": detail.document_registry_summary,
                 "run_lock_mode": detail.run_lock_mode,
                 "run_lock_note": detail.run_lock_note,
                 "background_slot_limit": detail.background_slot_limit,

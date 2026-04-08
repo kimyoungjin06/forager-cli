@@ -25,6 +25,7 @@ import control_dashboard as dashboard_app  # noqa: E402
 import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
+import aoe_tg_document_registry as document_registry  # noqa: E402
 import aoe_tg_workspace_brief as workspace_brief  # noqa: E402
 
 
@@ -793,6 +794,24 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
         project_root=project_root,
         entry={"background_runner_target": "local_background"},
     )
+    document_registry.write_document_registry(
+        project_team_dir,
+        {
+            "records": [
+                {
+                    "doc_id": "alpha-runbook",
+                    "path": str((project_root / "docs" / "RUNBOOK.md").resolve()),
+                    "doc_type": "runbook",
+                    "source_kind": "markdown",
+                    "title": "Runbook",
+                    "canonical": True,
+                    "freshness_class": "fresh",
+                    "ingest_status": "indexed",
+                }
+            ]
+        },
+        project_root=project_root,
+    )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -812,6 +831,8 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
     assert "bg=ollama-qwen3:qwen3-coder:30b" in text
     assert "workspace" in text
     assert "status=active" in text
+    assert "document_registry" in text
+    assert "indexed=1 canonical=1" in text
     assert "model_registry" in text
     assert "enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
 

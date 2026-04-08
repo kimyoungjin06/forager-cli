@@ -7,6 +7,7 @@ import time
 
 from _gateway_test_support import *  # noqa: F401,F403
 import aoe_tg_run_detached_flow as run_detached_flow
+import aoe_tg_document_registry as document_registry
 import aoe_tg_workspace_brief as workspace_brief
 
 from aoe_tg_background_runs import (
@@ -810,6 +811,24 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
         project_root=project_root,
         entry={"background_runner_target": "local_background"},
     )
+    document_registry.write_document_registry(
+        team_dir,
+        {
+            "records": [
+                {
+                    "doc_id": "tp-spec",
+                    "path": str((project_root / "docs" / "REQUEST_CONTRACT_SPEC.md").resolve()),
+                    "doc_type": "spec",
+                    "source_kind": "markdown",
+                    "title": "Request Contract Spec",
+                    "canonical": True,
+                    "freshness_class": "fresh",
+                    "ingest_status": "indexed",
+                }
+            ]
+        },
+        project_root=project_root,
+    )
     state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
@@ -879,6 +898,7 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
     text, context, _reply_markup = sent[-1]
     assert context == "status"
     assert "workspace: status=active" in text
+    assert "document_registry: indexed=1 canonical=1" in text
     assert "model_routing: profile=default" in text
     assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in text
     assert "bg=ollama-qwen3:qwen3-coder:30b" in text

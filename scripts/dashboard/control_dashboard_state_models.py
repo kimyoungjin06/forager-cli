@@ -107,6 +107,7 @@ class RuntimeCardDTO:
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
     workspace_summary: str
+    document_registry_summary: str
     model_routing_summary: str
     model_registry_summary: str
     run_lock_mode: str
@@ -271,6 +272,7 @@ class RuntimeDetailDTO:
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
     workspace_summary: str
+    document_registry_summary: str
     model_routing_summary: str
     model_registry_summary: str
     run_lock_mode: str
@@ -375,6 +377,7 @@ class RecoveryRuntimeDTO:
     active_task_background_run_external_note: str
     active_task_background_run_launch_spec_summary: str
     workspace_summary: str
+    document_registry_summary: str
     model_routing_summary: str
     model_registry_summary: str
     run_lock_mode: str
