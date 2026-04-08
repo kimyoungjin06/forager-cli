@@ -63,6 +63,22 @@
   - third-party coding CLI / agent shell
 - These can change without invalidating `ExecutionBrief`, `FollowupBrief`, or `Background Run Ticket`.
 
+### 3.4 Authoring Modules
+- Separate from executor adapters.
+- Examples:
+  - upstream harness generators
+  - skill compilers
+  - agent topology generators
+- These may emit:
+  - `.claude/agents`
+  - `.claude/skills`
+  - scaffolding for on-desk authoring
+- They do not own:
+  - task/runtime truth
+  - queue state
+  - off-desk policy
+  - audit/recovery truth
+
 ## 4. Control Plane Ownership
 - We keep these native:
   1. `WorkspaceBrief`
@@ -139,6 +155,8 @@
   - `REF-API-1`
 - `docs/MODEL_HARNESS_ROUTING_BASIS_20260408.md`
   - layer placement for on-desk shells, off-desk control, and model-routing policy
+- `docs/HARNESS_AUTHORING_ADAPTER_SPEC.md`
+  - boundary for upstream harness generators as authoring modules only
 - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
   - modular endpoint registry and routing seam for Ollama/API-served models
 - `docs/WORKSPACE_ONBOARDING_SPEC.md`

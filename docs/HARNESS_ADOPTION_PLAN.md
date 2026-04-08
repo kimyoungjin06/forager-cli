@@ -124,6 +124,27 @@
   - `LangGraph` is a re-platforming option, not the default off-desk answer
   - `OpenClaw` is a daemon/gateway option, not the canonical task/runtime truth
 
+### 3.9 Upstream Harness Authoring Import
+- Current upstream candidate:
+  - `revfactory/harness`
+- Canonical interpretation:
+  - import as an `authoring/generation module`
+  - do not import as the off-desk runtime truth
+- Import targets:
+  - pattern catalog
+  - skill generation discipline
+  - generated `.claude/agents`
+  - generated `.claude/skills`
+- Boundary:
+  - runtime truth remains:
+    - `ExecutionBrief`
+    - `FollowupBrief`
+    - `Background Run Ticket`
+    - dashboard/off-desk/recovery state
+- Detailed contract:
+  - `docs/HARNESS_AUTHORING_ADAPTER_SPEC.md`
+  - `docs/UPSTREAM_VENDORING_STRATEGY.md`
+
 ## 4. Package A: Session Search
 
 ### 4.1 Goal

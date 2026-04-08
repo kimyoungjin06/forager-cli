@@ -165,6 +165,16 @@
     - `stack manifest + env overlay + compiler`로 canonical runtime artifact를 생성
     - control plane은 compiled artifact만 읽고 실행
     - backend execution 기본값은 host-native Python + systemd, container는 later remote worker에 한정
+- [x] upstream harness authoring adapter baseline fixed
+  - 문서:
+    - `docs/HARNESS_AUTHORING_ADAPTER_SPEC.md`
+    - `docs/UPSTREAM_VENDORING_STRATEGY.md`
+  - 구현 기준선:
+    - `scripts/gateway/aoe_tg_harness_authoring_adapter.py`
+  - 핵심 판단:
+    - `revfactory/harness`는 off-desk runtime이 아니라 authoring/generation module
+    - upstream import 기본 전략은 `git subtree`
+    - runtime truth는 계속 current control plane이 소유
 
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료

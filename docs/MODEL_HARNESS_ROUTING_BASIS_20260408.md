@@ -145,13 +145,16 @@
 ## 9. Recommended Adoption Sequence
 1. Standardize `on-desk` on `Claude Code` as the primary shell.
 2. Keep `aoe_orch_control` as `off-desk` truth.
-3. Add one open/local worker pilot through the adapter seam.
+3. Treat upstream harness generators such as `revfactory/harness` as on-desk authoring modules, not off-desk runtime truth.
+- boundary:
+  - `docs/HARNESS_AUTHORING_ADAPTER_SPEC.md`
+4. Add one open/local worker pilot through the adapter seam.
 - first candidate: `Qwen3-Coder`
 - second candidate: `gpt-oss`
 - third candidate: `Gemma 4`
-4. Revisit `OpenClaw` only if we need a stronger always-on gateway or channel hub.
-5. Revisit `LangGraph` only if we intentionally decide to re-platform orchestration internals.
-6. Keep endpoint binding modular through:
+5. Revisit `OpenClaw` only if we need a stronger always-on gateway or channel hub.
+6. Revisit `LangGraph` only if we intentionally decide to re-platform orchestration internals.
+7. Keep endpoint binding modular through:
    - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
 
 ## 10. Anti-Patterns To Avoid
