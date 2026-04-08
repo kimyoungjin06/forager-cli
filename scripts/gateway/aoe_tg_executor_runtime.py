@@ -6,7 +6,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
-from aoe_tg_background_runs import advance_background_run_ticket
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
+from aoe_tg_background_runs import advance_background_run_ticket, upsert_background_run_ticket
 from aoe_tg_executor_adapter import normalize_executor_runner_target
 from aoe_tg_external_background_worker import poll_external_background_tickets
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
@@ -29,14 +30,54 @@ def dispatch_claimed_background_ticket_via_adapter(
     if runner_target != "local_background" or not token:
         return run_target()
 
+    worker_probe = model_endpoint_adapter.probe_background_ticket_worker_binding(queue_path.parent, ticket)
+    binding = worker_probe.get("binding") if isinstance(worker_probe.get("binding"), dict) else {}
+    binding_summary = str(binding.get("summary", "")).strip() if binding.get("bound") else ""
+    probe_status = str(worker_probe.get("probe_status", "")).strip()
+    launch_spec = dict(ticket.get("launch_spec") or {}) if isinstance(ticket.get("launch_spec"), dict) else {}
+    probe_summary = str(worker_probe.get("summary", "")).strip()
+    if binding_summary:
+        launch_spec["model_worker_binding_summary"] = binding_summary
+    if probe_status:
+        launch_spec["model_worker_probe_status"] = probe_status
+    if probe_summary:
+        launch_spec["model_worker_probe_summary"] = probe_summary
+    if launch_spec:
+        ticket["launch_spec"] = launch_spec
+        ticket = upsert_background_run_ticket(queue_path, ticket, now_iso=now_iso) or ticket
+    if binding.get("bound") and (not bool(worker_probe.get("ok"))):
+        try:
+            failed = advance_background_run_ticket(
+                queue_path,
+                token,
+                now_iso=now_iso,
+                status="failed",
+                runner_target=runner_target,
+                evidence_bundle=f"status=failed | reason=model_route_probe_failed | probe={probe_status or 'failed'}",
+            )
+            if failed:
+                on_ticket_update(failed)
+        except Exception as exc:  # pragma: no cover - defensive path
+            on_queue_error("background_run_state_write_failed", exc)
+        raise RuntimeError(f"model_route_probe_failed:{probe_status or 'failed'}")
+
     try:
+        runtime_summary = "dispatch_flow_started"
+        if binding_summary:
+            runtime_summary += f" | worker={binding_summary}"
+        if probe_status and probe_status != "unbound":
+            runtime_summary += f" | probe={probe_status}"
+        evidence_bundle = "status=running | outcome=dispatch_flow_started"
+        if probe_status and probe_status != "unbound":
+            evidence_bundle += f" | worker_probe={probe_status}"
         running = advance_background_run_ticket(
             queue_path,
             token,
             now_iso=now_iso,
             status="running",
             runner_target=runner_target,
-            evidence_bundle="status=running | outcome=dispatch_flow_started",
+            runtime_summary=runtime_summary,
+            evidence_bundle=evidence_bundle,
         )
         if running:
             on_ticket_update(running)

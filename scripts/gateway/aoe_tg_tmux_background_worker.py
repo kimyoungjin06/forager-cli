@@ -10,10 +10,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
     claim_background_run_ticket,
     list_background_run_tickets,
+    upsert_background_run_ticket,
 )
 from aoe_tg_request_contract import normalize_background_launch_spec_snapshot
 
@@ -177,7 +179,33 @@ def launch_local_tmux_background_ticket(
     if not claimed or str(claimed.get("status", "")).strip().lower() != "dispatching":
         return claimed
 
+    worker_probe = model_endpoint_adapter.probe_background_ticket_worker_binding(queue_path.parent, claimed)
     launch_spec = normalize_background_launch_spec_snapshot(claimed.get("launch_spec"))
+    binding = worker_probe.get("binding") if isinstance(worker_probe.get("binding"), dict) else {}
+    binding_summary = _trim(binding.get("summary", ""), 240) if binding.get("bound") else ""
+    probe_status = _trim(worker_probe.get("probe_status", ""), 64)
+    probe_summary = _trim(worker_probe.get("summary", ""), 240)
+    if binding_summary:
+        launch_spec["model_worker_binding_summary"] = binding_summary
+    if probe_status:
+        launch_spec["model_worker_probe_status"] = probe_status
+    if probe_summary:
+        launch_spec["model_worker_probe_summary"] = probe_summary
+    claimed["launch_spec"] = launch_spec
+    claimed = upsert_background_run_ticket(queue_path, claimed, now_iso=now_iso) or claimed
+    if binding.get("bound") and (not bool(worker_probe.get("ok"))):
+        return advance_background_run_ticket(
+            queue_path,
+            ticket_id,
+            now_iso=now_iso,
+            status="failed",
+            runner_target="local_tmux",
+            launch_mode=launch_mode,
+            created_by=claimed_by,
+            source_surface=source_surface,
+            evidence_bundle=f"status=failed | reason=model_route_probe_failed | probe={probe_status or 'failed'}",
+        )
+
     command_argv = list(launch_spec.get("command_argv") or [])
     command_cwd = _trim(launch_spec.get("command_cwd", ""), 240) or _trim(launch_spec.get("project_root", ""), 240)
     if not command_argv:
@@ -245,6 +273,14 @@ def launch_local_tmux_background_ticket(
             source_surface=source_surface,
             evidence_bundle=f"status=failed | reason={reason}",
         )
+    runtime_summary = f"tmux_session={session_name}"
+    if binding_summary:
+        runtime_summary += f" | worker={binding_summary}"
+    if probe_status and probe_status != "unbound":
+        runtime_summary += f" | probe={probe_status}"
+    evidence_bundle = f"status=running | outcome=tmux_session_started | session={session_name} | log={log_artifact}"
+    if probe_status and probe_status != "unbound":
+        evidence_bundle += f" | worker_probe={probe_status}"
     return advance_background_run_ticket(
         queue_path,
         ticket_id,
@@ -255,7 +291,7 @@ def launch_local_tmux_background_ticket(
         created_by=claimed_by,
         source_surface=source_surface,
         runtime_handle=session_name,
-        runtime_summary=f"tmux_session={session_name}",
-        evidence_bundle=f"status=running | outcome=tmux_session_started | session={session_name} | log={log_artifact}",
+        runtime_summary=runtime_summary,
+        evidence_bundle=evidence_bundle,
         evidence_artifacts=[item for item in (log_artifact, result_artifact) if item],
     )

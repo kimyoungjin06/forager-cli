@@ -1186,6 +1186,9 @@ def sanitize_task_record(
                 "model_worker_endpoint_id": task.get("background_run_model_worker_endpoint_id"),
                 "model_judge_endpoint_id": task.get("background_run_model_judge_endpoint_id"),
                 "model_escalation_endpoint_id": task.get("background_run_model_escalation_endpoint_id"),
+                "model_worker_binding_summary": task.get("background_run_model_worker_binding_summary"),
+                "model_worker_probe_status": task.get("background_run_model_worker_probe_status"),
+                "model_worker_probe_summary": task.get("background_run_model_worker_probe_summary"),
             },
         }
     )
@@ -1222,6 +1225,9 @@ def sanitize_task_record(
             "background_run_model_worker_endpoint_id",
             "background_run_model_judge_endpoint_id",
             "background_run_model_escalation_endpoint_id",
+            "background_run_model_worker_binding_summary",
+            "background_run_model_worker_probe_status",
+            "background_run_model_worker_probe_summary",
         ):
             task.pop(key, None)
 

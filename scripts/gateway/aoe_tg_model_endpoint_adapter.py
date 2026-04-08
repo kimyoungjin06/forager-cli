@@ -433,6 +433,25 @@ def resolve_task_worker_binding(team_dir: Any, *, entry: Any = None, task: Any =
     return binding
 
 
+def resolve_background_ticket_worker_binding(team_dir: Any, ticket: Any, *, entry: Any = None) -> Dict[str, Any]:
+    ticket_data = ticket if isinstance(ticket, dict) else {}
+    launch_spec = ticket_data.get("launch_spec") if isinstance(ticket_data.get("launch_spec"), dict) else {}
+    route_id = (
+        _trim(launch_spec.get("model_worker_route_id"), 64).lower()
+        or _trim(ticket_data.get("model_worker_route_id"), 64).lower()
+        or "background_worker_primary"
+    )
+    endpoint_id = (
+        _trim(launch_spec.get("model_worker_endpoint_id"), 64).lower()
+        or _trim(ticket_data.get("model_worker_endpoint_id"), 64).lower()
+    )
+    binding = resolve_model_binding_snapshot(team_dir, route_id, entry=entry, endpoint_id_override=endpoint_id)
+    binding["source"] = "launch_spec" if _trim(launch_spec.get("model_plan_summary"), 64) else "background_ticket"
+    binding["pack_profile"] = _trim(launch_spec.get("model_pack_profile"), 64)
+    binding["plan_summary"] = _trim(launch_spec.get("model_plan_summary"), 320)
+    return binding
+
+
 def _default_fetch_json(url: str, *, timeout_sec: float = 3.0) -> Dict[str, Any]:
     with urllib.request.urlopen(url, timeout=max(0.1, float(timeout_sec or 3.0))) as response:
         payload = json.loads(response.read().decode("utf-8"))
@@ -537,6 +556,30 @@ def probe_model_route(
     result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
     result["route_id"] = _trim(route.get("route_id"), 64).lower() or _trim(route_id, 64).lower()
     result["binding"] = binding
+    return result
+
+
+def probe_background_ticket_worker_binding(
+    team_dir: Any,
+    ticket: Any,
+    *,
+    entry: Any = None,
+    timeout_sec: float = 3.0,
+    fetch_json: Any = None,
+) -> Dict[str, Any]:
+    binding = resolve_background_ticket_worker_binding(team_dir, ticket, entry=entry)
+    route = binding.get("route") if isinstance(binding.get("route"), dict) else {}
+    endpoint = binding.get("endpoint") if isinstance(binding.get("endpoint"), dict) else {}
+    if not binding.get("bound"):
+        return {
+            "ok": False,
+            "probe_status": "unbound",
+            "summary": _trim(route.get("summary"), 240) or "worker_route=unbound",
+            "binding": binding,
+        }
+    result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
+    result["binding"] = binding
+    result["route_id"] = _trim(route.get("route_id"), 64).lower() or "background_worker_primary"
     return result
 
 

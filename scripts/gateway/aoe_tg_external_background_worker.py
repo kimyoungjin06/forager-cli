@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 from urllib.parse import quote
 
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
     claim_background_run_ticket,
     list_background_run_tickets,
+    upsert_background_run_ticket,
 )
 from aoe_tg_request_contract import normalize_background_launch_spec_snapshot
 
@@ -199,8 +201,34 @@ def emit_external_background_handoff(
     if not claimed or str(claimed.get("status", "")).strip().lower() != "dispatching":
         return claimed
 
-    launch_spec = normalize_background_launch_spec_snapshot(claimed.get("launch_spec"))
     team_dir = queue_path.parent
+    launch_spec = normalize_background_launch_spec_snapshot(claimed.get("launch_spec"))
+    worker_probe = model_endpoint_adapter.probe_background_ticket_worker_binding(team_dir, claimed)
+    binding = worker_probe.get("binding") if isinstance(worker_probe.get("binding"), dict) else {}
+    binding_summary = _trim(binding.get("summary", ""), 240) if binding.get("bound") else ""
+    probe_status = _trim(worker_probe.get("probe_status", ""), 64)
+    probe_summary = _trim(worker_probe.get("summary", ""), 240)
+    if binding_summary:
+        launch_spec["model_worker_binding_summary"] = binding_summary
+    if probe_status:
+        launch_spec["model_worker_probe_status"] = probe_status
+    if probe_summary:
+        launch_spec["model_worker_probe_summary"] = probe_summary
+    claimed["launch_spec"] = launch_spec
+    claimed = upsert_background_run_ticket(queue_path, claimed, now_iso=now_iso) or claimed
+    if binding.get("bound") and (not bool(worker_probe.get("ok"))):
+        return advance_background_run_ticket(
+            queue_path,
+            token,
+            now_iso=now_iso,
+            status="failed",
+            runner_target=target,
+            launch_mode=launch_mode,
+            created_by=claimed_by,
+            source_surface=source_surface,
+            evidence_bundle=f"status=failed | reason=model_route_probe_failed | probe={probe_status or 'failed'}",
+        )
+
     handoff_path = external_background_handoff_path(team_dir, token, target)
     handoff_path.parent.mkdir(parents=True, exist_ok=True)
     handoff_payload = {
@@ -220,6 +248,14 @@ def emit_external_background_handoff(
     }
     handoff_path.write_text(json.dumps(handoff_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     handoff_artifact = _artifact_path_for_team(team_dir, handoff_path)
+    runtime_summary = f"{target}_handoff={handoff_artifact}"
+    if binding_summary:
+        runtime_summary += f" | worker={binding_summary}"
+    if probe_status and probe_status != "unbound":
+        runtime_summary += f" | probe={probe_status}"
+    evidence_bundle = f"status=running | outcome=external_handoff_emitted | handoff={handoff_artifact}"
+    if probe_status and probe_status != "unbound":
+        evidence_bundle += f" | worker_probe={probe_status}"
     return advance_background_run_ticket(
         queue_path,
         token,
@@ -230,8 +266,8 @@ def emit_external_background_handoff(
         created_by=claimed_by,
         source_surface=source_surface,
         runtime_handle=handoff_artifact,
-        runtime_summary=f"{target}_handoff={handoff_artifact}",
-        evidence_bundle=f"status=running | outcome=external_handoff_emitted | handoff={handoff_artifact}",
+        runtime_summary=runtime_summary,
+        evidence_bundle=evidence_bundle,
         evidence_artifacts=[handoff_artifact],
     )
 

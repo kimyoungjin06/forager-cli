@@ -5316,6 +5316,60 @@ def test_local_background_worker_claims_and_completes_ticket(tmp_path: Path) -> 
     assert row["evidence_artifacts"] == ["review_report.md"]
 
 
+def test_local_background_worker_fails_when_bound_model_route_probe_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REQ-WORKER-FAIL-001",
+            request_id="REQ-WORKER-FAIL",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec={"model_worker_route_id": "background_worker_primary"},
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+    called = {"count": 0}
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "probe_status": "request_failed",
+            "summary": "endpoint=ollama-qwen3 provider=ollama status=request_failed",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="model_route_probe_failed"):
+        run_local_background_ticket(
+            queue_path=queue_file,
+            ticket_id="BGT-REQ-WORKER-FAIL-001",
+            now_iso=lambda: "2026-03-13T18:55:02+0900",
+            run_target=lambda: called.__setitem__("count", called["count"] + 1),
+            on_ticket_update=lambda ticket: None,
+            on_queue_error=lambda event_name, exc: None,
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            claimed_by="thread:REQ-WORKER",
+            source_surface="run_no_wait",
+        )
+
+    assert called["count"] == 0
+    state = load_background_runs_state(queue_file)
+    row = state["runs"][0]
+    assert row["status"] == "failed"
+    assert "model_route_probe_failed" in row["evidence_bundle"]
+
+
 def test_background_run_evidence_artifacts_from_task_uses_request_contract_paths() -> None:
     task = {
         "request_contract_required_outputs": ["review_report", "severity_rationale"],
@@ -5752,6 +5806,63 @@ def test_emit_external_background_handoff_writes_manifest(tmp_path: Path) -> Non
     assert handoff_rel in (launched.get("evidence_artifacts") or [])
 
 
+def test_emit_external_background_handoff_fails_when_bound_model_route_probe_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-GHA-FAIL-001",
+        request_id="REQ-GHA-FAIL-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:00:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+        launch_spec=build_external_runner_gateway_command_launch_spec(
+            runner_target="github_runner",
+            request_id="REQ-GHA-FAIL-001",
+            project_key="twinpaper",
+            project_root=str(tmp_path),
+            team_dir=str(team_dir),
+            manager_state_file=str(team_dir / "orch_manager_state.json"),
+            command_text="/retry T-101",
+            simulate_chat_id="gha-bg",
+            launch_mode="dashboard_retry",
+            source_surface="dashboard_retry",
+            created_by="dashboard:control",
+        ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:00:01+0900")
+    monkeypatch.setattr(
+        "aoe_tg_external_background_worker.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "probe_status": "model_missing",
+            "summary": "endpoint=ollama-qwen3 provider=ollama model=qwen3-coder:30b present=no available=0",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    launched = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-GHA-FAIL-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-07T10:00:02+0900",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+
+    assert launched["status"] == "failed"
+    assert "model_route_probe_failed" in launched["evidence_bundle"]
+    assert not external_background_handoff_path(team_dir, "BGT-GHA-FAIL-001", "github_runner").exists()
+
+
 def test_poll_external_background_tickets_marks_completed_from_result_file(tmp_path: Path) -> None:
     queue_file = tmp_path / "background_runs.json"
     team_dir = tmp_path
@@ -5926,6 +6037,70 @@ def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monk
     assert launched["cmd"][:4] == ["tmux", "new-session", "-d", "-s"]
     assert "background_run_results" in launched["cmd"][-1]
     assert "background_run_logs" in launched["cmd"][-1]
+
+
+def test_launch_local_tmux_background_ticket_records_worker_probe_when_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-PROBE-001",
+            request_id="REQ-TMUX-PROBE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="queued",
+            launch_spec=build_local_tmux_background_launch_spec(
+                request_id="REQ-TMUX-PROBE-001",
+                project_key="twinpaper",
+                project_root=str(tmp_path),
+                team_dir=str(tmp_path / ".aoe-team"),
+                manager_state_file=str(tmp_path / ".aoe-team" / "orch_manager_state.json"),
+                launch_mode="offdesk_manual",
+                source_surface="offdesk_review",
+                created_by="telegram:939062873",
+                command_argv=["python3", "-c", "print('tmux')"],
+                command_cwd=str(tmp_path),
+            ),
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        "aoe_tg_tmux_background_worker.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 provider=ollama model=qwen3-coder:30b present=yes available=4",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    result = launch_local_tmux_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-TMUX-PROBE-001",
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+        claimed_by="worker:local_tmux",
+        source_surface="background_queue",
+        launch_mode="offdesk_manual",
+    )
+
+    assert result["status"] == "running"
+    assert "worker=bg=ollama-qwen3:qwen3-coder:30b" in result["runtime_summary"]
+    assert "probe=ok" in result["runtime_summary"]
+    assert "worker_probe=ok" in result["evidence_bundle"]
 
 
 def test_launch_local_tmux_background_ticket_fails_without_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

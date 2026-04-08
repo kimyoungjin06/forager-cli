@@ -265,6 +265,9 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         ("model_worker_endpoint_id", 64),
         ("model_judge_endpoint_id", 64),
         ("model_escalation_endpoint_id", 64),
+        ("model_worker_binding_summary", 240),
+        ("model_worker_probe_status", 64),
+        ("model_worker_probe_summary", 240),
     ):
         token = _trim(raw.get(key, ""), limit)
         if token:
@@ -1233,6 +1236,9 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_model_worker_endpoint_id": launch_spec.get("model_worker_endpoint_id", ""),
             "background_run_model_judge_endpoint_id": launch_spec.get("model_judge_endpoint_id", ""),
             "background_run_model_escalation_endpoint_id": launch_spec.get("model_escalation_endpoint_id", ""),
+            "background_run_model_worker_binding_summary": launch_spec.get("model_worker_binding_summary", ""),
+            "background_run_model_worker_probe_status": launch_spec.get("model_worker_probe_status", ""),
+            "background_run_model_worker_probe_summary": launch_spec.get("model_worker_probe_summary", ""),
         }
     )
 
