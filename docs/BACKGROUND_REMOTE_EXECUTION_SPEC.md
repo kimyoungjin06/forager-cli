@@ -210,6 +210,9 @@
     - writes a bounded terminal result sidecar for the latest external ticket
   - intended use:
     - isolated rehearsal of `handoff -> ack -> result` parity without a real external runner
+  - state-root rule:
+    - queue ticket, handoff, ack, and result artifacts must all live under the same project `team_dir`
+    - mixed root/project `.aoe-team` placement is invalid because the poller and inspect surfaces derive phase from one shared state root
 - external phase model:
   - `awaiting_external_pickup`
   - `handoff_emitted`

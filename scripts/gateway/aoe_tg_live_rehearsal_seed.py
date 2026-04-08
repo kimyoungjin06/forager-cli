@@ -9,6 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from aoe_tg_external_background_worker import emit_external_background_handoff
+from aoe_tg_request_contract import (
+    build_background_run_ticket,
+    build_external_runner_gateway_command_launch_spec,
+)
+from aoe_tg_background_runs import upsert_background_run_ticket
 import aoe_tg_runtime_read as runtime_read
 
 
@@ -20,6 +26,10 @@ R2_REQUEST_TEXT = (
 
 R3_EXECUTE_REQUEST_TEXT = (
     "로그인 패치의 회귀 리스크 후보를 정리하고, 내가 지정한 lane만 후속 증거 수집으로 다시 실행해줘."
+)
+
+R4_REQUEST_TEXT = (
+    "review rerun work is handed to a non-local background runner and must remain operator-visible through handoff, pickup acknowledgement, and result."
 )
 
 
@@ -290,6 +300,99 @@ def _r3_execute_task(now: str) -> Dict[str, Any]:
     }
 
 
+def _r4_external_task(now: str, runner_target: str) -> Dict[str, Any]:
+    return {
+        "request_id": "REQ-R4-001",
+        "short_id": "T-401",
+        "alias": "review-external-rail",
+        "prompt": R4_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "running",
+        "stage": "execution",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "running",
+            "verification": "pending",
+            "integration": "pending",
+            "close": "pending",
+        },
+        "roles": ["Codex-Reviewer", "Claude-Reviewer"],
+        "verifier_roles": ["Claude-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "execution",
+        "phase1_current_round": 1,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "review",
+        "phase2_team_preset": "review",
+        "execution_brief_status": "executable",
+        "execution_brief_summary": f"executable | do=lane-scoped external reentry via {runner_target} | blocked=-",
+        "execution_brief_executable_slice": [
+            "review_report.md",
+        ],
+        "execution_brief_blocked_slice": [],
+        "execution_brief_operator_decision": "",
+        "followup_brief_status": "none",
+        "reentry_rails_summary": f"retry=ready exec=L1 review=R1 | followup=none | bg=running/{runner_target}",
+        "plan": {
+            "summary": f"review | external background rail over {runner_target} keeps rerun visible through handoff, ack, and result",
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L1",
+                    "role": "Codex-Reviewer",
+                    "status": "running",
+                    "subtask_ids": ["S1"],
+                    "touched_files": ["review_report.md"],
+                }
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Claude-Reviewer",
+                    "kind": "verifier",
+                    "status": "pending",
+                    "depends_on": ["L1"],
+                    "verdict": "retry",
+                    "action": "retry",
+                    "reason": "external rail still needs pickup/result visibility before closure",
+                    "touched_files": ["review_report.md"],
+                }
+            ],
+            "summary": {
+                "execution": {"running": 1},
+                "review": {"pending": 1},
+                "review_verdicts": {"retry": 1},
+            },
+        },
+        "exec_critic": {
+            "verdict": "retry",
+            "action": "retry",
+            "reason": f"{runner_target} handoff is active; await pickup ack and result before deciding the next rerun action",
+            "rerun_execution_lane_ids": ["L1"],
+            "rerun_review_lane_ids": ["R1"],
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "retry",
+            "backend_contract": "review_external_background",
+            "backend_contract_note": f"external runner {runner_target} should remain operator-visible through handoff, ack, and result",
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O4",
+            "task_short_id": "T-401",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def seed_r2_review_rerun_runtime(
     control_root: Path,
     *,
@@ -421,12 +524,131 @@ def seed_r3_manual_followup_execute_runtime(
     }
 
 
+def seed_r4_external_background_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "github_runner",
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated external background rail live rehearsal",
+    )
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    queue_path = project_team_dir / "background_runs.json"
+    launch_spec = build_external_runner_gateway_command_launch_spec(
+        runner_target=runner_target,
+        request_id="REQ-R4-001",
+        project_key="alpha",
+        project_root=str(project_root),
+        team_dir=str(project_team_dir),
+        manager_state_file=str(manager_state_file),
+        command_text="/retry T-401 lane L1",
+        simulate_chat_id="939062873",
+        launch_mode="dashboard_retry",
+        source_surface="dashboard_retry",
+        created_by="dashboard:control",
+    )
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-R4-001",
+        request_id="REQ-R4-001",
+        project_key="alpha",
+        execution_brief_status="executable",
+        runner_target=runner_target,
+        launch_mode="dashboard_retry",
+        created_at=now,
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+        launch_spec=launch_spec,
+    )
+    upsert_background_run_ticket(queue_path, ticket, now_iso=lambda: now)
+    handoff = emit_external_background_handoff(
+        queue_path=queue_path,
+        ticket_id="BGT-R4-001",
+        runner_target=runner_target,
+        now_iso=lambda: now,
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_r4_external_task(now, runner_target), "REQ-R4-001")
+    task["background_run_ticket_id"] = str(handoff.get("ticket_id", "")).strip()
+    task["background_run_status"] = str(handoff.get("status", "")).strip()
+    task["background_run_runner_target"] = str(handoff.get("runner_target", "")).strip()
+    task["background_run_launch_mode"] = str(handoff.get("launch_mode", "")).strip()
+    task["background_run_runtime_handle"] = str(handoff.get("runtime_handle", "")).strip()
+    task["background_run_runtime_summary"] = str(handoff.get("runtime_summary", "")).strip()
+    task["background_run_evidence_bundle"] = str(handoff.get("evidence_bundle", "")).strip()
+    task["background_run_evidence_artifacts"] = list(handoff.get("evidence_artifacts") or [])
+    task["background_run_external_phase"] = "handoff_emitted"
+    task["background_run_external_note"] = str(handoff.get("runtime_handle", "")).strip()
+    task["result"]["background_run_status"] = str(handoff.get("status", "")).strip()
+    task["result"]["background_run_runner_target"] = str(handoff.get("runner_target", "")).strip()
+    task["result"]["background_run_ticket_id"] = str(handoff.get("ticket_id", "")).strip()
+    task["result"]["background_run_evidence_bundle"] = str(handoff.get("evidence_bundle", "")).strip()
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O4",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated external background rail live rehearsal",
+        "last_request_id": "REQ-R4-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": 1,
+        "background_runner_slot_limits": {
+            "local_tmux": 1,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-R4-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "R4",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O4",
+        "request_id": "REQ-R4-001",
+        "task_ref": "T-401",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "preflight_commands": [
+            "/orch status O4",
+            "/orch bgx-status O4",
+            "/offdesk review O4",
+        ],
+        "trigger_commands": [
+            "/orch bgx-emit-ack O4",
+            "/orch bgx-emit-result O4 completed",
+        ],
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-R4-001",
+            "runtime_detail": "/control/runtimes/O4",
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["r2", "r3-execute"], default="r2")
+    parser.add_argument("--scenario", choices=["r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
-    parser.add_argument("--runner-target", choices=["local_tmux"], default="local_tmux")
+    parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
     parser.add_argument("--local-tmux-slot-limit", type=int, default=1)
     args = parser.parse_args()
 
@@ -443,6 +665,12 @@ def main() -> int:
             run_lock_mode=args.run_lock_mode,
             runner_target=args.runner_target,
             local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "r4":
+        payload = seed_r4_external_background_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target if args.runner_target in {"github_runner", "remote_worker"} else "github_runner",
         )
     else:
         raise SystemExit(f"unsupported scenario: {args.scenario}")

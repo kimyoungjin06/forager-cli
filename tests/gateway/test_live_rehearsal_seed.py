@@ -15,6 +15,7 @@ import aoe_tg_runtime_read as runtime_read  # noqa: E402
 from aoe_tg_live_rehearsal_seed import (  # noqa: E402
     seed_r2_review_rerun_runtime,
     seed_r3_manual_followup_execute_runtime,
+    seed_r4_external_background_runtime,
 )
 
 
@@ -78,3 +79,33 @@ def test_seed_r3_manual_followup_execute_runtime_creates_isolated_followup_candi
     assert task["reentry_rails_summary"] == "retry=none | followup=partially_executable exec=L2 review=R1"
     assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
     assert payload["trigger_command"] == "/followup-exec T-301 lane L2"
+
+
+def test_seed_r4_external_background_runtime_creates_handoff_seed(tmp_path: Path) -> None:
+    payload = seed_r4_external_background_runtime(
+        tmp_path / "control",
+        run_lock_mode="test_only",
+        runner_target="github_runner",
+    )
+
+    control_root = Path(payload["control_root"])
+    team_dir = Path(payload["team_dir"])
+    project_root = Path(payload["project_root"])
+    manager_state_file = Path(payload["manager_state_file"])
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    project = state["projects"]["alpha"]
+    task = project["tasks"]["REQ-R4-001"]
+
+    assert project["project_alias"] == "O4"
+    assert project["overview"] == "isolated external background rail live rehearsal"
+    assert project["run_lock_mode"] == "test_only"
+    assert project["background_runner_target"] == "github_runner"
+    assert task["background_run_status"] == "running"
+    assert task["background_run_runner_target"] == "github_runner"
+    assert task["background_run_external_phase"] == "handoff_emitted"
+    assert task["reentry_rails_summary"] == "retry=ready exec=L1 review=R1 | followup=none | bg=running/github_runner"
+    assert payload["trigger_commands"] == [
+        "/orch bgx-emit-ack O4",
+        "/orch bgx-emit-result O4 completed",
+    ]
+    assert (project_root / ".aoe-team" / "background_run_handoffs" / "github-runner-bgt-r4-001.json").exists()

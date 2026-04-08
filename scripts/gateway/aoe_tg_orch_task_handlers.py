@@ -1535,6 +1535,83 @@ def handle_orch_task_command(
                 reply_markup=_orch_status_reply_markup(manager_state, key, entry),
             )
             return True
+        artifact_path = str(snapshot.get("artifact_path", "")).strip() or "-"
+        artifact_exists = str(snapshot.get("artifact_exists", "")).strip() or "no"
+        artifact_parsed = str(snapshot.get("artifact_parsed", "")).strip() or "no"
+        detail = snapshot.get("artifact_detail") if isinstance(snapshot.get("artifact_detail"), dict) else {}
+        if artifact_kind == "result":
+            outcome_reason_code = "result_present" if artifact_exists == "yes" else "result_missing"
+            outcome_detail = artifact_path
+            append_action_audit_row(
+                team_dir,
+                headline="External Background Result | accepted",
+                status="accepted",
+                outcome_kind="background_external",
+                outcome_status="accepted",
+                outcome_reason_code=outcome_reason_code,
+                outcome_detail=outcome_detail,
+                next_step=f"/orch bgx-status {alias}",
+                remediation="inspect external summary status and then return to /orch bgx-status or /offdesk review",
+                source_command=f"/orch bgx-result {alias}",
+                link_label="runtime detail",
+                link_href=_runtime_action_link(alias),
+                at=now_iso(),
+            )
+            evidence_artifacts = ", ".join(str(item).strip() for item in list(detail.get("evidence_artifacts") or []) if str(item).strip()) or "-"
+            send(
+                "external background result\n"
+                f"- runtime: {key}\n"
+                f"- artifact: {artifact_path} | exists={artifact_exists} | parsed={artifact_parsed}\n"
+                f"- result_status: {str(detail.get('status', '-')).strip() or '-'}\n"
+                f"- reason: {str(detail.get('reason', '-')).strip() or '-'}\n"
+                f"- summary: {str(detail.get('summary', '-')).strip() or '-'}\n"
+                f"- evidence_bundle: {str(detail.get('evidence_bundle', '-')).strip() or '-'}\n"
+                f"- evidence_artifacts: {evidence_artifacts}\n"
+                "next:\n"
+                f"- /orch bgx-status {alias}",
+                context="orch-bgx-result",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        outcome_reason_code = f"{artifact_kind}_{'present' if artifact_exists == 'yes' else 'missing'}"
+        outcome_detail = artifact_path
+        append_action_audit_row(
+            team_dir,
+            headline=f"External Background {artifact_kind.title()} | accepted",
+            status="accepted",
+            outcome_kind="background_external",
+            outcome_status="accepted",
+            outcome_reason_code=outcome_reason_code,
+            outcome_detail=outcome_detail,
+            next_step=f"/orch bgx-status {alias}",
+            remediation="inspect the external artifact detail and then return to /orch bgx-status",
+            source_command=f"/orch bgx-{artifact_kind} {alias}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
+        evidence_artifacts = ", ".join(str(item).strip() for item in list(detail.get("evidence_artifacts") or []) if str(item).strip()) or "-"
+        extra_lines = []
+        for key_name in ("status", "worker_id", "summary", "launch_mode", "source_surface", "created_by", "execution_brief_status", "launch_spec_mode", "launch_spec_summary"):
+            value = str(detail.get(key_name, "")).strip()
+            if value:
+                extra_lines.append(f"- {key_name}: {value}")
+        if evidence_artifacts != "-":
+            extra_lines.append(f"- evidence_artifacts: {evidence_artifacts}")
+        detail_block = ("\n".join(extra_lines) + "\n") if extra_lines else ""
+        send(
+            f"external background {artifact_kind}\n"
+            f"- runtime: {key}\n"
+            f"- artifact: {artifact_path} | exists={artifact_exists} | parsed={artifact_parsed}\n"
+            f"{detail_block}"
+            "next:\n"
+            f"- /orch bgx-status {alias}",
+            context=f"orch-bgx-{artifact_kind}",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
 
     if cmd in {"orch-bgx-emit-ack", "orch-bgx-emit-result"}:
         try:

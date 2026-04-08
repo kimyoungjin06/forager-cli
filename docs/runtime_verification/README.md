@@ -65,14 +65,11 @@
       - isolated live rehearsal launched exactly one execution-only `followup-exec` over `local_tmux` and closed the background ticket with `exit_code=0`
       - `/task`, `/followup`, `/offdesk review`, and dashboard task/runtime detail all kept the branch on `manual_followup` without auto-launching review remainder
   - `review/R4_external_background_rail.md`
-    - `live_rehearsal_ready`
+    - `executed_done`
     - finding:
-      - bounded replay now proves the external background rail itself:
-        - handoff, pickup acknowledgement, and result are all persisted and operator-visible
-        - `/orch status`, `/orch bgx-status`, and offdesk surfaces agree on external phase and next step
-        - artifact-level inspect commands expose handoff / ack / result directly
-        - same-runner scheduler head reflects starvation-aware claim ordering
-        - `test_only` harness commands can now emit bounded pickup/result sidecars without a real external runner
+      - isolated `test_only` live rehearsal proved the full `handoff -> pickup_acknowledged -> result_received` lifecycle on real operator surfaces
+      - `/orch status`, `/orch bgx-status`, `/orch bgx-result`, `/task`, and dashboard task/runtime detail all stayed phase-consistent
+      - `run_lock=test_only` remained active, so `/offdesk review` stayed conservative after completion instead of recommending further mutation
   - `mixed/M1_happy_path.md`
     - `executed_done`
     - finding:
@@ -122,14 +119,13 @@
 - still bounded replay only:
   - `none in the review rail first wave`
 - next live candidate:
-  - `review/R4_external_background_rail.md`
+  - `review rail first wave complete`
 - candidate reason:
-  - safe `test_only` harness commands now exist for external ack/result
-  - no real external worker pickup is required for the first isolated rehearsal
+  - `R2`, `R3 preview`, `R3 execute`, and `R4` have all crossed into executed live rehearsal`
 - remaining gate:
-  - capture one isolated harness-backed rehearsal and verify the same phase/next-step parity on real operator surfaces
+  - `decide whether any non-review rail deserves the next live promotion`
 - runbook:
-  - pending
+  - `R4` runbook is now embedded in `review/R4_external_background_rail.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
