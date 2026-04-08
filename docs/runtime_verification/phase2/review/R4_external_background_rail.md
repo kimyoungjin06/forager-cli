@@ -9,6 +9,12 @@
   - `rerun`
 - status:
   - `bounded_replay_pass`
+- proof_mode:
+  - `bounded_replay`
+- promotion_gate:
+  - `handoff, ack, result, inspect surfaces, and starvation-aware scheduler behavior are already proven`
+- live_gate:
+  - `defer until a safe test-only external pickup harness exists`
 - executed_at:
   - `2026-04-08 KST`
 - operator:

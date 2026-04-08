@@ -9,6 +9,12 @@
   - `rerun`
 - status:
   - `bounded_replay_pass`
+- proof_mode:
+  - `bounded_replay`
+- promotion_gate:
+  - `surface parity, runner metadata parity, and starvation-aware retry scheduling are already proven`
+- live_gate:
+  - `defer while test-only run lock remains the default safety posture`
 - executed_at:
   - `2026-04-07 KST`
 - operator:

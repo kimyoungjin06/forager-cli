@@ -10,6 +10,12 @@
   - `execute_surface`
 - status:
   - `bounded_replay_pass`
+- proof_mode:
+  - `bounded_replay`
+- promotion_gate:
+  - `followup execute now reuses the rerun rail with explicit execution-only scope`
+- live_gate:
+  - `defer while test-only run lock remains active and no live followup execute rehearsal is required`
 - executed_at:
   - `2026-04-07 KST`
 - operator:

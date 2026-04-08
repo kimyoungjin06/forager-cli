@@ -10,6 +10,12 @@
   - `preview_surface`
 - status:
   - `bounded_replay_pass`
+- proof_mode:
+  - `bounded_replay`
+- promotion_gate:
+  - `preview/execute split and dashboard parity are already proven`
+- live_gate:
+  - `no live execute is needed while followup preview remains intentionally read-only`
 - executed_at:
   - `2026-04-07 KST`
 - operator:
