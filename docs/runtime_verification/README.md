@@ -95,6 +95,22 @@
   - operator surface evidence
   - mismatch and next fix
 
+## Proof Promotion Rule
+- default progression is:
+  - `planned`
+  - `bounded_replay_pass`
+  - `live_rehearsal_ready`
+  - `executed_done` or `executed_blocked`
+- bounded replay should be treated as the default proof mode while:
+  - `run_lock_mode=test_only`
+  - internal jobs are intentionally locked down
+  - runner safety or launch serializability is still being hardened
+- promote to `live_rehearsal_ready` only when:
+  - contract ambiguity is already removed
+  - operator surface parity is already proven
+  - queue / runner behavior is already bounded and inspectable
+- do not skip directly from `planned` to `executed_done` for new non-happy-path rails
+
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
   - preview proof

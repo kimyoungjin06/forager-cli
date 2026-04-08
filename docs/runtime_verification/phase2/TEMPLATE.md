@@ -10,7 +10,7 @@
   - if `manual_followup`, specify:
     - `<preview_surface|execute_surface>`
 - status:
-  - `planned`
+  - `<planned|bounded_replay_pass|live_rehearsal_ready|executed_done|executed_blocked>`
 - executed_at:
   - `-`
 - operator:
@@ -106,6 +106,14 @@
 - mismatch notes:
   - `-`
 - next fix:
+  - `-`
+
+## 6.1 Proof Mode
+- proof_mode:
+  - `<bounded_replay|live_rehearsal>`
+- promotion_gate:
+  - `-`
+- live_gate:
   - `-`
 
 ## 7. Raw References

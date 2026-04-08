@@ -26,6 +26,9 @@
   - `preview_surface`
   - `execute_surface`
 - until an executable `FollowupBrief` exists, only the preview surface is eligible for proof
+- for new non-happy-path rails:
+  - bounded replay is the default first proof
+  - live rehearsal should happen only after the scenario is explicitly marked `live_rehearsal_ready`
 
 ## 4. Scenario Inventory
 

@@ -167,6 +167,50 @@ without drifting from the preset completion matrix.
 - all target presets have at least one verified non-happy-path scenario
 - no surface contradiction remains unresolved
 
+## 8.3 Proof Promotion Ladder
+- scenario proof should move through these states:
+  - `planned`
+  - `bounded_replay_pass`
+  - `live_rehearsal_ready`
+  - `executed_done` or `executed_blocked`
+- interpretation:
+  - `bounded_replay_pass`
+    - isolated tests or fixture replay prove the contract and surface parity
+    - no real internal job execution is required
+  - `live_rehearsal_ready`
+    - bounded replay is already green
+    - the remaining gap is operational rehearsal, not contract ambiguity
+  - `executed_done` / `executed_blocked`
+    - a live runtime attempt was actually made and evidence was captured
+
+### 8.4 Promotion Gate: Bounded Replay -> Live Rehearsal
+- a scenario may be promoted from `bounded_replay_pass` to `live_rehearsal_ready` only if:
+  - the scenario contract is already stable under bounded replay
+  - `/task`, `/offdesk review`, dashboard runtime/task/recovery surfaces agree on status and next step
+  - background rail metadata is already coherent, when used:
+    - ticket
+    - runner target
+    - launch spec
+    - evidence bundle
+  - external runner lifecycle parity is already proven, when used:
+    - `/orch status`
+    - `/orch bgx-status`
+    - `/offdesk review`
+  - queue scheduling and starvation behavior are already proven, when the scenario depends on them
+  - the live run can be bounded safely:
+    - narrow scope
+    - no broad fanout
+    - conservative slot limit
+    - explicit operator intent
+
+### 8.5 Live Rehearsal Safety Gate
+- even if a scenario is `live_rehearsal_ready`, do not run it live when:
+  - `run_lock_mode=test_only`
+  - the required runner target is not safe/available
+  - the scenario still depends on non-serializable launch behavior
+  - operator-facing remediation is still ambiguous
+- in those cases, the scenario should remain `bounded_replay_pass` until the gate is cleared
+
 ## 9. Failure Classes
 
 ### 9.1 Planning Drift
@@ -218,6 +262,8 @@ without drifting from the preset completion matrix.
 ### 10.3 Step 2: Live/Replay Execution
 - run scenarios through the current runtime path
 - prefer replayable or isolated testable inputs where possible
+- use bounded replay first
+- promote to live rehearsal only after the promotion gate above is satisfied
 
 ### 10.4 Step 3: Surface Capture
 - capture operator-visible outputs from:
