@@ -420,6 +420,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "state_root_mode" in overview_text
     assert "legacy" in overview_text
     assert str(team_dir.resolve()) in overview_text
+    assert "context_pack" in overview_text
+    assert "model_plan" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -835,6 +837,9 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
     assert "profile=default" in text
     assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in text
     assert "bg=ollama-qwen3:qwen3-coder:30b" in text
+    assert "model_plan" in text
+    assert "worker=none" in text
+    assert "judge=none" in text
     assert "workspace" in text
     assert "status=active" in text
     assert "document_registry" in text
@@ -939,6 +944,8 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "runtime_summary" in text
     assert "tmux_session=aoe_bg_bgt_001" in text
     assert "awaiting_review" in text
+    assert "context_pack" in text
+    assert "model_plan" in text
     assert "/offdesk review O2" in text
 
 
@@ -983,6 +990,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "background_scheduler" in text
     assert "background_scheduler_note" in text
     assert "no queued scheduler head" in text
+    assert "context_pack" in text
+    assert "model_plan" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text

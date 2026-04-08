@@ -161,6 +161,8 @@ def build_nightly_session_summary(
                 "active_task_preset": detail.active_task_preset,
                 "active_task_phase2_shape": detail.active_task_phase2_shape,
                 "active_task_phase2_quality": detail.active_task_phase2_quality,
+                "active_task_context_pack_summary": detail.active_task_context_pack_summary,
+                "active_task_model_plan_summary": detail.active_task_model_plan_summary,
                 "active_task_reentry_rails_summary": detail.active_task_reentry_rails_summary,
                 "active_task_background_run_status": detail.active_task_background_run_status,
                 "active_task_background_run_runner_target": detail.active_task_background_run_runner_target,

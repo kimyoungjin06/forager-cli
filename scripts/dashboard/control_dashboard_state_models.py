@@ -95,6 +95,8 @@ class RuntimeCardDTO:
     active_task_followup_brief_execution_lanes: str
     active_task_followup_brief_review_lanes: str
     active_task_followup_brief_reason: str
+    active_task_context_pack_summary: str
+    active_task_model_plan_summary: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str
@@ -267,6 +269,7 @@ class RuntimeDetailDTO:
     active_task_context_pack_summary: str
     active_task_context_pack_docs: str
     active_task_context_pack_excluded: str
+    active_task_model_plan_summary: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str
@@ -375,6 +378,8 @@ class RecoveryRuntimeDTO:
     active_task_preset: str
     active_task_phase2_shape: str
     active_task_phase2_quality: str
+    active_task_context_pack_summary: str
+    active_task_model_plan_summary: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str

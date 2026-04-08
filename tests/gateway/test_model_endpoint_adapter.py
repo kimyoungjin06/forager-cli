@@ -91,3 +91,72 @@ def test_model_routing_binds_registered_endpoints(tmp_path: Path) -> None:
     assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in routing_summary
     assert "bg=ollama-qwen3:qwen3-coder:30b" in routing_summary
     assert "enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" == registry_summary
+
+
+def test_task_model_plan_uses_context_pack_profile(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "judge-claude",
+                        "provider_kind": "anthropic",
+                        "model": "claude-opus-4.1",
+                        "enabled": True,
+                    },
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://127.0.0.1:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    },
+                    {
+                        "endpoint_id": "ollama-gptoss",
+                        "provider_kind": "ollama",
+                        "base_url": "http://127.0.0.1:11434",
+                        "model": "gpt-oss:120b",
+                        "enabled": True,
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "judge-claude"},
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                    "background_worker_escalation": {"endpoint_id": "ollama-gptoss"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = model_endpoint_adapter.resolve_task_model_plan(
+        team_dir,
+        entry={"project_root": str(tmp_path), "model_routing_profile": "hybrid_local_exec"},
+        task={
+            "request_id": "REQ-1",
+            "control_mode": "followup",
+            "followup_brief_status": "partially_executable",
+        },
+    )
+
+    assert plan["pack_profile"] == "followup_execute"
+    assert "pack=followup_execute" in plan["summary"]
+    assert "worker=bg=ollama-qwen3:qwen3-coder:30b" in plan["summary"]
+    assert "judge=judge=judge-claude:claude-opus-4.1" in plan["summary"]
+    assert "escalation=bgx=ollama-gptoss:gpt-oss:120b" in plan["summary"]

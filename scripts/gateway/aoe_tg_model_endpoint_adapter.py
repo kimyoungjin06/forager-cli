@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Tuple
 
+from aoe_tg_context_pack import load_context_pack
 from aoe_tg_runtime_core import model_endpoint_registry_path, model_routing_policy_path
 
 
@@ -342,3 +343,48 @@ def summarize_model_endpoint_registry(team_dir: Any, *, entry: Any = None) -> st
         local=local_count,
         kinds=kinds,
     )
+
+
+def resolve_task_model_plan(team_dir: Any, *, entry: Any = None, task: Any = None) -> Dict[str, Any]:
+    task_data = task if isinstance(task, dict) else {}
+    entry_data = entry if isinstance(entry, dict) else {}
+    pack = load_context_pack(
+        team_dir,
+        entry=entry_data,
+        task=task_data,
+        project_root=entry_data.get("project_root"),
+    )
+    profile = _trim(pack.get("profile"), 64) or "on_desk_plan"
+    worker_profiles = {"offdesk_execute", "review", "followup_execute", "incident_recovery"}
+    judge_profiles = {"offdesk_execute", "review", "followup_preview", "followup_execute", "incident_recovery"}
+    use_worker = profile in worker_profiles
+    use_judge = profile in judge_profiles
+    worker_route = resolve_model_route(team_dir, "background_worker_primary", entry=entry_data) if use_worker else {}
+    escalation_route = (
+        resolve_model_route(team_dir, "background_worker_escalation", entry=entry_data) if use_worker else {}
+    )
+    judge_route = resolve_model_route(team_dir, "offdesk_judge", entry=entry_data) if use_judge else {}
+    parts = [f"pack={profile}"]
+    parts.append(
+        "worker={value}".format(
+            value=_trim(worker_route.get("summary"), 240) if worker_route else "none"
+        )
+    )
+    parts.append(
+        "judge={value}".format(
+            value=_trim(judge_route.get("summary"), 240) if judge_route else "none"
+        )
+    )
+    if use_worker:
+        parts.append(
+            "escalation={value}".format(
+                value=_trim(escalation_route.get("summary"), 240) if escalation_route else "none"
+            )
+        )
+    return {
+        "pack_profile": profile,
+        "worker_route": worker_route if isinstance(worker_route, dict) else {},
+        "judge_route": judge_route if isinstance(judge_route, dict) else {},
+        "escalation_route": escalation_route if isinstance(escalation_route, dict) else {},
+        "summary": " | ".join(parts),
+    }

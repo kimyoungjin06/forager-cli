@@ -85,6 +85,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         model_registry_summary = "-"
         workspace_summary = "-"
         document_registry_summary = "-"
+        active_task_context_pack_summary = "-"
+        active_task_model_plan_summary = "-"
         run_lock_mode = "open"
         run_lock_note = "-"
         background_slot_limit = 1
@@ -132,6 +134,16 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 )
                 model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry)
                 model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry)
+                if isinstance(active_task, dict):
+                    pack = context_pack.load_context_pack(
+                        team_dir,
+                        entry=entry,
+                        task=active_task,
+                        project_root=entry.get("project_root"),
+                    )
+                    model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=active_task)
+                    active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
+                    active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
         active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
         runtime_action_contract = _runtime_command_contract(
             project_alias=alias,
@@ -217,6 +229,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_followup_brief_reason=(
                     str((active_task or {}).get("followup_brief_reason", "")).strip() or "-"
                 ),
+                active_task_context_pack_summary=active_task_context_pack_summary,
+                active_task_model_plan_summary=active_task_model_plan_summary,
                 active_task_reentry_rails_summary=(
                     str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
                 ),
@@ -441,6 +455,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     active_task_context_pack_summary = "-"
     active_task_context_pack_docs = "-"
     active_task_context_pack_excluded = "-"
+    active_task_model_plan_summary = "-"
     if isinstance(active_task, dict) and str(entry.get("team_dir", "")).strip():
         pack = context_pack.load_context_pack(
             team_dir,
@@ -448,10 +463,12 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             task=active_task,
             project_root=entry.get("project_root"),
         )
+        model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=active_task)
         active_task_context_pack_profile = str(pack.get("profile", "")).strip() or "-"
         active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
         active_task_context_pack_docs = str(pack.get("docs_summary", "")).strip() or "-"
         active_task_context_pack_excluded = str(pack.get("excluded_summary", "")).strip() or "-"
+        active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
     run_lock_mode = run_lock.project_run_lock_mode(entry)
     run_lock_note = run_lock.project_run_lock_note(entry) or "-"
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
@@ -562,6 +579,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         active_task_context_pack_summary=active_task_context_pack_summary,
         active_task_context_pack_docs=active_task_context_pack_docs,
         active_task_context_pack_excluded=active_task_context_pack_excluded,
+        active_task_model_plan_summary=active_task_model_plan_summary,
         active_task_reentry_rails_summary=(
             str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
         ),
