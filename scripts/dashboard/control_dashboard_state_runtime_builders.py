@@ -459,6 +459,8 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     active_task_context_pack_docs = "-"
     active_task_context_pack_excluded = "-"
     active_task_model_plan_summary = "-"
+    active_task_judge_binding_summary = "-"
+    active_task_judge_probe_summary = "-"
     if isinstance(active_task, dict) and str(entry.get("team_dir", "")).strip():
         pack = context_pack.load_context_pack(
             team_dir,
@@ -467,11 +469,31 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             project_root=entry.get("project_root"),
         )
         model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=active_task)
+        judge_binding = model_endpoint_adapter.resolve_task_judge_binding(
+            team_dir,
+            entry=entry,
+            task=active_task,
+        )
         active_task_context_pack_profile = str(pack.get("profile", "")).strip() or "-"
         active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
         active_task_context_pack_docs = str(pack.get("docs_summary", "")).strip() or "-"
         active_task_context_pack_excluded = str(pack.get("excluded_summary", "")).strip() or "-"
         active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
+        active_task_judge_binding_summary = str(judge_binding.get("summary", "")).strip() or "-"
+        endpoint = judge_binding.get("endpoint") if isinstance(judge_binding.get("endpoint"), dict) else {}
+        provider_kind = str(endpoint.get("provider_kind", "")).strip().lower()
+        if not judge_binding.get("bound"):
+            active_task_judge_probe_summary = "status=unbound"
+        elif provider_kind != "ollama":
+            active_task_judge_probe_summary = (
+                f"endpoint={str(endpoint.get('endpoint_id', '')).strip() or '-'} "
+                f"provider={provider_kind or '-'} status=unsupported_probe"
+            )
+        else:
+            active_task_judge_probe_summary = (
+                f"endpoint={str(endpoint.get('endpoint_id', '')).strip() or '-'} "
+                f"provider=ollama status=deferred_live_probe"
+            )
     run_lock_mode = run_lock.project_run_lock_mode(entry)
     run_lock_note = run_lock.project_run_lock_note(entry) or "-"
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
@@ -583,6 +605,8 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         active_task_context_pack_docs=active_task_context_pack_docs,
         active_task_context_pack_excluded=active_task_context_pack_excluded,
         active_task_model_plan_summary=active_task_model_plan_summary,
+        active_task_judge_binding_summary=active_task_judge_binding_summary,
+        active_task_judge_probe_summary=active_task_judge_probe_summary,
         active_task_reentry_rails_summary=(
             str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
         ),

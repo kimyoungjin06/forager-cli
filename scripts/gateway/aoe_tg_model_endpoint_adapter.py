@@ -433,6 +433,29 @@ def resolve_task_worker_binding(team_dir: Any, *, entry: Any = None, task: Any =
     return binding
 
 
+def resolve_task_judge_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+) -> Dict[str, Any]:
+    plan = resolve_task_model_plan(
+        team_dir,
+        entry=entry,
+        task=task,
+        pack_profile_override=pack_profile_override,
+    )
+    judge = plan.get("judge_route") if isinstance(plan.get("judge_route"), dict) else {}
+    route_id = _trim(judge.get("route_id"), 64).lower() or "offdesk_judge"
+    endpoint_id = _trim(judge.get("endpoint_id"), 64).lower()
+    binding = resolve_model_binding_snapshot(team_dir, route_id, entry=entry, endpoint_id_override=endpoint_id)
+    binding["source"] = "task_plan"
+    binding["pack_profile"] = _trim(plan.get("pack_profile"), 64)
+    binding["plan_summary"] = _trim(plan.get("summary"), 320)
+    return binding
+
+
 def resolve_background_ticket_worker_binding(team_dir: Any, ticket: Any, *, entry: Any = None) -> Dict[str, Any]:
     ticket_data = ticket if isinstance(ticket, dict) else {}
     launch_spec = ticket_data.get("launch_spec") if isinstance(ticket_data.get("launch_spec"), dict) else {}
@@ -580,6 +603,36 @@ def probe_background_ticket_worker_binding(
     result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
     result["binding"] = binding
     result["route_id"] = _trim(route.get("route_id"), 64).lower() or "background_worker_primary"
+    return result
+
+
+def probe_task_judge_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+    timeout_sec: float = 3.0,
+    fetch_json: Any = None,
+) -> Dict[str, Any]:
+    binding = resolve_task_judge_binding(
+        team_dir,
+        entry=entry,
+        task=task,
+        pack_profile_override=pack_profile_override,
+    )
+    route = binding.get("route") if isinstance(binding.get("route"), dict) else {}
+    endpoint = binding.get("endpoint") if isinstance(binding.get("endpoint"), dict) else {}
+    if not binding.get("bound"):
+        return {
+            "ok": False,
+            "probe_status": "unbound",
+            "summary": _trim(route.get("summary"), 240) or "judge_route=unbound",
+            "binding": binding,
+        }
+    result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
+    result["binding"] = binding
+    result["route_id"] = _trim(route.get("route_id"), 64).lower() or "offdesk_judge"
     return result
 
 

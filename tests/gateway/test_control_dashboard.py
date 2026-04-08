@@ -574,6 +574,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "context_pack" in text
     assert "profile=followup_preview" in text
     assert "context_pack_docs" in text
+    assert "judge_binding" in text
+    assert "judge=unbound:claude-opus-4.1" in text
+    assert "judge_probe" in text
+    assert "status=unbound" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=preview_only exec=L2 review=R1" in text
@@ -840,6 +844,10 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
     assert "model_plan" in text
     assert "worker=none" in text
     assert "judge=none" in text
+    assert "judge_binding" in text
+    assert "judge=unbound:claude-opus-4.1" in text
+    assert "judge_probe" in text
+    assert "status=unbound" in text
     assert "workspace" in text
     assert "status=active" in text
     assert "document_registry" in text

@@ -15,6 +15,7 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_background_runs as background_runs
 import aoe_tg_context_pack as context_pack
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
@@ -221,8 +222,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         pack_summary = "-"
         pack_docs = "-"
         pack_excluded = "-"
+        judge_binding_summary = "-"
+        judge_probe_summary = "-"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
+            team_dir = Path(team_dir_raw)
             slot_snapshot = _background_slot_snapshot(entry, task, Path(team_dir_raw))
             background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
             background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
@@ -232,7 +236,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
                 + (str(slot_snapshot.get("summary", "")).strip() or "-")
             )
             pack = context_pack.load_context_pack(
-                Path(team_dir_raw),
+                team_dir,
                 entry=entry,
                 task=task,
                 project_root=entry.get("project_root"),
@@ -241,6 +245,26 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             pack_summary = str(pack.get("summary", "")).strip() or "-"
             pack_docs = str(pack.get("docs_summary", "")).strip() or "-"
             pack_excluded = str(pack.get("excluded_summary", "")).strip() or "-"
+            judge_binding = model_endpoint_adapter.resolve_task_judge_binding(
+                team_dir,
+                entry=entry,
+                task=task,
+            )
+            judge_binding_summary = str(judge_binding.get("summary", "")).strip() or "-"
+            endpoint = judge_binding.get("endpoint") if isinstance(judge_binding.get("endpoint"), dict) else {}
+            provider_kind = str(endpoint.get("provider_kind", "")).strip().lower()
+            if not judge_binding.get("bound"):
+                judge_probe_summary = "status=unbound"
+            elif provider_kind != "ollama":
+                judge_probe_summary = (
+                    f"endpoint={str(endpoint.get('endpoint_id', '')).strip() or '-'} "
+                    f"provider={provider_kind or '-'} status=unsupported_probe"
+                )
+            else:
+                judge_probe_summary = (
+                    f"endpoint={str(endpoint.get('endpoint_id', '')).strip() or '-'} "
+                    f"provider=ollama status=deferred_live_probe"
+                )
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),
@@ -294,6 +318,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             context_pack_summary=pack_summary,
             context_pack_docs=pack_docs,
             context_pack_excluded=pack_excluded,
+            judge_binding_summary=judge_binding_summary,
+            judge_probe_summary=judge_probe_summary,
             reentry_rails_summary=str(task.get("reentry_rails_summary", "")).strip() or "-",
             run_lock_mode=run_lock_mode,
             run_lock_note=run_lock_note,

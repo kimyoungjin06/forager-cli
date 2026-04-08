@@ -836,7 +836,15 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
         "project_root": str(project_root),
         "team_dir": str(team_dir),
         "overview": "Twin project orchestration",
-        "tasks": {},
+        "last_request_id": "REQ-1",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "status": "running",
+                "updated_at": "2026-04-08T23:10:00+09:00",
+            }
+        },
     }
     state["active"] = "twinpaper"
     sent = []
@@ -903,6 +911,8 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
     assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in text
     assert "bg=ollama-qwen3:qwen3-coder:30b" in text
     assert "model_registry: enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
+    assert "judge_binding: T-001 | judge=unbound:claude-opus-4.1" in text
+    assert "judge_probe: T-001 | judge=unbound:claude-opus-4.1" in text
 
 
 def test_orch_bgx_status_surfaces_external_artifacts_and_audit(tmp_path: Path) -> None:

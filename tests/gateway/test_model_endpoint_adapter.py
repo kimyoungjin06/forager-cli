@@ -270,3 +270,51 @@ def test_probe_model_route_reports_ollama_tags(tmp_path: Path) -> None:
     assert result["probe_status"] == "ok"
     assert result["model_present"] is True
     assert "qwen3-coder:30b" in result["available_model_names"]
+
+
+def test_probe_task_judge_binding_reports_unsupported_provider_without_network(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "judge-claude",
+                        "provider_kind": "anthropic",
+                        "model": "claude-opus-4.1",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "judge-claude"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = model_endpoint_adapter.probe_task_judge_binding(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1", "followup_brief_status": "preview_only"},
+    )
+
+    assert result["ok"] is False
+    assert result["route_id"] == "offdesk_judge"
+    assert result["probe_status"] == "unsupported_provider_probe"
+    assert "provider=anthropic" in result["summary"]

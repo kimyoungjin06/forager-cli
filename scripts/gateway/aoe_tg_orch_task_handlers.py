@@ -6,6 +6,7 @@ from urllib.parse import quote
 from typing import Any, Callable, Dict, List, Optional
 
 import aoe_tg_background_runs as background_runs
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
@@ -378,6 +379,59 @@ def _latest_external_background_task_snapshot(entry: Dict[str, Any]) -> Dict[str
         "phase": str(best_task.get("background_run_external_phase", "")).strip().lower(),
         "note": str(best_task.get("background_run_external_note", "")).strip(),
     }
+
+
+def _latest_task_for_model_status(entry: Dict[str, Any]) -> Dict[str, Any]:
+    tasks = entry.get("tasks") if isinstance(entry, dict) else {}
+    if not isinstance(tasks, dict):
+        return {}
+    last_request_id = str(entry.get("last_request_id", "")).strip()
+    if last_request_id and isinstance(tasks.get(last_request_id), dict):
+        return tasks.get(last_request_id) or {}
+
+    def _sort_key(req_id: str, task: Dict[str, Any]) -> tuple[int, str, str]:
+        status = str(task.get("status", "pending")).strip().lower()
+        priority = {"running": 4, "pending": 3, "failed": 2, "completed": 1}.get(status, 0)
+        updated = str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip()
+        return (priority, updated, str(req_id or "").strip())
+
+    best_req = ""
+    best_task: Dict[str, Any] | None = None
+    for req_id, task in tasks.items():
+        if not isinstance(task, dict):
+            continue
+        if best_task is None or _sort_key(str(req_id), task) > _sort_key(best_req, best_task):
+            best_req = str(req_id)
+            best_task = task
+    return best_task if isinstance(best_task, dict) else {}
+
+
+def _judge_binding_lines(entry: Dict[str, Any], team_dir: Path) -> tuple[str, str]:
+    latest_task = _latest_task_for_model_status(entry)
+    if not latest_task:
+        return "", ""
+    task_label = (
+        str(latest_task.get("short_id", "")).strip().upper()
+        or str(latest_task.get("alias", "")).strip()
+        or str(latest_task.get("request_id", "")).strip()
+        or "task"
+    )
+    binding = model_endpoint_adapter.resolve_task_judge_binding(
+        team_dir,
+        entry=entry,
+        task=latest_task,
+    )
+    probe = model_endpoint_adapter.probe_task_judge_binding(
+        team_dir,
+        entry=entry,
+        task=latest_task,
+    )
+    binding_summary = str(binding.get("summary", "")).strip() or "-"
+    probe_summary = str(probe.get("summary", "")).strip() or "-"
+    return (
+        f"judge_binding: {task_label} | {binding_summary}\n",
+        f"judge_probe: {task_label} | {probe_summary}\n",
+    )
 
 
 def _external_background_artifact_snapshot(entry: Dict[str, Any]) -> Dict[str, str]:
@@ -925,6 +979,8 @@ def handle_orch_task_command(
         scheduler_line = ""
         model_routing_line = ""
         model_registry_line = ""
+        judge_binding_line = ""
+        judge_probe_line = ""
         document_registry_line = ""
         workspace_line = ""
         try:
@@ -953,6 +1009,7 @@ def handle_orch_task_command(
                 model_registry_line = (
                     f"model_registry: {summarize_model_endpoint_registry(team_dir, entry=entry)}\n"
                 )
+                judge_binding_line, judge_probe_line = _judge_binding_lines(entry, team_dir)
                 workspace_line = (
                     f"workspace: {summarize_workspace_brief(team_dir, entry=entry, project_root=entry.get('project_root'))}\n"
                 )
@@ -968,6 +1025,8 @@ def handle_orch_task_command(
             scheduler_line = ""
             model_routing_line = ""
             model_registry_line = ""
+            judge_binding_line = ""
+            judge_probe_line = ""
             document_registry_line = ""
             workspace_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
@@ -1028,7 +1087,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
