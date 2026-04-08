@@ -165,6 +165,7 @@
     - `local_tmux`
     - slot limit `1`
     - no external runner
+  - the rehearsal runbook is embedded in `docs/runtime_verification/phase2/review/R2_rerun_path.md`
 - current finding:
   - bounded replay now proves:
     - review-only rerun prompts stay in `review`

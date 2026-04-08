@@ -169,3 +169,73 @@
 - interpretation:
   - this remains a useful history note for the old planning stack
   - it is no longer the current canonical R2 proof under the new `ExecutionBrief + FollowupBrief + reentry rail` model
+
+## 9. Live Rehearsal Runbook
+- rehearsal scope:
+  - `single lane-scoped retry over local_tmux only`
+- safety posture:
+  - use an isolated runtime
+  - temporarily set:
+    - `run_lock_mode=open`
+    - `background_runner_target=local_tmux`
+    - `background_runner_slot_limits.local_tmux=1`
+  - keep:
+    - `github_runner=0/disabled for this rehearsal`
+    - `remote_worker=0/disabled for this rehearsal`
+- required target state:
+  - a review task exists with:
+    - `ExecutionBrief.status=executable`
+    - explicit retry lane targets
+    - no followup promotion for the same slice
+  - `/offdesk review` and `/task` already agree on the retry branch before launch
+- preflight:
+  - verify `/orch status <orch>` shows:
+    - `run_lock=open`
+    - `background_runner: pref=local_tmux | effective=local_tmux`
+    - `background_slots` with `local_tmux=0/1`
+    - no active external runner target
+  - verify `/task <task>` shows:
+    - retry lane scope
+    - `followup=none` or no executable followup for the same slice
+  - verify `/offdesk review <orch>` still recommends retry rather than manual followup
+- trigger:
+  - launch exactly one bounded retry through one operator surface:
+    - `/retry <task> lane <L#>`
+    - or dashboard retry action for the same lane scope
+  - do not launch multiple retries in parallel
+- capture during rehearsal:
+  - `/orch status <orch>` before launch
+  - `/task <task>` before launch
+  - `/offdesk review <orch>` before launch
+  - the retry trigger response
+  - `/orch status <orch>` after launch
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+- pass criteria:
+  - retry stays lane-scoped
+  - runner target is `local_tmux`
+  - a background ticket is created with a `local_tmux` runtime handle
+  - `reentry_rails_summary` still points to rerun rather than followup
+  - no external phase or `/orch bgx-status` dependency appears
+  - slot usage remains bounded at `local_tmux=1/1`
+- fail conditions:
+  - retry collapses into manual followup
+  - runner target drifts to `github_runner` or `remote_worker`
+  - background launch exceeds the declared lane scope
+  - slot pressure allows a second concurrent local_tmux launch
+  - operator surfaces disagree on retry branch or next step
+- evidence to retain:
+  - command transcript snippets for:
+    - `/orch status <orch>`
+    - `/task <task>`
+    - `/offdesk review <orch>`
+    - retry trigger
+  - task/runtime screenshots or copied field values for:
+    - `background_ticket`
+    - `runner_target`
+    - `runtime_handle`
+    - `reentry_rails`
+    - `background_slots`
+  - final outcome note:
+    - `executed_done` if the bounded local_tmux retry remains lane-scoped and inspectable
+    - `executed_blocked` if any launch drift or slot drift occurs

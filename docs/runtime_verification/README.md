@@ -141,6 +141,8 @@
     - conservative slot limit
     - `local_tmux` only
     - no external runner target
+- runbook:
+  - embedded in `review/R2_rerun_path.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
