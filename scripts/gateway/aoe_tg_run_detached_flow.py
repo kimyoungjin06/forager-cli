@@ -8,6 +8,10 @@ from aoe_tg_background_runs import (
     summarize_background_runner_slots,
     upsert_background_run_ticket,
 )
+from aoe_tg_executor_dispatch import (
+    build_gateway_run_launch_spec_for_adapter,
+    launch_background_ticket_via_adapter,
+)
 from aoe_tg_local_background_worker import (
     drain_local_background_queue,
     ensure_local_background_daemon,
@@ -15,7 +19,6 @@ from aoe_tg_local_background_worker import (
 )
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
-    build_local_tmux_gateway_run_launch_spec,
     build_background_launch_spec,
     background_run_evidence_artifacts_from_task,
     background_run_evidence_bundle_from_task,
@@ -23,7 +26,6 @@ from aoe_tg_request_contract import (
     select_background_runner_target,
 )
 from aoe_tg_run_lock import project_run_lock_blocks_launch, project_run_lock_note
-from aoe_tg_tmux_background_worker import launch_local_tmux_background_ticket
 
 
 def maybe_handle_no_wait_dispatch_detach(
@@ -70,7 +72,8 @@ def maybe_handle_no_wait_dispatch_detach(
     orch_ref = str(orch_target or entry.get("project_alias", "") or key or "").strip()
     tmux_launch_spec = {}
     if preferred_runner_target == "local_tmux" and source_prompt and project_root and team_dir and manager_state_file:
-        tmux_launch_spec = build_local_tmux_gateway_run_launch_spec(
+        tmux_launch_spec = build_gateway_run_launch_spec_for_adapter(
+            runner_target=preferred_runner_target,
             request_id=str(provisional_req_id or "").strip(),
             project_key=str(key or "").strip(),
             project_root=project_root,
@@ -365,9 +368,10 @@ def maybe_handle_no_wait_dispatch_detach(
                 status="failed",
                 detail=str(exc).strip()[:240] or "background daemon start failed",
             )
-        launched = launch_local_tmux_background_ticket(
+        launched = launch_background_ticket_via_adapter(
             queue_path=queue_path,
             ticket_id=str((provisional_task or {}).get("background_run_ticket_id", "")).strip(),
+            runner_target=selected_runner_target,
             now_iso=now_iso,
             claimed_by=f"tmux:{provisional_req_id or chat_id}",
             source_surface="run_no_wait",

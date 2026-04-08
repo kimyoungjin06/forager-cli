@@ -1153,12 +1153,12 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
 
     monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
 
-    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+    def _fake_launch(*, queue_path, ticket_id, runner_target="", now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
         claimed = background_runs.claim_background_run_ticket(
             queue_path,
             ticket_id,
             now_iso=now_iso,
-            runner_target="local_tmux",
+            runner_target=runner_target or "local_tmux",
             launch_mode=launch_mode,
             claimed_by=claimed_by,
             source_surface=source_surface,
@@ -1178,7 +1178,7 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
             evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_retry_req_1",
         )
 
-    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+    monkeypatch.setattr(retry_exec, "launch_background_ticket_via_adapter", lambda **kwargs: _fake_launch(**kwargs))
 
     status, headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/task/retry",
@@ -1402,12 +1402,12 @@ def test_control_dashboard_post_retry_route_ignores_busy_other_runner_slots(tmp_
 
     monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
 
-    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+    def _fake_launch(*, queue_path, ticket_id, runner_target="", now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
         claimed = background_runs.claim_background_run_ticket(
             queue_path,
             ticket_id,
             now_iso=now_iso,
-            runner_target="local_tmux",
+            runner_target=runner_target or "local_tmux",
             launch_mode=launch_mode,
             claimed_by=claimed_by,
             source_surface=source_surface,
@@ -1427,7 +1427,7 @@ def test_control_dashboard_post_retry_route_ignores_busy_other_runner_slots(tmp_
             evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_retry_req_1",
         )
 
-    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+    monkeypatch.setattr(retry_exec, "launch_background_ticket_via_adapter", lambda **kwargs: _fake_launch(**kwargs))
 
     status, headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/task/retry",
@@ -1466,12 +1466,12 @@ def test_control_dashboard_post_replan_route_uses_local_tmux_background_when_pre
 
     monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
 
-    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+    def _fake_launch(*, queue_path, ticket_id, runner_target="", now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
         claimed = background_runs.claim_background_run_ticket(
             queue_path,
             ticket_id,
             now_iso=now_iso,
-            runner_target="local_tmux",
+            runner_target=runner_target or "local_tmux",
             launch_mode=launch_mode,
             claimed_by=claimed_by,
             source_surface=source_surface,
@@ -1493,7 +1493,7 @@ def test_control_dashboard_post_replan_route_uses_local_tmux_background_when_pre
             evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_replan_req_1",
         )
 
-    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+    monkeypatch.setattr(retry_exec, "launch_background_ticket_via_adapter", lambda **kwargs: _fake_launch(**kwargs))
 
     status, headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/task/replan",
@@ -1763,12 +1763,12 @@ def test_control_dashboard_post_followup_execute_route_uses_local_tmux_backgroun
 
     monkeypatch.setattr(retry_exec, "_load_gateway_main_module", lambda: _GatewayMain)
 
-    def _fake_launch(*, queue_path, ticket_id, now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
+    def _fake_launch(*, queue_path, ticket_id, runner_target="", now_iso, claimed_by="", source_surface="", launch_mode="offdesk_manual"):
         claimed = background_runs.claim_background_run_ticket(
             queue_path,
             ticket_id,
             now_iso=now_iso,
-            runner_target="local_tmux",
+            runner_target=runner_target or "local_tmux",
             launch_mode=launch_mode,
             claimed_by=claimed_by,
             source_surface=source_surface,
@@ -1788,7 +1788,7 @@ def test_control_dashboard_post_followup_execute_route_uses_local_tmux_backgroun
             evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_followup_req_1",
         )
 
-    monkeypatch.setattr(retry_exec, "launch_local_tmux_background_ticket", _fake_launch)
+    monkeypatch.setattr(retry_exec, "launch_background_ticket_via_adapter", lambda **kwargs: _fake_launch(**kwargs))
 
     status, _headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/task/followup-execute",

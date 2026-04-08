@@ -9,19 +9,19 @@ from typing import Any, Dict, List, Tuple
 
 import aoe_tg_background_runs as background_runs
 import aoe_tg_chat_state as chat_state
+from aoe_tg_executor_dispatch import (
+    build_gateway_command_launch_spec_for_adapter,
+    launch_background_ticket_via_adapter,
+)
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
     build_background_run_ticket,
-    build_external_runner_gateway_command_launch_spec,
-    build_local_tmux_gateway_command_launch_spec,
     select_background_runner_target,
 )
 import aoe_tg_retry_handlers as retry_handlers
 from aoe_tg_run_lock import project_run_lock_blocks_launch, project_run_lock_mode, project_run_lock_note
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
-from aoe_tg_external_background_worker import emit_external_background_handoff
-from aoe_tg_tmux_background_worker import launch_local_tmux_background_ticket
 
 from control_dashboard_action_exec_shared import (
     _DASHBOARD_CHAT_ID,
@@ -251,33 +251,19 @@ def _maybe_execute_retry_background_runner(
         return None
     project_root = str(entry.get("project_root", "")).strip() or str(paths.control_root)
     manager_state_file = str(paths.manager_state_file)
-    if preferred_runner == "local_tmux":
-        launch_spec = build_local_tmux_gateway_command_launch_spec(
-            request_id=source_request_id,
-            project_key=project_key,
-            project_root=project_root,
-            team_dir=team_dir_raw,
-            manager_state_file=manager_state_file,
-            command_text=command_text,
-            simulate_chat_id=_DASHBOARD_CHAT_ID,
-            launch_mode=launch_mode,
-            source_surface=source_surface,
-            created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        )
-    else:
-        launch_spec = build_external_runner_gateway_command_launch_spec(
-            runner_target=preferred_runner,
-            request_id=source_request_id,
-            project_key=project_key,
-            project_root=project_root,
-            team_dir=team_dir_raw,
-            manager_state_file=manager_state_file,
-            command_text=command_text,
-            simulate_chat_id=_DASHBOARD_CHAT_ID,
-            launch_mode=launch_mode,
-            source_surface=source_surface,
-            created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        )
+    launch_spec = build_gateway_command_launch_spec_for_adapter(
+        runner_target=preferred_runner,
+        request_id=source_request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir_raw,
+        manager_state_file=manager_state_file,
+        command_text=command_text,
+        simulate_chat_id=_DASHBOARD_CHAT_ID,
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+    )
     selected_runner = select_background_runner_target(
         preferred_runner_target=preferred_runner,
         launch_spec=launch_spec,
@@ -336,25 +322,15 @@ def _maybe_execute_retry_background_runner(
         launch_spec=launch_spec,
     )
     ticket = background_runs.upsert_background_run_ticket(queue_path, ticket, now_iso=_now_iso)
-    if selected_runner == "local_tmux":
-        launched = launch_local_tmux_background_ticket(
-            queue_path=queue_path,
-            ticket_id=str(ticket.get("ticket_id", "")).strip(),
-            now_iso=_now_iso,
-            claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-            source_surface=source_surface,
-            launch_mode=launch_mode,
-        )
-    else:
-        launched = emit_external_background_handoff(
-            queue_path=queue_path,
-            ticket_id=str(ticket.get("ticket_id", "")).strip(),
-            runner_target=selected_runner,
-            now_iso=_now_iso,
-            claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
-            source_surface=source_surface,
-            launch_mode=launch_mode,
-        )
+    launched = launch_background_ticket_via_adapter(
+        queue_path=queue_path,
+        ticket_id=str(ticket.get("ticket_id", "")).strip(),
+        runner_target=selected_runner,
+        now_iso=_now_iso,
+        claimed_by=f"dashboard:{_DASHBOARD_CHAT_ID}",
+        source_surface=source_surface,
+        launch_mode=launch_mode,
+    )
     ticket_snapshot = launched if isinstance(launched, dict) and launched else ticket
 
     if isinstance(source_task, dict):

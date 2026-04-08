@@ -1601,7 +1601,7 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     )
     monkeypatch.setattr(
         run_detached_flow,
-        "launch_local_tmux_background_ticket",
+        "launch_background_ticket_via_adapter",
         lambda **kwargs: launched.update(kwargs)
         or advance_background_run_ticket(
             kwargs["queue_path"],
@@ -1920,7 +1920,7 @@ def test_no_wait_detach_blocks_when_run_lock_is_test_only(
     )
     monkeypatch.setattr(
         run_detached_flow,
-        "launch_local_tmux_background_ticket",
+        "launch_background_ticket_via_adapter",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("tmux launch should not start under test-only run lock")),
     )
 
@@ -2089,7 +2089,7 @@ def test_no_wait_detach_blocks_when_background_slots_are_exhausted(
     )
     monkeypatch.setattr(
         run_detached_flow,
-        "launch_local_tmux_background_ticket",
+        "launch_background_ticket_via_adapter",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("tmux launch should not start when slots are exhausted")),
     )
 
