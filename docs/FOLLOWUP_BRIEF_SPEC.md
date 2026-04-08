@@ -36,6 +36,30 @@
 - `followup_brief_review_lane_ids[]`
 - `followup_brief_reason`
 
+## Preview Surface Seed Contract
+- current gateway behavior requires more than `followup_brief_*` fields to open `/followup`
+- the preview surface currently derives allowed lane targets from:
+  - `exec_critic.manual_followup_execution_lane_ids[]`
+  - `exec_critic.manual_followup_review_lane_ids[]`
+  - `exec_critic.reason`
+- therefore a valid `preview_only` seed must keep these two views aligned:
+  - `FollowupBrief`
+  - `exec_critic.manual_followup_*`
+- minimum preview-open seed:
+  - `followup_brief_status=preview_only`
+  - `followup_brief_execution_lane_ids[]`
+  - `followup_brief_review_lane_ids[]`
+  - `followup_brief_reason`
+  - `exec_critic.action=manual_followup`
+  - `exec_critic.manual_followup_execution_lane_ids[]`
+  - `exec_critic.manual_followup_review_lane_ids[]`
+  - `exec_critic.reason`
+- verification rule:
+  - `/followup`, `/task`, and dashboard surfaces must show the same lane ids and operator-owned reason
+- future direction:
+  - the preview surface may eventually read directly from `FollowupBrief`
+  - until then, live rehearsal and fixture seed data must satisfy both shapes
+
 ## Surface Split
 ### Preview Surface
 - command:
@@ -81,8 +105,9 @@
      - `docs/runtime_verification/phase2/review/R3_manual_followup_preview.md`
    - execute proof
      - `docs/runtime_verification/phase2/review/R3_manual_followup_execute.md`
-2. add richer follow-up launch specs and external runner eligibility
-3. decide whether a dedicated `followup_of` dashboard/history surface is needed
+2. compile preview surface loading away from `exec_critic.manual_followup_*`
+3. add richer follow-up launch specs and external runner eligibility
+4. decide whether a dedicated `followup_of` dashboard/history surface is needed
 
 ## Benchmark References
 - `OpenCode` plan/build split and permission boundary:

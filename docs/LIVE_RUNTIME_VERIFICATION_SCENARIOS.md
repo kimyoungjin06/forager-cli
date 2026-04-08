@@ -158,6 +158,13 @@
   - review result is shallow or required scope was missed
 - current status:
   - `bounded_replay_pass`
+- next promotion note:
+  - this is the next launch-bearing live candidate after `R3 preview`
+  - preferred first rehearsal shape:
+    - isolated runtime
+    - `local_tmux`
+    - slot limit `1`
+    - no external runner
 - current finding:
   - bounded replay now proves:
     - review-only rerun prompts stay in `review`
@@ -182,6 +189,8 @@
   - `preview_surface` completed the first read-only live rehearsal and is now `executed_done`
   - `execute_surface` remains bounded replay only until launch-bearing followup rehearsal is explicitly approved
   - the read-only live rehearsal runbook is embedded in `docs/runtime_verification/phase2/review/R3_manual_followup_preview.md`
+  - preview rehearsal also confirmed the current seed contract requirement:
+    - `/followup` opens only when `FollowupBrief` and `exec_critic.manual_followup_*` stay aligned
 - expected branch:
   - `manual followup`
 - must prove:

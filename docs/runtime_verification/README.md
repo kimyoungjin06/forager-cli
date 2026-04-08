@@ -129,12 +129,25 @@
   - `review/R4_external_background_rail.md`
 - reason:
   - these still depend on launch-bearing rails, runner safety, or external pickup guarantees
+- next launch-bearing candidate:
+  - `review/R2_rerun_path.md`
+- candidate reason:
+  - local launch rail only
+  - no external pickup dependency
+  - lane-scoped retry already has bounded replay parity across `/task`, `/offdesk review`, dashboard, and background ticket surfaces
+- remaining gate:
+  - explicit isolated rehearsal with:
+    - `run_lock_mode=open`
+    - conservative slot limit
+    - `local_tmux` only
+    - no external runner target
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
   - preview proof
     - `FollowupBrief.status=preview_only`
     - `/followup` and dashboard preview surfaces must agree
+    - preview-open seed currently also requires aligned `exec_critic.manual_followup_*` lane ids and reason
   - execute proof
     - only valid after an explicit executable `FollowupBrief` exists
     - `/followup-exec` must not be treated as equivalent to preview
