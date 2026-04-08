@@ -120,6 +120,9 @@ without drifting from the preset completion matrix.
   1. happy-path completion
   2. rerun-eligible incomplete path
   3. manual-followup-required path
+- supporting bounded replay artifacts may be added when a cross-cutting rail needs its own proof, for example:
+  - external background runner lifecycle
+  - scheduler / starvation guard behavior
 
 ### 7.2 Required Evidence For Each Scenario
 - request text / normalized action

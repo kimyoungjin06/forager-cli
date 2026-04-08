@@ -1,0 +1,169 @@
+# Review R4 External Background Rail
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `R4`
+- preset:
+  - `review`
+- branch_target:
+  - `rerun`
+- status:
+  - `bounded_replay_pass`
+- executed_at:
+  - `2026-04-08 KST`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `review rerun or followup execute work is handed to a non-local background runner and must remain operator-visible through handoff, pickup acknowledgement, and result.`
+- normalized action:
+  - `background_external_reentry`
+- target runtime:
+  - `bounded replay fixtures only`
+
+## 3. Expected Contract
+- expected preset:
+  - `review`
+- expected execution brief:
+  - status:
+    - `executable`
+  - executable slice:
+    - `bounded retry/followup reentry through a non-local background runner`
+  - blocked slice or operator decision:
+    - `-`
+- expected followup brief:
+  - status:
+    - `none` or `executable`
+  - execution lanes:
+    - `lane-scoped reentry only`
+  - review lanes:
+    - `manual remainder stays operator-owned`
+- expected lane shape:
+  - execution:
+    - `lane-scoped reentry rail`
+  - review:
+    - `not auto-launched by the external runner proof itself`
+- expected completion branch:
+  - `rerun`
+- expected reentry rail:
+  - `retry=<bounded lane scope> | followup=<explicit only> | bg=queued|running/<external runner>`
+- expected evidence:
+  - external runner handoff is persisted as a ticket artifact
+  - pickup acknowledgement is persisted and visible before result arrival
+  - result sidecar can close the external ticket as `completed` or `failed`
+  - `/orch status`, `/orch bgx-status`, and `/offdesk review` agree on:
+    - external phase
+    - operator next step
+  - dedicated inspect commands can summarize:
+    - handoff
+    - ack
+    - result
+  - same-runner queue ordering respects:
+    - launch-mode priority
+    - starvation guard for older queued work
+
+## 4. Runtime Evidence
+- request_id:
+  - `REQ-1`
+  - `REQ-REMOTE-001`
+- task_short_id:
+  - `T-001`
+  - `T-401`
+- planning:
+  - `bounded replay via gateway/dashboard tests only`
+- execution brief:
+  - `reentry work remains executable and runner-scoped`
+- followup brief:
+  - `execute path is only exercised after an explicit executable followup/retry transition exists`
+- reentry rails:
+  - `background rail stays explicit in task/runtime summaries`
+- stage progression:
+  - planning:
+    - `externalizable launch spec is built for github_runner / remote_worker`
+  - execution:
+    - `handoff manifest emitted`
+    - `pickup ack sidecar recorded`
+    - `result sidecar recorded`
+  - verification:
+    - `status and inspect commands stay phase-aware`
+  - integration:
+    - `not separately exercised in bounded replay`
+  - close:
+    - `ticket transitions to completed/failed from the external result sidecar`
+- critic/verifier verdict:
+  - `not the primary subject of this proof`
+- final branch:
+  - `external reentry rail remains bounded and inspectable`
+
+## 5. Surface Evidence
+- `/task`:
+  - `background_run_external_phase`
+  - `background_run_external_note`
+  - `background_run_evidence_bundle`
+- `/monitor`:
+  - `not used in bounded replay`
+- `/offdesk review`:
+  - `priority action and reason reflect external phase-aware next-step guidance`
+- `/orch status`:
+  - `background_external`
+  - `background_external_next`
+  - `background_scheduler`
+- `/orch bgx-status`:
+  - `latest external ticket summary`
+  - `artifact presence for handoff / ack / result`
+  - `next inspect command`
+- `/orch bgx-handoff`:
+  - `handoff artifact summary`
+- `/orch bgx-ack`:
+  - `pickup acknowledgement artifact summary`
+- `/orch bgx-result`:
+  - `result payload summary`
+- dashboard `Task Detail`:
+  - `background_external phase/note`
+  - `runtime_handle`
+  - `evidence_bundle`
+- dashboard `Runtime Detail` / `Offdesk`:
+  - `same external phase and next-step truth`
+- dashboard `Recovery`:
+  - `external phase and scheduler summary preserved in nightly/recovery surfaces`
+- background run ticket / runner:
+  - `proved for github_runner handoff + ack`
+  - `proved for remote_worker result polling`
+- launch spec / evidence bundle:
+  - `launch_spec.externalizable=true`
+  - `runtime_summary` stores handoff/ack/result context`
+
+## 6. Result
+- result:
+  - `pass`
+- mismatch class:
+  - `none`
+- mismatch notes:
+  - `external rail is no longer handoff-only; ack and result phases are both surfaced and audited`
+  - `operator surface is split cleanly into summary (`/orch bgx-status`) and artifact inspect commands (`/orch bgx-handoff`, `/orch bgx-ack`, `/orch bgx-result`)`
+  - `scheduler head now reflects actual starvation-aware claim ordering rather than raw launch-mode sort only`
+- next fix:
+  - `promote this bounded replay proof to a later live external-runner rehearsal only after a safe test-only pickup harness exists`
+
+## 7. Raw References
+- runtime state refs:
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_surfaces_external_background_phase_in_runtime_and_offdesk`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_emit_external_background_handoff_writes_manifest`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_poll_external_background_tickets_records_pickup_acknowledgement`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_poll_external_background_tickets_marks_completed_from_result_file`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_status_surfaces_external_background_phase`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_bgx_status_surfaces_external_artifacts_and_audit`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_bgx_result_surfaces_result_payload_and_audit`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_background_run_queue_claims_starved_ticket_before_newer_high_priority_work`
+- log refs:
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'emit_external_background_handoff_writes_manifest or poll_external_background_tickets_records_pickup_acknowledgement or poll_external_background_tickets_marks_completed_from_result_file'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_status_surfaces_external_background_phase or orch_bgx_status_surfaces_external_artifacts_and_audit or orch_bgx_result_surfaces_result_payload_and_audit'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_retry_route_emits_github_runner_handoff_when_preferred or surfaces_external_background_phase_in_runtime_and_offdesk'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'background_run_queue_claims_starved_ticket_before_newer_high_priority_work or orch_status_surfaces_background_scheduler_head'`
+- artifact refs:
+  - `background_run_handoffs/*.json`
+  - `background_run_acks/*.json`
+  - `background_run_results/*.json`
+  - `action-history.jsonl`

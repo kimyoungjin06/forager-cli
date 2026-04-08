@@ -17,6 +17,7 @@
   - `review/R2_rerun_path.md`
   - `review/R3_manual_followup_preview.md`
   - `review/R3_manual_followup_execute.md`
+  - `review/R4_external_background_rail.md`
 
 ## Current First Wave
 - happy-path scenario stubs are prepared for:
@@ -67,6 +68,14 @@
     - finding:
       - execute proof is separate from preview proof
       - bounded replay now proves `/followup-exec` is only valid after an explicit executable or partially executable `FollowupBrief` exists
+  - `review/R4_external_background_rail.md`
+    - `bounded_replay_pass`
+    - finding:
+      - bounded replay now proves the external background rail itself:
+        - handoff, pickup acknowledgement, and result are all persisted and operator-visible
+        - `/orch status`, `/orch bgx-status`, and offdesk surfaces agree on external phase and next step
+        - artifact-level inspect commands expose handoff / ack / result directly
+        - same-runner scheduler head reflects starvation-aware claim ordering
   - `mixed/M1_happy_path.md`
     - `executed_done`
     - finding:
@@ -104,3 +113,7 @@
   - background ticket / runner target / launch spec / evidence bundle, when used
   - external phase / next-step parity, when a non-local runner is used
   - queue scheduling evidence, when bounded replay covers retry ordering
+- cross-cutting external-rail proofs may be recorded as supporting bounded replay artifacts when they validate:
+  - non-local runner lifecycle parity
+  - artifact inspect surfaces
+  - scheduler/claim-order behavior

@@ -186,6 +186,25 @@
     - `/followup-exec` reuses the rerun rail without auto-launching review/manual remainder
   - system escalates the risk decision rather than choosing for the operator
 
+#### R4. External Background Rail Support Proof
+- intent:
+  - validate the non-local runner lifecycle used by rerun/manual-followup reentry rails
+- current status:
+  - `bounded_replay_pass`
+- current finding:
+  - bounded replay now proves:
+    - `github_runner`/`remote_worker` handoff manifests are persisted
+    - pickup acknowledgement and result sidecars feed ticket state back into task/runtime surfaces
+    - `/orch status`, `/orch bgx-status`, and `/offdesk review` expose the same external phase and next step
+    - artifact inspect commands surface `handoff`, `ack`, and `result` directly
+    - same-runner queue ordering now reflects `launch-mode priority + starvation guard`
+- expected branch:
+  - `rerun`
+- must prove:
+  - external rail state is operator-visible before final result arrival
+  - inspect surfaces expose artifact-level detail, not just summary strings
+  - starvation guard can overtake newer high-priority work when older queued work has waited too long
+
 ### 4.4 Mixed
 
 #### M1. Happy Path
