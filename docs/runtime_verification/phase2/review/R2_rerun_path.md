@@ -8,15 +8,15 @@
 - branch_target:
   - `rerun`
 - status:
-  - `bounded_replay_pass`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - promotion_gate:
   - `surface parity, runner metadata parity, and starvation-aware retry scheduling are already proven`
 - live_gate:
-  - `defer while test-only run lock remains the default safety posture`
+  - `satisfied in an isolated local_tmux rehearsal with run_lock=open and slot limit 1`
 - executed_at:
-  - `2026-04-07 KST`
+  - `2026-04-08 KST`
 - operator:
   - `Codex`
 
@@ -26,7 +26,7 @@
 - normalized action:
   - `retry`
 - target runtime:
-  - `bounded replay fixtures only`
+  - `tmp/r2_live_mpvkkb31`
 
 ## 3. Expected Contract
 - expected preset:
@@ -73,57 +73,55 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `REQ-1` (dashboard retry fixture)
-  - `REQ-123` (gateway retry transition fixture)
+  - `REQ-R2-001`
 - task_short_id:
-  - `T-001`
-  - `T-123`
+  - `T-201`
 - planning:
-  - `bounded replay via gateway/dashboard tests only`
+  - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py`
 - execution brief:
-  - `retry rail active; task fixture exposes rerun targets and reentry rail summary`
+  - `executable | do=review_evidence/*,review_report.md | blocked=-`
 - followup brief:
   - `none`
 - reentry rails:
-  - `retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background` in dashboard fixture
-  - `background_external_phase=handoff_emitted|pickup_acknowledged|result_received` in gateway status fixtures
+  - `retry=ready exec=L1 review=R1 | followup=none | bg=completed/local_tmux`
 - stage progression:
   - planning:
-    - `review-only prompt remains routed to review preset`
+    - `seeded retry candidate in isolated review runtime`
   - execution:
-    - `foreground retry transition`
-    - `local_tmux background retry`
-    - `github_runner handoff retry`
+    - `dashboard retry action launched one local_tmux rerun ticket for lane L1`
   - verification:
-    - `selected retry lanes preserved`
+    - `ticket completed with exit_code=0 and lane-scoped retry posture remained intact`
   - integration:
-    - `not separately exercised in bounded replay`
+    - `not separately exercised`
   - close:
-    - `retry branch remains open / rerun-oriented rather than done`
+    - `background ticket closed as completed while the task stayed rerun-oriented`
 - critic/verifier verdict:
-  - `retry remains lane-scoped and bounded`
+  - `retry remained lane-scoped and bounded`
 - final branch:
   - `rerun`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `reentry_rails summary exposes retry scope distinctly from followup`
+  - `shows retry=ready exec=L1 review=R1 | followup=none | bg=completed/local_tmux`
+  - `shows background ticket, runtime handle, evidence bundle, and artifacts`
 - `/monitor`:
   - `not used in bounded replay`
 - `/offdesk review`:
-  - `offdesk/runtime hints keep retry as the next actionable branch`
+  - `first action stayed on retry and did not drift into manual followup`
 - `/orch status`:
-  - `background_external` and `background_external_next` expose the current external runner phase and operator next step
-- `/orch bgx-status`:
-  - `handoff`, `ack`, and `result` artifact presence is inspectable for the latest external retry ticket
+  - `before launch: pref=local_tmux | effective=local_background while no task-specific externalizable launch spec existed`
+  - `after launch: queue showed completed local_tmux ticket with no external runner dependency`
 - dashboard `Task Detail`:
-  - `reentry_rails shows retry=blocked:underspecified exec=L1 review=R1`
+  - `reentry_rails shows retry=ready exec=L1 review=R1`
+  - `background ticket/runtime handle fields agree with gateway output`
 - dashboard `Recovery`:
-  - `same retry rail is preserved in recovery/nightly surfaces`
+  - `not required for the first isolated launch-bearing rehearsal`
 - background run ticket / runner:
-  - `proved for local_tmux and github_runner via dashboard retry tests`
+  - `local_tmux ticket: BGT-REQ-R2-001-20260408160031.4488010900`
+  - `runtime_handle: aoe_bg_bgt-req-r2-001-20260408160031-4488010900`
 - launch spec / evidence bundle:
-  - `background retry ticket includes runner-target-specific launch payload and runtime handle/handoff`
+  - `background_dispatch | mode=tmux_session_json | entry=aoe-background-worker | externalizable=yes`
+  - `status=completed | outcome=tmux_exit_code | exit_code=0`
 
 ## 6. Result
 - result:
@@ -131,17 +129,16 @@
 - mismatch class:
   - `none`
 - mismatch notes:
-  - `review-only routing stays in review preset for rerun-oriented review_report prompts`
-  - `retry rail now preserves selected execution/review lane scope`
-  - `retry can be blocked coherently by run lock and slot saturation without drifting into followup`
-  - `external retry lifecycle is now operator-visible through phase-aware status and inspect surfaces`
-  - `same-runner claim ordering now includes a starvation guard instead of only launch-mode priority`
-  - `legacy live blocker about review_report acceptance remains historical context, not the current canonical proof`
+  - `review-only routing stayed in review preset for the live rehearsal`
+  - `retry rail preserved the selected execution lane and rerun branch`
+  - `prelaunch /orch status still reports pref=local_tmux | effective=local_background until a task-specific externalizable launch spec exists`
+  - `seeded offdesk view still carries bootstrap/no-backlog noise, but it did not redirect the operator into manual followup`
 - next fix:
-  - `promote this bounded replay proof to a later live replay using the current ExecutionBrief + reentry rail surfaces`
+  - `promote the next launch-bearing candidate on the same local rail: R3 execute`
 
 ## 7. Raw References
 - runtime state refs:
+  - `tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json`
   - `tests/gateway/test_gateway_state_helpers.py::test_choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only`
   - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_retry_replan_transition_preserves_selected_lane_targets`
   - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_retry_replan_transition_rejects_invalid_lane_selector`
@@ -154,12 +151,17 @@
   - `tests/gateway/test_gateway_operator_workflows.py::test_orch_bgx_status_surfaces_external_artifacts_and_audit`
   - `tests/gateway/test_gateway_operator_workflows.py::test_background_run_queue_claims_starved_ticket_before_newer_high_priority_work`
 - log refs:
+  - `live rehearsal trigger: dashboard POST /control/actions/task/retry body={\"task_ref\":\"T-201\",\"lane_ids\":[\"L1\"]}`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r2_live_mpvkkb31 --workspace-root tmp/r2_live_mpvkkb31 --team-dir tmp/r2_live_mpvkkb31/.aoe-team --manager-state-file tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O2'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r2_live_mpvkkb31 --workspace-root tmp/r2_live_mpvkkb31 --team-dir tmp/r2_live_mpvkkb31/.aoe-team --manager-state-file tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-201'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r2_live_mpvkkb31 --workspace-root tmp/r2_live_mpvkkb31 --team-dir tmp/r2_live_mpvkkb31/.aoe-team --manager-state-file tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O2'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_state_helpers.py -k 'choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only or apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'resolve_retry_replan_transition_preserves_selected_lane_targets or resolve_retry_replan_transition_rejects_invalid_lane_selector'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_retry_route_executes_retry_bridge or post_retry_route_uses_local_tmux_background_when_preferred or post_retry_route_emits_github_runner_handoff_when_preferred or post_retry_route_blocks_when_run_lock_is_test_only or post_retry_route_blocks_when_background_slots_are_exhausted'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_status_surfaces_external_background_phase or orch_bgx_status_surfaces_external_artifacts_and_audit or background_run_queue_claims_starved_ticket_before_newer_high_priority_work'`
 - artifact refs:
-  - `no live runtime artifacts; proof uses fixture state, response payloads, and background ticket assertions only`
+  - `background_run_logs/bgt-req-r2-001-20260408160031-4488010900.log`
+  - `background_run_results/bgt-req-r2-001-20260408160031-4488010900.json`
 
 ## 8. Legacy Reference
 - previous live artifact:
@@ -194,9 +196,13 @@
 - preflight:
   - verify `/orch status <orch>` shows:
     - `run_lock=open`
-    - `background_runner: pref=local_tmux | effective=local_tmux`
     - `background_slots` with `local_tmux=0/1`
     - no active external runner target
+  - verify `/orch status <orch>` at least shows:
+    - `background_runner: pref=local_tmux`
+  - note:
+    - before launch, `/orch status` may still report `effective=local_background`
+    - actual `local_tmux` selection is confirmed from the retry trigger response and resulting background ticket
   - verify `/task <task>` shows:
     - retry lane scope
     - `followup=none` or no executable followup for the same slice
@@ -204,7 +210,7 @@
     - manual followup
     - external runner remediation
   - note:
-    - in the seeded preflight runtime, `/offdesk review` may still point to `/orch status` while `run_lock=test_only` remains active
+    - in seeded runtimes, `/offdesk review` may still carry bootstrap/no-backlog notes unrelated to the retry branch itself
 - trigger:
   - launch exactly one bounded retry through one operator surface:
     - `/retry <task> lane <L#>`

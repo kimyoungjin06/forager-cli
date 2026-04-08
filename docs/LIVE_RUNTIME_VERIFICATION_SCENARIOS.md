@@ -157,20 +157,16 @@
 - intent:
   - review result is shallow or required scope was missed
 - current status:
-  - `bounded_replay_pass`
-- next promotion note:
-  - this is the next launch-bearing live candidate after `R3 preview`
-  - preferred first rehearsal shape:
-    - isolated runtime
-    - `local_tmux`
-    - slot limit `1`
-    - no external runner
-  - the rehearsal runbook is embedded in `docs/runtime_verification/phase2/review/R2_rerun_path.md`
+  - `executed_done`
+- current promotion note:
+  - isolated `local_tmux` live rehearsal completed for lane-scoped retry
+  - the rehearsal runbook remains embedded in `docs/runtime_verification/phase2/review/R2_rerun_path.md`
 - current finding:
-  - bounded replay now proves:
+  - bounded replay and live rehearsal together now prove:
     - review-only rerun prompts stay in `review`
     - retry lane selection remains bounded
     - retry background rails preserve runner-specific ticket state
+    - a single `local_tmux` retry launch can complete with an inspectable ticket, runtime handle, and result artifact
     - external retry rails surface `handoff/ack/result` phase and next-step guidance coherently
     - run lock / slot saturation block retry without collapsing into followup
     - queue claim ordering preserves bounded retry priority without starving older queued work
@@ -188,7 +184,7 @@
   - review surfaces a real tradeoff but acceptance threshold belongs to the operator
 - current promotion decision:
   - `preview_surface` completed the first read-only live rehearsal and is now `executed_done`
-  - `execute_surface` remains bounded replay only until launch-bearing followup rehearsal is explicitly approved
+  - `execute_surface` is the next launch-bearing candidate and remains bounded replay only until its isolated local_tmux rehearsal is captured
   - the read-only live rehearsal runbook is embedded in `docs/runtime_verification/phase2/review/R3_manual_followup_preview.md`
   - preview rehearsal also confirmed the current seed contract requirement:
     - `/followup` opens only when `FollowupBrief` and `exec_critic.manual_followup_*` stay aligned

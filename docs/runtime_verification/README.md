@@ -48,21 +48,16 @@
       - live progression moved through reusable review seams: review-only routing, reviewer-only role defaults, readonly review contracts, canonical diff-range policy, auth/session scope tracing, and section-specific acceptance for severity findings vs test gaps vs uncertainties
       - final successful run (`T-022`) reached `planning_ready`, triggered one integration retry for dirty-path evidence precision, and then closed as `done`
   - `review/R2_rerun_path.md`
-    - `bounded_replay_pass`
+    - `executed_done`
     - finding:
-      - bounded replay now proves the current rerun rail:
-        - review-only routing remains in `review`
-        - retry lane selection stays bounded
-        - background retry rails (`local_tmux`, `github_runner`) preserve runner-specific ticket state
-        - external retry rails surface phase-aware next-step guidance through `/orch status` and `/orch bgx-status`
-        - run lock / slot saturation block retry coherently
-        - background queue claim ordering keeps retry priority bounded without starving older queued work
-      - the old `T-030` blocker remains captured only as legacy reference inside the scenario file
+      - isolated live rehearsal launched exactly one lane-scoped retry over `local_tmux` and closed the background ticket with `exit_code=0`
+      - `/task`, `/offdesk review`, dashboard task/runtime detail, and the retry trigger response all kept the branch on `rerun`
+      - the prelaunch `pref=local_tmux | effective=local_background` status nuance is now documented as a task-specific launch-spec limitation, not a rehearsal blocker
   - `review/R3_manual_followup_preview.md`
-    - `bounded_replay_pass`
+    - `executed_done`
     - finding:
       - preview proof is now a first-class manual-followup target
-      - bounded replay now proves `/followup` remains read-only and agrees with `FollowupBrief.status=preview_only`
+      - read-only live rehearsal proved `/followup` remains read-only and agrees with `FollowupBrief.status=preview_only`
   - `review/R3_manual_followup_execute.md`
     - `bounded_replay_pass`
     - finding:
@@ -114,27 +109,25 @@
 ## Current Promotion Decision
 - first live rehearsal completed:
   - `review/R3_manual_followup_preview.md`
-- result:
-  - `executed_done`
-- reason:
-  - read-only operator-surface proof
-  - no internal launch
-  - no runner dependency
-  - direct verification of `FollowupBrief.status=preview_only` parity
-- runbook:
-  - embedded in `review/R3_manual_followup_preview.md`
-- still bounded replay only:
+- launch-bearing live rehearsal completed:
   - `review/R2_rerun_path.md`
+- reason:
+  - isolated `local_tmux` retry remained lane-scoped
+  - no external pickup dependency
+  - background ticket, runtime handle, and reentry rail all stayed coherent
+- runbook:
+  - embedded in `review/R2_rerun_path.md`
+- still bounded replay only:
   - `review/R3_manual_followup_execute.md`
   - `review/R4_external_background_rail.md`
 - reason:
   - these still depend on launch-bearing rails, runner safety, or external pickup guarantees
 - next launch-bearing candidate:
-  - `review/R2_rerun_path.md`
+  - `review/R3_manual_followup_execute.md`
 - candidate reason:
-  - local launch rail only
-  - no external pickup dependency
-  - lane-scoped retry already has bounded replay parity across `/task`, `/offdesk review`, dashboard, and background ticket surfaces
+  - reuses the same local reentry rail already proven by `R2`
+  - still avoids external pickup
+  - the remaining difference is executable `FollowupBrief` gating rather than runner semantics
 - remaining gate:
   - explicit isolated rehearsal with:
     - `run_lock_mode=open`
@@ -142,7 +135,7 @@
     - `local_tmux` only
     - no external runner target
 - runbook:
-  - embedded in `review/R2_rerun_path.md`
+  - pending
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
