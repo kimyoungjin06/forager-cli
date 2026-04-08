@@ -59,11 +59,11 @@
       - preview proof is now a first-class manual-followup target
       - read-only live rehearsal proved `/followup` remains read-only and agrees with `FollowupBrief.status=preview_only`
   - `review/R3_manual_followup_execute.md`
-    - `live_rehearsal_ready`
+    - `executed_done`
     - finding:
       - execute proof is separate from preview proof
-      - bounded replay now proves `/followup-exec` is only valid after an explicit executable or partially executable `FollowupBrief` exists
-      - an isolated seed helper and live rehearsal runbook now exist for the first launch-bearing followup execute rehearsal
+      - isolated live rehearsal launched exactly one execution-only `followup-exec` over `local_tmux` and closed the background ticket with `exit_code=0`
+      - `/task`, `/followup`, `/offdesk review`, and dashboard task/runtime detail all kept the branch on `manual_followup` without auto-launching review remainder
   - `review/R4_external_background_rail.md`
     - `bounded_replay_pass`
     - finding:
@@ -123,19 +123,13 @@
 - reason:
   - `R4` still depends on launch-bearing rails, runner safety, or external pickup guarantees
 - next launch-bearing candidate:
-  - `review/R3_manual_followup_execute.md`
-- candidate reason:
-  - reuses the same local reentry rail already proven by `R2`
-  - still avoids external pickup
-  - the remaining difference is executable `FollowupBrief` gating rather than runner semantics
+  - `none on the local review rail`
+- next bounded candidate:
+  - `review/R4_external_background_rail.md`
 - remaining gate:
-  - explicit isolated rehearsal with:
-    - `run_lock_mode=open`
-    - conservative slot limit
-    - `local_tmux` only
-    - no external runner target
+  - external pickup harness and acknowledgement safety still need to stay bounded
 - runbook:
-  - embedded in `review/R3_manual_followup_execute.md`
+  - `R4` remains bounded replay only
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:

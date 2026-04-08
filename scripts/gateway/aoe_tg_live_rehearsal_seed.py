@@ -32,7 +32,7 @@ def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _prepare_project_layout(control_root: Path) -> tuple[Path, Path, Path]:
+def _prepare_project_layout(control_root: Path, *, overview: str) -> tuple[Path, Path, Path]:
     team_dir = control_root / ".aoe-team"
     project_root = control_root / "Alpha"
     project_team_dir = project_root / ".aoe-team"
@@ -47,7 +47,7 @@ def _prepare_project_layout(control_root: Path) -> tuple[Path, Path, Path]:
             "version": 1,
             "project_root": str(project_root),
             "team_dir": str(project_team_dir),
-            "overview": "isolated R2 review rerun rehearsal",
+            "overview": overview,
         },
     )
     return team_dir, project_root, project_team_dir
@@ -298,7 +298,10 @@ def seed_r2_review_rerun_runtime(
     local_tmux_slot_limit: int = 1,
 ) -> Dict[str, Any]:
     control_root = Path(control_root).expanduser().resolve()
-    team_dir, project_root, project_team_dir = _prepare_project_layout(control_root)
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated review rerun live rehearsal",
+    )
     manager_state_file = team_dir / "orch_manager_state.json"
     now = _now_iso()
 
@@ -360,7 +363,10 @@ def seed_r3_manual_followup_execute_runtime(
     local_tmux_slot_limit: int = 1,
 ) -> Dict[str, Any]:
     control_root = Path(control_root).expanduser().resolve()
-    team_dir, project_root, project_team_dir = _prepare_project_layout(control_root)
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated review followup execute live rehearsal",
+    )
     manager_state_file = team_dir / "orch_manager_state.json"
     now = _now_iso()
 

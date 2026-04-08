@@ -9,15 +9,15 @@
   - `manual_followup`
   - `execute_surface`
 - status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - promotion_gate:
   - `followup execute now reuses the rerun rail with explicit execution-only scope and an isolated seed helper exists`
 - live_gate:
-  - `ready for an isolated local_tmux rehearsal with run_lock=open and slot limit 1`
+  - `satisfied in an isolated local_tmux rehearsal with run_lock=open and slot limit 1`
 - executed_at:
-  - `2026-04-07 KST`
+  - `2026-04-08 KST`
 - operator:
   - `Codex`
 
@@ -27,7 +27,7 @@
 - normalized action:
   - `followup_execute`
 - target runtime:
-  - `seed helper available via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario r3-execute`
+  - `tmp/r3_execute_live_0sowoq13`
 
 ## 3. Expected Contract
 - expected preset:
@@ -62,52 +62,56 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `REQ-1` (dashboard fixture)
-  - `REQ-123` (gateway followup fixture)
+  - `REQ-R3-001`
 - task_short_id:
-  - `T-001`
-  - `T-123`
+  - `T-301`
 - planning:
-  - `bounded replay via gateway/dashboard tests only`
+  - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py`
 - execution brief:
   - `partially_executable` / execution slice only
 - followup brief:
   - `partially_executable | execution=L2 | review=R1`
-  - `executable | execution=L3 | review=-` in direct snapshot helper
 - reentry rails:
-  - `followup rail executes only selected execution lanes`
+  - `retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
 - stage progression:
   - planning:
-    - `fixture replay only`
+    - `seeded execution-only followup candidate in isolated review runtime`
   - execution:
-    - `foreground followup transition`
-    - `local_tmux background transition`
+    - `dashboard followup-execute action launched one local_tmux followup ticket for lane L2`
   - verification:
-    - `review lanes explicitly excluded from auto-launch`
+    - `review lane R1 remained manual and was not auto-launched`
   - integration:
-    - `-`
+    - `not separately exercised`
   - close:
-    - `transition recorded as followup execute`
+    - `background ticket closed as completed while the task stayed manual_followup-oriented`
 - critic/verifier verdict:
-  - `execute surface launches only execution slice and keeps review/manual remainder visible`
+  - `execute surface launched only the declared execution lane and kept review/manual remainder visible`
 - final branch:
-  - `manual_followup execute_surface`
+  - `manual_followup`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `summary helper exposes executable/partially_executable FollowupBrief state`
+  - `shows followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
+  - `shows background ticket, runtime handle, evidence bundle, and artifacts`
 - `/monitor`:
-  - `not used in bounded replay`
+  - `not used in the first isolated launch-bearing rehearsal`
 - `/offdesk review`:
-  - `operator-owned review remainder remains visible; not auto-launched`
+  - `latest action records Follow-up Execute, but the first operator action remains /followup and does not auto-launch review/manual remainder`
+- `/orch status`:
+  - `before launch: pref=local_tmux | effective=local_background while no task-specific externalizable launch spec existed`
+  - `after launch: queue showed completed local_tmux ticket with no external runner dependency`
 - dashboard `Task Detail`:
-  - `proof covered by task/runtime detail fixture tests`
+  - `shows local_tmux background ticket/runtime handle and followup branch fields`
+- dashboard `Runtime Detail`:
+  - `shows local_tmux, followup-exec surface, and runtime_handle`
 - dashboard `Recovery`:
-  - `not separately exercised in this bounded replay slice`
+  - `not required for the first isolated launch-bearing rehearsal`
 - background run ticket / runner:
-  - `proved for local_tmux via dashboard followup execute background test`
+  - `local_tmux ticket: BGT-REQ-R3-001-20260408161414.8102320900`
+  - `runtime_handle: aoe_bg_bgt-req-r3-001-20260408161414-8102320900`
 - launch spec / evidence bundle:
-  - `background ticket contains runner_target=local_tmux and runtime_handle when preferred`
+  - `background_dispatch | mode=tmux_session_json | entry=aoe-background-worker | externalizable=yes`
+  - `status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-req-r3-001-20260408161414-8102320900.log`
 
 ## 6. Result
 - result:
@@ -115,14 +119,16 @@
 - mismatch class:
   - `none`
 - mismatch notes:
-  - `followup-exec now reuses the rerun rail as a dedicated control mode`
-  - `selected review lanes are rejected for execute surface`
-  - `preview_only and executable surfaces are no longer conflated`
+  - `followup-exec stayed execution-only and did not auto-launch review lane R1`
+  - `the operator preview surface remained /followup rather than collapsing into retry`
+  - `prelaunch /orch status still reports pref=local_tmux | effective=local_background until a task-specific externalizable launch spec exists`
+  - `seeded offdesk view still carries bootstrap/no-backlog noise, but it did not redirect the operator into retry or external remediation`
 - next fix:
-  - `perform one isolated local_tmux live rehearsal and capture the resulting background ticket/runtime handle`
+  - `no further local launch-bearing review candidate remains; keep external rail R4 bounded until a safe pickup harness exists`
 
 ## 7. Raw References
 - runtime state refs:
+  - `tmp/r3_execute_live_0sowoq13/.aoe-team/orch_manager_state.json`
   - `tests/gateway/test_gateway_state_helpers.py::test_build_followup_brief_snapshot_marks_execution_only_slice_executable`
   - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_uses_execution_slice_only`
   - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_rejects_review_lane_selection`
@@ -130,12 +136,18 @@
   - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_uses_local_tmux_background_when_preferred`
   - `tests/gateway/test_operator_action_contract.py::test_partition_task_operator_commands_adds_followup_execute_when_followup_brief_is_executable`
 - log refs:
+  - `live rehearsal trigger: dashboard POST /control/actions/task/followup-execute body={\"task_ref\":\"T-301\",\"lane_ids\":[\"L2\"]}`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_execute_live_0sowoq13 --workspace-root tmp/r3_execute_live_0sowoq13 --team-dir tmp/r3_execute_live_0sowoq13/.aoe-team --manager-state-file tmp/r3_execute_live_0sowoq13/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O3'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_execute_live_0sowoq13 --workspace-root tmp/r3_execute_live_0sowoq13 --team-dir tmp/r3_execute_live_0sowoq13/.aoe-team --manager-state-file tmp/r3_execute_live_0sowoq13/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-301'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_execute_live_0sowoq13 --workspace-root tmp/r3_execute_live_0sowoq13 --team-dir tmp/r3_execute_live_0sowoq13/.aoe-team --manager-state-file tmp/r3_execute_live_0sowoq13/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-301'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_execute_live_0sowoq13 --workspace-root tmp/r3_execute_live_0sowoq13 --team-dir tmp/r3_execute_live_0sowoq13/.aoe-team --manager-state-file tmp/r3_execute_live_0sowoq13/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O3'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_state_helpers.py -k 'build_followup_brief_snapshot_marks_execution_only_slice_executable or task_lifecycle_summary'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_followup_execute_blocks_preview_only_followup_brief or resolve_followup_execute_transition_uses_execution_slice_only or resolve_followup_execute_transition_rejects_review_lane_selection'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_followup_execute_route_blocks_preview_only_brief or post_followup_execute_route_uses_local_tmux_background_when_preferred or task_detail_route_redirects_alias_to_request_id or runtime_detail_route_renders_runtime_scope'`
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_operator_action_contract.py -k 'partition_task_operator_commands_adds_followup_execute_when_followup_brief_is_executable or http_action_spec_maps_followup_execute_to_post_contract'`
 - artifact refs:
-  - `no live artifacts; proof uses fixture state, response payloads, and background ticket assertions only`
+  - `background_run_logs/bgt-req-r3-001-20260408161414-8102320900.log`
+  - `background_run_results/bgt-req-r3-001-20260408161414-8102320900.json`
 
 ## 8. Live Rehearsal Runbook
 - rehearsal scope:

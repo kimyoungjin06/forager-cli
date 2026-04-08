@@ -35,6 +35,7 @@ def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path:
 
     assert (team_dir / "AOE_TODO.md").read_text(encoding="utf-8").strip() == "Alpha/TODO.md"
     assert project["project_alias"] == "O2"
+    assert project["overview"] == "isolated review rerun live rehearsal"
     assert project["run_lock_mode"] == "test_only"
     assert project["background_runner_target"] == "local_tmux"
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
@@ -64,6 +65,7 @@ def test_seed_r3_manual_followup_execute_runtime_creates_isolated_followup_candi
     task = project["tasks"]["REQ-R3-001"]
 
     assert project["project_alias"] == "O3"
+    assert project["overview"] == "isolated review followup execute live rehearsal"
     assert project["run_lock_mode"] == "test_only"
     assert project["background_runner_target"] == "local_tmux"
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
