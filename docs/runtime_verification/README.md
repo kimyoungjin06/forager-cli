@@ -119,6 +119,8 @@
   - no internal launch
   - no runner dependency
   - direct verification of `FollowupBrief.status=preview_only` parity
+- runbook:
+  - embedded in `review/R3_manual_followup_preview.md`
 - still bounded replay only:
   - `review/R2_rerun_path.md`
   - `review/R3_manual_followup_execute.md`

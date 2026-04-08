@@ -130,3 +130,67 @@
   - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_followup_execute_route_blocks_preview_only_brief or post_followup_execute_route_uses_local_tmux_background_when_preferred or task_detail_route_redirects_alias_to_request_id or runtime_detail_route_renders_runtime_scope'`
 - artifact refs:
   - `no runtime artifacts; proof uses test fixtures and response payload assertions only`
+
+## 8. Live Rehearsal Runbook
+- rehearsal scope:
+  - `read-only preview parity only`
+- safety posture:
+  - keep `run_lock_mode=test_only`
+  - do not invoke:
+    - `/followup-exec`
+    - `/retry`
+    - `/replan`
+    - any background runner action
+- required target state:
+  - a task exists with:
+    - `FollowupBrief.status=preview_only`
+    - explicit execution lane ids
+    - explicit review lane ids
+    - operator-owned followup reason
+- operator surfaces to capture:
+  - `/followup <task>`
+  - `/task <task>`
+  - `/offdesk review <orch>`
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+- preflight:
+  - verify `/orch status <orch>` shows:
+    - `run_lock=test_only`
+    - no required background runner for this rehearsal
+  - verify the chosen task does not advertise:
+    - executable followup
+    - retry as the preferred next step
+- procedure:
+  - open `/followup <task>` and record:
+    - `preview_only`
+    - execution lane ids
+    - review lane ids
+    - operator-owned reason
+  - open `/task <task>` and confirm the same `followup_brief_*` fields
+  - open `/offdesk review <orch>` and confirm the safe next step remains preview/review, not execute
+  - open dashboard `Task Detail` and `Runtime Detail` and confirm the same brief and reentry rail summary
+- pass criteria:
+  - all surfaces agree on:
+    - `FollowupBrief.status=preview_only`
+    - execution lane ids
+    - review lane ids
+    - operator-owned reason
+    - no execute recommendation
+  - no background ticket, launch spec, or runner action is created during the rehearsal
+- fail conditions:
+  - any surface implies `followup-exec` is currently allowed
+  - lane ids drift between `/followup`, `/task`, `/offdesk review`, or dashboard
+  - operator-owned reason is omitted or rewritten inconsistently
+  - any background mutation occurs
+- evidence to retain:
+  - command transcript snippets for:
+    - `/orch status <orch>`
+    - `/followup <task>`
+    - `/task <task>`
+    - `/offdesk review <orch>`
+  - dashboard screenshots or copied field values for:
+    - `Task Detail`
+    - `Runtime Detail`
+  - final outcome note:
+    - `executed_done` if all parity checks hold
+    - `executed_blocked` if any surface drift is found

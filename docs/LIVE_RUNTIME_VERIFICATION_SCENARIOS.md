@@ -181,6 +181,7 @@
 - current promotion decision:
   - `preview_surface` is the first `live_rehearsal_ready` candidate because it is read-only and launch-free
   - `execute_surface` remains bounded replay only until launch-bearing followup rehearsal is explicitly approved
+  - the read-only live rehearsal runbook is embedded in `docs/runtime_verification/phase2/review/R3_manual_followup_preview.md`
 - expected branch:
   - `manual followup`
 - must prove:
