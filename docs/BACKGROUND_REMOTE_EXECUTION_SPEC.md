@@ -237,6 +237,12 @@
   - `local_tmux`
   - `github_runner`
   - `remote_worker`
+- Current runtime handler seams:
+  - `scripts/gateway/aoe_tg_executor_dispatch.py`
+    - launch-spec materialization and launch routing
+  - `scripts/gateway/aoe_tg_executor_runtime.py`
+    - ticket lifecycle dispatch for `local_background`
+    - aggregate poll/update handling for `local_tmux` and external runners
 - Detailed architecture:
   - `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`
 

@@ -18,6 +18,7 @@ from aoe_tg_executor_adapter import (
     normalize_executor_runner_target,
 )
 import aoe_tg_executor_dispatch as executor_dispatch
+import aoe_tg_executor_runtime as executor_runtime
 
 
 def test_executor_adapter_inventory_is_stable() -> None:
@@ -131,3 +132,56 @@ def test_executor_dispatch_routes_launch_to_runner_adapter(monkeypatch, tmp_path
     assert external_row["runner_target"] == "remote_worker"
     assert seen["tmux"]["ticket_id"] == "BGT-1"
     assert seen["external"]["runner_target"] == "remote_worker"
+
+
+def test_executor_runtime_dispatches_local_background_claimed_ticket(monkeypatch, tmp_path: Path) -> None:
+    queue_path = tmp_path / "background_runs.json"
+    updates = []
+    errors = []
+
+    monkeypatch.setattr(
+        executor_runtime,
+        "advance_background_run_ticket",
+        lambda queue_path, ticket_id, now_iso, **kwargs: {"ticket_id": ticket_id, **kwargs},
+    )
+
+    result = executor_runtime.dispatch_claimed_background_ticket_via_adapter(
+        queue_path=queue_path,
+        claimed_ticket={"ticket_id": "BGT-LB-1", "runner_target": "local_background"},
+        now_iso=lambda: "2026-04-08T00:00:00+09:00",
+        run_target=lambda: "ok",
+        on_ticket_update=updates.append,
+        on_queue_error=lambda name, exc: errors.append((name, str(exc))),
+        completed_evidence_bundle=lambda: "status=completed | outcome=test",
+    )
+
+    assert result == "ok"
+    assert len(updates) == 2
+    assert updates[0]["status"] == "running"
+    assert updates[1]["status"] == "completed"
+    assert not errors
+
+
+def test_executor_runtime_polls_via_adapter_handlers(monkeypatch, tmp_path: Path) -> None:
+    queue_path = tmp_path / "background_runs.json"
+    monkeypatch.setattr(
+        executor_runtime,
+        "poll_local_tmux_background_tickets",
+        lambda **kwargs: {"changed": True, "completed_count": 1, "failed_count": 0},
+    )
+    monkeypatch.setattr(
+        executor_runtime,
+        "poll_external_background_tickets",
+        lambda **kwargs: {"changed": False, "completed_count": 0, "failed_count": 1, "acknowledged_count": 2},
+    )
+
+    result = executor_runtime.poll_background_tickets_via_adapters(
+        queue_path=queue_path,
+        now_iso=lambda: "2026-04-08T00:00:00+09:00",
+    )
+
+    assert result["changed"] is True
+    assert result["completed_count"] == 1
+    assert result["failed_count"] == 1
+    assert result["acknowledged_count"] == 2
+    assert result["local_background"]["changed"] is False

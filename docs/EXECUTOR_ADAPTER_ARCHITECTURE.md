@@ -118,8 +118,10 @@
 ## 8. Near-Term Implementation Direction
 1. Keep runner capability truth in one adapter module.
 2. Make launch selection and slot policy depend on adapter capability instead of scattered string checks.
-3. Keep background execution spec and roadmap aligned to the adapter seam.
-4. Only build native execution features when they strengthen the control plane, not when they duplicate commodity executor behavior.
+3. Route launch dispatch through shared executor dispatch helpers.
+4. Route ticket poll/update through shared executor runtime handlers, including `local_background`.
+5. Keep background execution spec and roadmap aligned to the adapter seam.
+6. Only build native execution features when they strengthen the control plane, not when they duplicate commodity executor behavior.
 
 ## 9. References
 - `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md`

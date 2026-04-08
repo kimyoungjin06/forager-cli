@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from aoe_tg_background_runs import (
-    advance_background_run_ticket,
     background_worker_state_path,
     claim_background_run_ticket,
     claim_next_background_run_ticket,
@@ -18,8 +17,10 @@ from aoe_tg_background_runs import (
     summarize_background_runs_state,
     update_background_worker_state,
 )
-from aoe_tg_external_background_worker import poll_external_background_tickets
-from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
+from aoe_tg_executor_runtime import (
+    dispatch_claimed_background_ticket_via_adapter,
+    poll_background_tickets_via_adapters,
+)
 
 _LOCAL_BACKGROUND_REGISTRY: Dict[str, Dict[str, Any]] = {}
 _LOCAL_BACKGROUND_REGISTRY_LOCK = threading.Lock()
@@ -59,74 +60,6 @@ def _pop_local_background_run(ticket_id: str) -> Dict[str, Any]:
     return row if isinstance(row, dict) else {}
 
 
-def _run_claimed_local_background_ticket(
-    *,
-    queue_path: Path,
-    claimed_ticket: Dict[str, Any],
-    now_iso: Callable[[], str],
-    run_target: Callable[[], Any],
-    on_ticket_update: Callable[[Dict[str, Any]], None],
-    on_queue_error: Callable[[str, Exception], None],
-    completed_evidence_artifacts: Callable[[], list[str]] | None = None,
-    completed_evidence_bundle: Callable[[], str] | None = None,
-) -> Any:
-    token = str(claimed_ticket.get("ticket_id", "")).strip()
-    if not token:
-        return run_target()
-
-    try:
-        running = advance_background_run_ticket(
-            queue_path,
-            token,
-            now_iso=now_iso,
-            status="running",
-            evidence_bundle="status=running | outcome=dispatch_flow_started",
-        )
-        if running:
-            on_ticket_update(running)
-    except Exception as exc:  # pragma: no cover - defensive path
-        on_queue_error("background_run_state_write_failed", exc)
-
-    try:
-        result = run_target()
-    except Exception as exc:
-        reason = str(exc).strip().splitlines()[0] if str(exc).strip() else "background_dispatch_failed"
-        try:
-            failed = advance_background_run_ticket(
-                queue_path,
-                token,
-                now_iso=now_iso,
-                status="failed",
-                evidence_bundle=f"status=failed | reason={reason[:160]}",
-            )
-            if failed:
-                on_ticket_update(failed)
-        except Exception as queue_exc:  # pragma: no cover - defensive path
-            on_queue_error("background_run_state_write_failed", queue_exc)
-        raise
-
-    try:
-        completed_artifacts = list(completed_evidence_artifacts() or []) if callable(completed_evidence_artifacts) else []
-        completed_bundle = (
-            str(completed_evidence_bundle() or "").strip()
-            if callable(completed_evidence_bundle)
-            else "status=completed | outcome=dispatch_flow_returned"
-        )
-        completed = advance_background_run_ticket(
-            queue_path,
-            token,
-            now_iso=now_iso,
-            status="completed",
-            evidence_bundle=completed_bundle or "status=completed | outcome=dispatch_flow_returned",
-            evidence_artifacts=completed_artifacts,
-        )
-        if completed:
-            on_ticket_update(completed)
-    except Exception as exc:  # pragma: no cover - defensive path
-        on_queue_error("background_run_state_write_failed", exc)
-    return result
-
-
 def run_local_background_ticket(
     *,
     queue_path: Path,
@@ -145,6 +78,7 @@ def run_local_background_ticket(
     token = str(ticket_id or "").strip()
     if not token:
         return run_target()
+    claimed: Dict[str, Any] = {}
 
     try:
         claimed = claim_background_run_ticket(
@@ -160,7 +94,7 @@ def run_local_background_ticket(
             on_ticket_update(claimed)
     except Exception as exc:  # pragma: no cover - defensive path
         on_queue_error("background_run_claim_failed", exc)
-    return _run_claimed_local_background_ticket(
+    return dispatch_claimed_background_ticket_via_adapter(
         queue_path=queue_path,
         claimed_ticket=claimed,
         now_iso=now_iso,
@@ -205,7 +139,7 @@ def drain_local_background_queue_once(
     on_ticket_update = row.get("on_ticket_update")
     if callable(on_ticket_update):
         on_ticket_update(claimed)
-    _run_claimed_local_background_ticket(
+    dispatch_claimed_background_ticket_via_adapter(
         queue_path=queue_path,
         claimed_ticket=claimed,
         now_iso=now_iso,
@@ -288,14 +222,12 @@ def _run_local_background_daemon(
                 now_iso=now_iso,
                 stale_after_sec=stale_after_sec,
             )
-            tmux_poll_result = poll_local_tmux_background_tickets(
+            adapter_poll = poll_background_tickets_via_adapters(
                 queue_path=queue_path,
                 now_iso=now_iso,
             )
-            external_poll_result = poll_external_background_tickets(
-                queue_path=queue_path,
-                now_iso=now_iso,
-            )
+            tmux_poll_result = adapter_poll.get("local_tmux") if isinstance(adapter_poll.get("local_tmux"), dict) else {}
+            external_poll_result = adapter_poll.get("external") if isinstance(adapter_poll.get("external"), dict) else {}
             drained = drain_local_background_queue(
                 queue_path=queue_path,
                 now_iso=now_iso,

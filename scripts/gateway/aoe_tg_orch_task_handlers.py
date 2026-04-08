@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import aoe_tg_background_runs as background_runs
 from aoe_tg_action_audit import append_action_audit_row
+from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
 from aoe_tg_package_paths import package_root
 from aoe_tg_request_contract import (
@@ -22,12 +23,10 @@ from aoe_tg_external_background_worker import (
     external_background_ack_path,
     external_background_handoff_path,
     external_background_result_path,
-    poll_external_background_tickets,
     read_external_background_ack,
     read_external_background_handoff,
     read_external_background_result,
 )
-from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
 from aoe_tg_task_state import derive_background_run_external_snapshot
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
@@ -925,8 +924,9 @@ def handle_orch_task_command(
             team_dir = Path(str(entry.get("team_dir", "") or "")).expanduser()
             if str(team_dir):
                 queue_path = background_runs.background_runs_state_path(team_dir)
-                tmux_poll = poll_local_tmux_background_tickets(queue_path=queue_path, now_iso=now_iso)
-                external_poll = poll_external_background_tickets(queue_path=queue_path, now_iso=now_iso)
+                adapter_poll = poll_background_tickets_via_adapters(queue_path=queue_path, now_iso=now_iso)
+                tmux_poll = adapter_poll.get("local_tmux") if isinstance(adapter_poll.get("local_tmux"), dict) else {}
+                external_poll = adapter_poll.get("external") if isinstance(adapter_poll.get("external"), dict) else {}
                 if (bool(tmux_poll.get("changed")) or bool(external_poll.get("changed"))) and (not args.dry_run):
                     if _sync_background_run_snapshots_from_queue(entry, queue_path):
                         entry["updated_at"] = now_iso()
@@ -1373,8 +1373,9 @@ def handle_orch_task_command(
                 reply_markup=_orch_status_reply_markup(manager_state, key, entry),
             )
             return True
-        tmux_poll = poll_local_tmux_background_tickets(queue_path=queue_path, now_iso=now_iso)
-        external_poll = poll_external_background_tickets(queue_path=queue_path, now_iso=now_iso)
+        adapter_poll = poll_background_tickets_via_adapters(queue_path=queue_path, now_iso=now_iso)
+        tmux_poll = adapter_poll.get("local_tmux") if isinstance(adapter_poll.get("local_tmux"), dict) else {}
+        external_poll = adapter_poll.get("external") if isinstance(adapter_poll.get("external"), dict) else {}
         if (bool(tmux_poll.get("changed")) or bool(external_poll.get("changed"))) and (not args.dry_run):
             if _sync_background_run_snapshots_from_queue(entry, queue_path):
                 entry["updated_at"] = now_iso()
@@ -1457,7 +1458,8 @@ def handle_orch_task_command(
             return True
         team_dir = Path(team_dir_raw).expanduser().resolve()
         queue_path = background_runs.background_runs_state_path(team_dir)
-        external_poll = poll_external_background_tickets(queue_path=queue_path, now_iso=now_iso)
+        adapter_poll = poll_background_tickets_via_adapters(queue_path=queue_path, now_iso=now_iso)
+        external_poll = adapter_poll.get("external") if isinstance(adapter_poll.get("external"), dict) else {}
         if bool(external_poll.get("changed")) and (not args.dry_run):
             if _sync_background_run_snapshots_from_queue(entry, queue_path):
                 entry["updated_at"] = now_iso()
@@ -1682,7 +1684,7 @@ def handle_orch_task_command(
                 runner_target=runner_target,
                 now_iso=now_iso,
             )
-            poll_result = poll_external_background_tickets(
+            poll_result = poll_background_tickets_via_adapters(
                 queue_path=queue_path,
                 now_iso=now_iso,
                 ack_source_command=f"/orch bgx-emit-ack {alias}",
@@ -1735,7 +1737,7 @@ def handle_orch_task_command(
             now_iso=now_iso,
             status=terminal_status,
         )
-        poll_result = poll_external_background_tickets(
+        poll_result = poll_background_tickets_via_adapters(
             queue_path=queue_path,
             now_iso=now_iso,
             result_source_command=f"/orch bgx-emit-result {alias} {terminal_status}",
