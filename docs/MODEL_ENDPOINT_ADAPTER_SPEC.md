@@ -89,6 +89,8 @@ must all expose:
 - `/orch status O#`
   - `model_routing: ...`
   - `model_registry: ...`
+- CLI probe:
+  - `scripts/gateway/aoe_tg_model_endpoint_probe.py`
 - dashboard:
   - `Overview`
   - `Offdesk`
@@ -101,6 +103,7 @@ must all expose:
   - registry normalization
   - route normalization
   - route resolution
+  - route/endpoint probing
   - operator summary
 
 ## 6. Future Attachment Path

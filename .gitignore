@@ -20,6 +20,12 @@
 .aoe-team/*.bak*
 .aoe-team/workers/*.json
 .aoe-team/agents/*/AGENTS.md
+.aoe-team/model_endpoints.json
+.aoe-team/model_routing.json
+.aoe-team/workspace_brief.json
+.aoe-team/document_registry.json
+.aoe-team/context_packs/
+.aoe-team/harness_authoring/
 
 # Runtime queues/logs
 .aoe-team/messages/

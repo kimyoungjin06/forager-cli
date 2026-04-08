@@ -160,3 +160,113 @@ def test_task_model_plan_uses_context_pack_profile(tmp_path: Path) -> None:
     assert "worker=bg=ollama-qwen3:qwen3-coder:30b" in plan["summary"]
     assert "judge=judge=judge-claude:claude-opus-4.1" in plan["summary"]
     assert "escalation=bgx=ollama-gptoss:gpt-oss:120b" in plan["summary"]
+
+
+def test_resolve_task_worker_binding_prefers_background_ticket_metadata(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    binding = model_endpoint_adapter.resolve_task_worker_binding(
+        team_dir,
+        task={
+            "background_run_model_plan_summary": "pack=review | worker=bg=ollama-qwen3:qwen3-coder:30b",
+            "background_run_model_worker_route_id": "background_worker_primary",
+            "background_run_model_worker_endpoint_id": "ollama-qwen3",
+        },
+    )
+
+    assert binding["source"] == "background_ticket"
+    assert binding["bound"] is True
+    assert binding["endpoint"]["model"] == "qwen3-coder:30b"
+
+
+def test_probe_model_route_reports_ollama_tags(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_fetch(url: str, *, timeout_sec: float = 3.0):
+        assert url == "http://172.16.0.37:11434/api/tags"
+        assert timeout_sec == 3.0
+        return {
+            "models": [
+                {"name": "qwen3-coder:30b"},
+                {"name": "gemma4:26b"},
+            ]
+        }
+
+    result = model_endpoint_adapter.probe_model_route(
+        team_dir,
+        "background_worker_primary",
+        fetch_json=_fake_fetch,
+    )
+
+    assert result["ok"] is True
+    assert result["probe_status"] == "ok"
+    assert result["model_present"] is True
+    assert "qwen3-coder:30b" in result["available_model_names"]

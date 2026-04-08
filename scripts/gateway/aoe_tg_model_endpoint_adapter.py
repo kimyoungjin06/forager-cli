@@ -13,6 +13,7 @@ It does not execute model calls. It only owns:
 from __future__ import annotations
 
 import json
+import urllib.request
 from typing import Any, Dict, List, Tuple
 
 from aoe_tg_context_pack import load_context_pack
@@ -394,6 +395,149 @@ def resolve_task_model_plan(
         "escalation_route": escalation_route if isinstance(escalation_route, dict) else {},
         "summary": " | ".join(parts),
     }
+
+
+def resolve_model_binding_snapshot(
+    team_dir: Any,
+    route_id: str,
+    *,
+    entry: Any = None,
+    endpoint_id_override: Any = "",
+) -> Dict[str, Any]:
+    route = resolve_model_route(team_dir, route_id, entry=entry)
+    registry = load_model_endpoint_registry(team_dir)
+    index = _registry_index(registry)
+    endpoint_id = _trim(endpoint_id_override, 64).lower() or _trim(route.get("endpoint_id"), 64).lower()
+    endpoint = index.get(endpoint_id) if endpoint_id else None
+    endpoint_data = endpoint if isinstance(endpoint, dict) else {}
+    return {
+        "route": route,
+        "endpoint": endpoint_data,
+        "endpoint_id": endpoint_id,
+        "bound": bool(route.get("bound")) and bool(endpoint_data),
+        "summary": _trim(route.get("summary"), 240) or "-",
+    }
+
+
+def resolve_task_worker_binding(team_dir: Any, *, entry: Any = None, task: Any = None) -> Dict[str, Any]:
+    task_data = task if isinstance(task, dict) else {}
+    route_id = _trim(task_data.get("background_run_model_worker_route_id"), 64).lower() or "background_worker_primary"
+    endpoint_id = _trim(task_data.get("background_run_model_worker_endpoint_id"), 64).lower()
+    if not endpoint_id and not _trim(task_data.get("background_run_model_plan_summary"), 64):
+        plan = resolve_task_model_plan(team_dir, entry=entry, task=task_data)
+        worker = plan.get("worker_route") if isinstance(plan.get("worker_route"), dict) else {}
+        route_id = _trim(worker.get("route_id"), 64).lower() or route_id
+        endpoint_id = _trim(worker.get("endpoint_id"), 64).lower()
+    binding = resolve_model_binding_snapshot(team_dir, route_id, entry=entry, endpoint_id_override=endpoint_id)
+    binding["source"] = "background_ticket" if _trim(task_data.get("background_run_model_plan_summary"), 64) else "task_plan"
+    return binding
+
+
+def _default_fetch_json(url: str, *, timeout_sec: float = 3.0) -> Dict[str, Any]:
+    with urllib.request.urlopen(url, timeout=max(0.1, float(timeout_sec or 3.0))) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
+def probe_model_endpoint(
+    endpoint: Any,
+    *,
+    timeout_sec: float = 3.0,
+    fetch_json: Any = None,
+) -> Dict[str, Any]:
+    row = endpoint if isinstance(endpoint, dict) else {}
+    endpoint_id = _trim(row.get("endpoint_id"), 64).lower()
+    provider_kind = _trim(row.get("provider_kind"), 64).lower() or "custom"
+    base_url = _trim(row.get("base_url"), 240).rstrip("/")
+    model = _trim(row.get("model"), 128)
+    enabled = bool(row.get("enabled"))
+    if not endpoint_id:
+        return {"ok": False, "probe_status": "missing_endpoint", "summary": "endpoint=missing"}
+    if not enabled:
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "probe_status": "disabled",
+            "summary": f"endpoint={endpoint_id} status=disabled",
+        }
+    if provider_kind != "ollama":
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "probe_status": "unsupported_provider_probe",
+            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=unsupported_probe",
+        }
+    if not base_url:
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "probe_status": "missing_base_url",
+            "summary": f"endpoint={endpoint_id} provider=ollama status=missing_base_url",
+        }
+    fetch = fetch_json if callable(fetch_json) else _default_fetch_json
+    try:
+        payload = fetch(f"{base_url}/api/tags", timeout_sec=timeout_sec)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "base_url": base_url,
+            "model": model,
+            "probe_status": "request_failed",
+            "error": _trim(exc, 240),
+            "summary": f"endpoint={endpoint_id} provider=ollama status=request_failed",
+        }
+    models = payload.get("models") if isinstance(payload.get("models"), list) else []
+    names = [
+        _trim(item.get("name"), 128)
+        for item in models
+        if isinstance(item, dict) and _trim(item.get("name"), 128)
+    ][:24]
+    model_present = (model in names) if model else False
+    return {
+        "ok": bool(model_present),
+        "endpoint_id": endpoint_id,
+        "provider_kind": provider_kind,
+        "base_url": base_url,
+        "model": model,
+        "probe_status": "ok" if model_present else "model_missing",
+        "available_model_names": names,
+        "available_model_count": len(names),
+        "model_present": bool(model_present),
+        "summary": (
+            f"endpoint={endpoint_id} provider=ollama model={model or '-'} "
+            f"present={'yes' if model_present else 'no'} available={len(names)}"
+        ),
+    }
+
+
+def probe_model_route(
+    team_dir: Any,
+    route_id: str,
+    *,
+    entry: Any = None,
+    timeout_sec: float = 3.0,
+    fetch_json: Any = None,
+) -> Dict[str, Any]:
+    binding = resolve_model_binding_snapshot(team_dir, route_id, entry=entry)
+    route = binding.get("route") if isinstance(binding.get("route"), dict) else {}
+    endpoint = binding.get("endpoint") if isinstance(binding.get("endpoint"), dict) else {}
+    if not binding.get("bound"):
+        return {
+            "ok": False,
+            "route_id": _trim(route.get("route_id"), 64).lower() or _trim(route_id, 64).lower(),
+            "probe_status": "unbound",
+            "summary": _trim(route.get("summary"), 240) or f"route={route_id} status=unbound",
+            "binding": binding,
+        }
+    result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
+    result["route_id"] = _trim(route.get("route_id"), 64).lower() or _trim(route_id, 64).lower()
+    result["binding"] = binding
+    return result
 
 
 def launch_spec_model_plan_metadata(plan: Any) -> Dict[str, str]:
