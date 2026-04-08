@@ -62,6 +62,14 @@
 #### B2. Rerun Path
 - intent:
   - code change lands but test/verification evidence is incomplete or failing
+- current status:
+  - `executed_done`
+- current finding:
+  - isolated `local_tmux` live rehearsal now proves:
+    - retry stays on the primary build lane
+    - background ticket/runtime handle/result artifact remain inspectable
+    - `/task`, `/offdesk review`, and dashboard task/runtime detail keep the branch on `rerun`
+    - the prelaunch `pref=local_tmux | effective=local_background` nuance is a task-specific launch-spec limitation, not a rerun blocker
 - expected branch:
   - `rerun`
 - must prove:
@@ -277,6 +285,8 @@
 1. `B1`, `D1`, `R1`, `M1`
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
+- current next non-review candidate:
+  - `B3`
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.

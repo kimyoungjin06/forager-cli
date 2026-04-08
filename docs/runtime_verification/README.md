@@ -10,6 +10,7 @@
 - `phase2/TEMPLATE.md`
   - common capture template
 - `phase2/build/`
+  - `build/B2_rerun_path.md`
 - `phase2/data/`
 - `phase2/review/`
 - `phase2/mixed/`
@@ -32,6 +33,12 @@
       - `build` preset live verification now completes planning, execution, review, retry, and close on the live path
       - final successful run (`T-012`) reached `planning_ready`, reran once under exec critic, and closed as `done`
       - visible project registration later exposed task lineage surface drift
+  - `build/B2_rerun_path.md`
+    - `executed_done`
+    - finding:
+      - isolated `local_tmux` live rehearsal launched exactly one lane-scoped build retry and closed the background ticket with `exit_code=0`
+      - `/task`, `/offdesk review`, and dashboard task/runtime detail all kept the branch on `rerun`
+      - the prelaunch `pref=local_tmux | effective=local_background` status nuance is now documented as a task-specific launch-spec limitation, not a build rerun blocker
   - `data/D1_happy_path.md`
     - `executed_done`
     - finding:
@@ -119,13 +126,13 @@
 - still bounded replay only:
   - `none in the review rail first wave`
 - next live candidate:
-  - `review rail first wave complete`
+  - `build/B3_manual_followup_path.md` (not yet written)
 - candidate reason:
-  - `R2`, `R3 preview`, `R3 execute`, and `R4` have all crossed into executed live rehearsal`
+  - `review rail first wave is complete and build rerun has now crossed into executed live rehearsal`
 - remaining gate:
-  - `decide whether any non-review rail deserves the next live promotion`
+  - `write the first build manual-followup artifact and choose whether it should start as preview-only or launch-bearing`
 - runbook:
-  - `R4` runbook is now embedded in `review/R4_external_background_rail.md`
+  - `B2` runbook is now embedded in `build/B2_rerun_path.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:

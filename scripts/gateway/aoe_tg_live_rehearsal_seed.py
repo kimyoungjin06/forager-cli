@@ -24,6 +24,11 @@ R2_REQUEST_TEXT = (
     "범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
 )
 
+B2_REQUEST_TEXT = (
+    "로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘. "
+    "세션 정리나 테스트 증적이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
+)
+
 R3_EXECUTE_REQUEST_TEXT = (
     "로그인 패치의 회귀 리스크 후보를 정리하고, 내가 지정한 lane만 후속 증거 수집으로 다시 실행해줘."
 )
@@ -173,6 +178,123 @@ def _r2_task(now: str) -> Dict[str, Any]:
             "project_key": "alpha",
             "project_alias": "O2",
             "task_short_id": "T-201",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _b2_task(now: str) -> Dict[str, Any]:
+    return {
+        "request_id": "REQ-B2-001",
+        "short_id": "T-501",
+        "alias": "build-rerun",
+        "prompt": B2_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "failed",
+        "stage": "verification",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "done",
+            "verification": "failed",
+            "integration": "failed",
+            "close": "failed",
+        },
+        "roles": ["Codex-Dev", "Claude-Reviewer"],
+        "verifier_roles": ["Claude-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "verification",
+        "phase1_current_round": 3,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "build",
+        "phase2_team_preset": "build",
+        "execution_brief_status": "executable",
+        "execution_brief_summary": "executable | do=src/session.js,tests/session.test.js,report.md | blocked=-",
+        "execution_brief_executable_slice": [
+            "src/session.js",
+            "tests/session.test.js",
+            "report.md",
+        ],
+        "execution_brief_blocked_slice": [],
+        "execution_brief_operator_decision": "",
+        "followup_brief_status": "none",
+        "reentry_rails_summary": "retry=ready exec=L1 review=R1 | followup=none | bg=-",
+        "plan": {
+            "summary": "build | session expiry fix -> regression test -> report evidence | review lane validates session cleanup and test proof",
+            "meta": {
+                "phase1_role_preset": "build",
+                "phase2_team_preset": "build",
+                "phase2_team_spec": {
+                    "execution_groups": [
+                        {"group_id": "L1", "role": "Codex-Dev", "kind": "implementation"},
+                    ],
+                    "review_groups": [
+                        {"group_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"]},
+                    ],
+                    "critic_role": "Claude-Reviewer",
+                    "integration_role": "Codex-Dev",
+                },
+                "phase2_execution_plan": {
+                    "execution_lanes": [
+                        {"lane_id": "L1", "role": "Codex-Dev", "kind": "implementation", "outputs": ["work_result", "handoff_doc"]},
+                    ],
+                    "review_lanes": [
+                        {"lane_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"], "outputs": ["reviewer_note"]},
+                    ],
+                },
+            },
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L1",
+                    "role": "Codex-Dev",
+                    "status": "done",
+                    "subtask_ids": ["S1"],
+                    "touched_files": ["src/session.js", "tests/session.test.js", "report.md"],
+                }
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Claude-Reviewer",
+                    "kind": "verifier",
+                    "status": "failed",
+                    "depends_on": ["L1"],
+                    "reason": "session cleanup evidence stayed incomplete; rerun the primary build lane before closing",
+                    "verdict": "retry",
+                    "action": "retry",
+                    "touched_files": ["report.md"],
+                }
+            ],
+            "summary": {
+                "execution": {"done": 1},
+                "review": {"failed": 1},
+                "review_verdicts": {"retry": 1},
+            },
+        },
+        "exec_critic": {
+            "verdict": "retry",
+            "action": "retry",
+            "reason": "recheck build lane first",
+            "rerun_execution_lane_ids": ["L1"],
+            "rerun_review_lane_ids": ["R1"],
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "retry",
+            "backend_contract": "build_rerun",
+            "backend_contract_note": "rerun should stay on the primary build lane with verifier follow-up",
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O5",
+            "task_short_id": "T-501",
         },
         "created_at": now,
         "updated_at": now,
@@ -458,6 +580,71 @@ def seed_r2_review_rerun_runtime(
     }
 
 
+def seed_b2_build_rerun_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "local_tmux",
+    local_tmux_slot_limit: int = 1,
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated build rerun live rehearsal",
+    )
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_b2_task(now), "REQ-B2-001")
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated build rerun live rehearsal",
+        "last_request_id": "REQ-B2-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": local_tmux_slot_limit,
+        "background_runner_slot_limits": {
+            "local_tmux": local_tmux_slot_limit,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-B2-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "B2",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O5",
+        "request_id": "REQ-B2-001",
+        "task_ref": "T-501",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "preflight_commands": [
+            "/orch status O5",
+            "/task T-501",
+            "/offdesk review O5",
+        ],
+        "trigger_command": "/retry T-501 lane L1",
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-B2-001",
+            "runtime_detail": "/control/runtimes/O5",
+        },
+    }
+
+
 def seed_r3_manual_followup_execute_runtime(
     control_root: Path,
     *,
@@ -645,14 +832,21 @@ def seed_r4_external_background_runtime(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["r2", "r3-execute", "r4"], default="r2")
+    parser.add_argument("--scenario", choices=["b2", "r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
     parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
     parser.add_argument("--local-tmux-slot-limit", type=int, default=1)
     args = parser.parse_args()
 
-    if args.scenario == "r2":
+    if args.scenario == "b2":
+        payload = seed_b2_build_rerun_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target,
+            local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "r2":
         payload = seed_r2_review_rerun_runtime(
             Path(args.control_root),
             run_lock_mode=args.run_lock_mode,
