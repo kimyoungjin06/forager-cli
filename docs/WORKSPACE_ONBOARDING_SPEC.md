@@ -137,11 +137,13 @@
 ## 8. Near-Term Implementation Order
 1. read-only `WorkspaceBrief` artifact and loader
 2. CLI onboarding/bootstrap helper
+3. stack manifest compiler to populate workspace + model routing artifacts from declarative topology
 3. dashboard runtime card parity
 4. doc-registry builder wired to `doc_roots`
 5. context-pack compiler wired to workspace + runtime truth
 
 ## 9. References
+- `docs/AOE_STACK_MANIFEST_SPEC.md`
 - `docs/EXECUTOR_ADAPTER_ARCHITECTURE.md`
 - `docs/REQUEST_CONTRACT_SPEC.md`
 - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`

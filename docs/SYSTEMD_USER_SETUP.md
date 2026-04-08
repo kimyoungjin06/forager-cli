@@ -2,8 +2,14 @@
 
 ## Goal
 - Reboot/login 이후에도 AOE Telegram stack를 자동 복구/유지한다.
+- 권장 전제:
+  - stack manifest와 env overlay를 먼저 compile해서 canonical runtime artifact를 만든다.
+  - `docs/AOE_STACK_MANIFEST_SPEC.md`
+  - `docs/HOST_NATIVE_EXECUTION_STRATEGY.md`
 
 ## 1. Install
+0. preflight compile:
+- `python3 scripts/gateway/aoe_tg_stack_compile.py --project-root /path/to/project --team-dir /path/to/project/.aoe-team --manifest /path/to/project/aoe_stack.json --env-file /path/to/project/.env`
 1. `bash /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/systemd/install_user_services.sh`
 2. 상태 확인:
 - `systemctl --user status aoe-telegram-stack.service`

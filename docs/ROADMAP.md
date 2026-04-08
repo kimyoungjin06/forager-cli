@@ -154,6 +154,17 @@
     - 실제 GPU/Ollama endpoint 정보는 config로 바인딩
     - canonical control truth에는 secret/host를 박지 않음
     - `/orch status`와 dashboard가 route binding/unbound 상태를 직접 보여줌
+- [x] stack manifest compiler baseline fixed
+  - 문서:
+    - `docs/AOE_STACK_MANIFEST_SPEC.md`
+    - `docs/HOST_NATIVE_EXECUTION_STRATEGY.md`
+  - 구현 기준선:
+    - `scripts/gateway/aoe_tg_stack_compile.py`
+  - 핵심 판단:
+    - topology는 raw `.env`만으로 운영하지 않음
+    - `stack manifest + env overlay + compiler`로 canonical runtime artifact를 생성
+    - control plane은 compiled artifact만 읽고 실행
+    - backend execution 기본값은 host-native Python + systemd, container는 later remote worker에 한정
 
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료

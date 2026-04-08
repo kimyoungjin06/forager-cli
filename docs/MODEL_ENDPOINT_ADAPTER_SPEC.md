@@ -104,6 +104,9 @@ must all expose:
   - operator summary
 
 ## 6. Future Attachment Path
+0. Declare topology in a stack manifest and compile it first.
+  - `docs/AOE_STACK_MANIFEST_SPEC.md`
+  - `scripts/gateway/aoe_tg_stack_compile.py`
 1. Receive GPU server endpoint details
   - host/ip
   - port
@@ -152,6 +155,19 @@ python3 scripts/gateway/aoe_tg_model_endpoint_seed.py \
   ]
 }
 ```
+
+## 8. Stack Compiler
+- compiler:
+  - `scripts/gateway/aoe_tg_stack_compile.py`
+- role:
+  - read stack manifest + env overlay
+  - write:
+    - `workspace_brief.json`
+    - `model_endpoints.json`
+    - `model_routing.json`
+- policy:
+  - runtime reads compiled artifacts
+  - runtime does not need raw manifest/env parsing for normal operation
 
 ```json
 {

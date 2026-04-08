@@ -128,8 +128,10 @@
 4. Route ticket poll/update through shared executor runtime handlers, including `local_background`.
 5. Keep background execution spec and roadmap aligned to the adapter seam.
 6. Only build native execution features when they strengthen the control plane, not when they duplicate commodity executor behavior.
+7. Compile stack topology into canonical runtime artifacts before attaching provider execution.
 
 ## 9. References
+- `docs/AOE_STACK_MANIFEST_SPEC.md`
 - `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md`
   - `REF-OH-1`
   - `REF-CC-2`
