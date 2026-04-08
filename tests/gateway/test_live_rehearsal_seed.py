@@ -30,6 +30,7 @@ def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path:
     project = state["projects"]["alpha"]
     task = project["tasks"]["REQ-R2-001"]
 
+    assert (team_dir / "AOE_TODO.md").read_text(encoding="utf-8").strip() == "Alpha/TODO.md"
     assert project["project_alias"] == "O2"
     assert project["run_lock_mode"] == "test_only"
     assert project["background_runner_target"] == "local_tmux"

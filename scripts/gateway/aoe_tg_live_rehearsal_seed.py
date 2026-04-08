@@ -34,6 +34,7 @@ def _prepare_project_layout(control_root: Path) -> tuple[Path, Path, Path]:
     project_team_dir = project_root / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
     project_team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "AOE_TODO.md").write_text("Alpha/TODO.md\n", encoding="utf-8")
     (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
     (project_team_dir / "AOE_TODO.md").write_text("TODO.md\n", encoding="utf-8")
     _write_json(

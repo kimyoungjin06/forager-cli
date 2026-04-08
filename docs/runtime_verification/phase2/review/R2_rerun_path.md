@@ -189,7 +189,8 @@
     - `ExecutionBrief.status=executable`
     - explicit retry lane targets
     - no followup promotion for the same slice
-  - `/offdesk review` and `/task` already agree on the retry branch before launch
+  - `/task` and dashboard already agree on the retry branch before launch
+  - `/offdesk review` must not contradict the retry branch by drifting into manual followup or external-runner remediation
 - preflight:
   - verify `/orch status <orch>` shows:
     - `run_lock=open`
@@ -199,7 +200,11 @@
   - verify `/task <task>` shows:
     - retry lane scope
     - `followup=none` or no executable followup for the same slice
-  - verify `/offdesk review <orch>` still recommends retry rather than manual followup
+  - verify `/offdesk review <orch>` remains conservative but does not suggest:
+    - manual followup
+    - external runner remediation
+  - note:
+    - in the seeded preflight runtime, `/offdesk review` may still point to `/orch status` while `run_lock=test_only` remains active
 - trigger:
   - launch exactly one bounded retry through one operator surface:
     - `/retry <task> lane <L#>`
@@ -220,6 +225,7 @@
   - `reentry_rails_summary` still points to rerun rather than followup
   - no external phase or `/orch bgx-status` dependency appears
   - slot usage remains bounded at `local_tmux=1/1`
+  - `/offdesk review` never redirects the operator into manual followup for the same slice
 - fail conditions:
   - retry collapses into manual followup
   - runner target drifts to `github_runner` or `remote_worker`
