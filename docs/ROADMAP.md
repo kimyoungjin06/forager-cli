@@ -171,6 +171,7 @@
     - `docs/UPSTREAM_VENDORING_STRATEGY.md`
   - 구현 기준선:
     - `scripts/gateway/aoe_tg_harness_authoring_adapter.py`
+    - `scripts/gateway/aoe_tg_harness_authoring_export.py`
   - 핵심 판단:
     - `revfactory/harness`는 off-desk runtime이 아니라 authoring/generation module
     - upstream import 기본 전략은 `git subtree`

@@ -9,6 +9,8 @@
     - `https://github.com/revfactory/harness`
   - placement:
     - `vendor/revfactory-harness`
+  - current import mode:
+    - `git subtree`
 
 ## 3. Preferred Method
 - use `git subtree`
@@ -31,7 +33,8 @@
 
 ## 7. Near-Term Steps
 1. keep read-only adapter seam in place
-2. add vendored subtree only when we are ready to consume it
+2. export authoring plans through:
+   - `scripts/gateway/aoe_tg_harness_authoring_export.py`
 3. treat generated `.claude/agents` and `.claude/skills` as output products, not canonical runtime state
 
 ## 8. References

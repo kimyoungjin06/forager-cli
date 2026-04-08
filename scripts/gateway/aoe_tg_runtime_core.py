@@ -134,6 +134,24 @@ def context_pack_path(team_dir: Path | str, *, request_id: str, profile: str) ->
     return context_pack_dir(team_dir) / (safe_request or "runtime") / f"{safe_profile or 'default'}.json"
 
 
+def harness_authoring_dir(team_dir: Path | str, dirname: str = "harness_authoring") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(dirname or "harness_authoring").strip()
+
+
+def harness_authoring_plan_path(
+    team_dir: Path | str,
+    *,
+    request_id: str = "",
+    task_ref: str = "",
+    filename: str = "",
+) -> Path:
+    token = "".join(
+        ch if ch.isalnum() or ch in "._-" else "_"
+        for ch in str(filename or request_id or task_ref or "runtime").strip()
+    ).strip("._-")
+    return harness_authoring_dir(team_dir) / f"{token or 'runtime'}.json"
+
+
 def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
 

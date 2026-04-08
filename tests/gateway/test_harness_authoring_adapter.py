@@ -16,7 +16,7 @@ import aoe_tg_harness_authoring_adapter as harness_authoring_adapter  # noqa: E4
 import aoe_tg_workspace_brief as workspace_brief  # noqa: E402
 
 
-def test_harness_authoring_plan_reports_missing_vendor_by_default(tmp_path: Path) -> None:
+def test_harness_authoring_plan_reports_missing_vendor_with_explicit_missing_root(tmp_path: Path) -> None:
     project_root = tmp_path / "Alpha"
     team_dir = project_root / ".aoe-team"
     docs_dir = project_root / "docs"
@@ -43,6 +43,7 @@ def test_harness_authoring_plan_reports_missing_vendor_by_default(tmp_path: Path
         team_dir,
         entry={"project_alias": "O2", "project_root": str(project_root)},
         task={"request_id": "REQ-1", "followup_brief_status": "preview_only"},
+        vendor_root=tmp_path / "missing-vendor",
     )
 
     assert plan["vendor"]["available"] is False

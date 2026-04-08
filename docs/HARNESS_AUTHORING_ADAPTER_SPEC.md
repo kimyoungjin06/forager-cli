@@ -22,6 +22,8 @@
 ## 3. Canonical Adapter
 - module:
   - `scripts/gateway/aoe_tg_harness_authoring_adapter.py`
+- export command:
+  - `scripts/gateway/aoe_tg_harness_authoring_export.py`
 - current role:
   - inspect vendored upstream harness layout
   - build a read-only authoring plan from:
@@ -83,6 +85,8 @@
   - upstream can keep moving
   - local runtime does not depend on vendoring details
   - authoring adapter reads a stable folder boundary
+- current import path:
+  - `vendor/revfactory-harness`
 
 ## 8. Near-Term Roadmap
 1. pin upstream under `vendor/revfactory-harness`
