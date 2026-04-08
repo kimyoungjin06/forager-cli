@@ -175,6 +175,8 @@
   - `single lane-scoped retry over local_tmux only`
 - safety posture:
   - use an isolated runtime
+  - seed it with:
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario r2 --control-root tmp/r2_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
   - temporarily set:
     - `run_lock_mode=open`
     - `background_runner_target=local_tmux`
