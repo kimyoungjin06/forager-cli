@@ -249,6 +249,15 @@ def project_model_routing_profile(entry: Any) -> str:
     return _trim(data.get("model_routing_profile"), 64) or "default"
 
 
+def effective_model_routing_profile(entry: Any, policy: Any) -> str:
+    project_profile = project_model_routing_profile(entry)
+    policy_data = policy if isinstance(policy, dict) else {}
+    policy_profile = _trim(policy_data.get("profile"), 64) or "default"
+    if project_profile and project_profile != "default":
+        return project_profile
+    return policy_profile or "default"
+
+
 def _registry_index(registry: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     rows = registry.get("endpoints") if isinstance(registry.get("endpoints"), list) else []
     return {
@@ -277,7 +286,7 @@ def resolve_model_route(team_dir: Any, route_id: str, *, entry: Any = None) -> D
     effective_kind = _trim((endpoint or {}).get("provider_kind"), 64).lower() or family_hint
     return {
         "route_id": route_token,
-        "profile": project_model_routing_profile(entry),
+        "profile": effective_model_routing_profile(entry, policy),
         "summary_label": summary_label,
         "endpoint_id": endpoint_id,
         "bound": bound,
@@ -297,7 +306,8 @@ def resolve_model_route(team_dir: Any, route_id: str, *, entry: Any = None) -> D
 
 
 def summarize_model_routing(team_dir: Any, *, entry: Any = None) -> str:
-    profile = project_model_routing_profile(entry)
+    policy = load_model_routing_policy(team_dir)
+    profile = effective_model_routing_profile(entry, policy)
     parts = [f"profile={profile}"]
     for route_id in MODEL_ROUTE_IDS:
         snapshot = resolve_model_route(team_dir, route_id, entry=entry)

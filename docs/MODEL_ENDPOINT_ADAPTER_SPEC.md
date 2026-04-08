@@ -113,6 +113,26 @@ must all expose:
 3. Bind route IDs in `model_routing.json`
 4. Attach one or more executor/provider adapters to consume the resolved route
 
+### 6.1 Seed Helper
+- helper:
+  - `scripts/gateway/aoe_tg_model_endpoint_seed.py`
+- purpose:
+  - write `model_endpoints.json` and `model_routing.json` for an Ollama-served model set
+- example:
+```bash
+python3 scripts/gateway/aoe_tg_model_endpoint_seed.py \
+  --team-dir /path/to/.aoe-team \
+  --ollama-base-url http://172.16.0.37:11434 \
+  --qwen-model qwen3-coder:30b \
+  --gpt-oss-model gpt-oss:120b \
+  --gemma-model gemma4:26b
+```
+- default binding policy:
+  - `background_worker_primary` -> `qwen3-coder`
+  - `background_worker_escalation` -> `gpt-oss`
+  - `gemma4` stays registered but unbound until explicitly promoted
+  - premium on-desk / judge routes remain unbound by default
+
 ## 7. Example
 ```json
 {
