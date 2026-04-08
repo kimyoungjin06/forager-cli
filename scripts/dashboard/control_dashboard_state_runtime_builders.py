@@ -15,6 +15,7 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_background_runs as background_runs
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
@@ -77,6 +78,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         queue_stale_count = 0
         worker_status = "-"
         worker_summary = "-"
+        model_routing_summary = "-"
+        model_registry_summary = "-"
         run_lock_mode = "open"
         run_lock_note = "-"
         background_slot_limit = 1
@@ -112,6 +115,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 )
                 worker_status = str(worker_snapshot.get("status", "")).strip() or "-"
                 worker_summary = str(worker_snapshot.get("summary", "")).strip() or "-"
+                model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry)
+                model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry)
         active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
         runtime_action_contract = _runtime_command_contract(
             project_alias=alias,
@@ -233,6 +238,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_background_run_launch_spec_summary=(
                     str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
                 ),
+                model_routing_summary=model_routing_summary,
+                model_registry_summary=model_registry_summary,
                 run_lock_mode=run_lock_mode,
                 run_lock_note=run_lock_note,
                 background_slot_limit=background_slot_limit,
@@ -391,16 +398,18 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
             + " | "
             + (str(slot_snapshot.get("summary", "")).strip() or "-")
         )
-        worker_snapshot = background_runs.summarize_background_worker_state(
-            background_runs.background_worker_state_path(team_dir)
-        )
     else:
         queue_snapshot = {}
         scheduler_snapshot = {}
-        worker_snapshot = {}
         background_slot_limit = 1
         background_slot_active = 0
         background_slot_pressure = "not_applicable | -"
+        team_dir = Path(".")
+    worker_snapshot = background_runs.summarize_background_worker_state(
+        background_runs.background_worker_state_path(team_dir)
+    ) if str(entry.get("team_dir", "")).strip() else {}
+    model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
+    model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
     run_lock_mode = run_lock.project_run_lock_mode(entry)
     run_lock_note = run_lock.project_run_lock_note(entry) or "-"
     active_rerun_summary = _task_rerun_summary(active_task) if isinstance(active_task, dict) else "-"
@@ -544,6 +553,8 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         active_task_background_run_launch_spec_summary=(
             str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
         ),
+        model_routing_summary=model_routing_summary,
+        model_registry_summary=model_registry_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,

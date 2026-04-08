@@ -108,6 +108,14 @@ def provider_capacity_state_path(team_dir: Path | str, filename: str = "provider
     return Path(team_dir).expanduser().resolve() / str(filename or "provider_capacity.json").strip()
 
 
+def model_endpoint_registry_path(team_dir: Path | str, filename: str = "model_endpoints.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "model_endpoints.json").strip()
+
+
+def model_routing_policy_path(team_dir: Path | str, filename: str = "model_routing.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "model_routing.json").strip()
+
+
 def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
 
@@ -185,6 +193,8 @@ def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callab
                 "background_runner_target": "local_background",
                 "background_runner_slot_limit": 1,
                 "background_runner_slot_limits": {},
+                "model_routing_profile": "default",
+                "model_endpoint_overrides": {},
                 "run_lock_mode": "open",
                 "project_root": str(project_root),
                 "team_dir": str(team_dir),

@@ -145,6 +145,15 @@
     - `LangGraph`는 orchestration re-platform option이지 기본 off-desk 답이 아님
     - `OpenClaw`는 daemon/gateway option이지 canonical task/runtime truth가 아님
     - premium models are for judgment, open/local models are for execution
+- [x] model endpoint adapter seam fixed
+  - 문서:
+    - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
+  - 구현 기준선:
+    - `scripts/gateway/aoe_tg_model_endpoint_adapter.py`
+  - 핵심 판단:
+    - 실제 GPU/Ollama endpoint 정보는 config로 바인딩
+    - canonical control truth에는 secret/host를 박지 않음
+    - `/orch status`와 dashboard가 route binding/unbound 상태를 직접 보여줌
 
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료

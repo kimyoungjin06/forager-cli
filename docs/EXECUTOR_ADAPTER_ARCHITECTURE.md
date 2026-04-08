@@ -131,3 +131,5 @@
   - `REF-API-1`
 - `docs/MODEL_HARNESS_ROUTING_BASIS_20260408.md`
   - layer placement for on-desk shells, off-desk control, and model-routing policy
+- `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
+  - modular endpoint registry and routing seam for Ollama/API-served models

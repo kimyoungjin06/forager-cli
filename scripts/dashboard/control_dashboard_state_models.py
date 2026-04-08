@@ -106,6 +106,8 @@ class RuntimeCardDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    model_routing_summary: str
+    model_registry_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -267,6 +269,8 @@ class RuntimeDetailDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    model_routing_summary: str
+    model_registry_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -368,6 +372,8 @@ class RecoveryRuntimeDTO:
     active_task_background_run_external_phase: str
     active_task_background_run_external_note: str
     active_task_background_run_launch_spec_summary: str
+    model_routing_summary: str
+    model_registry_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int

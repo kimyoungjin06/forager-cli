@@ -734,6 +734,72 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "/request REQ-1" in text
 
 
+def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    (project_team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "claude-sonnet-shell",
+                        "provider_kind": "anthropic",
+                        "model": "claude-sonnet-4",
+                        "enabled": True,
+                        "supports_tools": True,
+                    },
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://127.0.0.1:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (project_team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "default",
+                "routes": {
+                    "on_desk_primary": {"endpoint_id": "claude-sonnet-shell"},
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "model_routing" in text
+    assert "profile=default" in text
+    assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in text
+    assert "bg=ollama-qwen3:qwen3-coder:30b" in text
+    assert "model_registry" in text
+    assert "enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
+
+
 def test_control_dashboard_surfaces_external_background_phase_in_runtime_and_offdesk(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

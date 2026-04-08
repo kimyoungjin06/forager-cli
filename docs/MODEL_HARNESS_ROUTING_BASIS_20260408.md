@@ -151,6 +151,8 @@
 - third candidate: `Gemma 4`
 4. Revisit `OpenClaw` only if we need a stronger always-on gateway or channel hub.
 5. Revisit `LangGraph` only if we intentionally decide to re-platform orchestration internals.
+6. Keep endpoint binding modular through:
+   - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
 
 ## 10. Anti-Patterns To Avoid
 - `on-desk = Claude Code + OMC + another shell` as simultaneous primaries

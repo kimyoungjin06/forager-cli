@@ -181,6 +181,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_background_run_external_phase=str(row.get("active_task_background_run_external_phase", "")).strip() or "-",
                 active_task_background_run_external_note=str(row.get("active_task_background_run_external_note", "")).strip() or "-",
                 active_task_background_run_launch_spec_summary=str(row.get("active_task_background_run_launch_spec_summary", "")).strip() or "-",
+                model_routing_summary=str(row.get("model_routing_summary", "")).strip() or "-",
+                model_registry_summary=str(row.get("model_registry_summary", "")).strip() or "-",
                 run_lock_mode=str(row.get("run_lock_mode", "")).strip() or "-",
                 run_lock_note=str(row.get("run_lock_note", "")).strip() or "-",
                 background_slot_limit=int(row.get("background_slot_limit", 1) or 1),
