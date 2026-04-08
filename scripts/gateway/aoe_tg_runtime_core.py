@@ -116,6 +116,10 @@ def model_routing_policy_path(team_dir: Path | str, filename: str = "model_routi
     return Path(team_dir).expanduser().resolve() / str(filename or "model_routing.json").strip()
 
 
+def workspace_brief_path(team_dir: Path | str, filename: str = "workspace_brief.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "workspace_brief.json").strip()
+
+
 def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
 

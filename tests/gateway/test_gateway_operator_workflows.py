@@ -7,6 +7,7 @@ import time
 
 from _gateway_test_support import *  # noqa: F401,F403
 import aoe_tg_run_detached_flow as run_detached_flow
+import aoe_tg_workspace_brief as workspace_brief
 
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
@@ -795,6 +796,20 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    (project_root / "docs").mkdir(parents=True, exist_ok=True)
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "project_root": str(project_root),
+            "project_alias": "O2",
+            "onboarding_status": "active",
+            "doc_roots": [str((project_root / "docs").resolve())],
+            "canonical_todo_path": str((team_dir / "AOE_TODO.md").resolve()),
+        },
+        project_root=project_root,
+        entry={"background_runner_target": "local_background"},
+    )
     state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
@@ -863,6 +878,7 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
     assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
     text, context, _reply_markup = sent[-1]
     assert context == "status"
+    assert "workspace: status=active" in text
     assert "model_routing: profile=default" in text
     assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in text
     assert "bg=ollama-qwen3:qwen3-coder:30b" in text
