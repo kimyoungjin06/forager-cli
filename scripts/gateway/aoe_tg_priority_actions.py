@@ -49,12 +49,14 @@ def external_background_priority_action_snapshot(
     background_run_runner_target: str = "",
     background_run_external_phase: str = "",
     background_run_external_note: str = "",
+    run_lock_mode: str = "",
 ) -> Dict[str, str]:
     project_alias = str(alias or "").strip()
     runner = str(background_run_runner_target or "").strip().lower()
     phase = str(background_run_external_phase or "").strip().lower()
     note = str(background_run_external_note or "").strip()
     label = str(task_label or "").strip()
+    lock_mode = str(run_lock_mode or "").strip().lower()
 
     if runner not in {"github_runner", "remote_worker"}:
         return {"action": "", "reason": ""}
@@ -62,6 +64,16 @@ def external_background_priority_action_snapshot(
         return {
             "action": f"/offdesk review {project_alias}" if project_alias else (f"/task {label}" if label else ""),
             "reason": note or f"{runner} result received; inspect task state and decide the next operator action",
+        }
+    if phase == "pickup_acknowledged" and lock_mode == "test_only":
+        return {
+            "action": f"/orch bgx-emit-result {project_alias} completed" if project_alias else "",
+            "reason": note or f"{runner} pickup was acknowledged; emit a bounded test-only result sidecar to finish the rehearsal",
+        }
+    if phase in {"handoff_emitted", "awaiting_external_pickup"} and lock_mode == "test_only":
+        return {
+            "action": f"/orch bgx-emit-ack {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} handoff is ready; emit a bounded test-only pickup acknowledgement",
         }
     if phase == "pickup_acknowledged":
         return {
@@ -248,6 +260,7 @@ def offdesk_priority_action_snapshot(
             background_run_runner_target=background_runner,
             background_run_external_phase=background_external_phase,
             background_run_external_note=background_external_note,
+            run_lock_mode=lock_mode,
         )
         if str(external_priority.get("action", "")).strip():
             return external_priority

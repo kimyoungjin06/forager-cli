@@ -54,6 +54,11 @@ def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
         return str(resolved).strip()
 
 
+def _write_json(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _append_external_background_audit(
     *,
     team_dir: Path,
@@ -231,10 +236,90 @@ def emit_external_background_handoff(
     )
 
 
+def emit_external_background_ack(
+    *,
+    queue_path: Path,
+    ticket_id: str,
+    runner_target: str,
+    now_iso: Callable[[], str],
+    worker_id: str = "",
+    summary: str = "",
+    evidence_artifacts: List[str] | None = None,
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = _trim(runner_target, 64).lower()
+    if not token or target not in {"github_runner", "remote_worker"}:
+        return {}
+    team_dir = queue_path.parent
+    ack_path = external_background_ack_path(team_dir, token, target)
+    payload = {
+        "version": "2026-04-08.v1",
+        "ticket_id": token,
+        "status": "acknowledged",
+        "worker_id": _trim(worker_id, 96) or f"test-harness:{target}",
+        "summary": _trim(summary, 240) or "test_only harness emitted external pickup acknowledgement",
+        "evidence_artifacts": [_trim(item, 240) for item in list(evidence_artifacts or []) if _trim(item, 240)],
+        "emitted_at": now_iso(),
+    }
+    _write_json(ack_path, payload)
+    return {
+        "artifact_path": _artifact_path_for_team(team_dir, ack_path),
+        "payload": payload,
+    }
+
+
+def emit_external_background_result(
+    *,
+    queue_path: Path,
+    ticket_id: str,
+    runner_target: str,
+    now_iso: Callable[[], str],
+    status: str = "completed",
+    reason: str = "",
+    summary: str = "",
+    evidence_bundle: str = "",
+    evidence_artifacts: List[str] | None = None,
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = _trim(runner_target, 64).lower()
+    terminal_status = _trim(status, 32).lower()
+    if not token or target not in {"github_runner", "remote_worker"} or terminal_status not in {"completed", "failed"}:
+        return {}
+    team_dir = queue_path.parent
+    result_path = external_background_result_path(team_dir, token, target)
+    payload = {
+        "version": "2026-04-08.v1",
+        "ticket_id": token,
+        "status": terminal_status,
+        "reason": _trim(reason, 160) or ("test_only_external_result" if terminal_status == "completed" else "test_only_external_failure"),
+        "summary": _trim(summary, 240)
+        or (
+            "test_only harness emitted external completion result"
+            if terminal_status == "completed"
+            else "test_only harness emitted external failure result"
+        ),
+        "evidence_bundle": _trim(evidence_bundle, 320)
+        or (
+            f"status={terminal_status} | outcome=test_only_external_result"
+            if terminal_status == "completed"
+            else f"status={terminal_status} | outcome=test_only_external_failure"
+        ),
+        "evidence_artifacts": [_trim(item, 240) for item in list(evidence_artifacts or []) if _trim(item, 240)],
+        "emitted_at": now_iso(),
+    }
+    _write_json(result_path, payload)
+    return {
+        "artifact_path": _artifact_path_for_team(team_dir, result_path),
+        "payload": payload,
+    }
+
+
 def poll_external_background_tickets(
     *,
     queue_path: Path,
     now_iso: Callable[[], str],
+    ack_source_command: str = "",
+    result_source_command: str = "",
 ) -> Dict[str, Any]:
     team_dir = queue_path.parent
     acknowledged: List[str] = []
@@ -294,7 +379,7 @@ def poll_external_background_tickets(
                                 runner_target=runner_target,
                                 phase="Pickup Ack",
                                 note=ack_rel or summary or worker_id or ticket_id,
-                                source_command=f"/external ack {runner_target} {ticket_id}",
+                                source_command=ack_source_command or f"/external ack {runner_target} {ticket_id}",
                                 outcome_reason_code="external_pickup_acknowledged",
                                 next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
                                 remediation=(
@@ -354,7 +439,7 @@ def poll_external_background_tickets(
                         runner_target=runner_target,
                         phase="Result",
                         note=evidence_bundle,
-                        source_command=f"/external result {runner_target} {ticket_id}",
+                        source_command=result_source_command or f"/external result {runner_target} {ticket_id}",
                         outcome_reason_code="external_result_completed",
                         next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
                         remediation="inspect the task detail and evidence bundle before issuing another rerun or follow-up action",
@@ -368,7 +453,7 @@ def poll_external_background_tickets(
                         runner_target=runner_target,
                         phase="Result",
                         note=evidence_bundle,
-                        source_command=f"/external result {runner_target} {ticket_id}",
+                        source_command=result_source_command or f"/external result {runner_target} {ticket_id}",
                         outcome_reason_code="external_result_failed",
                         next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
                         remediation="inspect the failed external result and evidence bundle before retrying or changing runner target",

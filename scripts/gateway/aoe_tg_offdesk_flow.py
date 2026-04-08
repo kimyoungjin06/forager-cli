@@ -1174,6 +1174,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                 background_run_runner_target=task_background_runner,
                 background_run_external_phase=task_background_external_phase,
                 background_run_external_note=task_background_external_note,
+                run_lock_mode=run_lock_mode,
             )
             lines.append(
                 "  active_task_background_external: {runner} | {phase} | {note}".format(

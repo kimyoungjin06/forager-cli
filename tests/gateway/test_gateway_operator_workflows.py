@@ -34,7 +34,9 @@ from aoe_tg_local_background_worker import (
 )
 from aoe_tg_external_background_worker import (
     external_background_ack_path,
+    emit_external_background_ack,
     emit_external_background_handoff,
+    emit_external_background_result,
     external_background_handoff_path,
     external_background_result_path,
     poll_external_background_tickets,
@@ -229,6 +231,43 @@ def test_resolve_message_command_parses_slash_orch_bgx_result() -> None:
 
     assert resolved.cmd == "orch-bgx-result"
     assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgx_emit_ack() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgx-emit-ack O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgx-emit-ack"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgx_emit_result() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgx-emit-result O2 failed",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgx-emit-result"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "failed"
 
 
 def test_resolve_message_command_parses_slash_orch_bg_runner() -> None:
@@ -988,6 +1027,298 @@ def test_orch_bgx_result_surfaces_result_payload_and_audit(tmp_path: Path) -> No
     assert rows[-1]["headline"] == "External Background Result | accepted"
     assert rows[-1]["outcome_reason_code"] == "result_present"
     assert rows[-1]["source_command"] == "/orch bgx-result O2"
+
+
+def test_orch_bgx_emit_ack_writes_test_only_ack_and_syncs_snapshot(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    queue_file = team_dir / "background_runs.json"
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-EXT-ACK-001",
+        request_id="REQ-EXT-ACK-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-08T10:00:00+09:00",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+            launch_spec=build_external_runner_gateway_command_launch_spec(
+                runner_target="github_runner",
+                request_id="REQ-EXT-ACK-001",
+                project_key="twinpaper",
+                project_root=str(project_root),
+                team_dir=str(team_dir),
+                manager_state_file=str(team_dir / "orch_manager_state.json"),
+                command_text="/retry T-401 lane L1",
+                simulate_chat_id="939062873",
+                source_surface="dashboard_retry",
+                created_by="dashboard:control",
+            ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-08T10:00:00+09:00")
+    handoff = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-EXT-ACK-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-08T10:00:01+09:00",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {
+            "REQ-EXT-ACK-001": {
+                "request_id": "REQ-EXT-ACK-001",
+                "short_id": "T-401",
+                "status": "running",
+                "updated_at": "2026-04-08T10:00:01+09:00",
+                "background_run_status": "running",
+                "background_run_ticket_id": "BGT-EXT-ACK-001",
+                "background_run_runner_target": "github_runner",
+                "background_run_runtime_handle": handoff.get("runtime_handle", ""),
+                "background_run_external_phase": "handoff_emitted",
+                "background_run_external_note": handoff.get("runtime_handle", ""),
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    manager_state_file = tmp_path / "manager_state.json"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=manager_state_file,
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, updated: Path(path).write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"),
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-08T10:00:02+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgx-emit-ack", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgx-emit-ack"
+    assert "external background pickup ack emitted" in text
+    assert "- /orch bgx-emit-result O2 completed" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgx-emit-result O2 completed" in buttons
+    ack_path = external_background_ack_path(team_dir, "BGT-EXT-ACK-001", "github_runner")
+    ack_payload = json.loads(ack_path.read_text(encoding="utf-8"))
+    assert ack_payload["worker_id"] == "test-harness:github_runner"
+    assert ack_payload["status"] == "acknowledged"
+    updated_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = updated_state["projects"]["twinpaper"]["tasks"]["REQ-EXT-ACK-001"]
+    assert task["background_run_external_phase"] == "pickup_acknowledged"
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["outcome_reason_code"] == "external_pickup_acknowledged"
+    assert rows[-1]["source_command"] == "/orch bgx-emit-ack O2"
+
+
+def test_orch_bgx_emit_result_writes_test_only_result_and_syncs_snapshot(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    queue_file = team_dir / "background_runs.json"
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-EXT-RESULT-001",
+        request_id="REQ-EXT-RESULT-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-08T10:10:00+09:00",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+            launch_spec=build_external_runner_gateway_command_launch_spec(
+                runner_target="github_runner",
+                request_id="REQ-EXT-RESULT-001",
+                project_key="twinpaper",
+                project_root=str(project_root),
+                team_dir=str(team_dir),
+                manager_state_file=str(team_dir / "orch_manager_state.json"),
+                command_text="/retry T-402 lane L1",
+                simulate_chat_id="939062873",
+                source_surface="dashboard_retry",
+                created_by="dashboard:control",
+            ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-08T10:10:00+09:00")
+    handoff = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-EXT-RESULT-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-08T10:10:01+09:00",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+    emit_external_background_ack(
+        queue_path=queue_file,
+        ticket_id="BGT-EXT-RESULT-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-08T10:10:02+09:00",
+    )
+    poll_external_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-08T10:10:03+09:00",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {
+            "REQ-EXT-RESULT-001": {
+                "request_id": "REQ-EXT-RESULT-001",
+                "short_id": "T-402",
+                "status": "running",
+                "updated_at": "2026-04-08T10:10:03+09:00",
+                "background_run_status": "running",
+                "background_run_ticket_id": "BGT-EXT-RESULT-001",
+                "background_run_runner_target": "github_runner",
+                "background_run_runtime_handle": handoff.get("runtime_handle", ""),
+                "background_run_external_phase": "pickup_acknowledged",
+                "background_run_external_note": "background_run_acks/github-runner-bgt-ext-result-001.json",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    manager_state_file = tmp_path / "manager_state.json"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=manager_state_file,
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="completed",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, updated: Path(path).write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"),
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-08T10:10:04+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgx-emit-result", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "orch-bgx-emit-result"
+    assert "external background result emitted" in text
+    assert "- /offdesk review O2" in text
+    result_path = external_background_result_path(team_dir, "BGT-EXT-RESULT-001", "github_runner")
+    result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result_payload["status"] == "completed"
+    updated_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = updated_state["projects"]["twinpaper"]["tasks"]["REQ-EXT-RESULT-001"]
+    assert task["background_run_status"] == "completed"
+    assert task["background_run_external_phase"] == "result_received"
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["outcome_reason_code"] == "external_result_completed"
+    assert rows[-1]["source_command"] == "/orch bgx-emit-result O2 completed"
 
 
 def test_orch_status_surfaces_background_scheduler_head(tmp_path: Path) -> None:

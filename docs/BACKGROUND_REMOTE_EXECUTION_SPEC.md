@@ -201,6 +201,15 @@
     - pickup acknowledgement detail
   - `/orch bgx-result O#`
     - terminal result detail
+- test-only harness surfaces:
+  - `/orch bgx-emit-ack O#`
+    - only valid while `run_lock_mode=test_only`
+    - writes a bounded pickup acknowledgement sidecar for the latest external ticket
+  - `/orch bgx-emit-result O# [completed|failed]`
+    - only valid while `run_lock_mode=test_only`
+    - writes a bounded terminal result sidecar for the latest external ticket
+  - intended use:
+    - isolated rehearsal of `handoff -> ack -> result` parity without a real external runner
 - external phase model:
   - `awaiting_external_pickup`
   - `handoff_emitted`

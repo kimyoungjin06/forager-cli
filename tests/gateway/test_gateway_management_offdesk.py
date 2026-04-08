@@ -1337,6 +1337,36 @@ def test_offdesk_status_surfaces_external_background_phase(tmp_path: Path) -> No
     assert "first: /orch bgx-status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
 
 
+def test_offdesk_status_surfaces_test_only_external_harness_next_step(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    state = gw.default_manager_state(tmp_path, team_dir)
+    state["projects"]["default"]["project_alias"] = "O1"
+    state["projects"]["default"]["display_name"] = "default"
+    state["projects"]["default"]["system_project"] = False
+    state["projects"]["default"]["ops_hidden"] = False
+    state["projects"]["default"].pop("ops_hidden_reason", None)
+    state["projects"]["default"]["run_lock_mode"] = "test_only"
+    state["projects"]["default"]["tasks"] = {
+        "REQ-EXT-001": {
+            "request_id": "REQ-EXT-001",
+            "short_id": "T-401",
+            "alias": "external-run",
+            "status": "running",
+            "updated_at": "2026-04-07T22:00:00+09:00",
+            "background_run_status": "running",
+            "background_run_runner_target": "github_runner",
+            "background_run_external_phase": "handoff_emitted",
+            "background_run_external_note": "background_run_handoffs/github-runner-bgt-ext-001.json",
+        }
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
+
+    assert "active_task_background_external_next: /orch bgx-emit-ack O1 | background_run_handoffs/github-runner-bgt-ext-001.json" in text
+    assert "first: /orch bgx-emit-ack O1 | background_run_handoffs/github-runner-bgt-ext-001.json" in text
+
+
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)

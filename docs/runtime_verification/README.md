@@ -65,13 +65,14 @@
       - isolated live rehearsal launched exactly one execution-only `followup-exec` over `local_tmux` and closed the background ticket with `exit_code=0`
       - `/task`, `/followup`, `/offdesk review`, and dashboard task/runtime detail all kept the branch on `manual_followup` without auto-launching review remainder
   - `review/R4_external_background_rail.md`
-    - `bounded_replay_pass`
+    - `live_rehearsal_ready`
     - finding:
       - bounded replay now proves the external background rail itself:
         - handoff, pickup acknowledgement, and result are all persisted and operator-visible
         - `/orch status`, `/orch bgx-status`, and offdesk surfaces agree on external phase and next step
         - artifact-level inspect commands expose handoff / ack / result directly
         - same-runner scheduler head reflects starvation-aware claim ordering
+        - `test_only` harness commands can now emit bounded pickup/result sidecars without a real external runner
   - `mixed/M1_happy_path.md`
     - `executed_done`
     - finding:
@@ -119,17 +120,16 @@
 - runbook:
   - embedded in `review/R2_rerun_path.md`
 - still bounded replay only:
+  - `none in the review rail first wave`
+- next live candidate:
   - `review/R4_external_background_rail.md`
-- reason:
-  - `R4` still depends on launch-bearing rails, runner safety, or external pickup guarantees
-- next launch-bearing candidate:
-  - `none on the local review rail`
-- next bounded candidate:
-  - `review/R4_external_background_rail.md`
+- candidate reason:
+  - safe `test_only` harness commands now exist for external ack/result
+  - no real external worker pickup is required for the first isolated rehearsal
 - remaining gate:
-  - external pickup harness and acknowledgement safety still need to stay bounded
+  - capture one isolated harness-backed rehearsal and verify the same phase/next-step parity on real operator surfaces
 - runbook:
-  - `R4` remains bounded replay only
+  - pending
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:

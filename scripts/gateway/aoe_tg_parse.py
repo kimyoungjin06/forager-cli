@@ -1133,6 +1133,49 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 i += 1
             return {"cmd": "orch-bgx-result", "orch": orch_name}
 
+        if sub in {"bgx-emit-ack", "external-emit-ack", "background-external-emit-ack"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-emit-ack [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgx-emit-ack [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-emit-ack", "orch": orch_name}
+
+        if sub in {"bgx-emit-result", "external-emit-result", "background-external-emit-result"}:
+            orch_name: Optional[str] = None
+            result_status = "completed"
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-emit-result [--orch <name>] [completed|failed]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    token = tok.strip().lower()
+                    if token in {"completed", "failed"}:
+                        result_status = token
+                    else:
+                        if orch_name is not None:
+                            raise RuntimeError("usage: aoe orch bgx-emit-result [--orch <name>] [completed|failed]")
+                        orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-emit-result", "orch": orch_name, "rest": result_status}
+
         if sub in {"bgw-start", "worker-start"}:
             orch_name: Optional[str] = None
             i = 0

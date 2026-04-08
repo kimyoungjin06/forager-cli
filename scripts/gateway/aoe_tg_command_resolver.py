@@ -334,6 +334,14 @@ def resolve_message_command(
                 elif sub in {"bgx-result", "external-result", "background-external-result"}:
                     out.cmd = "orch-bgx-result"
                     out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-emit-ack", "external-emit-ack", "background-external-emit-ack"}:
+                    out.cmd = "orch-bgx-emit-ack"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-emit-result", "external-emit-result", "background-external-emit-result"}:
+                    out.cmd = "orch-bgx-emit-result"
+                    out.orch_target = tail[0].strip() if tail else None
+                    if len(tail) > 1:
+                        out.rest = tail[1].strip()
                 elif sub in {"bgw-start", "worker-start"}:
                     out.cmd = "orch-bgw-start"
                     out.orch_target = tail[0].strip() if tail else None
@@ -362,7 +370,7 @@ def resolve_message_command(
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -713,6 +721,8 @@ def resolve_message_command(
                 "orch-bgx-handoff",
                 "orch-bgx-ack",
                 "orch-bgx-result",
+                "orch-bgx-emit-ack",
+                "orch-bgx-emit-result",
                 "orch-bgw-start",
                 "orch-bgw-stop",
                 "orch-bg-runner",
@@ -755,8 +765,10 @@ def resolve_message_command(
                     out.orch_kpi_hours = natural.get("hours")
                 elif ncmd == "orch-bgq-clean":
                     out.orch_target = natural.get("orch")
-                elif ncmd in {"orch-bgw-status", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
+                elif ncmd in {"orch-bgw-status", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgx-emit-ack", "orch-bgx-emit-result", "orch-bgw-start", "orch-bgw-stop"}:
                     out.orch_target = natural.get("orch")
+                    if ncmd == "orch-bgx-emit-result":
+                        out.rest = str(natural.get("rest", "")).strip()
                 elif ncmd == "orch-bg-runner":
                     out.orch_target = natural.get("orch")
                     out.rest = str(natural.get("runner_target", "")).strip()

@@ -17,6 +17,8 @@ from aoe_tg_request_contract import (
 from aoe_tg_priority_actions import external_background_priority_action_snapshot
 from aoe_tg_run_lock import normalize_run_lock_mode, project_run_lock_mode, project_run_lock_note
 from aoe_tg_external_background_worker import (
+    emit_external_background_ack,
+    emit_external_background_result,
     external_background_ack_path,
     external_background_handoff_path,
     external_background_result_path,
@@ -26,6 +28,7 @@ from aoe_tg_external_background_worker import (
     read_external_background_result,
 )
 from aoe_tg_tmux_background_worker import poll_local_tmux_background_tickets
+from aoe_tg_task_state import derive_background_run_external_snapshot
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
 
@@ -210,6 +213,19 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
             [{"text": slot_bump_command}],
             [{"text": f"/orch run-lock {alias} {run_lock_toggle}"}],
             ([{"text": f"/orch bgx-status {alias}"}] if external_snapshot else []),
+            (
+                [{"text": f"/orch bgx-emit-ack {alias}"}]
+                if external_snapshot and run_lock_mode == "test_only" and str(external_snapshot.get("phase", "")).strip().lower() in {"handoff_emitted", "awaiting_external_pickup"}
+                else []
+            ),
+            (
+                [
+                    {"text": f"/orch bgx-emit-result {alias} completed"},
+                    {"text": f"/orch bgx-emit-result {alias} failed"},
+                ]
+                if external_snapshot and run_lock_mode == "test_only" and str(external_snapshot.get("phase", "")).strip().lower() == "pickup_acknowledged"
+                else []
+            ),
             (
                 [
                     {"text": f"/orch bgx-handoff {alias}"},
@@ -462,6 +478,13 @@ def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path:
             str(task.get("background_run_runtime_handle", "")).strip(),
         )
         apply_background_run_ticket_snapshot(task, ticket)
+        external_snapshot = derive_background_run_external_snapshot(task)
+        if external_snapshot:
+            task["background_run_external_phase"] = str(external_snapshot.get("phase", "")).strip()
+            task["background_run_external_note"] = str(external_snapshot.get("note", "")).strip()
+        else:
+            task.pop("background_run_external_phase", None)
+            task.pop("background_run_external_note", None)
         task.setdefault("result", {})
         if isinstance(task.get("result"), dict):
             task["result"]["background_run_status"] = str(ticket.get("status", "")).strip()
@@ -962,6 +985,7 @@ def handle_orch_task_command(
                 background_run_runner_target=str(external_snapshot.get("runner_target", "")).strip(),
                 background_run_external_phase=str(external_snapshot.get("phase", "")).strip(),
                 background_run_external_note=str(external_snapshot.get("note", "")).strip(),
+                run_lock_mode=run_lock_mode,
             )
             external_line = (
                 "background_external: {label} | {runner} | {phase} | {note}\n".format(
@@ -1473,6 +1497,7 @@ def handle_orch_task_command(
                 background_run_runner_target=str(snapshot.get('runner_target', '')).strip(),
                 background_run_external_phase=str(snapshot.get('phase', '')).strip(),
                 background_run_external_note=str(snapshot.get('note', '')).strip(),
+                run_lock_mode=project_run_lock_mode(entry),
             )
             next_step = str(external_priority.get("action", "")).strip()
             if not next_step or next_step == f"/orch bgx-status {alias}":
@@ -1510,6 +1535,161 @@ def handle_orch_task_command(
                 reply_markup=_orch_status_reply_markup(manager_state, key, entry),
             )
             return True
+
+    if cmd in {"orch-bgx-emit-ack", "orch-bgx-emit-result"}:
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "external background harness blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context=f"{cmd} blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        run_lock_mode = project_run_lock_mode(entry)
+        if run_lock_mode != "test_only":
+            send(
+                "external background harness blocked\n"
+                f"- runtime: {key}\n"
+                f"- run_lock: {run_lock_mode or 'open'}\n"
+                "- reason: harness commands are limited to test_only runtimes\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context=f"{cmd} blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if not team_dir_raw:
+            send(
+                "external background harness blocked\n"
+                f"- runtime: {key}\n"
+                "- reason: team_dir missing\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context=f"{cmd} blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        snapshot = _external_background_artifact_snapshot(entry)
+        ticket_id = str(snapshot.get("ticket_id", "")).strip()
+        runner_target = str(snapshot.get("runner_target", "")).strip().lower()
+        if not ticket_id or runner_target not in {"github_runner", "remote_worker"}:
+            send(
+                "external background harness blocked\n"
+                f"- runtime: {key}\n"
+                "- reason: no external ticket is available\n"
+                "next:\n"
+                f"- /orch bgx-status {alias}",
+                context=f"{cmd} blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        team_dir = Path(team_dir_raw).expanduser().resolve()
+        queue_path = background_runs.background_runs_state_path(team_dir)
+        if cmd == "orch-bgx-emit-ack":
+            emit_external_background_ack(
+                queue_path=queue_path,
+                ticket_id=ticket_id,
+                runner_target=runner_target,
+                now_iso=now_iso,
+            )
+            poll_result = poll_external_background_tickets(
+                queue_path=queue_path,
+                now_iso=now_iso,
+                ack_source_command=f"/orch bgx-emit-ack {alias}",
+            )
+            if bool(poll_result.get("changed")) and (not args.dry_run):
+                if _sync_background_run_snapshots_from_queue(entry, queue_path):
+                    entry["updated_at"] = now_iso()
+                    save_manager_state(args.manager_state_file, manager_state)
+            updated_snapshot = _external_background_artifact_snapshot(entry)
+            next_step = external_background_priority_action_snapshot(
+                alias=alias,
+                task_label=str(updated_snapshot.get("label", "")).strip(),
+                background_run_runner_target=str(updated_snapshot.get("runner_target", "")).strip(),
+                background_run_external_phase=str(updated_snapshot.get("phase", "")).strip(),
+                background_run_external_note=str(updated_snapshot.get("note", "")).strip(),
+                run_lock_mode=run_lock_mode,
+            ).get("action", "") or f"/orch bgx-status {alias}"
+            send(
+                "external background pickup ack emitted\n"
+                f"- runtime: {key}\n"
+                f"- runner: {runner_target}\n"
+                f"- ticket: {ticket_id}\n"
+                f"- ack: {str(updated_snapshot.get('ack_path', '-')).strip() or '-'}\n"
+                f"- phase: {str(updated_snapshot.get('phase', '-')).strip() or '-'}\n"
+                "next:\n"
+                f"- {next_step}",
+                context="orch-bgx-emit-ack",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+
+        terminal_status = str(rest or "").strip().lower() or "completed"
+        if terminal_status not in {"completed", "failed"}:
+            send(
+                "external background result harness blocked\n"
+                f"- runtime: {key}\n"
+                f"- reason: invalid result status `{terminal_status}`\n"
+                "next:\n"
+                f"- /orch bgx-result {alias}",
+                context="orch-bgx-emit-result blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        emit_external_background_result(
+            queue_path=queue_path,
+            ticket_id=ticket_id,
+            runner_target=runner_target,
+            now_iso=now_iso,
+            status=terminal_status,
+        )
+        poll_result = poll_external_background_tickets(
+            queue_path=queue_path,
+            now_iso=now_iso,
+            result_source_command=f"/orch bgx-emit-result {alias} {terminal_status}",
+        )
+        if bool(poll_result.get("changed")) and (not args.dry_run):
+            if _sync_background_run_snapshots_from_queue(entry, queue_path):
+                entry["updated_at"] = now_iso()
+                save_manager_state(args.manager_state_file, manager_state)
+        updated_snapshot = _external_background_artifact_snapshot(entry)
+        next_step = external_background_priority_action_snapshot(
+            alias=alias,
+            task_label=str(updated_snapshot.get("label", "")).strip(),
+            background_run_runner_target=str(updated_snapshot.get("runner_target", "")).strip(),
+            background_run_external_phase=str(updated_snapshot.get("phase", "")).strip(),
+            background_run_external_note=str(updated_snapshot.get("note", "")).strip(),
+            run_lock_mode=run_lock_mode,
+        ).get("action", "") or f"/offdesk review {alias}"
+        send(
+            "external background result emitted\n"
+            f"- runtime: {key}\n"
+            f"- runner: {runner_target}\n"
+            f"- ticket: {ticket_id}\n"
+            f"- result: {str(updated_snapshot.get('result_path', '-')).strip() or '-'}\n"
+            f"- phase: {str(updated_snapshot.get('phase', '-')).strip() or '-'}\n"
+            "next:\n"
+            f"- {next_step}",
+            context="orch-bgx-emit-result",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
 
         artifact_path = str(snapshot.get("artifact_path", "")).strip() or "-"
         artifact_exists = str(snapshot.get("artifact_exists", "")).strip() or "no"

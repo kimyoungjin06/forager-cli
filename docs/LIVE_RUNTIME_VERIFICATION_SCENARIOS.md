@@ -207,7 +207,7 @@
 - intent:
   - validate the non-local runner lifecycle used by rerun/manual-followup reentry rails
 - current status:
-  - `bounded_replay_pass`
+  - `live_rehearsal_ready`
 - current finding:
   - bounded replay now proves:
     - `github_runner`/`remote_worker` handoff manifests are persisted
@@ -215,6 +215,7 @@
     - `/orch status`, `/orch bgx-status`, and `/offdesk review` expose the same external phase and next step
     - artifact inspect commands surface `handoff`, `ack`, and `result` directly
     - same-runner queue ordering now reflects `launch-mode priority + starvation guard`
+    - `test_only` harness commands can now emit bounded external `ack/result` sidecars without a real external runner
 - expected branch:
   - `rerun`
 - must prove:

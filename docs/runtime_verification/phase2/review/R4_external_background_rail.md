@@ -8,13 +8,13 @@
 - branch_target:
   - `rerun`
 - status:
-  - `bounded_replay_pass`
+  - `live_rehearsal_ready`
 - proof_mode:
   - `bounded_replay`
 - promotion_gate:
-  - `handoff, ack, result, inspect surfaces, and starvation-aware scheduler behavior are already proven`
+  - `handoff, ack, result, inspect surfaces, starvation-aware scheduler behavior, and test-only external harness commands are already proven`
 - live_gate:
-  - `defer until a safe test-only external pickup harness exists`
+  - `ready for an isolated test_only rehearsal that emits handoff, ack, and result through the harness commands`
 - executed_at:
   - `2026-04-08 KST`
 - operator:
@@ -150,7 +150,7 @@
   - `operator surface is split cleanly into summary (`/orch bgx-status`) and artifact inspect commands (`/orch bgx-handoff`, `/orch bgx-ack`, `/orch bgx-result`)`
   - `scheduler head now reflects actual starvation-aware claim ordering rather than raw launch-mode sort only`
 - next fix:
-  - `promote this bounded replay proof to a later live external-runner rehearsal only after a safe test-only pickup harness exists`
+  - `capture one isolated test_only external harness rehearsal and then decide whether real external pickup is worth proving live`
 
 ## 7. Raw References
 - runtime state refs:
@@ -173,3 +173,4 @@
   - `background_run_acks/*.json`
   - `background_run_results/*.json`
   - `action-history.jsonl`
+  - `test-only harness commands: /orch bgx-emit-ack, /orch bgx-emit-result`
