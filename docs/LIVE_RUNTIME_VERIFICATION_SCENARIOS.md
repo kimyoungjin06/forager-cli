@@ -178,6 +178,9 @@
 #### R3. Manual Followup Path
 - intent:
   - review surfaces a real tradeoff but acceptance threshold belongs to the operator
+- current promotion decision:
+  - `preview_surface` is the first `live_rehearsal_ready` candidate because it is read-only and launch-free
+  - `execute_surface` remains bounded replay only until launch-bearing followup rehearsal is explicitly approved
 - expected branch:
   - `manual followup`
 - must prove:

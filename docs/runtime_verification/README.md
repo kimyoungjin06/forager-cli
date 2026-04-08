@@ -111,6 +111,21 @@
   - queue / runner behavior is already bounded and inspectable
 - do not skip directly from `planned` to `executed_done` for new non-happy-path rails
 
+## Current Promotion Decision
+- first `live_rehearsal_ready` candidate:
+  - `review/R3_manual_followup_preview.md`
+- reason:
+  - read-only operator-surface proof
+  - no internal launch
+  - no runner dependency
+  - direct verification of `FollowupBrief.status=preview_only` parity
+- still bounded replay only:
+  - `review/R2_rerun_path.md`
+  - `review/R3_manual_followup_execute.md`
+  - `review/R4_external_background_rail.md`
+- reason:
+  - these still depend on launch-bearing rails, runner safety, or external pickup guarantees
+
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
   - preview proof

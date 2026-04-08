@@ -9,13 +9,13 @@
   - `manual_followup`
   - `preview_surface`
 - status:
-  - `bounded_replay_pass`
+  - `live_rehearsal_ready`
 - proof_mode:
   - `bounded_replay`
 - promotion_gate:
   - `preview/execute split and dashboard parity are already proven`
 - live_gate:
-  - `no live execute is needed while followup preview remains intentionally read-only`
+  - `safe under test-only posture because preview is read-only and launches no internal work`
 - executed_at:
   - `2026-04-07 KST`
 - operator:
@@ -118,7 +118,7 @@
   - `preview surface is now explicitly distinct from execute surface`
   - `/followup-exec` rejects preview_only and routes operator back to safe preview`
 - next fix:
-  - `promote the same proof to a later live runtime replay if needed, but no additional core change is required for preview split`
+  - `capture one read-only live rehearsal over /followup, /task, /offdesk review, and dashboard parity without launching any internal job`
 
 ## 7. Raw References
 - runtime state refs:

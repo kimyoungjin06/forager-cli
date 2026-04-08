@@ -205,11 +205,27 @@ without drifting from the preset completion matrix.
 
 ### 8.5 Live Rehearsal Safety Gate
 - even if a scenario is `live_rehearsal_ready`, do not run it live when:
-  - `run_lock_mode=test_only`
+  - `run_lock_mode=test_only` and the scenario requires an internal launch or mutation
   - the required runner target is not safe/available
   - the scenario still depends on non-serializable launch behavior
   - operator-facing remediation is still ambiguous
 - in those cases, the scenario should remain `bounded_replay_pass` until the gate is cleared
+
+### 8.6 Read-only Exception
+- read-only operator-surface rehearsals may still be promoted to `live_rehearsal_ready`
+- required conditions:
+  - no internal launch
+  - no runner pickup
+  - no background mutation
+  - proof target is operator-surface parity itself
+
+### 8.7 First-Candidate Rule
+- the first live rehearsal candidate should prefer the narrowest safe scope:
+  - read-only
+  - no background rail
+  - no runner dependency
+  - no mutation beyond operator-surface inspection
+- only after a read-only rehearsal exists should launch-bearing rerun/followup rails be promoted
 
 ## 9. Failure Classes
 
