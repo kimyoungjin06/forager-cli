@@ -115,6 +115,15 @@
   - `REF-GHCA-1`
   - `REF-API-1`
 
+### 3.8 Model + Harness Routing Basis
+- Decision basis for mixing premium/open models and placing third-party tools by layer:
+  - `docs/MODEL_HARNESS_ROUTING_BASIS_20260408.md`
+- Canonical reading:
+  - `on-desk` defaults to a terminal-native coding shell
+  - `off-desk` remains the control plane
+  - `LangGraph` is a re-platforming option, not the default off-desk answer
+  - `OpenClaw` is a daemon/gateway option, not the canonical task/runtime truth
+
 ## 4. Package A: Session Search
 
 ### 4.1 Goal

@@ -129,3 +129,5 @@
   - `REF-CC-2`
   - `REF-GHCA-1`
   - `REF-API-1`
+- `docs/MODEL_HARNESS_ROUTING_BASIS_20260408.md`
+  - layer placement for on-desk shells, off-desk control, and model-routing policy

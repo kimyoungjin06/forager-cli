@@ -136,6 +136,15 @@
     - runner-specific launch and pickup behavior는 adapter 책임으로 분리
   - 구현 기준선:
     - `scripts/gateway/aoe_tg_executor_adapter.py`
+- [x] model + harness routing basis fixed
+  - 문서:
+    - `docs/MODEL_HARNESS_ROUTING_BASIS_20260408.md`
+  - 핵심 판단:
+    - `on-desk` 기본값은 terminal-native coding shell
+    - `off-desk` 기본값은 current control plane
+    - `LangGraph`는 orchestration re-platform option이지 기본 off-desk 답이 아님
+    - `OpenClaw`는 daemon/gateway option이지 canonical task/runtime truth가 아님
+    - premium models are for judgment, open/local models are for execution
 
 ### 8.1 Cleanup and Naming
 - [x] stale PR 정리 완료
