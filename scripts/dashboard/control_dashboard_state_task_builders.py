@@ -331,6 +331,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             background_run_launch_spec_summary=(
                 str(task.get("background_run_launch_spec_summary", "")).strip() or "-"
             ),
+            background_run_model_plan_summary=(
+                str(task.get("background_run_model_plan_summary", "")).strip() or "-"
+            ),
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,

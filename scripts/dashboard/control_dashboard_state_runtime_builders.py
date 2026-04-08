@@ -267,6 +267,9 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 active_task_background_run_launch_spec_summary=(
                     str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
                 ),
+                active_task_background_run_model_plan_summary=(
+                    str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
+                ),
                 workspace_summary=workspace_summary,
                 document_registry_summary=document_registry_summary,
                 model_routing_summary=model_routing_summary,
@@ -616,6 +619,9 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         or "-",
         active_task_background_run_launch_spec_summary=(
             str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_model_plan_summary=(
+            str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
         ),
         workspace_summary=workspace_summary,
         document_registry_summary=document_registry_summary,

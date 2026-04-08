@@ -1304,6 +1304,7 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
             "background_run_evidence_bundle": "status=pending | outcome=awaiting_review",
             "background_run_evidence_artifacts": ["review_evidence/git_diff_scope.md"],
             "background_run_launch_spec_summary": "gateway_dispatch | mode=in_process_callback | entry=aoe-telegram-gateway | externalizable=no | requires in-process callback registry",
+            "background_run_model_plan_summary": "pack=review | worker=none | judge=none | escalation=none",
             "plan_review_count": 3,
             "plan_issue_history": [
                 {"round": 1, "review_pass": "contract", "status": "issues", "primary_issue": "missing acceptance criteria", "issue_codes": ["acceptance_gap"], "issue_count": 1},
@@ -1334,6 +1335,7 @@ def test_plan_critic_primary_issue_and_lifecycle_summary_use_schema_reason() -> 
     assert "background_run_evidence: status=pending | outcome=awaiting_review" in summary
     assert "background_run_artifacts: review_evidence/git_diff_scope.md" in summary
     assert "background_run_launch_spec: gateway_dispatch | mode=in_process_callback | entry=aoe-telegram-gateway | externalizable=no" in summary
+    assert "background_run_model_plan: pack=review | worker=none | judge=none | escalation=none" in summary
     assert "plan_convergence: stalled reviews=3 last_round=3" in summary
     assert "plan_stalled_reason: missing acceptance criteria" in summary
     assert "plan_review_focus: verification | missing acceptance criteria" in summary

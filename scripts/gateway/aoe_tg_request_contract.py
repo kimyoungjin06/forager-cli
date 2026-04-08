@@ -258,6 +258,13 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         ("source_surface", 64),
         ("created_by", 96),
         ("blocked_reason", 240),
+        ("model_pack_profile", 64),
+        ("model_worker_route_id", 64),
+        ("model_judge_route_id", 64),
+        ("model_escalation_route_id", 64),
+        ("model_worker_endpoint_id", 64),
+        ("model_judge_endpoint_id", 64),
+        ("model_escalation_endpoint_id", 64),
     ):
         token = _trim(raw.get(key, ""), limit)
         if token:
@@ -293,6 +300,9 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         summary = " | ".join(parts)[:320]
     if summary:
         snapshot["summary"] = summary
+    model_plan_summary = _trim(raw.get("model_plan_summary", ""), 320)
+    if model_plan_summary:
+        snapshot["model_plan_summary"] = model_plan_summary
     return snapshot
 
 
@@ -1215,6 +1225,14 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_launch_spec_mode": launch_spec.get("mode", ""),
             "background_run_launch_spec_summary": launch_spec.get("summary", ""),
             "background_run_launch_spec_externalizable": bool(launch_spec.get("externalizable", False)),
+            "background_run_model_pack_profile": launch_spec.get("model_pack_profile", ""),
+            "background_run_model_plan_summary": launch_spec.get("model_plan_summary", ""),
+            "background_run_model_worker_route_id": launch_spec.get("model_worker_route_id", ""),
+            "background_run_model_judge_route_id": launch_spec.get("model_judge_route_id", ""),
+            "background_run_model_escalation_route_id": launch_spec.get("model_escalation_route_id", ""),
+            "background_run_model_worker_endpoint_id": launch_spec.get("model_worker_endpoint_id", ""),
+            "background_run_model_judge_endpoint_id": launch_spec.get("model_judge_endpoint_id", ""),
+            "background_run_model_escalation_endpoint_id": launch_spec.get("model_escalation_endpoint_id", ""),
         }
     )
 

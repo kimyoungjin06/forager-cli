@@ -1178,6 +1178,14 @@ def sanitize_task_record(
                 "mode": task.get("background_run_launch_spec_mode"),
                 "summary": task.get("background_run_launch_spec_summary"),
                 "externalizable": task.get("background_run_launch_spec_externalizable"),
+                "model_pack_profile": task.get("background_run_model_pack_profile"),
+                "model_plan_summary": task.get("background_run_model_plan_summary"),
+                "model_worker_route_id": task.get("background_run_model_worker_route_id"),
+                "model_judge_route_id": task.get("background_run_model_judge_route_id"),
+                "model_escalation_route_id": task.get("background_run_model_escalation_route_id"),
+                "model_worker_endpoint_id": task.get("background_run_model_worker_endpoint_id"),
+                "model_judge_endpoint_id": task.get("background_run_model_judge_endpoint_id"),
+                "model_escalation_endpoint_id": task.get("background_run_model_escalation_endpoint_id"),
             },
         }
     )
@@ -1206,6 +1214,14 @@ def sanitize_task_record(
             "background_run_launch_spec_mode",
             "background_run_launch_spec_summary",
             "background_run_launch_spec_externalizable",
+            "background_run_model_pack_profile",
+            "background_run_model_plan_summary",
+            "background_run_model_worker_route_id",
+            "background_run_model_judge_route_id",
+            "background_run_model_escalation_route_id",
+            "background_run_model_worker_endpoint_id",
+            "background_run_model_judge_endpoint_id",
+            "background_run_model_escalation_endpoint_id",
         ):
             task.pop(key, None)
 

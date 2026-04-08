@@ -17,6 +17,7 @@ from aoe_tg_local_background_worker import (
     ensure_local_background_daemon,
     register_local_background_run,
 )
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
     build_background_launch_spec,
@@ -116,6 +117,8 @@ def maybe_handle_no_wait_dispatch_detach(
     )
     if selected_runner_target != "local_tmux":
         launch_spec = fallback_launch_spec
+    model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=provisional_task)
+    launch_spec.update(model_endpoint_adapter.launch_spec_model_plan_metadata(model_plan))
 
     if selected_runner_target in {"local_tmux", "github_runner", "remote_worker"} and queue_path:
         slot_snapshot = summarize_background_runner_slots(

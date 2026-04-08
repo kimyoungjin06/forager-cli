@@ -345,7 +345,13 @@ def summarize_model_endpoint_registry(team_dir: Any, *, entry: Any = None) -> st
     )
 
 
-def resolve_task_model_plan(team_dir: Any, *, entry: Any = None, task: Any = None) -> Dict[str, Any]:
+def resolve_task_model_plan(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+) -> Dict[str, Any]:
     task_data = task if isinstance(task, dict) else {}
     entry_data = entry if isinstance(entry, dict) else {}
     pack = load_context_pack(
@@ -354,7 +360,7 @@ def resolve_task_model_plan(team_dir: Any, *, entry: Any = None, task: Any = Non
         task=task_data,
         project_root=entry_data.get("project_root"),
     )
-    profile = _trim(pack.get("profile"), 64) or "on_desk_plan"
+    profile = _trim(pack_profile_override, 64).lower() or _trim(pack.get("profile"), 64) or "on_desk_plan"
     worker_profiles = {"offdesk_execute", "review", "followup_execute", "incident_recovery"}
     judge_profiles = {"offdesk_execute", "review", "followup_preview", "followup_execute", "incident_recovery"}
     use_worker = profile in worker_profiles
@@ -387,4 +393,21 @@ def resolve_task_model_plan(team_dir: Any, *, entry: Any = None, task: Any = Non
         "judge_route": judge_route if isinstance(judge_route, dict) else {},
         "escalation_route": escalation_route if isinstance(escalation_route, dict) else {},
         "summary": " | ".join(parts),
+    }
+
+
+def launch_spec_model_plan_metadata(plan: Any) -> Dict[str, str]:
+    data = plan if isinstance(plan, dict) else {}
+    worker = data.get("worker_route") if isinstance(data.get("worker_route"), dict) else {}
+    judge = data.get("judge_route") if isinstance(data.get("judge_route"), dict) else {}
+    escalation = data.get("escalation_route") if isinstance(data.get("escalation_route"), dict) else {}
+    return {
+        "model_pack_profile": _trim(data.get("pack_profile"), 64),
+        "model_plan_summary": _trim(data.get("summary"), 320),
+        "model_worker_route_id": _trim(worker.get("route_id"), 64),
+        "model_judge_route_id": _trim(judge.get("route_id"), 64),
+        "model_escalation_route_id": _trim(escalation.get("route_id"), 64),
+        "model_worker_endpoint_id": _trim(worker.get("endpoint_id"), 64),
+        "model_judge_endpoint_id": _trim(judge.get("endpoint_id"), 64),
+        "model_escalation_endpoint_id": _trim(escalation.get("endpoint_id"), 64),
     }

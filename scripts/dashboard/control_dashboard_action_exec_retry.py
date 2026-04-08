@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 import aoe_tg_background_runs as background_runs
 import aoe_tg_chat_state as chat_state
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_executor_dispatch import (
     build_gateway_command_launch_spec_for_adapter,
     launch_background_ticket_via_adapter,
@@ -309,6 +310,14 @@ def _maybe_execute_retry_background_runner(
     queue_path = background_runs.background_runs_state_path(Path(team_dir_raw))
     current_ts = _now_iso()
     source_task = gateway_task_state.get_task_record(entry, source_request_id)
+    pack_profile_override = "followup_execute" if control_mode == "followup" else "review"
+    model_plan = model_endpoint_adapter.resolve_task_model_plan(
+        team_dir_raw,
+        entry=entry,
+        task=source_task,
+        pack_profile_override=pack_profile_override,
+    )
+    launch_spec.update(model_endpoint_adapter.launch_spec_model_plan_metadata(model_plan))
     ticket = build_background_run_ticket(
         request_id=source_request_id,
         project_key=project_key,
@@ -349,13 +358,19 @@ def _maybe_execute_retry_background_runner(
             "tf_phase": str(source_task.get("tf_phase", "")).strip() or "-",
             "detail_path": f"/control/tasks/by-request/{source_request_id}",
         }
+    ticket_launch_spec = ticket_snapshot.get("launch_spec") if isinstance(ticket_snapshot.get("launch_spec"), dict) else {}
     background_payload = {
         "ticket_id": str(ticket_snapshot.get("ticket_id", "")).strip() or "-",
         "status": str(ticket_snapshot.get("status", "")).strip() or "-",
         "runner_target": str(ticket_snapshot.get("runner_target", "")).strip() or selected_runner,
         "runtime_handle": str(ticket_snapshot.get("runtime_handle", "")).strip() or "-",
         "runtime_summary": str(ticket_snapshot.get("runtime_summary", "")).strip() or "-",
-        "launch_spec": str((ticket_snapshot.get("launch_spec") or {}).get("summary", "")).strip() or "-",
+        "launch_spec": str(ticket_launch_spec.get("summary", "")).strip() or "-",
+        "model_plan": str(ticket_launch_spec.get("model_plan_summary", "")).strip() or "-",
+        "model_pack_profile": str(ticket_launch_spec.get("model_pack_profile", "")).strip() or "-",
+        "model_worker_route_id": str(ticket_launch_spec.get("model_worker_route_id", "")).strip() or "-",
+        "model_judge_route_id": str(ticket_launch_spec.get("model_judge_route_id", "")).strip() or "-",
+        "model_escalation_route_id": str(ticket_launch_spec.get("model_escalation_route_id", "")).strip() or "-",
     }
     blocked = str(ticket_snapshot.get("status", "")).strip().lower() == "failed"
     detail = str(ticket_snapshot.get("evidence_bundle", "")).strip() or "background_runner_launch_failed"

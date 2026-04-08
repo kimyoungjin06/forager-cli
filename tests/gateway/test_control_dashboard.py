@@ -1314,6 +1314,11 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
     assert payload["background_run"]["runner_target"] == "local_tmux"
     assert payload["background_run"]["status"] == "running"
     assert payload["background_run"]["runtime_handle"] == "aoe_bg_retry_req_1"
+    assert payload["background_run"]["model_plan"] == (
+        "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
+    assert payload["background_run"]["model_pack_profile"] == "review"
+    assert payload["background_run"]["model_worker_route_id"] == "background_worker_primary"
     assert payload["transition"]["run_source_request_id"] == "REQ-1"
     assert payload["task"]["request_id"] == "REQ-1"
     assert payload["task"]["detail_path"] == "/control/tasks/by-request/REQ-1"
@@ -1324,6 +1329,10 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
     assert task["background_run_status"] == "running"
     assert task["background_run_ticket_id"].startswith("BGT-REQ-1-")
     assert task["background_run_runtime_handle"] == "aoe_bg_retry_req_1"
+    assert task["background_run_model_pack_profile"] == "review"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
     queue_path = Path(updated["projects"]["alpha"]["team_dir"]) / "background_runs.json"
     rows = background_runs.load_background_runs_state(queue_path).get("runs") or []
     launched = [row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-1-")]
@@ -1331,6 +1340,10 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
     assert launched[0]["runner_target"] == "local_tmux"
     assert launched[0]["status"] == "running"
     assert launched[0]["runtime_handle"] == "aoe_bg_retry_req_1"
+    assert launched[0]["launch_spec"]["model_pack_profile"] == "review"
+    assert launched[0]["launch_spec"]["model_plan_summary"] == (
+        "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
 
 
 def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred(tmp_path: Path, monkeypatch) -> None:
@@ -1371,6 +1384,10 @@ def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_pre
     assert payload["next_step"] == "/orch status O2"
     assert payload["background_run"]["runner_target"] == "github_runner"
     assert payload["background_run"]["status"] == "running"
+    assert payload["background_run"]["model_plan"] == (
+        "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
+    assert payload["background_run"]["model_pack_profile"] == "review"
     runtime_handle = payload["background_run"]["runtime_handle"]
     assert runtime_handle.startswith("background_run_handoffs/")
     assert runtime_handle.endswith(".json")
@@ -1384,6 +1401,10 @@ def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_pre
     assert task["background_run_status"] == "running"
     assert task["background_run_ticket_id"].startswith("BGT-REQ-1-")
     assert task["background_run_runtime_handle"] == runtime_handle
+    assert task["background_run_model_pack_profile"] == "review"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
     queue_path = Path(updated["projects"]["alpha"]["team_dir"]) / "background_runs.json"
     rows = background_runs.load_background_runs_state(queue_path).get("runs") or []
     launched = [row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-1-")]
@@ -1391,6 +1412,10 @@ def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_pre
     assert launched[0]["runner_target"] == "github_runner"
     assert launched[0]["status"] == "running"
     assert launched[0]["runtime_handle"] == runtime_handle
+    assert launched[0]["launch_spec"]["model_pack_profile"] == "review"
+    assert launched[0]["launch_spec"]["model_plan_summary"] == (
+        "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
     handoff_path = Path(updated["projects"]["alpha"]["team_dir"]) / runtime_handle
     assert handoff_path.exists()
     handoff_payload = json.loads(handoff_path.read_text(encoding="utf-8"))
@@ -1922,8 +1947,19 @@ def test_control_dashboard_post_followup_execute_route_uses_local_tmux_backgroun
     assert payload["background_run"]["runner_target"] == "local_tmux"
     assert payload["background_run"]["status"] == "running"
     assert payload["background_run"]["runtime_handle"] == "aoe_bg_followup_req_1"
+    assert payload["background_run"]["model_plan"] == (
+        "pack=followup_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
+    assert payload["background_run"]["model_pack_profile"] == "followup_execute"
     assert payload["transition"]["run_control_mode"] == "followup"
     assert payload["next_step"] == "/orch status O2"
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert task["background_run_model_pack_profile"] == "followup_execute"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=followup_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
 
 
 def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_path: Path) -> None:

@@ -1891,6 +1891,10 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     assert task["background_run_runtime_handle"] == "aoe_bg_req_detached_tmux"
     assert task["background_run_launch_spec_summary"].startswith("background_dispatch | mode=tmux_session_json")
     assert task["background_run_launch_spec_summary"].endswith("externalizable=yes")
+    assert task["background_run_model_pack_profile"] == "offdesk_execute"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
     queue_file = team_dir / "background_runs.json"
     rows = json.loads(queue_file.read_text(encoding="utf-8")).get("runs") or []
     row = next(row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-DETACHED-TMUX-"))
@@ -1898,6 +1902,10 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     assert row["status"] == "running"
     assert row["launch_spec"]["externalizable"] is True
     assert row["launch_spec"]["mode"] == "tmux_session_json"
+    assert row["launch_spec"]["model_pack_profile"] == "offdesk_execute"
+    assert row["launch_spec"]["model_plan_summary"] == (
+        "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
     assert row["launch_spec"]["command_argv"][1] == gateway_cli_entrypoint_path()
     assert "--simulate-text" in row["launch_spec"]["command_argv"]
     assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in row["launch_spec"]["command_argv"]
@@ -2043,6 +2051,10 @@ def test_no_wait_detach_falls_back_to_local_background_without_manager_state_fil
     task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-FALLBACK"]
     assert task["background_run_runner_target"] == "local_background"
     assert task["background_run_launch_spec_summary"].startswith("gateway_dispatch | mode=in_process_callback")
+    assert task["background_run_model_pack_profile"] == "offdesk_execute"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
 
 
 def test_no_wait_detach_blocks_when_run_lock_is_test_only(
