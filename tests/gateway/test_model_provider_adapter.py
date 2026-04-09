@@ -159,6 +159,66 @@ def test_invoke_task_judge_stub_uses_resolved_judge_route(tmp_path: Path) -> Non
     assert result["response_text"] == "judge: proceed"
 
 
+def test_invoke_task_research_stub_uses_research_route(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-gemma4",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "gemma4:26b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "research_synthesis": {"endpoint_id": "ollama-gemma4"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "http://172.16.0.37:11434/api/generate"
+        assert payload["model"] == "gemma4:26b"
+        assert payload["prompt"] == "research this"
+        return {"response": "research: ok", "done": True}
+
+    result = provider_adapter.invoke_task_research_stub(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1"},
+        prompt="research this",
+        pack_profile_override="on_desk_plan",
+        post_json=_fake_post,
+    )
+
+    assert result["kind"] == "research"
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["route_id"] == "research_synthesis"
+    assert result["model"] == "gemma4:26b"
+    assert result["response_text"] == "research: ok"
+
+
 def test_invoke_task_worker_stub_uses_worker_route_with_pack_override(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)

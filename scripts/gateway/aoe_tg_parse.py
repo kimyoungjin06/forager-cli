@@ -1195,6 +1195,32 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                 i += 1
             return {"cmd": "orch-bgx-emit-result", "orch": orch_name, "rest": result_status}
 
+        if sub in {"model-ping", "model-invoke"}:
+            orch_name: Optional[str] = None
+            model_kind: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch model-ping [--orch <name>] <research|judge|escalation>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    lowered = tok.strip().lower()
+                    if lowered in {"research", "judge", "escalation"}:
+                        model_kind = lowered
+                    else:
+                        if orch_name is not None:
+                            raise RuntimeError("usage: aoe orch model-ping [--orch <name>] <research|judge|escalation>")
+                        orch_name = tok.strip()
+                i += 1
+            if not orch_name or not model_kind:
+                raise RuntimeError("usage: aoe orch model-ping [--orch <name>] <research|judge|escalation>")
+            return {"cmd": "orch-model-ping", "orch": orch_name, "rest": model_kind}
+
         if sub in {"bgw-start", "worker-start"}:
             orch_name: Optional[str] = None
             i = 0

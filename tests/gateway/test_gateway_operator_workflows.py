@@ -250,6 +250,107 @@ def test_orch_bgw_ping_executes_test_only_provider_harness(tmp_path: Path, monke
     assert audit_rows[-1]["outcome_reason_code"] == "completed"
 
 
+def test_orch_model_ping_executes_research_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    monkeypatch.setattr(
+        orch_task_handlers.model_provider_adapter,
+        "invoke_task_research_stub",
+        lambda team_dir, **kwargs: {
+            "kind": "research",
+            "ok": True,
+            "executed": True,
+            "summary": "route=research_synthesis endpoint=ollama-gemma4 model=gemma4:26b",
+            "response_text": "RESEARCH_PING_OK",
+            "reason_code": "ok",
+        },
+    )
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="research",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-09T15:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-model-ping", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-model-ping"
+    assert "model ping" in text
+    assert "- kind: research" in text
+    assert "- executed: yes" in text
+    assert "- ok: yes" in text
+    assert "- response: RESEARCH_PING_OK" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch model-ping O2 research" in buttons
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert audit_rows[-1]["source_command"] == "/orch model-ping O2 research"
+    assert audit_rows[-1]["outcome_reason_code"] == "ok"
+
+
 def test_orch_map_reply_markup_narrows_to_locked_project() -> None:
     state = _empty_state()
     state["projects"]["twinpaper"] = {
@@ -366,6 +467,25 @@ def test_resolve_message_command_parses_slash_orch_bgw_ping() -> None:
 
     assert resolved.cmd == "orch-bgw-ping"
     assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_model_ping() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch model-ping O2 research",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-model-ping"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "research"
 
 
 def test_resolve_message_command_parses_slash_orch_bgx_status() -> None:

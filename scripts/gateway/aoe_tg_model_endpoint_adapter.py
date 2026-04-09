@@ -444,6 +444,30 @@ def resolve_task_worker_binding(
     return binding
 
 
+def resolve_task_research_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+) -> Dict[str, Any]:
+    entry_data = entry if isinstance(entry, dict) else {}
+    profile = _trim(pack_profile_override, 64).lower()
+    if not profile:
+        pack = load_context_pack(
+            team_dir,
+            entry=entry_data,
+            task=task if isinstance(task, dict) else {},
+            project_root=entry_data.get("project_root"),
+        )
+        profile = _trim(pack.get("profile"), 64) or "on_desk_plan"
+    binding = resolve_model_binding_snapshot(team_dir, "research_synthesis", entry=entry_data)
+    binding["source"] = "task_plan"
+    binding["pack_profile"] = profile
+    binding["plan_summary"] = f"pack={profile} | research={_trim(binding.get('summary'), 240) or 'none'}"
+    return binding
+
+
 def resolve_task_judge_binding(
     team_dir: Any,
     *,
@@ -700,6 +724,36 @@ def probe_task_judge_binding(
     result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
     result["binding"] = binding
     result["route_id"] = _trim(route.get("route_id"), 64).lower() or "offdesk_judge"
+    return result
+
+
+def probe_task_research_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+    timeout_sec: float = 3.0,
+    fetch_json: Any = None,
+) -> Dict[str, Any]:
+    binding = resolve_task_research_binding(
+        team_dir,
+        entry=entry,
+        task=task,
+        pack_profile_override=pack_profile_override,
+    )
+    route = binding.get("route") if isinstance(binding.get("route"), dict) else {}
+    endpoint = binding.get("endpoint") if isinstance(binding.get("endpoint"), dict) else {}
+    if not binding.get("bound"):
+        return {
+            "ok": False,
+            "probe_status": "unbound",
+            "summary": _trim(route.get("summary"), 240) or "research_route=unbound",
+            "binding": binding,
+        }
+    result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
+    result["binding"] = binding
+    result["route_id"] = _trim(route.get("route_id"), 64).lower() or "research_synthesis"
     return result
 
 

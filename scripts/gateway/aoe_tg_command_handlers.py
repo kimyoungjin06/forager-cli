@@ -116,6 +116,7 @@ _ORCH_DISCOVERY_TRIGGER_CMDS = {
     "orch-bg-runner",
     "orch-bgw-status",
     "orch-bgw-ping",
+    "orch-model-ping",
     "orch-bgw-start",
     "orch-bgw-stop",
     "orch-monitor",

@@ -325,6 +325,12 @@ def resolve_message_command(
                 elif sub in {"bgw-ping", "worker-ping"}:
                     out.cmd = "orch-bgw-ping"
                     out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"model-ping", "model-invoke"}:
+                    out.cmd = "orch-model-ping"
+                    out.orch_target = tail[0].strip() if tail else None
+                    out.rest = tail[1].strip() if len(tail) > 1 else ""
+                    if not out.orch_target or not out.rest:
+                        raise RuntimeError("usage: /orch model-ping <O#|name> <research|judge|escalation>")
                 elif sub in {"bgx-status", "external-status", "background-external-status"}:
                     out.cmd = "orch-bgx-status"
                     out.orch_target = tail[0].strip() if tail else None
@@ -373,7 +379,7 @@ def resolve_message_command(
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-ping|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-ping|model-ping|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -506,6 +512,9 @@ def resolve_message_command(
                 out.orch_target = quick.get("orch")
             elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-ping", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = quick.get("orch")
+            elif out.cmd == "orch-model-ping":
+                out.orch_target = quick.get("orch")
+                out.rest = str(quick.get("rest", "")).strip()
             elif out.cmd == "orch-bg-runner":
                 out.orch_target = quick.get("orch")
                 out.rest = str(quick.get("runner_target", "")).strip()
@@ -575,6 +584,9 @@ def resolve_message_command(
                 _apply_add_role_cli(cli)
             elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-ping", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = cli.get("orch")
+            elif out.cmd == "orch-model-ping":
+                out.orch_target = cli.get("orch")
+                out.rest = str(cli.get("rest", "")).strip()
             elif out.cmd == "orch-bg-runner":
                 out.orch_target = cli.get("orch")
                 out.rest = str(cli.get("runner_target", "")).strip()
@@ -721,6 +733,7 @@ def resolve_message_command(
                 "orch-bgq-clean",
                 "orch-bgw-status",
                 "orch-bgw-ping",
+                "orch-model-ping",
                 "orch-bgx-status",
                 "orch-bgx-handoff",
                 "orch-bgx-ack",
@@ -773,6 +786,9 @@ def resolve_message_command(
                     out.orch_target = natural.get("orch")
                     if ncmd == "orch-bgx-emit-result":
                         out.rest = str(natural.get("rest", "")).strip()
+                elif ncmd == "orch-model-ping":
+                    out.orch_target = natural.get("orch")
+                    out.rest = str(natural.get("rest", "")).strip()
                 elif ncmd == "orch-bg-runner":
                     out.orch_target = natural.get("orch")
                     out.rest = str(natural.get("runner_target", "")).strip()

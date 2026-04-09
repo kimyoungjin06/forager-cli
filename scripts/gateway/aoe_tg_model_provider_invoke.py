@@ -17,7 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--team-dir", required=True, help="team_dir containing compiled model routing artifacts")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--route-id", help="Explicit route id to invoke, for example background_worker_primary")
-    mode.add_argument("--kind", choices=["worker", "judge", "escalation"], help="Task-scoped stub kind to invoke")
+    mode.add_argument("--kind", choices=["worker", "research", "judge", "escalation"], help="Task-scoped stub kind to invoke")
     parser.add_argument("--pack-profile", default="", help="Optional task pack profile override for --kind mode")
     parser.add_argument("--prompt", required=True, help="Prompt text")
     parser.add_argument("--system", default="", help="Optional system text")
@@ -39,6 +39,15 @@ def _invoke(args: argparse.Namespace) -> Dict[str, Any]:
     profile = str(args.pack_profile or "").strip().lower()
     if args.kind == "worker":
         return provider_adapter.invoke_task_worker_stub(
+            team_dir,
+            task=task_stub,
+            prompt=args.prompt,
+            system=args.system,
+            pack_profile_override=profile or None,
+            timeout_sec=float(args.timeout_sec or 30.0),
+        )
+    if args.kind == "research":
+        return provider_adapter.invoke_task_research_stub(
             team_dir,
             task=task_stub,
             prompt=args.prompt,

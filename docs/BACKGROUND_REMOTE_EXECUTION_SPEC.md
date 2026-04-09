@@ -224,6 +224,10 @@
     - only valid while `run_lock_mode=test_only`
     - writes one bounded `provider_invoke` local background ticket
     - immediately claims and executes the ticket through `background_worker_primary`
+  - `/orch model-ping O# <research|judge|escalation>`
+    - only valid while `run_lock_mode=test_only`
+    - performs one bounded direct provider invoke without a queue ticket
+    - intended for research/judge/escalation route validation while the runtime stays locked
   - `/orch bgx-emit-ack O#`
     - only valid while `run_lock_mode=test_only`
     - writes a bounded pickup acknowledgement sidecar for the latest external ticket

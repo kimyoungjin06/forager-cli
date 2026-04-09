@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import aoe_tg_background_runs as background_runs
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
+import aoe_tg_model_provider_adapter as model_provider_adapter
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import (
@@ -49,6 +50,11 @@ _BACKGROUND_SLOT_MIN = 1
 _BACKGROUND_SLOT_MAX = 8
 _BACKGROUND_WORKER_PING_PROMPT = "Reply with BGW_PING_OK only."
 _BACKGROUND_WORKER_PING_SYSTEM = "Return the exact token only."
+_MODEL_PING_SPECS = {
+    "research": ("RESEARCH_PING_OK", "on_desk_plan"),
+    "judge": ("JUDGE_PING_OK", "review"),
+    "escalation": ("ESCALATION_PING_OK", "review"),
+}
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -253,6 +259,14 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
                 else [{"text": f"/orch bgw-start {alias}"}]
             ),
             ([{"text": f"/orch bgw-ping {alias}"}] if run_lock_mode == "test_only" else []),
+            (
+                [
+                    {"text": f"/orch model-ping {alias} research"},
+                    {"text": f"/orch model-ping {alias} escalation"},
+                ]
+                if run_lock_mode == "test_only"
+                else []
+            ),
             [{"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/sync {alias} 1h"}, {"text": f"/use {alias}"}, {"text": focus_button}],
             [{"text": hide_button}],
@@ -1632,6 +1646,128 @@ def handle_orch_task_command(
             "next:\n"
             f"- /orch status {alias}",
             context="orch-bgw-status",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd == "orch-model-ping":
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "model ping blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context="orch-model-ping blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        run_lock_mode = project_run_lock_mode(entry)
+        if run_lock_mode != "test_only":
+            send(
+                "model ping blocked\n"
+                f"- runtime: {key}\n"
+                f"- run_lock: {run_lock_mode or 'open'}\n"
+                "- reason: bounded model harness is limited to test_only runtimes\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-model-ping blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        kind = str(rest or "").strip().lower()
+        if kind not in _MODEL_PING_SPECS:
+            send(
+                "usage: /orch model-ping <O#|name> <research|judge|escalation>",
+                context="orch-model-ping usage",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if not team_dir_raw:
+            send(
+                "model ping blocked\n"
+                f"- runtime: {key}\n"
+                "- reason: team_dir missing\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-model-ping blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        team_dir = Path(team_dir_raw).expanduser().resolve()
+        latest_task = _latest_task_for_model_status(entry)
+        token, pack_profile = _MODEL_PING_SPECS[kind]
+        prompt = f"Reply with {token} only."
+        system = "Return the exact token only."
+        if kind == "research":
+            result = model_provider_adapter.invoke_task_research_stub(
+                team_dir,
+                entry=entry,
+                task=latest_task,
+                prompt=prompt,
+                system=system,
+                pack_profile_override=pack_profile,
+            )
+        elif kind == "judge":
+            result = model_provider_adapter.invoke_task_judge_stub(
+                team_dir,
+                entry=entry,
+                task=latest_task,
+                prompt=prompt,
+                system=system,
+                pack_profile_override=pack_profile,
+            )
+        else:
+            result = model_provider_adapter.invoke_task_escalation_stub(
+                team_dir,
+                entry=entry,
+                task=latest_task,
+                prompt=prompt,
+                system=system,
+                pack_profile_override=pack_profile,
+            )
+        ok = bool(result.get("ok"))
+        executed = bool(result.get("executed"))
+        summary = str(result.get("summary", "-")).strip() or "-"
+        response_text = str(result.get("response_text", "")).strip()
+        reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
+        append_action_audit_row(
+            team_dir,
+            headline=f"Model Ping {kind.title()} | {'executed' if ok else 'blocked'}",
+            status="executed" if ok else "blocked",
+            outcome_kind="model_ping",
+            outcome_status="executed" if ok else "blocked",
+            outcome_reason_code=reason_code,
+            outcome_detail=summary,
+            next_step=f"/orch status {alias}",
+            remediation="inspect binding summary and route probe status if the bounded invoke did not execute",
+            source_command=f"/orch model-ping {alias} {kind}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
+        send(
+            "model ping\n"
+            f"- runtime: {key}\n"
+            f"- kind: {kind}\n"
+            f"- executed: {'yes' if executed else 'no'}\n"
+            f"- ok: {'yes' if ok else 'no'}\n"
+            f"- summary: {summary}\n"
+            + (f"- response: {response_text}\n" if response_text else "")
+            + "next:\n"
+            f"- /orch status {alias}",
+            context="orch-model-ping",
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )

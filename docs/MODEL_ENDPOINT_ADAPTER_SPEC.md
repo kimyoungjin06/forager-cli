@@ -110,6 +110,7 @@ must all expose:
   - `scripts/gateway/aoe_tg_model_provider_adapter.py`
   - `scripts/gateway/aoe_tg_model_provider_invoke.py`
   - `/orch bgw-ping O#` for a test-only queue/ticket/provider bounded invoke
+  - `/orch model-ping O# <research|judge|escalation>` for a test-only direct route invoke
 - example:
 ```bash
 python3 scripts/gateway/aoe_tg_model_provider_invoke.py \
