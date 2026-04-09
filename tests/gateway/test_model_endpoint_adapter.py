@@ -272,9 +272,10 @@ def test_probe_model_route_reports_ollama_tags(tmp_path: Path) -> None:
     assert "qwen3-coder:30b" in result["available_model_names"]
 
 
-def test_probe_task_judge_binding_reports_unsupported_provider_without_network(tmp_path: Path) -> None:
+def test_probe_task_judge_binding_reports_missing_api_key_for_anthropic(tmp_path: Path, monkeypatch) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     (team_dir / "model_endpoints.json").write_text(
         json.dumps(
             {
@@ -316,7 +317,8 @@ def test_probe_task_judge_binding_reports_unsupported_provider_without_network(t
 
     assert result["ok"] is False
     assert result["route_id"] == "offdesk_judge"
-    assert result["probe_status"] == "unsupported_provider_probe"
+    assert result["probe_status"] == "missing_api_key"
+    assert "missing_api_key" in result["summary"]
     assert "provider=anthropic" in result["summary"]
 
 

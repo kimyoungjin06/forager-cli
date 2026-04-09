@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.request
 from typing import Any, Dict
 
@@ -26,15 +27,98 @@ def _coerce_timeout_sec(value: Any, default: float = 30.0) -> float:
 
 
 def _default_post_json(url: str, payload: Dict[str, Any], *, timeout_sec: float = 30.0) -> Dict[str, Any]:
+    return _default_post_json_with_headers(url, payload, headers={}, timeout_sec=timeout_sec)
+
+
+def _default_post_json_with_headers(
+    url: str,
+    payload: Dict[str, Any],
+    *,
+    headers: Dict[str, str] | None = None,
+    timeout_sec: float = 30.0,
+) -> Dict[str, Any]:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **(headers or {})},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=max(0.1, float(timeout_sec or 30.0))) as response:
         raw = json.loads(response.read().decode("utf-8"))
     return raw if isinstance(raw, dict) else {}
+
+
+def _default_api_key_env(provider_kind: str, explicit: Any) -> str:
+    token = _trim(explicit, 128)
+    if token:
+        return token
+    if provider_kind == "anthropic":
+        return "ANTHROPIC_API_KEY"
+    if provider_kind == "openai":
+        return "OPENAI_API_KEY"
+    return ""
+
+
+def _resolve_api_key(provider_kind: str, endpoint: Dict[str, Any]) -> tuple[str, str]:
+    env_name = _default_api_key_env(provider_kind, endpoint.get("api_key_env"))
+    if not env_name:
+        return "", ""
+    return env_name, _trim(os.environ.get(env_name), 800)
+
+
+def _extract_openai_output_text(response: Dict[str, Any]) -> str:
+    direct = _trim(response.get("output_text"), 8000)
+    if direct:
+        return direct
+    output = response.get("output") if isinstance(response.get("output"), list) else []
+    parts = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content") if isinstance(item.get("content"), list) else []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            text = _trim(block.get("text"), 8000)
+            if text:
+                parts.append(text)
+    return "\n".join(part for part in parts if part)
+
+
+def _extract_openai_compatible_text(response: Dict[str, Any]) -> str:
+    choices = response.get("choices") if isinstance(response.get("choices"), list) else []
+    if not choices:
+        return ""
+    message = choices[0].get("message") if isinstance(choices[0], dict) else {}
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return _trim(content, 8000)
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            text = _trim(block.get("text"), 8000)
+            if text:
+                parts.append(text)
+        return "\n".join(part for part in parts if part)
+    return ""
+
+
+def _extract_anthropic_text(response: Dict[str, Any]) -> str:
+    content = response.get("content") if isinstance(response.get("content"), list) else []
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if _trim(block.get("type"), 32).lower() not in {"text", ""}:
+            continue
+        text = _trim(block.get("text"), 8000)
+        if text:
+            parts.append(text)
+    return "\n".join(part for part in parts if part)
 
 
 def invoke_model_binding(
@@ -77,7 +161,7 @@ def invoke_model_binding(
             "summary": f"route={route_id} endpoint={endpoint_id or '-'} reason=empty_prompt",
             "binding": binding_data,
         }
-    if provider_kind != "ollama":
+    if provider_kind not in {"ollama", "openai", "openai_compatible", "anthropic"}:
         return {
             "ok": False,
             "executed": False,
@@ -88,6 +172,12 @@ def invoke_model_binding(
             "summary": f"route={route_id} endpoint={endpoint_id or '-'} provider={provider_kind or '-'} status=unsupported_invoke",
             "binding": binding_data,
         }
+    default_base_url = {
+        "openai": "https://api.openai.com",
+        "anthropic": "https://api.anthropic.com",
+    }.get(provider_kind, "")
+    if not base_url:
+        base_url = default_base_url
     if not base_url or not model:
         return {
             "ok": False,
@@ -99,16 +189,71 @@ def invoke_model_binding(
             "summary": f"route={route_id} endpoint={endpoint_id or '-'} provider=ollama status=missing_metadata",
             "binding": binding_data,
         }
-    invoke = post_json if callable(post_json) else _default_post_json
-    payload: Dict[str, Any] = {
-        "model": model,
-        "prompt": prompt_text,
-        "stream": False,
-    }
-    if system_text:
-        payload["system"] = system_text
+    api_key_env, api_key = _resolve_api_key(provider_kind, endpoint)
+    if provider_kind in {"openai", "anthropic"} and not api_key:
+        return {
+            "ok": False,
+            "executed": False,
+            "route_id": route_id,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "model": model,
+            "reason_code": "missing_api_key",
+            "summary": (
+                f"route={route_id} endpoint={endpoint_id or '-'} provider={provider_kind} "
+                f"status=missing_api_key env={api_key_env or '-'}"
+            ),
+            "binding": binding_data,
+        }
+    if provider_kind == "ollama":
+        url = f"{base_url}/api/generate"
+        payload: Dict[str, Any] = {
+            "model": model,
+            "prompt": prompt_text,
+            "stream": False,
+        }
+        if system_text:
+            payload["system"] = system_text
+        headers: Dict[str, str] = {}
+    elif provider_kind == "openai":
+        url = f"{base_url}/v1/responses"
+        payload = {
+            "model": model,
+            "input": prompt_text,
+        }
+        if system_text:
+            payload["instructions"] = system_text
+        headers = {"Authorization": f"Bearer {api_key}"}
+    elif provider_kind == "openai_compatible":
+        url = f"{base_url}/v1/chat/completions"
+        messages = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        messages.append({"role": "user", "content": prompt_text})
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+        }
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    else:
+        url = f"{base_url}/v1/messages"
+        payload = {
+            "model": model,
+            "max_tokens": 256,
+            "messages": [{"role": "user", "content": prompt_text}],
+        }
+        if system_text:
+            payload["system"] = system_text
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
     try:
-        response = invoke(f"{base_url}/api/generate", payload, timeout_sec=timeout_sec)
+        if callable(post_json):
+            response = post_json(url, payload, timeout_sec=timeout_sec)
+        else:
+            response = _default_post_json_with_headers(url, payload, headers=headers, timeout_sec=timeout_sec)
     except Exception as exc:
         return {
             "ok": False,
@@ -119,13 +264,33 @@ def invoke_model_binding(
             "model": model,
             "reason_code": "provider_request_failed",
             "error": _trim(exc, 240),
-            "summary": f"route={route_id} endpoint={endpoint_id or '-'} provider=ollama status=request_failed",
+            "summary": f"route={route_id} endpoint={endpoint_id or '-'} provider={provider_kind or '-'} status=request_failed",
             "binding": binding_data,
         }
-    text = _trim(response.get("response"), 8000)
-    done = bool(response.get("done"))
-    eval_count = int(response.get("eval_count", 0) or 0)
-    prompt_eval_count = int(response.get("prompt_eval_count", 0) or 0)
+    if provider_kind == "ollama":
+        text = _trim(response.get("response"), 8000)
+        done = bool(response.get("done"))
+        eval_count = int(response.get("eval_count", 0) or 0)
+        prompt_eval_count = int(response.get("prompt_eval_count", 0) or 0)
+        provider_suffix = f"done={'yes' if done else 'no'} prompt_eval={prompt_eval_count} eval={eval_count}"
+    elif provider_kind == "openai":
+        text = _extract_openai_output_text(response)
+        done = True
+        eval_count = 0
+        prompt_eval_count = 0
+        provider_suffix = "status=completed"
+    elif provider_kind == "openai_compatible":
+        text = _extract_openai_compatible_text(response)
+        done = True
+        eval_count = 0
+        prompt_eval_count = 0
+        provider_suffix = "status=completed"
+    else:
+        text = _extract_anthropic_text(response)
+        done = True
+        eval_count = 0
+        prompt_eval_count = 0
+        provider_suffix = "status=completed"
     return {
         "ok": bool(text),
         "executed": True,
@@ -138,9 +303,8 @@ def invoke_model_binding(
         "prompt_eval_count": prompt_eval_count,
         "eval_count": eval_count,
         "summary": (
-            f"route={route_id} endpoint={endpoint_id or '-'} provider=ollama "
-            f"model={model or '-'} done={'yes' if done else 'no'} "
-            f"prompt_eval={prompt_eval_count} eval={eval_count}"
+            f"route={route_id} endpoint={endpoint_id or '-'} provider={provider_kind} "
+            f"model={model or '-'} {provider_suffix}"
         ),
         "binding": binding_data,
         "raw": response if isinstance(response, dict) else {},

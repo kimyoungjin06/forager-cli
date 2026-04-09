@@ -219,6 +219,132 @@ def test_invoke_task_research_stub_uses_research_route(tmp_path: Path) -> None:
     assert result["response_text"] == "research: ok"
 
 
+def test_invoke_model_binding_executes_openai_responses(tmp_path: Path, monkeypatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "openai-judge",
+                        "provider_kind": "openai",
+                        "model": "gpt-5.4",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "openai-judge"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "https://api.openai.com/v1/responses"
+        assert payload["model"] == "gpt-5.4"
+        assert payload["input"] == "judge this"
+        assert payload["instructions"] == "system prompt"
+        assert timeout_sec == 30.0
+        return {"output_text": "openai: ok"}
+
+    result = provider_adapter.invoke_task_judge_stub(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1"},
+        prompt="judge this",
+        system="system prompt",
+        pack_profile_override="review",
+        post_json=_fake_post,
+    )
+
+    assert result["kind"] == "judge"
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["provider_kind"] == "openai"
+    assert result["model"] == "gpt-5.4"
+    assert result["response_text"] == "openai: ok"
+
+
+def test_invoke_model_binding_executes_anthropic_messages(tmp_path: Path, monkeypatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "anthropic-judge",
+                        "provider_kind": "anthropic",
+                        "model": "claude-opus-4.1",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "anthropic-judge"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "https://api.anthropic.com/v1/messages"
+        assert payload["model"] == "claude-opus-4.1"
+        assert payload["system"] == "system prompt"
+        assert payload["messages"][0]["role"] == "user"
+        assert payload["messages"][0]["content"] == "decide now"
+        return {"content": [{"type": "text", "text": "anthropic: ok"}]}
+
+    result = provider_adapter.invoke_task_judge_stub(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1"},
+        prompt="decide now",
+        system="system prompt",
+        pack_profile_override="review",
+        post_json=_fake_post,
+    )
+
+    assert result["kind"] == "judge"
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["provider_kind"] == "anthropic"
+    assert result["model"] == "claude-opus-4.1"
+    assert result["response_text"] == "anthropic: ok"
+
+
 def test_invoke_task_worker_stub_uses_worker_route_with_pack_override(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)

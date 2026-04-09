@@ -111,6 +111,14 @@ must all expose:
   - `scripts/gateway/aoe_tg_model_provider_invoke.py`
   - `/orch bgw-ping O#` for a test-only queue/ticket/provider bounded invoke
   - `/orch model-ping O# <research|judge|escalation>` for a test-only direct route invoke
+- Current invoke support:
+  - `ollama`
+  - `openai`
+  - `openai_compatible`
+  - `anthropic`
+- Current probe policy:
+  - `ollama` routes may use a live model-presence probe
+  - `openai` / `anthropic` routes surface `missing_api_key` or `deferred_live_probe` in status views instead of a hard network gate
 - example:
 ```bash
 python3 scripts/gateway/aoe_tg_model_provider_invoke.py \

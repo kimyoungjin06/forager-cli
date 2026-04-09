@@ -13,6 +13,7 @@ It does not execute model calls. It only owns:
 from __future__ import annotations
 
 import json
+import os
 import urllib.request
 from typing import Any, Dict, List, Tuple
 
@@ -539,6 +540,17 @@ def _default_fetch_json(url: str, *, timeout_sec: float = 3.0) -> Dict[str, Any]
     return payload if isinstance(payload, dict) else {}
 
 
+def _default_api_key_env(provider_kind: str, explicit: Any) -> str:
+    token = _trim(explicit, 128)
+    if token:
+        return token
+    if provider_kind == "anthropic":
+        return "ANTHROPIC_API_KEY"
+    if provider_kind == "openai":
+        return "OPENAI_API_KEY"
+    return ""
+
+
 def probe_model_endpoint(
     endpoint: Any,
     *,
@@ -561,13 +573,22 @@ def probe_model_endpoint(
             "probe_status": "disabled",
             "summary": f"endpoint={endpoint_id} status=disabled",
         }
+    api_key_env = _default_api_key_env(provider_kind, row.get("api_key_env"))
+    if provider_kind in {"anthropic", "openai"} and not _trim(os.environ.get(api_key_env), 800):
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "probe_status": "missing_api_key",
+            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=missing_api_key env={api_key_env or '-'}",
+        }
     if provider_kind != "ollama":
         return {
             "ok": False,
             "endpoint_id": endpoint_id,
             "provider_kind": provider_kind,
-            "probe_status": "unsupported_provider_probe",
-            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=unsupported_probe",
+            "probe_status": "deferred_live_probe",
+            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=deferred_live_probe",
         }
     if not base_url:
         return {
@@ -680,12 +701,21 @@ def summarize_deferred_model_binding_probe(binding: Any, *, default_label: str =
         }
     endpoint_id = _trim(endpoint.get("endpoint_id"), 64) or "-"
     provider_kind = _trim(endpoint.get("provider_kind"), 64).lower() or "custom"
+    api_key_env = _default_api_key_env(provider_kind, endpoint.get("api_key_env"))
+    if provider_kind in {"anthropic", "openai"} and not _trim(os.environ.get(api_key_env), 800):
+        return {
+            "ok": False,
+            "route_id": route_id,
+            "probe_status": "missing_api_key",
+            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=missing_api_key env={api_key_env or '-'}",
+            "binding": row,
+        }
     if provider_kind != "ollama":
         return {
             "ok": False,
             "route_id": route_id,
-            "probe_status": "unsupported_provider_probe",
-            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=unsupported_probe",
+            "probe_status": "deferred_live_probe",
+            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=deferred_live_probe",
             "binding": row,
         }
     return {
