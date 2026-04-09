@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
+from aoe_tg_action_audit import load_latest_action_audit_for_runtime_kind
 from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
 from aoe_tg_background_runs import (
     background_runs_state_path,
@@ -737,6 +738,18 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
     background_slot_pressure = str(slot_snapshot.get("selected_pressure", "")).strip() or "not_applicable"
     background_slot_summary = str(slot_snapshot.get("summary", "")).strip() or "-"
+    latest_judge_action = (
+        load_latest_action_audit_for_runtime_kind(
+            team_dir,
+            project_alias=alias,
+            outcome_kind="offdesk_judge",
+        )
+        if team_dir is not None
+        else {}
+    )
+    latest_judge_headline = str(latest_judge_action.get("headline", "")).strip() or "-"
+    latest_judge_next_step = str(latest_judge_action.get("next_step", "")).strip() or "-"
+    latest_judge_detail = str(latest_judge_action.get("outcome_detail", "")).strip() or "-"
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -1191,6 +1204,14 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                         reason=str(task_background_external_next.get("reason", "")).strip() or "-",
                     )
                 )
+    if latest_judge_headline != "-":
+        lines.append(
+            "  latest_judge: {headline} | next={next_step} | {detail}".format(
+                headline=latest_judge_headline,
+                next_step=latest_judge_next_step,
+                detail=latest_judge_detail,
+            )
+        )
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()
@@ -1254,6 +1275,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "attention_summary": attention_summary,
         "priority_action": str(priority_action.get("action", "")).strip(),
         "priority_reason": str(priority_action.get("reason", "")).strip(),
+        "latest_judge_headline": latest_judge_headline,
+        "latest_judge_next_step": latest_judge_next_step,
+        "latest_judge_detail": latest_judge_detail,
         "notes": list(notes),
     }
 
@@ -1337,6 +1361,8 @@ def offdesk_review_reply_markup(
             primary.append({"text": f"/todo {alias} proposals"})
         if int(row.get("followup_count", 0) or 0) > 0:
             primary.append({"text": f"/todo {alias} followup"})
+        if str(row.get("active_task_label", "")).strip():
+            primary.append({"text": f"/orch judge {alias}"})
         if primary:
             dedup_primary: List[Dict[str, str]] = []
             seen_primary: set[str] = set()

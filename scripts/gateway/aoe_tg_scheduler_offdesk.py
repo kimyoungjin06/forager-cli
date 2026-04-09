@@ -464,6 +464,8 @@ def _handle_offdesk_command(
                 actions.append(f"/todo {alias} followup")
             active_task_label = str(row.get("active_task_label", "")).strip()
             active_task_tf_phase = str(row.get("active_task_tf_phase", "")).strip()
+            if active_task_label:
+                actions.append(f"/orch judge {alias}")
             if active_task_label and active_task_tf_phase in {"needs_retry", "manual_intervention", "critic_review", "blocked", "rate_limited"}:
                 actions.append(f"/task {active_task_label}")
             if bool(row.get("bootstrap_recommended", False)):
@@ -501,6 +503,17 @@ def _handle_offdesk_command(
             note_rows = list(row.get("notes") or [])
             for note in note_rows[:2]:
                 lines.append(f"  note: {note}")
+            latest_judge_headline = str(row.get("latest_judge_headline", "")).strip()
+            latest_judge_next_step = str(row.get("latest_judge_next_step", "")).strip() or "-"
+            latest_judge_detail = str(row.get("latest_judge_detail", "")).strip() or "-"
+            if latest_judge_headline:
+                lines.append(
+                    "  latest_judge: {headline} | next={next_step} | {detail}".format(
+                        headline=latest_judge_headline,
+                        next_step=latest_judge_next_step,
+                        detail=latest_judge_detail,
+                    )
+                )
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:
                 lines.append(

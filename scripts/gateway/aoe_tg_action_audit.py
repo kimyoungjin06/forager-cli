@@ -175,6 +175,31 @@ def load_latest_action_audit_for_runtime(
     return {}
 
 
+def load_latest_action_audit_for_runtime_kind(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+    outcome_kind: Any,
+) -> Dict[str, str]:
+    alias = str(project_alias or "").strip()
+    kind = str(outcome_kind or "").strip()
+    if not alias or not kind:
+        return {}
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}"
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() != runtime_path:
+            continue
+        if str(row.get("outcome_kind", "")).strip() != kind:
+            continue
+        normalized = _normalize_latest_action_row(row)
+        normalized["at"] = str(row.get("at", "")).strip() or "-"
+        return normalized
+    return {}
+
+
 def load_latest_model_ping_audit_for_runtime(
     team_dir: Any,
     *,

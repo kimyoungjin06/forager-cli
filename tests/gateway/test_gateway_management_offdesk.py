@@ -2035,6 +2035,54 @@ def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> 
     assert "- latest_action_next: /offdesk review" in text
 
 
+def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / "Research"
+    team_dir = project_root / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] draft memo\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T18:00:00+09:00",
+                "headline": "Offdesk Judge | executed",
+                "status": "executed",
+                "outcome_kind": "offdesk_judge",
+                "outcome_status": "executed",
+                "outcome_reason_code": "ok",
+                "outcome_detail": "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+                "next_step": "/offdesk review O5",
+                "remediation": "inspect the judge response together with execution brief, followup brief, and runtime status before acting",
+                "source_command": "/orch judge O5",
+                "link_href": "/control/runtimes/O5",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["research"] = {
+        "name": "research",
+        "display_name": "Research",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "draft memo", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "last_sync_at": "2026-03-10T20:00:00+0900",
+        "last_sync_mode": "scenario",
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review O5")
+
+    assert "offdesk review" in text
+    assert "latest_judge: Offdesk Judge | executed | next=/offdesk review O5 | endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in text
+
+
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
     state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
     project_root = tmp_path / "LaneProject"
@@ -2101,6 +2149,7 @@ def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path
     assert "/retry T-101 lane L2,R1" in body
     assert "/task T-101" in body
     buttons = _button_texts(markup)
+    assert "/orch judge O6" in buttons
     assert "/task T-101" in buttons
     assert "/retry T-101 lane L2,R1" in buttons
     assert "/orch status O6" in buttons
