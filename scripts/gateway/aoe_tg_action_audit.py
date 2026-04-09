@@ -112,6 +112,25 @@ def normalize_offdesk_judge_decision(raw: Any) -> Dict[str, str]:
     }
 
 
+def summarize_offdesk_judge_decision(decision: Any) -> str:
+    row = decision if isinstance(decision, dict) else normalize_offdesk_judge_decision(decision)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    action = str(row.get("recommended_action", "")).strip() or "-"
+    verdict = str(row.get("verdict", "")).strip() or "-"
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    next_step = str(row.get("next_step", "")).strip() or "-"
+    reasoning = str(row.get("reasoning", "")).strip() or "-"
+    parts = [f"action={action}", f"verdict={verdict}"]
+    if confidence != "-":
+        parts.append(f"confidence={confidence}")
+    if next_step != "-":
+        parts.append(f"next={next_step}")
+    if reasoning != "-":
+        parts.append(reasoning)
+    return " | ".join(parts) if parts else "-"
+
+
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
     headline = str(latest_action.get("headline", "")).strip() or "-"
     reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
@@ -288,6 +307,15 @@ def load_latest_offdesk_judge_decision_for_runtime(
         decision["at"] = str(row.get("at", "")).strip() or "-"
         return decision
     return {}
+
+
+def load_latest_offdesk_judge_decision_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    decision = load_latest_offdesk_judge_decision_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_offdesk_judge_decision(decision)
 
 
 def load_latest_model_ping_audit_for_runtime(

@@ -2059,6 +2059,15 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
                 "remediation": "inspect the judge response together with execution brief, followup brief, and runtime status before acting",
                 "source_command": "/orch judge O5",
                 "link_href": "/control/runtimes/O5",
+                "response_text": json.dumps(
+                    {
+                        "verdict": "continue",
+                        "confidence": "medium",
+                        "reasoning": "brief executable",
+                        "next_step": "/retry T-501",
+                        "caution": "review lane remains",
+                    }
+                ),
             }
         )
         + "\n",
@@ -2081,6 +2090,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
 
     assert "offdesk review" in text
     assert "latest_judge: Offdesk Judge | executed | next=/offdesk review O5 | endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in text
+    assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-501 | brief executable" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:

@@ -411,6 +411,17 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:00:00+09:00",
+        extra={
+            "response_text": json.dumps(
+                {
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "reasoning": "brief executable",
+                    "next_step": "/retry T-001",
+                    "caution": "review lane remains",
+                }
+            )
+        },
     )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -442,6 +453,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "latest_judge" in overview_text
     assert "Offdesk Judge" in overview_text
     assert "codex_cli-gpt-5-4" in overview_text
+    assert "latest_judge_decision" in overview_text
+    assert "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -875,6 +888,7 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
     assert "model_registry" in text
     assert "enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
     assert "latest_judge" in text
+    assert "latest_judge_decision" in text
 
 
 def test_control_dashboard_runtime_and_task_detail_prefer_recent_judge_model_ping(
@@ -1059,6 +1073,17 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:05:00+09:00",
+        extra={
+            "response_text": json.dumps(
+                {
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "reasoning": "brief executable",
+                    "next_step": "/retry T-001",
+                    "caution": "review lane remains",
+                }
+            )
+        },
     )
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
@@ -1112,6 +1137,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "model_plan" in text
     assert "latest_judge" in text
     assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in text
+    assert "latest_judge_decision" in text
+    assert "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text

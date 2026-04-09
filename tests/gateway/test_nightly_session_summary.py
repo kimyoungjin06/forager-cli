@@ -37,6 +37,17 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:10:00+09:00",
+        extra={
+            "response_text": json.dumps(
+                {
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "reasoning": "brief executable",
+                    "next_step": "/retry T-001",
+                    "caution": "review lane remains",
+                }
+            )
+        },
     )
 
     summary = nightly_summary.build_nightly_session_summary(
@@ -70,6 +81,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["background_scheduler_summary"] == "-"
     assert runtimes[0]["background_scheduler_note"] == "no queued scheduler head"
     assert runtimes[0]["latest_judge_summary"] == "Offdesk Judge | next=/offdesk review O2 | endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed"
+    assert runtimes[0]["latest_judge_decision_summary"] == "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable"
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -99,6 +111,17 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:12:00+09:00",
+        extra={
+            "response_text": json.dumps(
+                {
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "reasoning": "brief executable",
+                    "next_step": "/retry T-001",
+                    "caution": "review lane remains",
+                }
+            )
+        },
     )
 
     summary = nightly_summary.build_nightly_session_summary(
@@ -132,6 +155,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "link: runtime detail -> /control/runtimes/O2" in markdown
     assert "background_queue:" in markdown
     assert "latest_judge: Offdesk Judge | next=/offdesk review O2 | endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in markdown
+    assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in markdown
     assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown
     assert "background_slots: active=0 limit=1" in markdown

@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
-from aoe_tg_action_audit import load_latest_action_audit_for_runtime_kind
+from aoe_tg_action_audit import (
+    load_latest_action_audit_for_runtime_kind,
+    load_latest_offdesk_judge_decision_summary_for_runtime,
+)
 from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
 from aoe_tg_background_runs import (
     background_runs_state_path,
@@ -750,6 +753,11 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     latest_judge_headline = str(latest_judge_action.get("headline", "")).strip() or "-"
     latest_judge_next_step = str(latest_judge_action.get("next_step", "")).strip() or "-"
     latest_judge_detail = str(latest_judge_action.get("outcome_detail", "")).strip() or "-"
+    latest_judge_decision_summary = (
+        load_latest_offdesk_judge_decision_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -1212,6 +1220,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                 detail=latest_judge_detail,
             )
         )
+    if latest_judge_decision_summary != "-":
+        lines.append("  latest_judge_decision: " + latest_judge_decision_summary)
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()
@@ -1278,6 +1288,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "latest_judge_headline": latest_judge_headline,
         "latest_judge_next_step": latest_judge_next_step,
         "latest_judge_detail": latest_judge_detail,
+        "latest_judge_decision_summary": latest_judge_decision_summary,
         "notes": list(notes),
     }
 

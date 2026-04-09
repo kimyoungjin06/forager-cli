@@ -506,6 +506,7 @@ def _handle_offdesk_command(
             latest_judge_headline = str(row.get("latest_judge_headline", "")).strip()
             latest_judge_next_step = str(row.get("latest_judge_next_step", "")).strip() or "-"
             latest_judge_detail = str(row.get("latest_judge_detail", "")).strip() or "-"
+            latest_judge_decision_summary = str(row.get("latest_judge_decision_summary", "")).strip() or "-"
             if latest_judge_headline:
                 lines.append(
                     "  latest_judge: {headline} | next={next_step} | {detail}".format(
@@ -514,6 +515,8 @@ def _handle_offdesk_command(
                         detail=latest_judge_detail,
                     )
                 )
+            if latest_judge_decision_summary not in {"", "-"}:
+                lines.append("  latest_judge_decision: " + latest_judge_decision_summary)
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:
                 lines.append(

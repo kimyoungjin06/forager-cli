@@ -74,6 +74,13 @@ def _latest_judge_summary(team_dir: Path, *, project_alias: str) -> str:
     return f"{headline} | next={next_step} | {detail}"
 
 
+def _latest_judge_decision_summary(team_dir: Path, *, project_alias: str) -> str:
+    return action_audit.load_latest_offdesk_judge_decision_summary_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+    )
+
+
 def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any], *, root_team_dir: Path) -> List[RuntimeCardDTO]:
     reports = _runtime_reports(manager_state, provider_state)
 
@@ -99,6 +106,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         model_routing_summary = "-"
         model_registry_summary = "-"
         latest_judge_summary = "-"
+        latest_judge_decision_summary = "-"
         workspace_summary = "-"
         document_registry_summary = "-"
         active_task_context_pack_summary = "-"
@@ -151,6 +159,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry)
                 model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry)
                 latest_judge_summary = _latest_judge_summary(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
+                )
+                latest_judge_decision_summary = _latest_judge_decision_summary(
                     root_team_dir,
                     project_alias=str(entry.get("project_alias", "")).strip(),
                 )
@@ -295,6 +307,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 model_routing_summary=model_routing_summary,
                 model_registry_summary=model_registry_summary,
                 latest_judge_summary=latest_judge_summary,
+                latest_judge_decision_summary=latest_judge_decision_summary,
                 run_lock_mode=run_lock_mode,
                 run_lock_note=run_lock_note,
                 background_slot_limit=background_slot_limit,
@@ -483,6 +496,14 @@ def _build_runtime_detail(
     model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
     latest_judge_summary = (
         _latest_judge_summary(Path(str(root_team_dir or "")).expanduser(), project_alias=str(entry.get("project_alias", "")).strip())
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
+    latest_judge_decision_summary = (
+        _latest_judge_decision_summary(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
         if str(root_team_dir or "").strip()
         else "-"
     )
@@ -704,6 +725,7 @@ def _build_runtime_detail(
         model_routing_summary=model_routing_summary,
         model_registry_summary=model_registry_summary,
         latest_judge_summary=latest_judge_summary,
+        latest_judge_decision_summary=latest_judge_decision_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,
