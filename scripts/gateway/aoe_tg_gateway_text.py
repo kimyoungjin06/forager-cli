@@ -318,6 +318,7 @@ def help_text(
         "- aoe orch bgw-status [--orch <name>]\n"
         "- aoe orch bgw-ping [--orch <name>]   # test_only bounded worker invoke\n"
         "- aoe orch model-ping [--orch <name>] <research|judge|escalation>   # test_only bounded direct invoke\n"
+        "- aoe orch judge [--orch <name>]   # bounded offdesk judge review\n"
         "- aoe orch bgx-status [--orch <name>]\n"
         "- aoe orch bgx-handoff [--orch <name>]\n"
         "- aoe orch bgx-ack [--orch <name>]\n"

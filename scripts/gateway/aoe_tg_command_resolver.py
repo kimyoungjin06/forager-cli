@@ -331,6 +331,11 @@ def resolve_message_command(
                     out.rest = tail[1].strip() if len(tail) > 1 else ""
                     if not out.orch_target or not out.rest:
                         raise RuntimeError("usage: /orch model-ping <O#|name> <research|judge|escalation>")
+                elif sub in {"judge", "review-judge"}:
+                    out.cmd = "orch-judge"
+                    out.orch_target = tail[0].strip() if tail else None
+                    if not out.orch_target:
+                        raise RuntimeError("usage: /orch judge <O#|name>")
                 elif sub in {"bgx-status", "external-status", "background-external-status"}:
                     out.cmd = "orch-bgx-status"
                     out.orch_target = tail[0].strip() if tail else None
@@ -379,7 +384,7 @@ def resolve_message_command(
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-ping|model-ping|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-ping|model-ping|judge|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -734,6 +739,7 @@ def resolve_message_command(
                 "orch-bgw-status",
                 "orch-bgw-ping",
                 "orch-model-ping",
+                "orch-judge",
                 "orch-bgx-status",
                 "orch-bgx-handoff",
                 "orch-bgx-ack",

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Orchestrator task lifecycle handlers for Telegram gateway."""
 
+import json
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any, Callable, Dict, List, Optional
 
 import aoe_tg_background_runs as background_runs
+import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
 from aoe_tg_action_audit import append_action_audit_row, prefer_recent_model_ping_probe_summary
@@ -55,6 +57,10 @@ _MODEL_PING_SPECS = {
     "judge": ("JUDGE_PING_OK", "review"),
     "escalation": ("ESCALATION_PING_OK", "review"),
 }
+_OFFDESK_JUDGE_SYSTEM = (
+    "You are the off-desk judge. Return strict JSON with keys: "
+    "verdict, confidence, reasoning, next_step, caution. Keep each value concise."
+)
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -267,6 +273,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
                 if run_lock_mode == "test_only"
                 else []
             ),
+            [{"text": f"/orch judge {alias}"}],
             [{"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/sync {alias} 1h"}, {"text": f"/use {alias}"}, {"text": focus_button}],
             [{"text": hide_button}],
@@ -427,6 +434,56 @@ def _latest_task_for_model_status(entry: Dict[str, Any]) -> Dict[str, Any]:
             best_req = str(req_id)
             best_task = task
     return best_task if isinstance(best_task, dict) else {}
+
+
+def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir: Path) -> str:
+    alias = _project_alias(entry, str(entry.get("name", "")).strip())
+    project_name = str(entry.get("display_name", "")).strip() or str(entry.get("name", "")).strip() or alias
+    task_label = (
+        str(task.get("short_id", "")).strip().upper()
+        or str(task.get("alias", "")).strip()
+        or str(task.get("request_id", "")).strip()
+        or "task"
+    )
+    pack = context_pack.load_context_pack(
+        team_dir,
+        entry=entry,
+        task=task,
+        project_root=entry.get("project_root"),
+    )
+    rerun_summary = str(task.get("rerun_summary", "")).strip() or (
+        "retry="
+        + (
+            str(task.get("rerun_status", "")).strip() or "none"
+        )
+    )
+    followup_summary = str(task.get("followup_summary", "")).strip() or (
+        str(task.get("followup_brief_summary", "")).strip() or "followup=none"
+    )
+    payload = {
+        "runtime": alias,
+        "project": project_name,
+        "task": task_label,
+        "request_id": str(task.get("request_id", "")).strip() or "-",
+        "status": str(task.get("status", "")).strip() or "-",
+        "tf_phase": str(task.get("tf_phase", "")).strip() or "-",
+        "execution_brief_status": str(task.get("execution_brief_status", "")).strip() or "-",
+        "execution_brief_summary": str(task.get("execution_brief_summary", "")).strip() or "-",
+        "execution_brief_operator_decision": str(task.get("execution_brief_operator_decision", "")).strip() or "-",
+        "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+        "followup_brief_summary": str(task.get("followup_brief_summary", "")).strip() or "-",
+        "rerun_summary": rerun_summary,
+        "followup_summary": followup_summary,
+        "context_pack_profile": str(pack.get("profile", "")).strip() or "-",
+        "context_pack_docs": str(pack.get("docs_summary", "")).strip() or "-",
+        "context_pack_excluded": str(pack.get("excluded_summary", "")).strip() or "-",
+    }
+    return (
+        "Review the runtime and task state below and decide whether the operator should continue, "
+        "replan, execute follow-up, or hold for manual review.\n"
+        "Prefer conservative decisions when blockers or ambiguity remain.\n\n"
+        + json.dumps(payload, ensure_ascii=False, indent=2)
+    )
 
 
 def _judge_binding_lines(entry: Dict[str, Any], team_dir: Path) -> tuple[str, str]:
@@ -1777,6 +1834,110 @@ def handle_orch_task_command(
             + "next:\n"
             f"- /orch status {alias}",
             context="orch-model-ping",
+            with_menu=True,
+            reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+        )
+        return True
+
+    if cmd == "orch-judge":
+        try:
+            key, entry, _p_args = get_context(orch_target)
+        except Exception as exc:
+            text = str(exc)
+            if "project lock active:" in text.lower():
+                send(
+                    "offdesk judge blocked by project lock\n"
+                    f"- {text}\n"
+                    "next:\n"
+                    "- /focus off\n"
+                    "- /map",
+                    context="orch-judge blocked",
+                    with_menu=True,
+                )
+                return True
+            raise
+        alias = _project_alias(entry, key)
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if not team_dir_raw:
+            send(
+                "offdesk judge blocked\n"
+                f"- runtime: {alias}\n"
+                "- reason: team_dir missing\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-judge blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        team_dir = Path(team_dir_raw).expanduser().resolve()
+        latest_task = _latest_task_for_model_status(entry)
+        if not latest_task:
+            send(
+                "offdesk judge blocked\n"
+                f"- runtime: {alias}\n"
+                "- reason: no task available for judge review\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-judge blocked",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        task_label = (
+            str(latest_task.get("short_id", "")).strip().upper()
+            or str(latest_task.get("alias", "")).strip()
+            or str(latest_task.get("request_id", "")).strip()
+            or "task"
+        )
+        binding = model_endpoint_adapter.resolve_task_judge_binding(
+            team_dir,
+            entry=entry,
+            task=latest_task,
+            pack_profile_override="review",
+        )
+        result = model_provider_adapter.invoke_task_judge_stub(
+            team_dir,
+            entry=entry,
+            task=latest_task,
+            prompt=_offdesk_judge_prompt(entry, latest_task, team_dir),
+            system=_OFFDESK_JUDGE_SYSTEM,
+            pack_profile_override="review",
+            timeout_sec=120.0,
+        )
+        ok = bool(result.get("ok"))
+        executed = bool(result.get("executed"))
+        summary = str(result.get("summary", "-")).strip() or "-"
+        response_text = str(result.get("response_text", "")).strip()
+        reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
+        append_action_audit_row(
+            team_dir,
+            headline=f"Offdesk Judge | {'executed' if ok else 'blocked'}",
+            status="executed" if ok else "blocked",
+            outcome_kind="offdesk_judge",
+            outcome_status="executed" if ok else "blocked",
+            outcome_reason_code=reason_code,
+            outcome_detail=summary,
+            next_step=f"/offdesk review {alias}",
+            remediation="inspect the judge response together with execution brief, followup brief, and runtime status before acting",
+            source_command=f"/orch judge {alias}",
+            link_label="runtime detail",
+            link_href=_runtime_action_link(alias),
+            at=now_iso(),
+        )
+        send(
+            "offdesk judge\n"
+            f"- runtime: {alias}\n"
+            f"- task: {task_label}\n"
+            f"- binding: {str(binding.get('summary', '')).strip() or '-'}\n"
+            f"- executed: {'yes' if executed else 'no'}\n"
+            f"- ok: {'yes' if ok else 'no'}\n"
+            f"- summary: {summary}\n"
+            + (f"- response: {response_text}\n" if response_text else "")
+            + "next:\n"
+            f"- /offdesk review {alias}\n"
+            f"- /orch status {alias}",
+            context="orch-judge",
             with_menu=True,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
         )
