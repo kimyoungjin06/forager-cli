@@ -13,6 +13,7 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_ops_policy as ops_policy
+import aoe_tg_action_audit as action_audit
 import aoe_tg_background_runs as background_runs
 import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
@@ -265,6 +266,14 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
                     f"endpoint={str(endpoint.get('endpoint_id', '')).strip() or '-'} "
                     f"provider=ollama status=deferred_live_probe"
                 )
+            judge_probe_summary = action_audit.prefer_recent_model_ping_probe_summary(
+                team_dir,
+                project_alias=str(entry.get("project_alias", "")).strip(),
+                kind="judge",
+                endpoint_id=str(endpoint.get("endpoint_id", "")).strip(),
+                probe_status="unsupported_probe" if judge_binding.get("bound") and provider_kind != "ollama" else ("deferred_live_probe" if judge_binding.get("bound") else "unbound"),
+                probe_summary=judge_probe_summary,
+            )
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),

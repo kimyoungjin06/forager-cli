@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 import aoe_tg_background_runs as background_runs
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
-from aoe_tg_action_audit import append_action_audit_row
+from aoe_tg_action_audit import append_action_audit_row, prefer_recent_model_ping_probe_summary
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import (
     ensure_local_background_daemon,
@@ -450,7 +450,15 @@ def _judge_binding_lines(entry: Dict[str, Any], team_dir: Path) -> tuple[str, st
         task=latest_task,
     )
     binding_summary = str(binding.get("summary", "")).strip() or "-"
-    probe_summary = str(probe.get("summary", "")).strip() or "-"
+    endpoint = binding.get("endpoint") if isinstance(binding.get("endpoint"), dict) else {}
+    probe_summary = prefer_recent_model_ping_probe_summary(
+        team_dir,
+        project_alias=str(entry.get("project_alias", "")).strip(),
+        kind="judge",
+        endpoint_id=str(endpoint.get("endpoint_id", "")).strip(),
+        probe_status=str(probe.get("probe_status", "")).strip(),
+        probe_summary=str(probe.get("summary", "")).strip() or "-",
+    )
     return (
         f"judge_binding: {task_label} | {binding_summary}\n",
         f"judge_probe: {task_label} | {probe_summary}\n",

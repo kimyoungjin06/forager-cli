@@ -175,6 +175,64 @@ def load_latest_action_audit_for_runtime(
     return {}
 
 
+def load_latest_model_ping_audit_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+    kind: Any,
+) -> Dict[str, str]:
+    alias = str(project_alias or "").strip()
+    ping_kind = str(kind or "").strip().lower()
+    if not alias or not ping_kind:
+        return {}
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}"
+    suffix = f" {ping_kind}"
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() != runtime_path:
+            continue
+        if str(row.get("outcome_kind", "")).strip() != "model_ping":
+            continue
+        source_command = str(row.get("source_command", "")).strip()
+        if not source_command.endswith(suffix):
+            continue
+        normalized = _normalize_latest_action_row(row)
+        normalized["at"] = str(row.get("at", "")).strip() or "-"
+        return normalized
+    return {}
+
+
+def prefer_recent_model_ping_probe_summary(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+    kind: Any,
+    endpoint_id: Any = "",
+    probe_status: Any = "",
+    probe_summary: Any = "",
+) -> str:
+    current_status = str(probe_status or "").strip().lower()
+    current_summary = str(probe_summary or "").strip() or "-"
+    if current_status not in {"probe_timeout", "deferred_live_probe", "unsupported_probe"}:
+        return current_summary
+    latest_ping = load_latest_model_ping_audit_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+        kind=kind,
+    )
+    if not latest_ping:
+        return current_summary
+    if str(latest_ping.get("status", "")).strip().lower() != "executed":
+        return current_summary
+    detail = str(latest_ping.get("outcome_detail", "")).strip() or "-"
+    binding_endpoint_id = str(endpoint_id or "").strip()
+    if binding_endpoint_id and f"endpoint={binding_endpoint_id}" not in detail:
+        return current_summary
+    return f"status=last_invoke_ok | {detail}"
+
+
 def append_latest_action_lines(
     lines: List[str],
     latest_action: Dict[str, str],

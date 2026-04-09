@@ -18,6 +18,7 @@ for path in (GW_DIR, DASH_DIR):
 
 from _gateway_test_support import gw  # noqa: E402
 import aoe_tg_background_runs as background_runs  # noqa: E402
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter  # noqa: E402
 import aoe_tg_operator_summary as operator_summary  # noqa: E402
 from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
@@ -854,6 +855,70 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
     assert "indexed=1 canonical=1" in text
     assert "model_registry" in text
     assert "enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
+
+
+def test_control_dashboard_runtime_and_task_detail_prefer_recent_judge_model_ping(
+    tmp_path: Path, monkeypatch
+) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    audit_dir = project_team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T10:01:00+09:00",
+                "headline": "Model Ping Judge | executed",
+                "status": "executed",
+                "outcome_kind": "model_ping",
+                "outcome_status": "executed",
+                "outcome_reason_code": "ok",
+                "outcome_detail": "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+                "next_step": "/orch status O2",
+                "remediation": "inspect binding summary and route probe status if the bounded invoke did not execute",
+                "source_command": "/orch model-ping O2 judge",
+                "link_href": "/control/runtimes/O2",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        model_endpoint_adapter,
+        "resolve_task_judge_binding",
+        lambda *args, **kwargs: {
+            "bound": True,
+            "summary": "judge=claude_code_cli-opus:opus",
+            "endpoint": {
+                "endpoint_id": "claude_code_cli-opus",
+                "provider_kind": "claude_code_cli",
+            },
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, _headers, body = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)
+    runtime_text = body.decode("utf-8")
+    assert status == 200
+    assert "judge_binding" in runtime_text
+    assert "judge=claude_code_cli-opus:opus" in runtime_text
+    assert "judge_probe" in runtime_text
+    assert "status=last_invoke_ok" in runtime_text
+
+    status, _headers, body = dashboard_app.build_dashboard_response("/control/tasks/by-request/REQ-1", config)
+    task_text = body.decode("utf-8")
+    assert status == 200
+    assert "judge_binding" in task_text
+    assert "judge=claude_code_cli-opus:opus" in task_text
+    assert "judge_probe" in task_text
+    assert "status=last_invoke_ok" in task_text
 
 
 def test_control_dashboard_surfaces_external_background_phase_in_runtime_and_offdesk(tmp_path: Path) -> None:
