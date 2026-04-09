@@ -41,14 +41,17 @@ from control_dashboard_action_exec_shared import (
 from control_dashboard_common import DashboardAppConfig, _not_found_json
 
 _RETRY_BLOCKED_REMEDIATIONS = {
-    "planning-gate": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+    "planning-gate": "run /orch judge for the runtime first, then inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
     "dispatch-exception": "inspect dispatch exception output and backend notes in the task detail before attempting another retry",
-    "exec-critic": "inspect exec critic verdict and lane rerun targets in /task before retrying again",
+    "exec-critic": "run /orch judge for the runtime first, then inspect exec critic verdict and lane rerun targets in /task before retrying again",
     "verifier-gate failed": "inspect verifier findings and required verifier roles in /task before retrying again",
     "run usage": "inspect the retry command payload and lane selection before retrying again",
     "unknown command": "inspect the retry action contract and command mapping before retrying again",
     "empty prompt": "inspect the source task prompt in the runtime lifecycle before retrying again",
 }
+
+_RETRY_JUDGE_FIRST_REASON_CODES = {"planning_gate", "exec_critic"}
+_RETRY_JUDGE_FIRST_CONTEXTS = {"planning-gate", "exec-critic"}
 
 
 def _retry_blocked_remediation_for_reason(reason_code: str, detail: str = "") -> str:
@@ -66,13 +69,38 @@ def _retry_blocked_remediation_for_reason(reason_code: str, detail: str = "") ->
     return str(detail or "").strip() or "inspect the task and runtime state before retrying again"
 
 
+def _retry_blocked_next_step_for_reason(
+    reason_code: str,
+    *,
+    entry: Dict[str, Any],
+    fallback: str = "/offdesk review",
+) -> str:
+    token = str(reason_code or "").strip().lower().replace("-", "_")
+    if token in _RETRY_JUDGE_FIRST_REASON_CODES:
+        return f"/orch judge {_project_status_ref(str(entry.get('name', '')).strip(), entry)}"
+    return fallback
+
+
+def _retry_blocked_next_step_for_contexts(
+    contexts: List[str],
+    *,
+    entry: Dict[str, Any],
+    fallback: str = "/offdesk review",
+) -> str:
+    for context in contexts:
+        token = str(context or "").strip().lower()
+        if token in _RETRY_JUDGE_FIRST_CONTEXTS:
+            return f"/orch judge {_project_status_ref(str(entry.get('name', '')).strip(), entry)}"
+    return fallback
+
+
 
 def _retry_blocked_remediation(contexts: List[str]) -> str:
     for context in contexts:
         token = str(context or "").strip()
         if token in _RETRY_BLOCKED_REMEDIATIONS:
             return _RETRY_BLOCKED_REMEDIATIONS[token]
-    return "inspect planning or critic blockers in /offdesk review before re-running retry"
+    return "run /orch judge for the runtime first, then inspect planning or critic blockers in /offdesk review before re-running retry"
 
 
 def _now_iso() -> str:
@@ -546,6 +574,7 @@ def _execute_retry_run_transition(
     reason_code = str(outcome.get("reason_code", "")).strip() or "-"
     detail_note = str(outcome.get("detail", "")).strip()
     if blocked:
+        next_step = _retry_blocked_next_step_for_reason(reason_code, entry=entry, fallback=next_step)
         remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
     return _json(
         {
@@ -764,8 +793,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             status=500,
         )
 
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     if bool(transition.get("terminal")):
         blocked_contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
+        entry = projects.get(project_key) if isinstance(projects.get(project_key), dict) else {}
         error_code = (
             "followup_execute_brief_required"
             if "orch-followup-exec blocked" in blocked_contexts
@@ -784,12 +815,15 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "source_command": spec.get("command", "-"),
                 "payload": payload,
                 "messages": messages,
-                "next_step": "/offdesk review",
+                "next_step": _retry_blocked_next_step_for_contexts(
+                    blocked_contexts,
+                    entry=entry,
+                    fallback="/offdesk review",
+                ),
                 "remediation": _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
             },
             status=409,
         )
-    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     if isinstance(projects.get(project_key), dict):
         run_lock_response = _run_lock_block_response(
             entry=projects.get(project_key),

@@ -1800,6 +1800,38 @@ def test_control_dashboard_post_retry_route_blocked_includes_context_specific_re
     assert "approval blockers" in payload["remediation"]
 
 
+def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_step(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/retry",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["next_step"] == "/orch judge O2"
+    assert "/orch judge" in payload["remediation"]
+
+
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -2519,7 +2551,8 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert status == 409
     assert payload["status"] == "blocked"
     assert payload["outcome"]["reason_code"] == "planning_gate"
-    assert payload["next_step"] == "/offdesk review"
+    assert payload["next_step"] == "/orch judge O2"
+    assert "/orch judge" in payload["remediation"]
     assert "approval blockers" in payload["remediation"]
 
 
