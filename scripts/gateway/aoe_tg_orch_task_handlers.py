@@ -1727,6 +1727,7 @@ def handle_orch_task_command(
                 prompt=prompt,
                 system=system,
                 pack_profile_override=pack_profile,
+                timeout_sec=60.0,
             )
         else:
             result = model_provider_adapter.invoke_task_escalation_stub(

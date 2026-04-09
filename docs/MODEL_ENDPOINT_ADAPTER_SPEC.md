@@ -21,6 +21,8 @@
   - `endpoint_id`
   - `provider_kind`
     - `anthropic`
+    - `claude_code_cli`
+    - `codex_cli`
     - `google`
     - `openai`
     - `openai_compatible`
@@ -116,9 +118,12 @@ must all expose:
   - `openai`
   - `openai_compatible`
   - `anthropic`
+  - `claude_code_cli`
+  - `codex_cli`
 - Current probe policy:
   - `ollama` routes may use a live model-presence probe
   - `openai` / `anthropic` routes surface `missing_api_key` or `deferred_live_probe` in status views instead of a hard network gate
+  - `claude_code_cli` / `codex_cli` routes use CLI login probe state and may surface `logged_in`, `not_logged_in`, `missing_cli_binary`, or `probe_timeout`
 - example:
 ```bash
 python3 scripts/gateway/aoe_tg_model_provider_invoke.py \
@@ -176,10 +181,17 @@ python3 scripts/gateway/aoe_tg_model_endpoint_seed.py \
   - `research_synthesis` -> `gemma4`
   - premium on-desk / judge routes remain unbound by default
 - optional premium binding:
-  - `--judge-provider anthropic|openai|openai_compatible`
+  - `--judge-provider anthropic|openai|openai_compatible|claude_code_cli|codex_cli`
   - `--judge-model <model>`
   - `--judge-api-key-env <ENV_NAME>`
   - `--judge-base-url <url>` when the provider does not use its default API host
+  - `--judge-fallback-provider <kind>`
+  - `--judge-fallback-model <model>`
+  - `--judge-fallback-api-key-env <ENV_NAME>`
+  - `--judge-fallback-base-url <url>`
+  - recommended judge topology:
+    - primary: `claude_code_cli` or `codex_cli`
+    - fallback: `anthropic` or `openai`
 
 ## 7. Example
 ```json

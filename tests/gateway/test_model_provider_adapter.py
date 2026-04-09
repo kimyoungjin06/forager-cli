@@ -282,6 +282,137 @@ def test_invoke_model_binding_executes_openai_responses(tmp_path: Path, monkeypa
     assert result["response_text"] == "openai: ok"
 
 
+def test_invoke_model_binding_executes_claude_code_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "claude-cli-opus",
+                        "provider_kind": "claude_code_cli",
+                        "model": "opus",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "claude-cli-opus"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(provider_adapter.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    def _fake_run(argv, *, timeout_sec=30.0, cwd=""):
+        assert argv[0] == "/usr/bin/claude"
+        assert "-p" in argv
+        assert "--model" in argv
+        assert "opus" in argv
+        return {"ok": True, "exit_code": 0, "stdout": "CLI_JUDGE_OK", "stderr": ""}
+
+    result = provider_adapter.invoke_task_judge_stub(
+        team_dir,
+        entry={"project_root": str(tmp_path)},
+        task={"request_id": "REQ-1"},
+        prompt="judge this",
+        system="Return the exact token only.",
+        post_json=_fake_run,
+    )
+
+    assert result["kind"] == "judge"
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["provider_kind"] == "claude_code_cli"
+    assert result["response_text"] == "CLI_JUDGE_OK"
+
+
+def test_invoke_model_binding_falls_back_from_claude_cli_to_anthropic_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "claude-cli-opus",
+                        "provider_kind": "claude_code_cli",
+                        "model": "opus",
+                        "enabled": True,
+                    },
+                    {
+                        "endpoint_id": "anthropic-judge",
+                        "provider_kind": "anthropic",
+                        "model": "claude-opus-4.1",
+                        "enabled": True,
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {
+                        "endpoint_id": "claude-cli-opus",
+                        "fallback_ids": ["anthropic-judge"],
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(provider_adapter.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    def _hybrid_call(arg1, arg2=None, *, timeout_sec=30.0, cwd=""):
+        if isinstance(arg1, list):
+            return {"ok": False, "exit_code": 1, "stdout": "", "stderr": "not logged in"}
+        assert arg1 == "https://api.anthropic.com/v1/messages"
+        assert isinstance(arg2, dict)
+        return {"content": [{"type": "text", "text": "FALLBACK_OK"}]}
+
+    result = provider_adapter.invoke_task_judge_stub(
+        team_dir,
+        entry={"project_root": str(tmp_path)},
+        task={"request_id": "REQ-1"},
+        prompt="judge this",
+        system="Return the exact token only.",
+        post_json=_hybrid_call,
+    )
+
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["provider_kind"] == "anthropic"
+    assert result["response_text"] == "FALLBACK_OK"
+    assert result["fallback_used"] is True
+    assert result["fallback_from_endpoint_id"] == "claude-cli-opus"
+
+
 def test_invoke_model_binding_executes_anthropic_messages(tmp_path: Path, monkeypatch) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)

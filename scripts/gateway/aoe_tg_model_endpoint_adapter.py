@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import urllib.request
 from typing import Any, Dict, List, Tuple
 
@@ -31,6 +33,8 @@ MODEL_ROUTE_IDS: Tuple[str, ...] = (
 
 MODEL_ENDPOINT_KINDS: Tuple[str, ...] = (
     "anthropic",
+    "claude_code_cli",
+    "codex_cli",
     "google",
     "openai",
     "openai_compatible",
@@ -292,6 +296,7 @@ def resolve_model_route(team_dir: Any, route_id: str, *, entry: Any = None) -> D
         "profile": effective_model_routing_profile(entry, policy),
         "summary_label": summary_label,
         "endpoint_id": endpoint_id,
+        "fallback_ids": _normalize_list(route.get("fallback_ids"), limit=6, item_limit=64),
         "bound": bound,
         "family_hint": family_hint,
         "model_hint": model_hint,
@@ -413,9 +418,12 @@ def resolve_model_binding_snapshot(
     endpoint_data = endpoint if isinstance(endpoint, dict) else {}
     return {
         "route": route,
+        "registry": registry,
         "endpoint": endpoint_data,
         "endpoint_id": endpoint_id,
         "bound": bool(route.get("bound")) and bool(endpoint_data),
+        "team_dir": _trim(team_dir, 400),
+        "entry": entry if isinstance(entry, dict) else {},
         "summary": _trim(route.get("summary"), 240) or "-",
     }
 
@@ -540,6 +548,25 @@ def _default_fetch_json(url: str, *, timeout_sec: float = 3.0) -> Dict[str, Any]
     return payload if isinstance(payload, dict) else {}
 
 
+def _run_subprocess(argv: List[str], *, timeout_sec: float = 5.0) -> Dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=max(0.1, float(timeout_sec or 5.0)),
+            check=False,
+        )
+    except Exception as exc:
+        return {"ok": False, "exit_code": -1, "stdout": "", "stderr": _trim(exc, 400)}
+    return {
+        "ok": completed.returncode == 0,
+        "exit_code": int(completed.returncode),
+        "stdout": _trim(completed.stdout, 8000),
+        "stderr": _trim(completed.stderr, 8000),
+    }
+
+
 def _default_api_key_env(provider_kind: str, explicit: Any) -> str:
     token = _trim(explicit, 128)
     if token:
@@ -574,6 +601,82 @@ def probe_model_endpoint(
             "summary": f"endpoint={endpoint_id} status=disabled",
         }
     api_key_env = _default_api_key_env(provider_kind, row.get("api_key_env"))
+    if provider_kind == "claude_code_cli":
+        binary = shutil.which("claude")
+        if not binary:
+            return {
+                "ok": False,
+                "endpoint_id": endpoint_id,
+                "provider_kind": provider_kind,
+                "probe_status": "missing_cli_binary",
+                "summary": f"endpoint={endpoint_id} provider=claude_code_cli status=missing_cli_binary",
+            }
+        probe = _run_subprocess([binary, "auth", "status"], timeout_sec=max(float(timeout_sec or 3.0), 10.0))
+        merged = " ".join(part for part in (probe.get("stdout", ""), probe.get("stderr", "")) if part).lower()
+        try:
+            payload = json.loads(probe.get("stdout", "") or "{}")
+        except Exception:
+            payload = {}
+        if probe.get("ok") and bool(payload.get("loggedIn")):
+            auth_method = _trim(payload.get("authMethod"), 64) or "logged_in"
+            subscription = _trim(payload.get("subscriptionType"), 64) or "-"
+            return {
+                "ok": True,
+                "endpoint_id": endpoint_id,
+                "provider_kind": provider_kind,
+                "probe_status": "logged_in",
+                "summary": f"endpoint={endpoint_id} provider=claude_code_cli auth={auth_method} subscription={subscription}",
+            }
+        if "timed out" in merged:
+            return {
+                "ok": False,
+                "endpoint_id": endpoint_id,
+                "provider_kind": provider_kind,
+                "probe_status": "probe_timeout",
+                "summary": f"endpoint={endpoint_id} provider=claude_code_cli status=probe_timeout",
+            }
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "probe_status": "not_logged_in",
+            "summary": f"endpoint={endpoint_id} provider=claude_code_cli status=not_logged_in",
+        }
+    if provider_kind == "codex_cli":
+        binary = shutil.which("codex")
+        if not binary:
+            return {
+                "ok": False,
+                "endpoint_id": endpoint_id,
+                "provider_kind": provider_kind,
+                "probe_status": "missing_cli_binary",
+                "summary": f"endpoint={endpoint_id} provider=codex_cli status=missing_cli_binary",
+            }
+        probe = _run_subprocess([binary, "login", "status"], timeout_sec=max(float(timeout_sec or 3.0), 10.0))
+        merged = " ".join(part for part in (probe.get("stdout", ""), probe.get("stderr", "")) if part).lower()
+        if probe.get("ok") and "logged in" in merged:
+            return {
+                "ok": True,
+                "endpoint_id": endpoint_id,
+                "provider_kind": provider_kind,
+                "probe_status": "logged_in",
+                "summary": f"endpoint={endpoint_id} provider=codex_cli status=logged_in",
+            }
+        if "timed out" in merged:
+            return {
+                "ok": False,
+                "endpoint_id": endpoint_id,
+                "provider_kind": provider_kind,
+                "probe_status": "probe_timeout",
+                "summary": f"endpoint={endpoint_id} provider=codex_cli status=probe_timeout",
+            }
+        return {
+            "ok": False,
+            "endpoint_id": endpoint_id,
+            "provider_kind": provider_kind,
+            "probe_status": "not_logged_in",
+            "summary": f"endpoint={endpoint_id} provider=codex_cli status=not_logged_in",
+        }
     if provider_kind in {"anthropic", "openai"} and not _trim(os.environ.get(api_key_env), 800):
         return {
             "ok": False,
@@ -702,6 +805,40 @@ def summarize_deferred_model_binding_probe(binding: Any, *, default_label: str =
     endpoint_id = _trim(endpoint.get("endpoint_id"), 64) or "-"
     provider_kind = _trim(endpoint.get("provider_kind"), 64).lower() or "custom"
     api_key_env = _default_api_key_env(provider_kind, endpoint.get("api_key_env"))
+    if provider_kind == "claude_code_cli":
+        binary = shutil.which("claude")
+        if not binary:
+            return {
+                "ok": False,
+                "route_id": route_id,
+                "probe_status": "missing_cli_binary",
+                "summary": f"endpoint={endpoint_id} provider=claude_code_cli status=missing_cli_binary",
+                "binding": row,
+            }
+        return {
+            "ok": False,
+            "route_id": route_id,
+            "probe_status": "deferred_login_probe",
+            "summary": f"endpoint={endpoint_id} provider=claude_code_cli status=deferred_login_probe",
+            "binding": row,
+        }
+    if provider_kind == "codex_cli":
+        binary = shutil.which("codex")
+        if not binary:
+            return {
+                "ok": False,
+                "route_id": route_id,
+                "probe_status": "missing_cli_binary",
+                "summary": f"endpoint={endpoint_id} provider=codex_cli status=missing_cli_binary",
+                "binding": row,
+            }
+        return {
+            "ok": False,
+            "route_id": route_id,
+            "probe_status": "deferred_login_probe",
+            "summary": f"endpoint={endpoint_id} provider=codex_cli status=deferred_login_probe",
+            "binding": row,
+        }
     if provider_kind in {"anthropic", "openai"} and not _trim(os.environ.get(api_key_env), 800):
         return {
             "ok": False,

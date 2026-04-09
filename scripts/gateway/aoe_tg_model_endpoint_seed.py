@@ -90,6 +90,10 @@ def build_ollama_seed_payload(
     judge_model: str = "",
     judge_base_url: str = "",
     judge_api_key_env: str = "",
+    judge_fallback_provider: str = "",
+    judge_fallback_model: str = "",
+    judge_fallback_base_url: str = "",
+    judge_fallback_api_key_env: str = "",
     profile: str = "hybrid_local_exec",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     endpoints = []
@@ -125,6 +129,19 @@ def build_ollama_seed_payload(
         )
         endpoints.append(row)
         route_ids["offdesk_judge"] = str(row["endpoint_id"])
+    judge_fallback_ids: list[str] = []
+    judge_fallback_provider_token = model_endpoint_adapter.normalize_model_endpoint_kind(judge_fallback_provider, "custom")
+    judge_fallback_model_token = _trim(judge_fallback_model, 128)
+    if judge_fallback_provider_token and judge_fallback_provider_token != "custom" and judge_fallback_model_token:
+        row = _build_remote_endpoint(
+            provider_kind=judge_fallback_provider_token,
+            model_name=judge_fallback_model_token,
+            roles=[],
+            base_url=judge_fallback_base_url,
+            api_key_env=judge_fallback_api_key_env,
+        )
+        endpoints.append(row)
+        judge_fallback_ids.append(str(row["endpoint_id"]))
 
     registry = model_endpoint_adapter.sanitize_model_endpoint_registry(
         {
@@ -150,6 +167,7 @@ def build_ollama_seed_payload(
                     "endpoint_id": route_ids.get("offdesk_judge", ""),
                     "family_hint": "anthropic",
                     "model_hint": "claude-opus-4.1",
+                    "fallback_ids": judge_fallback_ids,
                 },
                 "background_worker_primary": {
                     "endpoint_id": route_ids.get("background_worker_primary", ""),
@@ -174,6 +192,10 @@ def write_ollama_seed_files(
     judge_model: str = "",
     judge_base_url: str = "",
     judge_api_key_env: str = "",
+    judge_fallback_provider: str = "",
+    judge_fallback_model: str = "",
+    judge_fallback_base_url: str = "",
+    judge_fallback_api_key_env: str = "",
     profile: str = "hybrid_local_exec",
 ) -> Dict[str, str]:
     registry, policy = build_ollama_seed_payload(
@@ -185,6 +207,10 @@ def write_ollama_seed_files(
         judge_model=judge_model,
         judge_base_url=judge_base_url,
         judge_api_key_env=judge_api_key_env,
+        judge_fallback_provider=judge_fallback_provider,
+        judge_fallback_model=judge_fallback_model,
+        judge_fallback_base_url=judge_fallback_base_url,
+        judge_fallback_api_key_env=judge_fallback_api_key_env,
         profile=profile,
     )
     team_dir = Path(team_dir).expanduser().resolve()
@@ -208,10 +234,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--qwen-model", default="", help="Qwen coding model name")
     p.add_argument("--gpt-oss-model", default="", help="gpt-oss model name")
     p.add_argument("--gemma-model", default="", help="Gemma model name")
-    p.add_argument("--judge-provider", default="", help="optional judge provider kind: anthropic|openai|openai_compatible")
+    p.add_argument("--judge-provider", default="", help="optional judge provider kind: anthropic|openai|openai_compatible|claude_code_cli|codex_cli")
     p.add_argument("--judge-model", default="", help="optional judge model name")
     p.add_argument("--judge-base-url", default="", help="optional custom base URL for judge endpoint")
     p.add_argument("--judge-api-key-env", default="", help="optional env var name for judge API key")
+    p.add_argument("--judge-fallback-provider", default="", help="optional fallback judge provider kind")
+    p.add_argument("--judge-fallback-model", default="", help="optional fallback judge model name")
+    p.add_argument("--judge-fallback-base-url", default="", help="optional custom base URL for fallback judge endpoint")
+    p.add_argument("--judge-fallback-api-key-env", default="", help="optional env var name for fallback judge API key")
     p.add_argument("--profile", default="hybrid_local_exec", help="routing profile label")
     return p
 
@@ -228,6 +258,10 @@ def main() -> int:
         judge_model=args.judge_model,
         judge_base_url=args.judge_base_url,
         judge_api_key_env=args.judge_api_key_env,
+        judge_fallback_provider=args.judge_fallback_provider,
+        judge_fallback_model=args.judge_fallback_model,
+        judge_fallback_base_url=args.judge_fallback_base_url,
+        judge_fallback_api_key_env=args.judge_fallback_api_key_env,
         profile=args.profile,
     )
     print("model endpoint seed written")

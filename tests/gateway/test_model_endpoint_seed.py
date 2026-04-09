@@ -52,6 +52,28 @@ def test_build_ollama_seed_payload_can_bind_premium_judge() -> None:
     assert endpoints[judge_endpoint_id]["roles"] == ["offdesk_judge"]
 
 
+def test_build_ollama_seed_payload_can_bind_cli_judge_with_api_fallback() -> None:
+    registry, policy = seed_mod.build_ollama_seed_payload(
+        base_url="http://172.16.0.37:11434",
+        qwen_model="qwen3-coder:30b",
+        gpt_oss_model="gpt-oss:120b",
+        gemma_model="gemma4:26b",
+        judge_provider="claude_code_cli",
+        judge_model="opus",
+        judge_fallback_provider="anthropic",
+        judge_fallback_model="claude-opus-4.1",
+        judge_fallback_api_key_env="ANTHROPIC_API_KEY",
+    )
+
+    endpoints = {row["endpoint_id"]: row for row in registry["endpoints"]}
+    judge_endpoint_id = policy["routes"]["offdesk_judge"]["endpoint_id"]
+    fallback_ids = policy["routes"]["offdesk_judge"]["fallback_ids"]
+    assert judge_endpoint_id.startswith("claude_code_cli-opus")
+    assert endpoints[judge_endpoint_id]["provider_kind"] == "claude_code_cli"
+    assert len(fallback_ids) == 1
+    assert endpoints[fallback_ids[0]]["provider_kind"] == "anthropic"
+
+
 def test_write_ollama_seed_files_writes_registry_and_policy(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     result = seed_mod.write_ollama_seed_files(

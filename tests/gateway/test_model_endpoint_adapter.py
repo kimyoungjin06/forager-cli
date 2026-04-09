@@ -7,6 +7,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 GW_DIR = ROOT / "scripts" / "gateway"
 if str(GW_DIR) not in sys.path:
@@ -320,6 +322,83 @@ def test_probe_task_judge_binding_reports_missing_api_key_for_anthropic(tmp_path
     assert result["probe_status"] == "missing_api_key"
     assert "missing_api_key" in result["summary"]
     assert "provider=anthropic" in result["summary"]
+
+
+def test_probe_model_endpoint_reports_claude_cli_logged_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    endpoint = {
+        "endpoint_id": "claude-cli-opus",
+        "provider_kind": "claude_code_cli",
+        "model": "opus",
+        "enabled": True,
+    }
+    monkeypatch.setattr(model_endpoint_adapter.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(
+        model_endpoint_adapter,
+        "_run_subprocess",
+        lambda argv, timeout_sec=5.0: {
+            "ok": True,
+            "exit_code": 0,
+            "stdout": json.dumps({"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "team"}),
+            "stderr": "",
+        },
+    )
+
+    result = model_endpoint_adapter.probe_model_endpoint(endpoint)
+
+    assert result["ok"] is True
+    assert result["probe_status"] == "logged_in"
+    assert "provider=claude_code_cli" in result["summary"]
+
+
+def test_summarize_deferred_model_binding_probe_marks_claude_cli_as_deferred(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "claude-cli-opus",
+                        "provider_kind": "claude_code_cli",
+                        "model": "opus",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "claude-cli-opus"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(model_endpoint_adapter.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    binding = model_endpoint_adapter.resolve_task_judge_binding(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1"},
+    )
+    result = model_endpoint_adapter.summarize_deferred_model_binding_probe(binding, default_label="judge")
+
+    assert result["ok"] is False
+    assert result["probe_status"] == "deferred_login_probe"
+    assert "provider=claude_code_cli" in result["summary"]
 
 
 def test_summarize_deferred_model_binding_probe_marks_bound_ollama_as_deferred(tmp_path: Path) -> None:
