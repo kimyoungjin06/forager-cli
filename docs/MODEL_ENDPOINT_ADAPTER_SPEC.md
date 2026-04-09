@@ -159,7 +159,7 @@ python3 scripts/gateway/aoe_tg_model_endpoint_seed.py \
 - default binding policy:
   - `background_worker_primary` -> `qwen3-coder`
   - `background_worker_escalation` -> `gpt-oss`
-  - `gemma4` stays registered but unbound until explicitly promoted
+  - `research_synthesis` -> `gemma4`
   - premium on-desk / judge routes remain unbound by default
 
 ## 7. Example

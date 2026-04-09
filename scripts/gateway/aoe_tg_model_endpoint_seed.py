@@ -82,6 +82,7 @@ def build_ollama_seed_payload(
     if gemma_token:
         row = _build_ollama_endpoint(base_url, gemma_token, [])
         endpoints.append(row)
+        route_ids["research_synthesis"] = str(row["endpoint_id"])
 
     registry = model_endpoint_adapter.sanitize_model_endpoint_registry(
         {
@@ -99,6 +100,7 @@ def build_ollama_seed_payload(
                     "model_hint": "claude-sonnet-4",
                 },
                 "research_synthesis": {
+                    "endpoint_id": route_ids.get("research_synthesis", ""),
                     "family_hint": "google",
                     "model_hint": "gemini-2.5-pro",
                 },

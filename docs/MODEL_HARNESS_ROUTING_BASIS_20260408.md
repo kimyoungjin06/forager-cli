@@ -124,7 +124,17 @@
 - But that does not automatically make it the first local coding executor for our stack.
 - The right move is to benchmark it as an adapter target, not assume it wins by announcement alone.
 
-## 7. Off-Desk Escalation Policy
+## 7. Canonical Route Policy
+- current recommended canonical mapping:
+  - `background_worker_primary` -> `Qwen3-Coder`
+  - `background_worker_escalation` -> `gpt-oss`
+  - `research_synthesis` -> `Gemma 4`
+  - `offdesk_judge` -> premium route or intentionally unbound
+- working rule:
+  - `Gemma 4` is first promoted into synthesis/research, not final judgment
+  - `offdesk_judge` should not silently downgrade to a local open model without an explicit policy decision
+
+## 8. Off-Desk Escalation Policy
 - Use premium judge calls only when at least one of these is true:
   1. a local/open worker hits the same blocker twice
   2. tests partially pass but failure classification is unclear
@@ -135,14 +145,14 @@
   - premium models decide
   - open/local models execute
 
-## 8. Planning Implications For This Repo
+## 9. Planning Implications For This Repo
 1. Do not replace the current off-desk core with `LangGraph` or `OpenClaw`.
 2. Continue moving execution behavior behind `ExecutorAdapter` seams.
 3. Standardize one primary on-desk shell before adding overlays.
 4. Pilot one local open worker through adapters before adding more orchestration products.
 5. Treat `OpenClaw` and `LangGraph` as optional adjacent layers, not as the new product boundary.
 
-## 9. Recommended Adoption Sequence
+## 10. Recommended Adoption Sequence
 1. Standardize `on-desk` on `Claude Code` as the primary shell.
 2. Keep `aoe_orch_control` as `off-desk` truth.
 3. Treat upstream harness generators such as `revfactory/harness` as on-desk authoring modules, not off-desk runtime truth.
@@ -157,14 +167,14 @@
 7. Keep endpoint binding modular through:
    - `docs/MODEL_ENDPOINT_ADAPTER_SPEC.md`
 
-## 10. Anti-Patterns To Avoid
+## 11. Anti-Patterns To Avoid
 - `on-desk = Claude Code + OMC + another shell` as simultaneous primaries
 - `off-desk = LangGraph` as a reflex without a re-platform decision
 - `off-desk = OpenClaw` as a replacement for task/runtime truth
 - “free model” language that ignores compute, memory, and operator overhead
 - putting premium models in the always-on worker lane by default
 
-## 11. References
+## 12. References
 - `SRC-CC-1` Claude Code official repo
   - https://github.com/anthropics/claude-code
   - reviewed 2026-04-08

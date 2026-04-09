@@ -29,7 +29,8 @@ def test_build_ollama_seed_payload_binds_background_routes() -> None:
     assert policy["profile"] == "hybrid_local_exec"
     assert policy["routes"]["background_worker_primary"]["endpoint_id"].startswith("ollama-qwen3-coder-30b")
     assert policy["routes"]["background_worker_escalation"]["endpoint_id"].startswith("ollama-gpt-oss-120b")
-    assert policy["routes"]["research_synthesis"]["endpoint_id"] == ""
+    assert policy["routes"]["research_synthesis"]["endpoint_id"].startswith("ollama-gemma4-26b")
+    assert policy["routes"]["offdesk_judge"]["endpoint_id"] == ""
 
 
 def test_write_ollama_seed_files_writes_registry_and_policy(tmp_path: Path) -> None:
@@ -52,6 +53,9 @@ def test_write_ollama_seed_files_writes_registry_and_policy(tmp_path: Path) -> N
 
     assert registry["endpoints"][0]["base_url"] == "http://172.16.0.37:11434"
     assert policy["routes"]["background_worker_primary"]["endpoint_id"]
+    assert policy["routes"]["research_synthesis"]["endpoint_id"]
+    assert policy["routes"]["offdesk_judge"]["endpoint_id"] == ""
     assert "profile=hybrid_local_exec" in result["routing_summary"]
     assert "bg=ollama-qwen3-coder-30b:qwen3-coder:30b" in result["routing_summary"]
-    assert "enabled=3 bound=2/5 local=3 kinds=ollama=3" == result["registry_summary"]
+    assert "research=ollama-gemma4-26b:gemma4:26b" in result["routing_summary"]
+    assert "enabled=3 bound=3/5 local=3 kinds=ollama=3" == result["registry_summary"]

@@ -178,6 +178,12 @@ Policy:
       "model": "gpt-oss:120b",
       "route": "background_worker_escalation"
     },
+    "gemma_local": {
+      "provider_kind": "ollama",
+      "base_url_env": "OLLAMA_BASE_URL",
+      "model": "gemma4:26b",
+      "route": "research_synthesis"
+    },
     "judge_claude": {
       "provider_kind": "anthropic",
       "model": "claude-opus-4.1",
