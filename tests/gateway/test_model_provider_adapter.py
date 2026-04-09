@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Provider-side model invocation regressions."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GW_DIR = ROOT / "scripts" / "gateway"
+if str(GW_DIR) not in sys.path:
+    sys.path.insert(0, str(GW_DIR))
+
+import aoe_tg_model_endpoint_adapter as endpoint_adapter  # noqa: E402
+import aoe_tg_model_provider_adapter as provider_adapter  # noqa: E402
+
+
+def test_invoke_model_binding_returns_unbound_without_execution(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    binding = endpoint_adapter.resolve_model_binding_snapshot(team_dir, "background_worker_primary")
+
+    result = provider_adapter.invoke_model_binding(binding, prompt="hello")
+
+    assert result["ok"] is False
+    assert result["executed"] is False
+    assert result["reason_code"] == "model_route_unbound"
+
+
+def test_invoke_model_binding_executes_ollama_generate(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    binding = endpoint_adapter.resolve_model_binding_snapshot(team_dir, "background_worker_primary")
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "http://172.16.0.37:11434/api/generate"
+        assert payload["model"] == "qwen3-coder:30b"
+        assert payload["prompt"] == "summarize"
+        assert payload["system"] == "system prompt"
+        assert payload["stream"] is False
+        assert timeout_sec == 30.0
+        return {
+            "response": "ok: summarized",
+            "done": True,
+            "prompt_eval_count": 12,
+            "eval_count": 48,
+        }
+
+    result = provider_adapter.invoke_model_binding(
+        binding,
+        prompt="summarize",
+        system="system prompt",
+        post_json=_fake_post,
+    )
+
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["provider_kind"] == "ollama"
+    assert result["model"] == "qwen3-coder:30b"
+    assert result["response_text"] == "ok: summarized"
+    assert result["done"] is True
+    assert result["prompt_eval_count"] == 12
+    assert result["eval_count"] == 48
+
+
+def test_invoke_task_judge_stub_uses_resolved_judge_route(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-gemma4",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "gemma4:26b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "offdesk_judge": {"endpoint_id": "ollama-gemma4"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "http://172.16.0.37:11434/api/generate"
+        assert payload["model"] == "gemma4:26b"
+        assert payload["prompt"] == "review this"
+        return {"response": "judge: proceed", "done": True}
+
+    result = provider_adapter.invoke_task_judge_stub(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1", "followup_brief_status": "preview_only"},
+        prompt="review this",
+        pack_profile_override="followup_preview",
+        post_json=_fake_post,
+    )
+
+    assert result["kind"] == "judge"
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["route_id"] == "offdesk_judge"
+    assert result["model"] == "gemma4:26b"
+    assert result["response_text"] == "judge: proceed"

@@ -98,13 +98,36 @@ must all expose:
   - `Recovery`
 
 ## 5. Current Scope
-- This layer does not perform live model inference.
-- It is a control-plane seam only:
+- Runtime automation does not yet perform general route-driven inference.
+- Current shipped scope:
   - registry normalization
   - route normalization
   - route resolution
   - route/endpoint probing
   - operator summary
+  - explicit bounded invoke helpers for provider-adapter testing
+- Current explicit invoke helpers:
+  - `scripts/gateway/aoe_tg_model_provider_adapter.py`
+  - `scripts/gateway/aoe_tg_model_provider_invoke.py`
+- example:
+```bash
+python3 scripts/gateway/aoe_tg_model_provider_invoke.py \
+  --team-dir /path/to/.aoe-team \
+  --route-id background_worker_primary \
+  --prompt "Summarize the retry scope in 5 bullets."
+```
+- example:
+```bash
+python3 scripts/gateway/aoe_tg_model_provider_invoke.py \
+  --team-dir /path/to/.aoe-team \
+  --kind judge \
+  --pack-profile followup_preview \
+  --prompt "Decide whether the followup preview is actionable."
+```
+- Current policy:
+  - background worker routes may block launch on failed worker probe
+  - judge/escalation routes are recorded as launch metadata and surfaced in status/detail views
+  - explicit invoke is opt-in and not yet wired into the autonomous background loop
 
 ## 6. Future Attachment Path
 0. Declare topology in a stack manifest and compile it first.
