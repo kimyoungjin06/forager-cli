@@ -113,6 +113,7 @@ class RuntimeCardDTO:
     document_registry_summary: str
     model_routing_summary: str
     model_registry_summary: str
+    latest_judge_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -301,6 +302,7 @@ class RuntimeDetailDTO:
     document_registry_summary: str
     model_routing_summary: str
     model_registry_summary: str
+    latest_judge_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -409,6 +411,7 @@ class RecoveryRuntimeDTO:
     document_registry_summary: str
     model_routing_summary: str
     model_registry_summary: str
+    latest_judge_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int

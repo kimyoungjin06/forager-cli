@@ -60,7 +60,21 @@ def _background_slot_snapshot(entry: Dict[str, Any], team_dir: Path) -> Dict[str
     )
 
 
-def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any]) -> List[RuntimeCardDTO]:
+def _latest_judge_summary(team_dir: Path, *, project_alias: str) -> str:
+    row = action_audit.load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=project_alias,
+        outcome_kind="offdesk_judge",
+    )
+    if not row:
+        return "-"
+    headline = str(row.get("headline", "")).strip() or "Offdesk Judge"
+    next_step = str(row.get("next_step", "")).strip() or "-"
+    detail = str(row.get("outcome_detail", "")).strip() or "-"
+    return f"{headline} | next={next_step} | {detail}"
+
+
+def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any], *, root_team_dir: Path) -> List[RuntimeCardDTO]:
     reports = _runtime_reports(manager_state, provider_state)
 
     cards: List[RuntimeCardDTO] = []
@@ -84,6 +98,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         worker_summary = "-"
         model_routing_summary = "-"
         model_registry_summary = "-"
+        latest_judge_summary = "-"
         workspace_summary = "-"
         document_registry_summary = "-"
         active_task_context_pack_summary = "-"
@@ -135,6 +150,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 )
                 model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry)
                 model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry)
+                latest_judge_summary = _latest_judge_summary(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
+                )
                 if isinstance(active_task, dict):
                     pack = context_pack.load_context_pack(
                         team_dir,
@@ -275,6 +294,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 document_registry_summary=document_registry_summary,
                 model_routing_summary=model_routing_summary,
                 model_registry_summary=model_registry_summary,
+                latest_judge_summary=latest_judge_summary,
                 run_lock_mode=run_lock_mode,
                 run_lock_note=run_lock_note,
                 background_slot_limit=background_slot_limit,
@@ -391,7 +411,13 @@ def _resolve_runtime_entry(manager_state: Dict[str, Any], project_alias: str) ->
     return None
 
 
-def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[str, Any], project_alias: str) -> Optional[RuntimeDetailDTO]:
+def _build_runtime_detail(
+    manager_state: Dict[str, Any],
+    provider_state: Dict[str, Any],
+    project_alias: str,
+    *,
+    root_team_dir: Path | str | None = None,
+) -> Optional[RuntimeDetailDTO]:
     resolved = _resolve_runtime_entry(manager_state, project_alias)
     if resolved is None:
         return None
@@ -455,6 +481,11 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
     ) if str(entry.get("team_dir", "")).strip() else "-"
     model_routing_summary = model_endpoint_adapter.summarize_model_routing(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
     model_registry_summary = model_endpoint_adapter.summarize_model_endpoint_registry(team_dir, entry=entry) if str(entry.get("team_dir", "")).strip() else "-"
+    latest_judge_summary = (
+        _latest_judge_summary(Path(str(root_team_dir or "")).expanduser(), project_alias=str(entry.get("project_alias", "")).strip())
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
     active_task_context_pack_profile = "-"
     active_task_context_pack_summary = "-"
     active_task_context_pack_docs = "-"
@@ -672,6 +703,7 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         document_registry_summary=document_registry_summary,
         model_routing_summary=model_routing_summary,
         model_registry_summary=model_registry_summary,
+        latest_judge_summary=latest_judge_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,

@@ -397,6 +397,21 @@ def test_runtime_read_matches_gateway_wrapper_state(tmp_path: Path) -> None:
 def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:00:00+09:00",
+    )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -424,6 +439,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert str(team_dir.resolve()) in overview_text
     assert "context_pack" in overview_text
     assert "model_plan" in overview_text
+    assert "latest_judge" in overview_text
+    assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -1026,6 +1043,31 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
 def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:05:00+09:00",
+    )
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -1066,6 +1108,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "no queued scheduler head" in text
     assert "context_pack" in text
     assert "model_plan" in text
+    assert "latest_judge" in text
+    assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text

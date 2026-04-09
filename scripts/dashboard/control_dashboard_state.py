@@ -190,7 +190,7 @@ def load_dashboard_snapshot_result(
     )
     action_audit_rows, action_audit_freshness = _load_recent_action_audit(paths.action_audit_file)
 
-    runtime_cards = _build_runtime_cards(manager_loaded.state, provider_state)
+    runtime_cards = _build_runtime_cards(manager_loaded.state, provider_state, root_team_dir=paths.team_dir)
     active_rows = _build_active_task_rows(manager_loaded.state)
     attention_cards = [card for card in runtime_cards if card.status in {"blocked", "warn"}][:8]
 
@@ -290,7 +290,7 @@ def load_runtime_detail(
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     manager_loaded = _load_manager_state(paths)
     provider_state, _provider_freshness = _load_json_file(paths.provider_capacity_file, name="provider_capacity")
-    return _build_runtime_detail(manager_loaded.state, provider_state, project_alias)
+    return _build_runtime_detail(manager_loaded.state, provider_state, project_alias, root_team_dir=paths.team_dir)
 
 
 def load_dashboard_runtime_page(
@@ -305,7 +305,12 @@ def load_dashboard_runtime_page(
         team_dir=team_dir,
         manager_state_file=manager_state_file,
     )
-    return loaded.snapshot, _build_runtime_detail(loaded.manager_state, loaded.provider_state, project_alias)
+    return loaded.snapshot, _build_runtime_detail(
+        loaded.manager_state,
+        loaded.provider_state,
+        project_alias,
+        root_team_dir=loaded.snapshot.team_dir,
+    )
 
 
 def load_dashboard_runtime_details(
@@ -321,7 +326,12 @@ def load_dashboard_runtime_details(
     )
     details: List[RuntimeDetailDTO] = []
     for card in loaded.snapshot.runtime_cards:
-        detail = _build_runtime_detail(loaded.manager_state, loaded.provider_state, card.project_alias)
+        detail = _build_runtime_detail(
+            loaded.manager_state,
+            loaded.provider_state,
+            card.project_alias,
+            root_team_dir=loaded.snapshot.team_dir,
+        )
         if detail is not None:
             details.append(detail)
     return loaded.snapshot, details, loaded.manager_state

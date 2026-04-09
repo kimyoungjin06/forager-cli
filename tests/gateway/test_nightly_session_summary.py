@@ -15,6 +15,7 @@ for path in (GW_DIR, DASH_DIR, TEST_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import aoe_tg_action_audit as action_audit  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
 from test_control_dashboard import _build_runtime  # noqa: E402
 
@@ -22,6 +23,21 @@ from test_control_dashboard import _build_runtime  # noqa: E402
 def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:10:00+09:00",
+    )
 
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
@@ -40,8 +56,8 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert control["latest_intent_action"] == "offdesk_prepare"
     assert "selected=offdesk_prepare" in control["latest_intent_trace"]
     assert control["latest_intent_focus"] == "오늘 밤 scope, provider capacity, auto posture를 먼저 점검"
-    assert summary["recent_action_audit"][0]["headline"] == "Sync Preview | preview"
-    assert summary["recent_action_audit"][0]["link_href"] == "/control/runtimes/O2"
+    assert any(row["headline"] == "Sync Preview | preview" for row in summary["recent_action_audit"])
+    assert any(row["link_href"] == "/control/runtimes/O2" for row in summary["recent_action_audit"])
     assert runtimes[0]["project_alias"] == "O2"
     assert runtimes[0]["completed_task_count"] == 1
     assert "/monitor O2" in runtimes[0]["operator_hints"]
@@ -53,6 +69,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert "depth=" in runtimes[0]["background_queue_summary"]
     assert runtimes[0]["background_scheduler_summary"] == "-"
     assert runtimes[0]["background_scheduler_note"] == "no queued scheduler head"
+    assert runtimes[0]["latest_judge_summary"] == "Offdesk Judge | next=/offdesk review O2 | endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed"
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -68,6 +85,21 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     output_dir = tmp_path / "summary-out"
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:12:00+09:00",
+    )
 
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
@@ -99,6 +131,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "Sync Preview | preview" in markdown
     assert "link: runtime detail -> /control/runtimes/O2" in markdown
     assert "background_queue:" in markdown
+    assert "latest_judge: Offdesk Judge | next=/offdesk review O2 | endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in markdown
     assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown
     assert "background_slots: active=0 limit=1" in markdown
@@ -112,4 +145,4 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "analysis-check (REQ-1)" in markdown
     assert "completion_focus: evidence quality, reasoning coherence, missing caveats" in markdown
     assert payload["runtimes"][0]["project_alias"] == "O2"
-    assert payload["recent_action_audit"][0]["headline"] == "Sync Preview | preview"
+    assert any(row["headline"] == "Sync Preview | preview" for row in payload["recent_action_audit"])
