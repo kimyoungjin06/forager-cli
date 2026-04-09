@@ -167,6 +167,34 @@ def invoke_task_judge_stub(
     return result
 
 
+def invoke_task_worker_stub(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    prompt: Any,
+    system: Any = "",
+    pack_profile_override: Any = None,
+    timeout_sec: float = 30.0,
+    post_json: Any = None,
+) -> Dict[str, Any]:
+    binding = endpoint_adapter.resolve_task_worker_binding(
+        team_dir,
+        entry=entry,
+        task=task,
+        pack_profile_override=pack_profile_override,
+    )
+    result = invoke_model_binding(
+        binding,
+        prompt=prompt,
+        system=system,
+        timeout_sec=timeout_sec,
+        post_json=post_json,
+    )
+    result["kind"] = "worker"
+    return result
+
+
 def invoke_task_escalation_stub(
     team_dir: Any,
     *,

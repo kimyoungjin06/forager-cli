@@ -419,12 +419,23 @@ def resolve_model_binding_snapshot(
     }
 
 
-def resolve_task_worker_binding(team_dir: Any, *, entry: Any = None, task: Any = None) -> Dict[str, Any]:
+def resolve_task_worker_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+) -> Dict[str, Any]:
     task_data = task if isinstance(task, dict) else {}
     route_id = _trim(task_data.get("background_run_model_worker_route_id"), 64).lower() or "background_worker_primary"
     endpoint_id = _trim(task_data.get("background_run_model_worker_endpoint_id"), 64).lower()
     if not endpoint_id and not _trim(task_data.get("background_run_model_plan_summary"), 64):
-        plan = resolve_task_model_plan(team_dir, entry=entry, task=task_data)
+        plan = resolve_task_model_plan(
+            team_dir,
+            entry=entry,
+            task=task_data,
+            pack_profile_override=pack_profile_override,
+        )
         worker = plan.get("worker_route") if isinstance(plan.get("worker_route"), dict) else {}
         route_id = _trim(worker.get("route_id"), 64).lower() or route_id
         endpoint_id = _trim(worker.get("endpoint_id"), 64).lower()
