@@ -1898,6 +1898,58 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
 
 
+def test_control_dashboard_post_replan_route_terminal_block_prefers_judge_next_step(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T10:05:00+09:00",
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["next_step"] == "/orch judge O2"
+    assert payload["source_command"] == "/replan T-001 lane L1"
+    assert "/orch judge" in payload["remediation"]
+    assert "latest judge: Offdesk Judge" in payload["remediation"]
+    assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
+    assert payload["latest_judge"]["headline"] == "Offdesk Judge"
+    assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
+
+
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
