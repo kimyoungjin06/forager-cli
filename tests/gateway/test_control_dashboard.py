@@ -440,7 +440,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "context_pack" in overview_text
     assert "model_plan" in overview_text
     assert "latest_judge" in overview_text
-    assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in overview_text
+    assert "Offdesk Judge" in overview_text
+    assert "codex_cli-gpt-5-4" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -873,6 +874,7 @@ def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_pat
     assert "indexed=1 canonical=1" in text
     assert "model_registry" in text
     assert "enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
+    assert "latest_judge" in text
 
 
 def test_control_dashboard_runtime_and_task_detail_prefer_recent_judge_model_ping(
