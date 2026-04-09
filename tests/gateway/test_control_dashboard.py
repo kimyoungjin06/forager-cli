@@ -1892,6 +1892,8 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert payload["status"] == "blocked"
     assert payload["next_step"] == "/orch judge O2"
     assert "/orch judge" in payload["remediation"]
+    assert "latest judge: Offdesk Judge" in payload["remediation"]
+    assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
     assert payload["latest_judge"]["headline"] == "Offdesk Judge"
     assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
 
@@ -2633,6 +2635,8 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert payload["next_step"] == "/orch judge O2"
     assert "/orch judge" in payload["remediation"]
     assert "approval blockers" in payload["remediation"]
+    assert "latest judge: Offdesk Judge" in payload["remediation"]
+    assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
     assert payload["latest_judge"]["headline"] == "Offdesk Judge"
     assert payload["latest_judge"]["detail"].startswith("endpoint=claude_code_cli-opus")
 

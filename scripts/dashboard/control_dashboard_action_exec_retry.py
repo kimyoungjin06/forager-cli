@@ -121,6 +121,26 @@ def _latest_judge_summary_payload(*, team_dir: Path, entry: Dict[str, Any]) -> D
     }
 
 
+def _retry_blocked_remediation_with_latest_judge(remediation: str, latest_judge: Dict[str, str]) -> str:
+    if not isinstance(latest_judge, dict) or not latest_judge:
+        return remediation
+    parts: List[str] = []
+    headline = str(latest_judge.get("headline", "")).strip()
+    detail = str(latest_judge.get("detail", "")).strip()
+    at = str(latest_judge.get("at", "")).strip()
+    if headline and headline != "-":
+        parts.append(headline)
+    if detail and detail != "-":
+        parts.append(detail)
+    if at and at != "-":
+        parts.append(f"at={at}")
+    if not parts:
+        return remediation
+    base = str(remediation or "").strip()
+    suffix = f"latest judge: {' | '.join(parts)}"
+    return f"{base}; {suffix}" if base else suffix
+
+
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
@@ -595,6 +615,7 @@ def _execute_retry_run_transition(
         next_step = _retry_blocked_next_step_for_reason(reason_code, entry=entry, fallback=next_step)
         remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
     latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
+    remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge) if blocked else remediation
     return _json(
         {
             "ok": not blocked,
@@ -841,7 +862,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                     entry=entry,
                     fallback="/offdesk review",
                 ),
-                "remediation": _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
+                "remediation": _retry_blocked_remediation_with_latest_judge(
+                    _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
+                    latest_judge,
+                ),
                 "latest_judge": latest_judge,
             },
             status=409,
