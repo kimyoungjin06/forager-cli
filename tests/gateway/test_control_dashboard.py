@@ -1341,6 +1341,10 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
     assert task["background_run_model_plan_summary"] == (
         "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
     )
+    assert task["background_run_model_judge_binding_summary"] == "judge=unbound:claude-opus-4.1"
+    assert task["background_run_model_judge_probe_status"] == "unbound"
+    assert task["background_run_model_escalation_binding_summary"] == "bgx=unbound:gpt-oss-or-gemma4"
+    assert task["background_run_model_escalation_probe_status"] == "unbound"
     queue_path = Path(updated["projects"]["alpha"]["team_dir"]) / "background_runs.json"
     rows = background_runs.load_background_runs_state(queue_path).get("runs") or []
     launched = [row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-1-")]
@@ -1352,6 +1356,10 @@ def test_control_dashboard_post_retry_route_uses_local_tmux_background_when_pref
     assert launched[0]["launch_spec"]["model_plan_summary"] == (
         "pack=review | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
     )
+    assert launched[0]["launch_spec"]["model_judge_binding_summary"] == "judge=unbound:claude-opus-4.1"
+    assert launched[0]["launch_spec"]["model_judge_probe_status"] == "unbound"
+    assert launched[0]["launch_spec"]["model_escalation_binding_summary"] == "bgx=unbound:gpt-oss-or-gemma4"
+    assert launched[0]["launch_spec"]["model_escalation_probe_status"] == "unbound"
 
 
 def test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred(tmp_path: Path, monkeypatch) -> None:

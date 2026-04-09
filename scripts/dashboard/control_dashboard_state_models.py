@@ -211,6 +211,10 @@ class TaskDetailDTO:
     background_run_evidence_artifacts: str = ""
     background_run_launch_spec_summary: str = ""
     background_run_model_plan_summary: str = ""
+    background_run_model_judge_binding_summary: str = ""
+    background_run_model_judge_probe_summary: str = ""
+    background_run_model_escalation_binding_summary: str = ""
+    background_run_model_escalation_probe_summary: str = ""
     backend_summary: str = ""
     backend_note: str = ""
     rate_limit_summary: str = ""
@@ -289,6 +293,10 @@ class RuntimeDetailDTO:
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
     active_task_background_run_model_plan_summary: str
+    active_task_background_run_model_judge_binding_summary: str
+    active_task_background_run_model_judge_probe_summary: str
+    active_task_background_run_model_escalation_binding_summary: str
+    active_task_background_run_model_escalation_probe_summary: str
     workspace_summary: str
     document_registry_summary: str
     model_routing_summary: str

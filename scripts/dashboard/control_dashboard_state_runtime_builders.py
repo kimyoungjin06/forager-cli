@@ -647,6 +647,18 @@ def _build_runtime_detail(manager_state: Dict[str, Any], provider_state: Dict[st
         active_task_background_run_model_plan_summary=(
             str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
         ),
+        active_task_background_run_model_judge_binding_summary=(
+            str((active_task or {}).get("background_run_model_judge_binding_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_model_judge_probe_summary=(
+            str((active_task or {}).get("background_run_model_judge_probe_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_model_escalation_binding_summary=(
+            str((active_task or {}).get("background_run_model_escalation_binding_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_model_escalation_probe_summary=(
+            str((active_task or {}).get("background_run_model_escalation_probe_summary", "")).strip() or "-"
+        ),
         workspace_summary=workspace_summary,
         document_registry_summary=document_registry_summary,
         model_routing_summary=model_routing_summary,

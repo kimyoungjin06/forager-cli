@@ -318,3 +318,58 @@ def test_probe_task_judge_binding_reports_unsupported_provider_without_network(t
     assert result["route_id"] == "offdesk_judge"
     assert result["probe_status"] == "unsupported_provider_probe"
     assert "provider=anthropic" in result["summary"]
+
+
+def test_summarize_deferred_model_binding_probe_marks_bound_ollama_as_deferred(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-gptoss",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "gpt-oss:120b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "background_worker_escalation": {"endpoint_id": "ollama-gptoss"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    binding = model_endpoint_adapter.resolve_task_escalation_binding(
+        team_dir,
+        entry={"model_routing_profile": "hybrid_local_exec"},
+        task={"request_id": "REQ-1", "tf_phase": "review"},
+        pack_profile_override="review",
+    )
+    summary = model_endpoint_adapter.summarize_deferred_model_binding_probe(
+        binding,
+        default_label="background_worker_escalation",
+    )
+
+    assert binding["bound"] is True
+    assert binding["summary"] == "bgx=ollama-gptoss:gpt-oss:120b"
+    assert summary["probe_status"] == "deferred_live_probe"
+    assert summary["route_id"] == "background_worker_escalation"
+    assert "endpoint=ollama-gptoss provider=ollama status=deferred_live_probe" == summary["summary"]

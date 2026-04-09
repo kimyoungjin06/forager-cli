@@ -317,7 +317,35 @@ def _maybe_execute_retry_background_runner(
         task=source_task,
         pack_profile_override=pack_profile_override,
     )
-    launch_spec.update(model_endpoint_adapter.launch_spec_model_plan_metadata(model_plan))
+    judge_binding = model_endpoint_adapter.resolve_task_judge_binding(
+        team_dir_raw,
+        entry=entry,
+        task=source_task,
+        pack_profile_override=pack_profile_override,
+    )
+    judge_probe = model_endpoint_adapter.summarize_deferred_model_binding_probe(
+        judge_binding,
+        default_label="offdesk_judge",
+    )
+    escalation_binding = model_endpoint_adapter.resolve_task_escalation_binding(
+        team_dir_raw,
+        entry=entry,
+        task=source_task,
+        pack_profile_override=pack_profile_override,
+    )
+    escalation_probe = model_endpoint_adapter.summarize_deferred_model_binding_probe(
+        escalation_binding,
+        default_label="background_worker_escalation",
+    )
+    launch_spec.update(
+        model_endpoint_adapter.launch_spec_model_plan_metadata(
+            model_plan,
+            judge_binding=judge_binding,
+            judge_probe=judge_probe,
+            escalation_binding=escalation_binding,
+            escalation_probe=escalation_probe,
+        )
+    )
     ticket = build_background_run_ticket(
         request_id=source_request_id,
         project_key=project_key,

@@ -584,6 +584,18 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_model_plan = str(task.get("background_run_model_plan_summary", "")).strip()
     if background_model_plan:
         lines.append("background_run_model_plan: " + background_model_plan[:240])
+    background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
+    if background_judge_binding:
+        lines.append("background_run_model_judge: " + background_judge_binding[:240])
+    background_judge_probe = str(task.get("background_run_model_judge_probe_summary", "")).strip()
+    if background_judge_probe:
+        lines.append("background_run_model_judge_probe: " + background_judge_probe[:240])
+    background_escalation_binding = str(task.get("background_run_model_escalation_binding_summary", "")).strip()
+    if background_escalation_binding:
+        lines.append("background_run_model_escalation: " + background_escalation_binding[:240])
+    background_escalation_probe = str(task.get("background_run_model_escalation_probe_summary", "")).strip()
+    if background_escalation_probe:
+        lines.append("background_run_model_escalation_probe: " + background_escalation_probe[:240])
     reentry_rails_summary = str(task.get("reentry_rails_summary", "")).strip()
     if reentry_rails_summary:
         lines.append("reentry_rails: " + reentry_rails_summary[:240])

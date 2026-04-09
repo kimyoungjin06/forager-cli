@@ -913,6 +913,8 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
     assert "model_registry: enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
     assert "judge_binding: T-001 | judge=unbound:claude-opus-4.1" in text
     assert "judge_probe: T-001 | judge=unbound:claude-opus-4.1" in text
+    assert "escalation_binding: T-001 | bgx=unbound:gpt-oss-or-gemma4" in text
+    assert "escalation_probe: T-001 | bgx=unbound:gpt-oss-or-gemma4" in text
 
 
 def test_orch_bgx_status_surfaces_external_artifacts_and_audit(tmp_path: Path) -> None:
@@ -1905,6 +1907,10 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     assert task["background_run_model_plan_summary"] == (
         "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
     )
+    assert task["background_run_model_judge_binding_summary"] == "judge=unbound:claude-opus-4.1"
+    assert task["background_run_model_judge_probe_status"] == "unbound"
+    assert task["background_run_model_escalation_binding_summary"] == "bgx=unbound:gpt-oss-or-gemma4"
+    assert task["background_run_model_escalation_probe_status"] == "unbound"
     queue_file = team_dir / "background_runs.json"
     rows = json.loads(queue_file.read_text(encoding="utf-8")).get("runs") or []
     row = next(row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-DETACHED-TMUX-"))
@@ -1916,6 +1922,10 @@ def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
     assert row["launch_spec"]["model_plan_summary"] == (
         "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
     )
+    assert row["launch_spec"]["model_judge_binding_summary"] == "judge=unbound:claude-opus-4.1"
+    assert row["launch_spec"]["model_judge_probe_status"] == "unbound"
+    assert row["launch_spec"]["model_escalation_binding_summary"] == "bgx=unbound:gpt-oss-or-gemma4"
+    assert row["launch_spec"]["model_escalation_probe_status"] == "unbound"
     assert row["launch_spec"]["command_argv"][1] == gateway_cli_entrypoint_path()
     assert "--simulate-text" in row["launch_spec"]["command_argv"]
     assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in row["launch_spec"]["command_argv"]

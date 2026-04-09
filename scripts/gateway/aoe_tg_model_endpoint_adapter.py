@@ -456,6 +456,29 @@ def resolve_task_judge_binding(
     return binding
 
 
+def resolve_task_escalation_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+) -> Dict[str, Any]:
+    plan = resolve_task_model_plan(
+        team_dir,
+        entry=entry,
+        task=task,
+        pack_profile_override=pack_profile_override,
+    )
+    escalation = plan.get("escalation_route") if isinstance(plan.get("escalation_route"), dict) else {}
+    route_id = _trim(escalation.get("route_id"), 64).lower() or "background_worker_escalation"
+    endpoint_id = _trim(escalation.get("endpoint_id"), 64).lower()
+    binding = resolve_model_binding_snapshot(team_dir, route_id, entry=entry, endpoint_id_override=endpoint_id)
+    binding["source"] = "task_plan"
+    binding["pack_profile"] = _trim(plan.get("pack_profile"), 64)
+    binding["plan_summary"] = _trim(plan.get("summary"), 320)
+    return binding
+
+
 def resolve_background_ticket_worker_binding(team_dir: Any, ticket: Any, *, entry: Any = None) -> Dict[str, Any]:
     ticket_data = ticket if isinstance(ticket, dict) else {}
     launch_spec = ticket_data.get("launch_spec") if isinstance(ticket_data.get("launch_spec"), dict) else {}
@@ -606,6 +629,39 @@ def probe_background_ticket_worker_binding(
     return result
 
 
+def summarize_deferred_model_binding_probe(binding: Any, *, default_label: str = "route") -> Dict[str, Any]:
+    row = binding if isinstance(binding, dict) else {}
+    route = row.get("route") if isinstance(row.get("route"), dict) else {}
+    endpoint = row.get("endpoint") if isinstance(row.get("endpoint"), dict) else {}
+    route_id = _trim(route.get("route_id"), 64).lower() or _trim(default_label, 64).lower() or "route"
+    route_summary = _trim(route.get("summary"), 240) or f"{route_id}=unbound"
+    if not row.get("bound"):
+        return {
+            "ok": False,
+            "route_id": route_id,
+            "probe_status": "unbound",
+            "summary": route_summary,
+            "binding": row,
+        }
+    endpoint_id = _trim(endpoint.get("endpoint_id"), 64) or "-"
+    provider_kind = _trim(endpoint.get("provider_kind"), 64).lower() or "custom"
+    if provider_kind != "ollama":
+        return {
+            "ok": False,
+            "route_id": route_id,
+            "probe_status": "unsupported_provider_probe",
+            "summary": f"endpoint={endpoint_id} provider={provider_kind} status=unsupported_probe",
+            "binding": row,
+        }
+    return {
+        "ok": False,
+        "route_id": route_id,
+        "probe_status": "deferred_live_probe",
+        "summary": f"endpoint={endpoint_id} provider=ollama status=deferred_live_probe",
+        "binding": row,
+    }
+
+
 def probe_task_judge_binding(
     team_dir: Any,
     *,
@@ -636,11 +692,52 @@ def probe_task_judge_binding(
     return result
 
 
-def launch_spec_model_plan_metadata(plan: Any) -> Dict[str, str]:
+def probe_task_escalation_binding(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    pack_profile_override: Any = None,
+    timeout_sec: float = 3.0,
+    fetch_json: Any = None,
+) -> Dict[str, Any]:
+    binding = resolve_task_escalation_binding(
+        team_dir,
+        entry=entry,
+        task=task,
+        pack_profile_override=pack_profile_override,
+    )
+    route = binding.get("route") if isinstance(binding.get("route"), dict) else {}
+    endpoint = binding.get("endpoint") if isinstance(binding.get("endpoint"), dict) else {}
+    if not binding.get("bound"):
+        return {
+            "ok": False,
+            "probe_status": "unbound",
+            "summary": _trim(route.get("summary"), 240) or "escalation_route=unbound",
+            "binding": binding,
+        }
+    result = probe_model_endpoint(endpoint, timeout_sec=timeout_sec, fetch_json=fetch_json)
+    result["binding"] = binding
+    result["route_id"] = _trim(route.get("route_id"), 64).lower() or "background_worker_escalation"
+    return result
+
+
+def launch_spec_model_plan_metadata(
+    plan: Any,
+    *,
+    judge_binding: Any = None,
+    judge_probe: Any = None,
+    escalation_binding: Any = None,
+    escalation_probe: Any = None,
+) -> Dict[str, str]:
     data = plan if isinstance(plan, dict) else {}
     worker = data.get("worker_route") if isinstance(data.get("worker_route"), dict) else {}
     judge = data.get("judge_route") if isinstance(data.get("judge_route"), dict) else {}
     escalation = data.get("escalation_route") if isinstance(data.get("escalation_route"), dict) else {}
+    judge_binding_data = judge_binding if isinstance(judge_binding, dict) else {}
+    judge_probe_data = judge_probe if isinstance(judge_probe, dict) else {}
+    escalation_binding_data = escalation_binding if isinstance(escalation_binding, dict) else {}
+    escalation_probe_data = escalation_probe if isinstance(escalation_probe, dict) else {}
     return {
         "model_pack_profile": _trim(data.get("pack_profile"), 64),
         "model_plan_summary": _trim(data.get("summary"), 320),
@@ -650,4 +747,10 @@ def launch_spec_model_plan_metadata(plan: Any) -> Dict[str, str]:
         "model_worker_endpoint_id": _trim(worker.get("endpoint_id"), 64),
         "model_judge_endpoint_id": _trim(judge.get("endpoint_id"), 64),
         "model_escalation_endpoint_id": _trim(escalation.get("endpoint_id"), 64),
+        "model_judge_binding_summary": _trim(judge_binding_data.get("summary"), 240),
+        "model_judge_probe_status": _trim(judge_probe_data.get("probe_status"), 64),
+        "model_judge_probe_summary": _trim(judge_probe_data.get("summary"), 240),
+        "model_escalation_binding_summary": _trim(escalation_binding_data.get("summary"), 240),
+        "model_escalation_probe_status": _trim(escalation_probe_data.get("probe_status"), 64),
+        "model_escalation_probe_summary": _trim(escalation_probe_data.get("summary"), 240),
     }

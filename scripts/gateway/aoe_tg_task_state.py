@@ -1189,6 +1189,12 @@ def sanitize_task_record(
                 "model_worker_binding_summary": task.get("background_run_model_worker_binding_summary"),
                 "model_worker_probe_status": task.get("background_run_model_worker_probe_status"),
                 "model_worker_probe_summary": task.get("background_run_model_worker_probe_summary"),
+                "model_judge_binding_summary": task.get("background_run_model_judge_binding_summary"),
+                "model_judge_probe_status": task.get("background_run_model_judge_probe_status"),
+                "model_judge_probe_summary": task.get("background_run_model_judge_probe_summary"),
+                "model_escalation_binding_summary": task.get("background_run_model_escalation_binding_summary"),
+                "model_escalation_probe_status": task.get("background_run_model_escalation_probe_status"),
+                "model_escalation_probe_summary": task.get("background_run_model_escalation_probe_summary"),
             },
         }
     )
@@ -1228,6 +1234,12 @@ def sanitize_task_record(
             "background_run_model_worker_binding_summary",
             "background_run_model_worker_probe_status",
             "background_run_model_worker_probe_summary",
+            "background_run_model_judge_binding_summary",
+            "background_run_model_judge_probe_status",
+            "background_run_model_judge_probe_summary",
+            "background_run_model_escalation_binding_summary",
+            "background_run_model_escalation_probe_status",
+            "background_run_model_escalation_probe_summary",
         ):
             task.pop(key, None)
 

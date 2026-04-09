@@ -434,6 +434,34 @@ def _judge_binding_lines(entry: Dict[str, Any], team_dir: Path) -> tuple[str, st
     )
 
 
+def _escalation_binding_lines(entry: Dict[str, Any], team_dir: Path) -> tuple[str, str]:
+    latest_task = _latest_task_for_model_status(entry)
+    if not latest_task:
+        return "", ""
+    task_label = (
+        str(latest_task.get("short_id", "")).strip().upper()
+        or str(latest_task.get("alias", "")).strip()
+        or str(latest_task.get("request_id", "")).strip()
+        or "task"
+    )
+    binding = model_endpoint_adapter.resolve_task_escalation_binding(
+        team_dir,
+        entry=entry,
+        task=latest_task,
+    )
+    probe = model_endpoint_adapter.probe_task_escalation_binding(
+        team_dir,
+        entry=entry,
+        task=latest_task,
+    )
+    binding_summary = str(binding.get("summary", "")).strip() or "-"
+    probe_summary = str(probe.get("summary", "")).strip() or "-"
+    return (
+        f"escalation_binding: {task_label} | {binding_summary}\n",
+        f"escalation_probe: {task_label} | {probe_summary}\n",
+    )
+
+
 def _external_background_artifact_snapshot(entry: Dict[str, Any]) -> Dict[str, str]:
     snapshot = _latest_external_background_task_snapshot(entry)
     if not snapshot:
@@ -981,6 +1009,8 @@ def handle_orch_task_command(
         model_registry_line = ""
         judge_binding_line = ""
         judge_probe_line = ""
+        escalation_binding_line = ""
+        escalation_probe_line = ""
         document_registry_line = ""
         workspace_line = ""
         try:
@@ -1010,6 +1040,7 @@ def handle_orch_task_command(
                     f"model_registry: {summarize_model_endpoint_registry(team_dir, entry=entry)}\n"
                 )
                 judge_binding_line, judge_probe_line = _judge_binding_lines(entry, team_dir)
+                escalation_binding_line, escalation_probe_line = _escalation_binding_lines(entry, team_dir)
                 workspace_line = (
                     f"workspace: {summarize_workspace_brief(team_dir, entry=entry, project_root=entry.get('project_root'))}\n"
                 )
@@ -1027,6 +1058,8 @@ def handle_orch_task_command(
             model_registry_line = ""
             judge_binding_line = ""
             judge_probe_line = ""
+            escalation_binding_line = ""
+            escalation_probe_line = ""
             document_registry_line = ""
             workspace_line = ""
         runner_pref, runner_effective, runner_note = _background_runner_status(entry, key)
@@ -1087,7 +1120,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
