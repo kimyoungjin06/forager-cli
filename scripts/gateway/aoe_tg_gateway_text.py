@@ -316,6 +316,7 @@ def help_text(
         "- aoe orch repair [all|--orch <name>]\n"
         "- aoe orch bgq-clean [--orch <name>]\n"
         "- aoe orch bgw-status [--orch <name>]\n"
+        "- aoe orch bgw-ping [--orch <name>]   # test_only bounded worker invoke\n"
         "- aoe orch bgx-status [--orch <name>]\n"
         "- aoe orch bgx-handoff [--orch <name>]\n"
         "- aoe orch bgx-ack [--orch <name>]\n"

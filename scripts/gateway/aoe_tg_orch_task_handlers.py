@@ -9,7 +9,11 @@ import aoe_tg_background_runs as background_runs
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
-from aoe_tg_local_background_worker import ensure_local_background_daemon, stop_local_background_daemon
+from aoe_tg_local_background_worker import (
+    ensure_local_background_daemon,
+    run_local_background_ticket,
+    stop_local_background_daemon,
+)
 from aoe_tg_model_endpoint_adapter import summarize_model_endpoint_registry, summarize_model_routing
 from aoe_tg_document_registry import summarize_document_registry
 from aoe_tg_workspace_brief import summarize_workspace_brief
@@ -17,6 +21,8 @@ from aoe_tg_package_paths import package_root
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
     build_background_launch_spec,
+    build_background_run_ticket,
+    build_local_background_provider_invoke_launch_spec,
     select_background_runner_target,
 )
 from aoe_tg_priority_actions import external_background_priority_action_snapshot
@@ -41,6 +47,8 @@ _BACKGROUND_RUNNER_PREFS = {"local_background", "local_tmux", "github_runner", "
 _RUN_LOCK_MODES = {"open", "test_only"}
 _BACKGROUND_SLOT_MIN = 1
 _BACKGROUND_SLOT_MAX = 8
+_BACKGROUND_WORKER_PING_PROMPT = "Reply with BGW_PING_OK only."
+_BACKGROUND_WORKER_PING_SYSTEM = "Return the exact token only."
 _DEFAULT_SCENARIO_TEMPLATE = """# AOE_TODO.md
 
 Project scenario (per-project, runtime file).
@@ -244,6 +252,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
                 if worker_status in {"running", "idle"}
                 else [{"text": f"/orch bgw-start {alias}"}]
             ),
+            ([{"text": f"/orch bgw-ping {alias}"}] if run_lock_mode == "test_only" else []),
             [{"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/sync {alias} 1h"}, {"text": f"/use {alias}"}, {"text": focus_button}],
             [{"text": hide_button}],
@@ -1372,7 +1381,7 @@ def handle_orch_task_command(
         )
         return True
 
-    if cmd in {"orch-bgw-status", "orch-bgw-start", "orch-bgw-stop"}:
+    if cmd in {"orch-bgw-status", "orch-bgw-start", "orch-bgw-stop", "orch-bgw-ping"}:
         try:
             key, entry, _p_args = get_context(orch_target)
         except Exception as exc:
@@ -1404,6 +1413,102 @@ def handle_orch_task_command(
         team_dir = Path(team_dir_raw).expanduser().resolve()
         queue_path = background_runs.background_runs_state_path(team_dir)
         worker_path = background_runs.background_worker_state_path(team_dir)
+        if cmd == "orch-bgw-ping":
+            run_lock_mode = project_run_lock_mode(entry)
+            if run_lock_mode != "test_only":
+                send(
+                    "background worker ping blocked\n"
+                    f"- runtime: {key}\n"
+                    f"- run_lock: {run_lock_mode or 'open'}\n"
+                    "- reason: ping harness is limited to test_only runtimes\n"
+                    "next:\n"
+                    f"- /orch status {alias}",
+                    context="orch-bgw-ping blocked",
+                    with_menu=True,
+                    reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+                )
+                return True
+            created_at = now_iso()
+            stamp = "".join(ch for ch in created_at if ch.isdigit())[:20] or "PING"
+            request_id = f"REQ-BGW-PING-{alias}-{stamp}"[:96]
+            launch_spec = build_local_background_provider_invoke_launch_spec(
+                request_id=request_id,
+                project_key=str(key or "").strip(),
+                project_root=str(entry.get("project_root", "") or "").strip(),
+                team_dir=str(team_dir),
+                manager_state_file=str(args.manager_state_file),
+                launch_mode="orch_bgw_ping",
+                source_surface="orch_bgw_ping",
+                created_by=f"telegram:{chat_id}",
+                prompt=_BACKGROUND_WORKER_PING_PROMPT,
+                system=_BACKGROUND_WORKER_PING_SYSTEM,
+                timeout_sec=20,
+            )
+            ticket = build_background_run_ticket(
+                request_id=request_id,
+                project_key=str(key or "").strip(),
+                execution_brief_status="executable",
+                runner_target="local_background",
+                launch_mode="orch_bgw_ping",
+                created_at=created_at,
+                created_by=f"telegram:{chat_id}",
+                source_surface="orch_bgw_ping",
+                status="queued",
+                launch_spec=launch_spec,
+            )
+            background_runs.upsert_background_run_ticket(queue_path, ticket, now_iso=now_iso)
+            try:
+                run_local_background_ticket(
+                    queue_path=queue_path,
+                    ticket_id=str(ticket.get("ticket_id", "")).strip(),
+                    now_iso=now_iso,
+                    run_target=lambda: None,
+                    on_ticket_update=lambda _ticket: None,
+                    on_queue_error=lambda _event_name, _exc: None,
+                    runner_target="local_background",
+                    launch_mode="orch_bgw_ping",
+                    claimed_by=f"telegram:{chat_id}",
+                    source_surface="orch_bgw_ping",
+                )
+            except Exception:
+                pass
+            queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
+            worker_snapshot = background_runs.summarize_background_worker_state(worker_path, now_iso=now_iso)
+            final_ticket = background_runs.get_background_run_ticket(queue_path, str(ticket.get("ticket_id", "")).strip())
+            final_status = str(final_ticket.get("status", "")).strip() or "unknown"
+            final_runtime = str(final_ticket.get("runtime_summary", "-")).strip() or "-"
+            final_evidence = str(final_ticket.get("evidence_bundle", "-")).strip() or "-"
+            append_action_audit_row(
+                team_dir,
+                headline="Background Worker Ping | executed",
+                status="executed" if final_status == "completed" else "blocked",
+                outcome_kind="background_worker",
+                outcome_status="executed" if final_status == "completed" else "blocked",
+                outcome_reason_code=(final_status or "unknown").lower(),
+                outcome_detail=final_runtime,
+                next_step=f"/orch status {alias}",
+                remediation="inspect bound worker route, probe status, and queue summary if the ping did not complete",
+                source_command=f"/orch bgw-ping {alias}",
+                link_label="runtime detail",
+                link_href=_runtime_action_link(alias),
+                at=now_iso(),
+            )
+            send(
+                "background worker ping\n"
+                f"- runtime: {key}\n"
+                f"- ticket: {str(ticket.get('ticket_id', '')).strip() or '-'}\n"
+                f"- status: {final_status}\n"
+                f"- runtime_summary: {final_runtime}\n"
+                f"- evidence: {final_evidence}\n"
+                f"- worker: {str(worker_snapshot.get('summary', '-')).strip() or '-'}\n"
+                f"- queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-bgw-ping",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
         if cmd == "orch-bgw-start":
             started = ensure_local_background_daemon(
                 queue_path=queue_path,

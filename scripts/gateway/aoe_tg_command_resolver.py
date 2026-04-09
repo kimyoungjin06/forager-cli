@@ -322,6 +322,9 @@ def resolve_message_command(
                 elif sub in {"bgw-status", "worker-status"}:
                     out.cmd = "orch-bgw-status"
                     out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgw-ping", "worker-ping"}:
+                    out.cmd = "orch-bgw-ping"
+                    out.orch_target = tail[0].strip() if tail else None
                 elif sub in {"bgx-status", "external-status", "background-external-status"}:
                     out.cmd = "orch-bgx-status"
                     out.orch_target = tail[0].strip() if tail else None
@@ -370,7 +373,7 @@ def resolve_message_command(
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-ping|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -501,7 +504,7 @@ def resolve_message_command(
                 out.run_no_wait_override = bool(quick.get("no_wait", False))
                 out.run_force_mode = quick.get("force_mode")
                 out.orch_target = quick.get("orch")
-            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
+            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-ping", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = quick.get("orch")
             elif out.cmd == "orch-bg-runner":
                 out.orch_target = quick.get("orch")
@@ -570,7 +573,7 @@ def resolve_message_command(
                 out.orch_target = cli.get("orch")
             elif out.cmd == "add-role":
                 _apply_add_role_cli(cli)
-            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
+            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-ping", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = cli.get("orch")
             elif out.cmd == "orch-bg-runner":
                 out.orch_target = cli.get("orch")
@@ -717,6 +720,7 @@ def resolve_message_command(
                 "orch-monitor",
                 "orch-bgq-clean",
                 "orch-bgw-status",
+                "orch-bgw-ping",
                 "orch-bgx-status",
                 "orch-bgx-handoff",
                 "orch-bgx-ack",
@@ -765,7 +769,7 @@ def resolve_message_command(
                     out.orch_kpi_hours = natural.get("hours")
                 elif ncmd == "orch-bgq-clean":
                     out.orch_target = natural.get("orch")
-                elif ncmd in {"orch-bgw-status", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgx-emit-ack", "orch-bgx-emit-result", "orch-bgw-start", "orch-bgw-stop"}:
+                elif ncmd in {"orch-bgw-status", "orch-bgw-ping", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgx-emit-ack", "orch-bgx-emit-result", "orch-bgw-start", "orch-bgw-stop"}:
                     out.orch_target = natural.get("orch")
                     if ncmd == "orch-bgx-emit-result":
                         out.rest = str(natural.get("rest", "")).strip()

@@ -220,6 +220,10 @@
   - `/orch bgx-result O#`
     - terminal result detail
 - test-only harness surfaces:
+  - `/orch bgw-ping O#`
+    - only valid while `run_lock_mode=test_only`
+    - writes one bounded `provider_invoke` local background ticket
+    - immediately claims and executes the ticket through `background_worker_primary`
   - `/orch bgx-emit-ack O#`
     - only valid while `run_lock_mode=test_only`
     - writes a bounded pickup acknowledgement sidecar for the latest external ticket
