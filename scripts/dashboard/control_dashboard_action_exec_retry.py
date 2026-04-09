@@ -160,6 +160,34 @@ def _retry_blocked_remediation_with_latest_judge(remediation: str, latest_judge:
     return f"{base}; {suffix}" if base else suffix
 
 
+def _command_head(command_text: str) -> str:
+    token = str(command_text or "").strip()
+    if not token:
+        return ""
+    return token.split()[0].strip().lower()
+
+
+def _promote_blocked_next_step_from_latest_judge(
+    current_next_step: str,
+    *,
+    latest_judge_decision: Dict[str, str],
+    source_command: str,
+) -> str:
+    current = str(current_next_step or "").strip()
+    if not current.lower().startswith("/orch judge "):
+        return current
+    if not isinstance(latest_judge_decision, dict) or not latest_judge_decision:
+        return current
+    candidate = str(latest_judge_decision.get("next_step", "")).strip()
+    if not candidate or candidate == "-" or candidate == current:
+        return current
+    current_head = _command_head(source_command)
+    candidate_head = _command_head(candidate)
+    if candidate_head and candidate_head == current_head:
+        return current
+    return candidate if candidate.startswith("/") else current
+
+
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
@@ -635,6 +663,11 @@ def _execute_retry_run_transition(
         remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
     latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
+    next_step = _promote_blocked_next_step_from_latest_judge(
+        next_step,
+        latest_judge_decision=latest_judge_decision,
+        source_command=source_command,
+    ) if blocked else next_step
     remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge) if blocked else remediation
     return _json(
         {
@@ -866,6 +899,16 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             if "orch-followup-exec blocked" in blocked_contexts
             else "followup_execute_blocked"
         )
+        next_step = _retry_blocked_next_step_for_contexts(
+            blocked_contexts,
+            entry=entry,
+            fallback="/offdesk review",
+        )
+        next_step = _promote_blocked_next_step_from_latest_judge(
+            next_step,
+            latest_judge_decision=latest_judge_decision,
+            source_command=str(spec.get("command", "-")),
+        )
         return _json(
             {
                 "ok": False,
@@ -879,11 +922,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "source_command": spec.get("command", "-"),
                 "payload": payload,
                 "messages": messages,
-                "next_step": _retry_blocked_next_step_for_contexts(
-                    blocked_contexts,
-                    entry=entry,
-                    fallback="/offdesk review",
-                ),
+                "next_step": next_step,
                 "remediation": _retry_blocked_remediation_with_latest_judge(
                     _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
                     latest_judge,

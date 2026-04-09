@@ -1903,7 +1903,7 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
 
 
-def test_control_dashboard_post_replan_route_terminal_block_prefers_judge_next_step(tmp_path: Path, monkeypatch) -> None:
+def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judge_next_step(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     config = dashboard_app.DashboardAppConfig(
@@ -1949,7 +1949,7 @@ def test_control_dashboard_post_replan_route_terminal_block_prefers_judge_next_s
     assert status == 409
     assert headers["Content-Type"].startswith("application/json")
     assert payload["status"] == "blocked"
-    assert payload["next_step"] == "/orch judge O2"
+    assert payload["next_step"] == "/retry T-001"
     assert payload["source_command"] == "/replan T-001 lane L1"
     assert "/orch judge" in payload["remediation"]
     assert "latest judge: Offdesk Judge" in payload["remediation"]
