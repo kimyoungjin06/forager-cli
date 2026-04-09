@@ -1871,6 +1871,9 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T10:00:00+09:00",
+        extra={
+            "response_text": "{\"verdict\":\"continue\",\"confidence\":\"medium\",\"reasoning\":\"brief executable\",\"next_step\":\"/retry T-001\",\"caution\":\"review lane remains\"}",
+        },
     )
 
     def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
@@ -1896,6 +1899,8 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
     assert payload["latest_judge"]["headline"] == "Offdesk Judge"
     assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
+    assert payload["latest_judge_decision"]["verdict"] == "continue"
+    assert payload["latest_judge_decision"]["recommended_action"] == "retry"
 
 
 def test_control_dashboard_post_replan_route_terminal_block_prefers_judge_next_step(tmp_path: Path, monkeypatch) -> None:
@@ -1922,6 +1927,9 @@ def test_control_dashboard_post_replan_route_terminal_block_prefers_judge_next_s
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T10:05:00+09:00",
+        extra={
+            "response_text": "{\"verdict\":\"continue\",\"confidence\":\"medium\",\"reasoning\":\"brief executable\",\"next_step\":\"/retry T-001\",\"caution\":\"review lane remains\"}",
+        },
     )
 
     def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
@@ -1948,6 +1956,8 @@ def test_control_dashboard_post_replan_route_terminal_block_prefers_judge_next_s
     assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
     assert payload["latest_judge"]["headline"] == "Offdesk Judge"
     assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
+    assert payload["latest_judge_decision"]["verdict"] == "continue"
+    assert payload["latest_judge_decision"]["recommended_action"] == "retry"
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
@@ -2643,6 +2653,9 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T10:05:00+09:00",
+        extra={
+            "response_text": "{\"verdict\":\"continue\",\"confidence\":\"medium\",\"reasoning\":\"brief executable\",\"next_step\":\"/retry T-001\",\"caution\":\"review lane remains\"}",
+        },
     )
 
     def _fake_handle_run_or_unknown_command(*, ctx, deps):
@@ -2691,6 +2704,8 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
     assert payload["latest_judge"]["headline"] == "Offdesk Judge"
     assert payload["latest_judge"]["detail"].startswith("endpoint=claude_code_cli-opus")
+    assert payload["latest_judge_decision"]["verdict"] == "continue"
+    assert payload["latest_judge_decision"]["recommended_action"] == "retry"
 
 
 def test_execute_retry_run_transition_requires_structured_outcome(tmp_path: Path, monkeypatch) -> None:

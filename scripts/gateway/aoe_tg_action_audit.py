@@ -54,6 +54,64 @@ def _normalize_latest_action_row(row: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def _parse_json_object_from_text(text: Any) -> Dict[str, Any]:
+    src = str(text or "").strip()
+    if not src:
+        return {}
+    try:
+        obj = json.loads(src)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(src):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(src[idx:])
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return {}
+
+
+def _judge_recommended_action(next_step: str, verdict: str) -> str:
+    step = str(next_step or "").strip().lower()
+    if step.startswith("/replan "):
+        return "replan"
+    if step.startswith("/retry "):
+        return "retry"
+    if step.startswith("/followup-exec "):
+        return "followup_execute"
+    if step.startswith("/offdesk review") or step.startswith("/orch judge "):
+        return "manual_review"
+    token = str(verdict or "").strip().lower()
+    if token in {"continue", "retry", "replan", "escalate", "hold"}:
+        return token
+    return "review"
+
+
+def normalize_offdesk_judge_decision(raw: Any) -> Dict[str, str]:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return {}
+    verdict = str(row.get("verdict", "")).strip() or "-"
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    reasoning = str(row.get("reasoning", "")).strip() or "-"
+    next_step = str(row.get("next_step", "")).strip() or "-"
+    caution = str(row.get("caution", "")).strip() or "-"
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "next_step": next_step,
+        "caution": caution,
+        "recommended_action": _judge_recommended_action(next_step, verdict),
+    }
+
+
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
     headline = str(latest_action.get("headline", "")).strip() or "-"
     reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
@@ -105,6 +163,7 @@ def append_action_audit_row(
     link_label: Any = "-",
     link_href: Any = "-",
     at: Any = "",
+    extra: Optional[Dict[str, Any]] = None,
 ) -> bool:
     token = str(team_dir or "").strip()
     source = str(source_command or "").strip()
@@ -126,6 +185,12 @@ def append_action_audit_row(
         "link_href": str(link_href or "").strip() or "-",
         "source_command": source,
     }
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            token = str(key or "").strip()
+            if not token or token in row:
+                continue
+            row[token] = value
     try:
         with path.open("a+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -197,6 +262,31 @@ def load_latest_action_audit_for_runtime_kind(
         normalized = _normalize_latest_action_row(row)
         normalized["at"] = str(row.get("at", "")).strip() or "-"
         return normalized
+    return {}
+
+
+def load_latest_offdesk_judge_decision_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> Dict[str, str]:
+    alias = str(project_alias or "").strip()
+    if not alias:
+        return {}
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}"
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() != runtime_path:
+            continue
+        if str(row.get("outcome_kind", "")).strip() != "offdesk_judge":
+            continue
+        decision = normalize_offdesk_judge_decision(row.get("decision_snapshot") or row.get("response_text"))
+        if not decision:
+            continue
+        decision["at"] = str(row.get("at", "")).strip() or "-"
+        return decision
     return {}
 
 

@@ -10,7 +10,7 @@ import aoe_tg_background_runs as background_runs
 import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
-from aoe_tg_action_audit import append_action_audit_row, prefer_recent_model_ping_probe_summary
+from aoe_tg_action_audit import append_action_audit_row, normalize_offdesk_judge_decision, prefer_recent_model_ping_probe_summary
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import (
     ensure_local_background_daemon,
@@ -1910,6 +1910,7 @@ def handle_orch_task_command(
         summary = str(result.get("summary", "-")).strip() or "-"
         response_text = str(result.get("response_text", "")).strip()
         reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
+        judge_decision = normalize_offdesk_judge_decision(response_text)
         append_action_audit_row(
             team_dir,
             headline=f"Offdesk Judge | {'executed' if ok else 'blocked'}",
@@ -1924,6 +1925,12 @@ def handle_orch_task_command(
             link_label="runtime detail",
             link_href=_runtime_action_link(alias),
             at=now_iso(),
+            extra={
+                "response_text": response_text,
+                "decision_snapshot": judge_decision,
+            }
+            if response_text or judge_decision
+            else None,
         )
         send(
             "offdesk judge\n"

@@ -471,6 +471,8 @@ def test_orch_judge_executes_bound_review_stub(tmp_path: Path, monkeypatch: pyte
     audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert audit_rows[-1]["source_command"] == "/orch judge O2"
     assert audit_rows[-1]["outcome_kind"] == "offdesk_judge"
+    assert audit_rows[-1]["decision_snapshot"]["verdict"] == "continue"
+    assert audit_rows[-1]["decision_snapshot"]["recommended_action"] == "retry"
     assert audit_rows[-1]["outcome_reason_code"] == "ok"
 
 
