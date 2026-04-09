@@ -23,6 +23,7 @@ import aoe_tg_retry_handlers as retry_handlers
 from aoe_tg_run_lock import project_run_lock_blocks_launch, project_run_lock_mode, project_run_lock_note
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
+from aoe_tg_action_audit import load_latest_action_audit_for_runtime_kind
 
 from control_dashboard_action_exec_shared import (
     _DASHBOARD_CHAT_ID,
@@ -101,6 +102,23 @@ def _retry_blocked_remediation(contexts: List[str]) -> str:
         if token in _RETRY_BLOCKED_REMEDIATIONS:
             return _RETRY_BLOCKED_REMEDIATIONS[token]
     return "run /orch judge for the runtime first, then inspect planning or critic blockers in /offdesk review before re-running retry"
+
+
+def _latest_judge_summary_payload(*, team_dir: Path, entry: Dict[str, Any]) -> Dict[str, str]:
+    alias = _project_status_ref(str(entry.get("name", "")).strip(), entry)
+    row = load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=alias,
+        outcome_kind="offdesk_judge",
+    )
+    if not row:
+        return {}
+    return {
+        "headline": str(row.get("headline", "")).strip() or "-",
+        "next_step": str(row.get("next_step", "")).strip() or "-",
+        "detail": str(row.get("outcome_detail", "")).strip() or "-",
+        "at": str(row.get("at", "")).strip() or "-",
+    }
 
 
 def _now_iso() -> str:
@@ -576,6 +594,7 @@ def _execute_retry_run_transition(
     if blocked:
         next_step = _retry_blocked_next_step_for_reason(reason_code, entry=entry, fallback=next_step)
         remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
+    latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     return _json(
         {
             "ok": not blocked,
@@ -607,6 +626,7 @@ def _execute_retry_run_transition(
             "task": task_payload,
             "next_step": next_step,
             "remediation": remediation,
+            "latest_judge": latest_judge,
         },
         status=409 if blocked else 200,
     )
@@ -797,6 +817,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
     if bool(transition.get("terminal")):
         blocked_contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
         entry = projects.get(project_key) if isinstance(projects.get(project_key), dict) else {}
+        latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if isinstance(entry, dict) else {}
         error_code = (
             "followup_execute_brief_required"
             if "orch-followup-exec blocked" in blocked_contexts
@@ -821,6 +842,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                     fallback="/offdesk review",
                 ),
                 "remediation": _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
+                "latest_judge": latest_judge,
             },
             status=409,
         )

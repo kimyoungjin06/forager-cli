@@ -17,6 +17,7 @@ for path in (GW_DIR, DASH_DIR):
         sys.path.insert(0, str(path))
 
 from _gateway_test_support import gw  # noqa: E402
+import aoe_tg_action_audit as action_audit  # noqa: E402
 import aoe_tg_background_runs as background_runs  # noqa: E402
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter  # noqa: E402
 import aoe_tg_operator_summary as operator_summary  # noqa: E402
@@ -1810,6 +1811,21 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
         host="127.0.0.1",
         port=8765,
     )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T10:00:00+09:00",
+    )
 
     def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
         send("plan gate blocked", context="planning-gate")
@@ -1830,6 +1846,8 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert payload["status"] == "blocked"
     assert payload["next_step"] == "/orch judge O2"
     assert "/orch judge" in payload["remediation"]
+    assert payload["latest_judge"]["headline"] == "Offdesk Judge"
+    assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
@@ -2511,6 +2529,21 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
         port=8765,
     )
     paths, manager_state = dashboard_app._load_dashboard_manager_state(config)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T10:05:00+09:00",
+    )
 
     def _fake_handle_run_or_unknown_command(*, ctx, deps):
         deps.core.record_outcome(
@@ -2554,6 +2587,8 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert payload["next_step"] == "/orch judge O2"
     assert "/orch judge" in payload["remediation"]
     assert "approval blockers" in payload["remediation"]
+    assert payload["latest_judge"]["headline"] == "Offdesk Judge"
+    assert payload["latest_judge"]["detail"].startswith("endpoint=claude_code_cli-opus")
 
 
 def test_execute_retry_run_transition_requires_structured_outcome(tmp_path: Path, monkeypatch) -> None:
