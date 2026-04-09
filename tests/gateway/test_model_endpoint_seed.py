@@ -33,6 +33,25 @@ def test_build_ollama_seed_payload_binds_background_routes() -> None:
     assert policy["routes"]["offdesk_judge"]["endpoint_id"] == ""
 
 
+def test_build_ollama_seed_payload_can_bind_premium_judge() -> None:
+    registry, policy = seed_mod.build_ollama_seed_payload(
+        base_url="http://172.16.0.37:11434",
+        qwen_model="qwen3-coder:30b",
+        gpt_oss_model="gpt-oss:120b",
+        gemma_model="gemma4:26b",
+        judge_provider="anthropic",
+        judge_model="claude-opus-4.1",
+        judge_api_key_env="ANTHROPIC_API_KEY",
+    )
+
+    endpoints = {row["endpoint_id"]: row for row in registry["endpoints"]}
+    judge_endpoint_id = policy["routes"]["offdesk_judge"]["endpoint_id"]
+    assert judge_endpoint_id.startswith("anthropic-claude-opus-4-1")
+    assert endpoints[judge_endpoint_id]["provider_kind"] == "anthropic"
+    assert endpoints[judge_endpoint_id]["api_key_env"] == "ANTHROPIC_API_KEY"
+    assert endpoints[judge_endpoint_id]["roles"] == ["offdesk_judge"]
+
+
 def test_write_ollama_seed_files_writes_registry_and_policy(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     result = seed_mod.write_ollama_seed_files(

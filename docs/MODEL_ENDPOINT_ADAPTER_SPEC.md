@@ -165,13 +165,21 @@ python3 scripts/gateway/aoe_tg_model_endpoint_seed.py \
   --ollama-base-url http://172.16.0.37:11434 \
   --qwen-model qwen3-coder:30b \
   --gpt-oss-model gpt-oss:120b \
-  --gemma-model gemma4:26b
+  --gemma-model gemma4:26b \
+  --judge-provider anthropic \
+  --judge-model claude-opus-4.1 \
+  --judge-api-key-env ANTHROPIC_API_KEY
 ```
 - default binding policy:
   - `background_worker_primary` -> `qwen3-coder`
   - `background_worker_escalation` -> `gpt-oss`
   - `research_synthesis` -> `gemma4`
   - premium on-desk / judge routes remain unbound by default
+- optional premium binding:
+  - `--judge-provider anthropic|openai|openai_compatible`
+  - `--judge-model <model>`
+  - `--judge-api-key-env <ENV_NAME>`
+  - `--judge-base-url <url>` when the provider does not use its default API host
 
 ## 7. Example
 ```json

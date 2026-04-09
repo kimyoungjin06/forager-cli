@@ -55,12 +55,41 @@ def _build_ollama_endpoint(base_url: str, model_name: str, roles: list[str]) -> 
     }
 
 
+def _build_remote_endpoint(
+    *,
+    provider_kind: str,
+    model_name: str,
+    roles: list[str],
+    base_url: str = "",
+    api_key_env: str = "",
+    supports_tools: bool | None = None,
+) -> Dict[str, Any]:
+    normalized_kind = model_endpoint_adapter.normalize_model_endpoint_kind(provider_kind, "custom")
+    tools_default = normalized_kind in {"openai", "openai_compatible"}
+    return {
+        "endpoint_id": _endpoint_id(normalized_kind, model_name),
+        "provider_kind": normalized_kind,
+        "base_url": _trim(base_url, 240),
+        "model": _trim(model_name, 128),
+        "api_key_env": _trim(api_key_env, 128),
+        "enabled": True,
+        "local": False,
+        "supports_tools": tools_default if supports_tools is None else bool(supports_tools),
+        "supports_json": True,
+        "roles": roles,
+    }
+
+
 def build_ollama_seed_payload(
     *,
     base_url: str,
     qwen_model: str,
     gpt_oss_model: str,
     gemma_model: str,
+    judge_provider: str = "",
+    judge_model: str = "",
+    judge_base_url: str = "",
+    judge_api_key_env: str = "",
     profile: str = "hybrid_local_exec",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     endpoints = []
@@ -84,6 +113,19 @@ def build_ollama_seed_payload(
         endpoints.append(row)
         route_ids["research_synthesis"] = str(row["endpoint_id"])
 
+    judge_provider_token = model_endpoint_adapter.normalize_model_endpoint_kind(judge_provider, "custom")
+    judge_model_token = _trim(judge_model, 128)
+    if judge_provider_token and judge_provider_token != "custom" and judge_model_token:
+        row = _build_remote_endpoint(
+            provider_kind=judge_provider_token,
+            model_name=judge_model_token,
+            roles=["offdesk_judge"],
+            base_url=judge_base_url,
+            api_key_env=judge_api_key_env,
+        )
+        endpoints.append(row)
+        route_ids["offdesk_judge"] = str(row["endpoint_id"])
+
     registry = model_endpoint_adapter.sanitize_model_endpoint_registry(
         {
             "version": 1,
@@ -105,6 +147,7 @@ def build_ollama_seed_payload(
                     "model_hint": "gemini-2.5-pro",
                 },
                 "offdesk_judge": {
+                    "endpoint_id": route_ids.get("offdesk_judge", ""),
                     "family_hint": "anthropic",
                     "model_hint": "claude-opus-4.1",
                 },
@@ -127,6 +170,10 @@ def write_ollama_seed_files(
     qwen_model: str,
     gpt_oss_model: str,
     gemma_model: str,
+    judge_provider: str = "",
+    judge_model: str = "",
+    judge_base_url: str = "",
+    judge_api_key_env: str = "",
     profile: str = "hybrid_local_exec",
 ) -> Dict[str, str]:
     registry, policy = build_ollama_seed_payload(
@@ -134,6 +181,10 @@ def write_ollama_seed_files(
         qwen_model=qwen_model,
         gpt_oss_model=gpt_oss_model,
         gemma_model=gemma_model,
+        judge_provider=judge_provider,
+        judge_model=judge_model,
+        judge_base_url=judge_base_url,
+        judge_api_key_env=judge_api_key_env,
         profile=profile,
     )
     team_dir = Path(team_dir).expanduser().resolve()
@@ -157,6 +208,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--qwen-model", default="", help="Qwen coding model name")
     p.add_argument("--gpt-oss-model", default="", help="gpt-oss model name")
     p.add_argument("--gemma-model", default="", help="Gemma model name")
+    p.add_argument("--judge-provider", default="", help="optional judge provider kind: anthropic|openai|openai_compatible")
+    p.add_argument("--judge-model", default="", help="optional judge model name")
+    p.add_argument("--judge-base-url", default="", help="optional custom base URL for judge endpoint")
+    p.add_argument("--judge-api-key-env", default="", help="optional env var name for judge API key")
     p.add_argument("--profile", default="hybrid_local_exec", help="routing profile label")
     return p
 
@@ -169,6 +224,10 @@ def main() -> int:
         qwen_model=args.qwen_model,
         gpt_oss_model=args.gpt_oss_model,
         gemma_model=args.gemma_model,
+        judge_provider=args.judge_provider,
+        judge_model=args.judge_model,
+        judge_base_url=args.judge_base_url,
+        judge_api_key_env=args.judge_api_key_env,
         profile=args.profile,
     )
     print("model endpoint seed written")
