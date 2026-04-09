@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from aoe_tg_background_runs import (
+    advance_background_run_ticket,
     background_worker_state_path,
     claim_background_run_ticket,
     claim_next_background_run_ticket,
@@ -26,6 +27,12 @@ _LOCAL_BACKGROUND_REGISTRY: Dict[str, Dict[str, Any]] = {}
 _LOCAL_BACKGROUND_REGISTRY_LOCK = threading.Lock()
 _LOCAL_BACKGROUND_DAEMONS: Dict[str, Dict[str, Any]] = {}
 _LOCAL_BACKGROUND_DAEMONS_LOCK = threading.Lock()
+
+
+def _is_provider_invoke_ticket(ticket: Dict[str, Any] | None) -> bool:
+    row = ticket if isinstance(ticket, dict) else {}
+    launch_spec = row.get("launch_spec") if isinstance(row.get("launch_spec"), dict) else {}
+    return str(launch_spec.get("kind", "")).strip().lower() == "provider_invoke"
 
 
 def register_local_background_run(
@@ -127,7 +134,7 @@ def drain_local_background_queue_once(
         return {}
     token = str(claimed.get("ticket_id", "")).strip()
     row = _pop_local_background_run(token)
-    if not row:
+    if not row and not _is_provider_invoke_ticket(claimed):
         stale = advance_background_run_ticket(
             queue_path,
             token,
@@ -136,6 +143,16 @@ def drain_local_background_queue_once(
             evidence_bundle="status=stale | reason=missing_local_handler",
         )
         return stale or claimed
+    if not row:
+        dispatch_claimed_background_ticket_via_adapter(
+            queue_path=queue_path,
+            claimed_ticket=claimed,
+            now_iso=now_iso,
+            run_target=lambda: None,
+            on_ticket_update=lambda ticket: None,
+            on_queue_error=lambda event_name, exc: None,
+        )
+        return claimed
     on_ticket_update = row.get("on_ticket_update")
     if callable(on_ticket_update):
         on_ticket_update(claimed)

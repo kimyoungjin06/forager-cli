@@ -19,6 +19,7 @@ from aoe_tg_executor_adapter import (
 )
 import aoe_tg_executor_dispatch as executor_dispatch
 import aoe_tg_executor_runtime as executor_runtime
+from aoe_tg_request_contract import build_local_background_provider_invoke_launch_spec
 
 
 def test_executor_adapter_inventory_is_stable() -> None:
@@ -159,6 +160,64 @@ def test_executor_runtime_dispatches_local_background_claimed_ticket(monkeypatch
     assert len(updates) == 2
     assert updates[0]["status"] == "running"
     assert updates[1]["status"] == "completed"
+    assert not errors
+
+
+def test_executor_runtime_dispatches_provider_invoke_local_background_ticket(monkeypatch, tmp_path: Path) -> None:
+    queue_path = tmp_path / "background_runs.json"
+    updates = []
+    errors = []
+
+    monkeypatch.setattr(
+        executor_runtime,
+        "advance_background_run_ticket",
+        lambda queue_path, ticket_id, now_iso, **kwargs: {"ticket_id": ticket_id, **kwargs},
+    )
+    monkeypatch.setattr(
+        executor_runtime.model_endpoint_adapter,
+        "probe_background_ticket_worker_binding",
+        lambda team_dir, ticket: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 status=ok",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+    monkeypatch.setattr(
+        executor_runtime.model_provider_adapter,
+        "invoke_background_ticket_worker",
+        lambda team_dir, *, ticket: {
+            "ok": True,
+            "executed": True,
+            "route_id": "background_worker_primary",
+            "endpoint_id": "ollama-qwen3",
+            "model": "qwen3-coder:30b",
+            "response_text": "QUEUE_OK",
+        },
+    )
+
+    launch_spec = build_local_background_provider_invoke_launch_spec(
+        request_id="REQ-PROVIDER-1",
+        project_key="alpha",
+        project_root=str(tmp_path),
+        team_dir=str(tmp_path),
+        prompt="Reply with QUEUE_OK only.",
+    )
+    result = executor_runtime.dispatch_claimed_background_ticket_via_adapter(
+        queue_path=queue_path,
+        claimed_ticket={"ticket_id": "BGT-LB-2", "runner_target": "local_background", "launch_spec": launch_spec},
+        now_iso=lambda: "2026-04-08T00:00:00+09:00",
+        run_target=lambda: (_ for _ in ()).throw(AssertionError("provider invoke path should bypass callback target")),
+        on_ticket_update=updates.append,
+        on_queue_error=lambda name, exc: errors.append((name, str(exc))),
+    )
+
+    assert result["ok"] is True
+    assert len(updates) == 2
+    assert updates[0]["status"] == "running"
+    assert updates[0]["runtime_summary"].startswith("provider_invoke_started")
+    assert updates[1]["status"] == "completed"
+    assert "provider_invoke_ok" in updates[1]["evidence_bundle"]
     assert not errors
 
 

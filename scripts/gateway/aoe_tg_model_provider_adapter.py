@@ -17,6 +17,14 @@ def _trim(value: Any, limit: int = 240) -> str:
     return text[:limit]
 
 
+def _coerce_timeout_sec(value: Any, default: float = 30.0) -> float:
+    try:
+        parsed = float(value if value is not None else default)
+    except Exception:
+        parsed = float(default)
+    return max(0.1, parsed)
+
+
 def _default_post_json(url: str, payload: Dict[str, Any], *, timeout_sec: float = 30.0) -> Dict[str, Any]:
     req = urllib.request.Request(
         url,
@@ -192,6 +200,31 @@ def invoke_task_worker_stub(
         post_json=post_json,
     )
     result["kind"] = "worker"
+    return result
+
+
+def invoke_background_ticket_worker(
+    team_dir: Any,
+    *,
+    ticket: Any,
+    timeout_sec: float | None = None,
+    post_json: Any = None,
+) -> Dict[str, Any]:
+    ticket_data = ticket if isinstance(ticket, dict) else {}
+    launch_spec = ticket_data.get("launch_spec") if isinstance(ticket_data.get("launch_spec"), dict) else {}
+    binding = endpoint_adapter.resolve_background_ticket_worker_binding(team_dir, ticket_data)
+    result = invoke_model_binding(
+        binding,
+        prompt=launch_spec.get("provider_prompt", ""),
+        system=launch_spec.get("provider_system", ""),
+        timeout_sec=_coerce_timeout_sec(
+            timeout_sec if timeout_sec is not None else launch_spec.get("provider_timeout_sec"),
+            default=30.0,
+        ),
+        post_json=post_json,
+    )
+    result["kind"] = "background_worker"
+    result["launch_kind"] = _trim(launch_spec.get("kind"), 64)
     return result
 
 

@@ -14,6 +14,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_model_endpoint_adapter as endpoint_adapter  # noqa: E402
 import aoe_tg_model_provider_adapter as provider_adapter  # noqa: E402
+from aoe_tg_request_contract import build_local_background_provider_invoke_launch_spec  # noqa: E402
 
 
 def test_invoke_model_binding_returns_unbound_without_execution(tmp_path: Path) -> None:
@@ -216,3 +217,70 @@ def test_invoke_task_worker_stub_uses_worker_route_with_pack_override(tmp_path: 
     assert result["route_id"] == "background_worker_primary"
     assert result["model"] == "qwen3-coder:30b"
     assert result["response_text"] == "worker: ok"
+
+
+def test_invoke_background_ticket_worker_uses_launch_spec_prompt_and_route(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    launch_spec = build_local_background_provider_invoke_launch_spec(
+        request_id="REQ-1",
+        project_key="alpha",
+        project_root=str(tmp_path),
+        team_dir=str(team_dir),
+        prompt="reply with ticket ok",
+        system="system prompt",
+        timeout_sec=17,
+    )
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "http://172.16.0.37:11434/api/generate"
+        assert payload["model"] == "qwen3-coder:30b"
+        assert payload["prompt"] == "reply with ticket ok"
+        assert payload["system"] == "system prompt"
+        assert timeout_sec == 17.0
+        return {"response": "ticket: ok", "done": True}
+
+    result = provider_adapter.invoke_background_ticket_worker(
+        team_dir,
+        ticket={"ticket_id": "BGT-1", "launch_spec": launch_spec},
+        post_json=_fake_post,
+    )
+
+    assert result["kind"] == "background_worker"
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["route_id"] == "background_worker_primary"
+    assert result["response_text"] == "ticket: ok"

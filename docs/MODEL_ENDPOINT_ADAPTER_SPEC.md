@@ -127,7 +127,8 @@ python3 scripts/gateway/aoe_tg_model_provider_invoke.py \
 - Current policy:
   - background worker routes may block launch on failed worker probe
   - judge/escalation routes are recorded as launch metadata and surfaced in status/detail views
-  - explicit invoke is opt-in and not yet wired into the autonomous background loop
+  - explicit invoke is opt-in for ad-hoc bounded checks
+  - `local_background` may also consume a `provider_invoke` launch spec and execute one worker-bound provider call through the same route seam
 
 ## 6. Future Attachment Path
 0. Declare topology in a stack manifest and compile it first.

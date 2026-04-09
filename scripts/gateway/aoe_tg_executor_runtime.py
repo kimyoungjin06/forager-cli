@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
+import aoe_tg_model_provider_adapter as model_provider_adapter
 from aoe_tg_background_runs import advance_background_run_ticket, upsert_background_run_ticket
 from aoe_tg_executor_adapter import normalize_executor_runner_target
 from aoe_tg_external_background_worker import poll_external_background_tickets
@@ -35,6 +36,7 @@ def dispatch_claimed_background_ticket_via_adapter(
     binding_summary = str(binding.get("summary", "")).strip() if binding.get("bound") else ""
     probe_status = str(worker_probe.get("probe_status", "")).strip()
     launch_spec = dict(ticket.get("launch_spec") or {}) if isinstance(ticket.get("launch_spec"), dict) else {}
+    launch_kind = str(launch_spec.get("kind", "")).strip().lower()
     probe_summary = str(worker_probe.get("summary", "")).strip()
     if binding_summary:
         launch_spec["model_worker_binding_summary"] = binding_summary
@@ -61,13 +63,38 @@ def dispatch_claimed_background_ticket_via_adapter(
             on_queue_error("background_run_state_write_failed", exc)
         raise RuntimeError(f"model_route_probe_failed:{probe_status or 'failed'}")
 
+    provider_invoke_result: Dict[str, Any] = {}
+    provider_failure_bundle = ""
+
+    def _invoke_provider_ticket() -> Dict[str, Any]:
+        nonlocal provider_invoke_result, provider_failure_bundle
+        provider_invoke_result = model_provider_adapter.invoke_background_ticket_worker(
+            queue_path.parent,
+            ticket=ticket,
+        )
+        if provider_invoke_result.get("ok"):
+            return provider_invoke_result
+        reason_code = str(provider_invoke_result.get("reason_code", "")).strip() or "provider_invoke_failed"
+        summary_text = str(provider_invoke_result.get("summary", "")).strip()
+        parts = [f"status=failed", f"reason={reason_code[:120]}"]
+        if summary_text:
+            parts.append(summary_text[:160])
+        provider_failure_bundle = " | ".join(parts)
+        raise RuntimeError(reason_code)
+
+    active_run_target = _invoke_provider_ticket if launch_kind == "provider_invoke" else run_target
+
     try:
-        runtime_summary = "dispatch_flow_started"
+        runtime_summary = "provider_invoke_started" if launch_kind == "provider_invoke" else "dispatch_flow_started"
         if binding_summary:
             runtime_summary += f" | worker={binding_summary}"
         if probe_status and probe_status != "unbound":
             runtime_summary += f" | probe={probe_status}"
-        evidence_bundle = "status=running | outcome=dispatch_flow_started"
+        evidence_bundle = (
+            "status=running | outcome=provider_invoke_started"
+            if launch_kind == "provider_invoke"
+            else "status=running | outcome=dispatch_flow_started"
+        )
         if probe_status and probe_status != "unbound":
             evidence_bundle += f" | worker_probe={probe_status}"
         running = advance_background_run_ticket(
@@ -85,7 +112,7 @@ def dispatch_claimed_background_ticket_via_adapter(
         on_queue_error("background_run_state_write_failed", exc)
 
     try:
-        result = run_target()
+        result = active_run_target()
     except Exception as exc:
         reason = str(exc).strip().splitlines()[0] if str(exc).strip() else "background_dispatch_failed"
         try:
@@ -95,7 +122,7 @@ def dispatch_claimed_background_ticket_via_adapter(
                 now_iso=now_iso,
                 status="failed",
                 runner_target=runner_target,
-                evidence_bundle=f"status=failed | reason={reason[:160]}",
+                evidence_bundle=provider_failure_bundle or f"status=failed | reason={reason[:160]}",
             )
             if failed:
                 on_ticket_update(failed)
@@ -105,17 +132,37 @@ def dispatch_claimed_background_ticket_via_adapter(
 
     try:
         completed_artifacts = list(completed_evidence_artifacts() or []) if callable(completed_evidence_artifacts) else []
+        completed_runtime_summary = ""
         completed_bundle = (
             str(completed_evidence_bundle() or "").strip()
             if callable(completed_evidence_bundle)
             else "status=completed | outcome=dispatch_flow_returned"
         )
+        if provider_invoke_result:
+            route_id = str(provider_invoke_result.get("route_id", "")).strip() or "background_worker_primary"
+            endpoint_id = str(provider_invoke_result.get("endpoint_id", "")).strip() or "-"
+            model_name = str(provider_invoke_result.get("model", "")).strip() or "-"
+            response_text = str(provider_invoke_result.get("response_text", "")).strip()
+            completed_runtime_summary = (
+                f"provider_invoke_completed | route={route_id} | endpoint={endpoint_id} | model={model_name}"
+            )[:240]
+            bundle_parts = [
+                "status=completed",
+                "outcome=provider_invoke_ok",
+                f"route={route_id}",
+                f"endpoint={endpoint_id}",
+                f"model={model_name}",
+            ]
+            if response_text:
+                bundle_parts.append(f"response={response_text[:80]}")
+            completed_bundle = " | ".join(bundle_parts)[:240]
         completed = advance_background_run_ticket(
             queue_path,
             token,
             now_iso=now_iso,
             status="completed",
             runner_target=runner_target,
+            runtime_summary=completed_runtime_summary,
             evidence_bundle=completed_bundle or "status=completed | outcome=dispatch_flow_returned",
             evidence_artifacts=completed_artifacts,
         )

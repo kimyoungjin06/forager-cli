@@ -274,6 +274,9 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         ("model_escalation_binding_summary", 240),
         ("model_escalation_probe_status", 64),
         ("model_escalation_probe_summary", 240),
+        ("provider_prompt", 8000),
+        ("provider_system", 4000),
+        ("provider_timeout_sec", 16),
     ):
         token = _trim(raw.get(key, ""), limit)
         if token:
@@ -637,6 +640,50 @@ def build_runner_background_launch_spec(
         externalizable=bool(defaults.get("externalizable", False)),
         blocked_reason=str(defaults.get("blocked_reason", "")),
     )
+
+
+def build_local_background_provider_invoke_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+    prompt: str,
+    system: str = "",
+    timeout_sec: int | float | None = None,
+) -> Dict[str, Any]:
+    spec = build_background_launch_spec(
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        runner_target="local_background",
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+        kind="provider_invoke",
+        mode="model_route_json",
+        entrypoint="aoe-model-provider",
+        argv=["invoke", "--kind", "worker"],
+        env_keys=["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        externalizable=False,
+        blocked_reason="host-local provider invoke",
+    )
+    payload = dict(spec)
+    prompt_text = _trim(prompt, 8000)
+    system_text = _trim(system, 4000)
+    if prompt_text:
+        payload["provider_prompt"] = prompt_text
+    if system_text:
+        payload["provider_system"] = system_text
+    if timeout_sec is not None:
+        payload["provider_timeout_sec"] = _trim(timeout_sec, 16)
+    return normalize_background_launch_spec_snapshot(payload)
 
 
 def build_local_tmux_background_launch_spec(

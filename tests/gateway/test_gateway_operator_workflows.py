@@ -58,6 +58,7 @@ from aoe_tg_request_contract import (
     build_github_runner_background_launch_spec,
     build_gateway_run_command_text,
     build_gateway_simulation_command_argv,
+    build_local_background_provider_invoke_launch_spec,
     build_local_tmux_background_launch_spec,
     build_local_tmux_gateway_command_launch_spec,
     build_local_tmux_gateway_run_launch_spec,
@@ -6426,6 +6427,78 @@ def test_background_run_queue_drain_consumes_multiple_registered_tickets(tmp_pat
     rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
     assert rows["BGT-REG-101"]["status"] == "completed"
     assert rows["BGT-REG-102"]["status"] == "completed"
+
+
+def test_background_run_queue_drain_executes_provider_invoke_without_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    launch_spec = build_local_background_provider_invoke_launch_spec(
+        request_id="REQ-PROVIDER-QUEUE-001",
+        project_key="twinpaper",
+        project_root=str(tmp_path),
+        team_dir=str(tmp_path),
+        launch_mode="detached_no_wait",
+        source_surface="background_queue",
+        created_by="telegram:939062873",
+        prompt="Reply with QUEUE_OK only.",
+        system="Return the exact token.",
+        timeout_sec=11,
+    )
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-PROVIDER-QUEUE-001",
+            request_id="REQ-PROVIDER-QUEUE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="background_queue",
+            status="queued",
+            launch_spec=launch_spec,
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda team_dir, ticket: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 status=ok",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_provider_adapter.invoke_background_ticket_worker",
+        lambda team_dir, *, ticket: {
+            "ok": True,
+            "executed": True,
+            "route_id": "background_worker_primary",
+            "endpoint_id": "ollama-qwen3",
+            "model": "qwen3-coder:30b",
+            "response_text": "QUEUE_OK",
+        },
+    )
+
+    claimed = drain_local_background_queue_once(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-PROVIDER-QUEUE-001"
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-PROVIDER-QUEUE-001"]["status"] == "completed"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["runtime_summary"].startswith("provider_invoke_completed")
+    assert "provider_invoke_ok" in rows["BGT-PROVIDER-QUEUE-001"]["evidence_bundle"]
 
 
 def test_local_background_daemon_drains_queue_and_writes_worker_state(tmp_path: Path) -> None:

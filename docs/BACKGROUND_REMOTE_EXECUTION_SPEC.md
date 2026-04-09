@@ -109,6 +109,22 @@
     - use a `local_tmux` launch spec with a gateway simulation payload
 
 #### 5.3.1 Externalizable Runner Defaults
+- `local_background`
+  - callback path:
+    - `kind=gateway_dispatch`
+    - `mode=in_process_callback`
+  - provider path:
+    - `kind=provider_invoke`
+    - `mode=model_route_json`
+    - `entrypoint=aoe-model-provider`
+    - `argv=["invoke","--kind","worker"]`
+    - `env_keys=["AOE_TEAM_DIR","AOE_STATE_DIR"]`
+    - `externalizable=false`
+    - bounded use:
+      - claim a queued ticket
+      - resolve `background_worker_primary`
+      - probe the bound endpoint
+      - execute one provider call through the canonical route seam
 - `local_tmux`
   - `kind=background_dispatch`
   - `mode=tmux_session_json`
