@@ -131,6 +131,48 @@ def summarize_offdesk_judge_decision(decision: Any) -> str:
     return " | ".join(parts) if parts else "-"
 
 
+def normalize_latest_judge_decision_bridge(raw: Any) -> Dict[str, Any]:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return {}
+    return {
+        "source": str(row.get("source", "")).strip() or "latest_offdesk_judge",
+        "verdict": str(row.get("verdict", "")).strip() or "-",
+        "confidence": str(row.get("confidence", "")).strip() or "-",
+        "recommended_action": str(row.get("recommended_action", "")).strip() or "-",
+        "reasoning": str(row.get("reasoning", "")).strip() or "-",
+        "caution": str(row.get("caution", "")).strip() or "-",
+        "candidate_next_step": str(row.get("candidate_next_step", "")).strip() or "-",
+        "applied": bool(row.get("applied", False)),
+        "applied_next_step": str(row.get("applied_next_step", "")).strip() or "-",
+        "decision_mode": str(row.get("decision_mode", "")).strip() or ("promoted_next_step" if bool(row.get("applied", False)) else "observe_only"),
+        "supports_auto_decision": bool(row.get("supports_auto_decision", False)),
+    }
+
+
+def summarize_latest_judge_decision_bridge(bridge: Any) -> str:
+    row = bridge if isinstance(bridge, dict) else normalize_latest_judge_decision_bridge(bridge)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    action = str(row.get("recommended_action", "")).strip() or "-"
+    verdict = str(row.get("verdict", "")).strip() or "-"
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    decision_mode = str(row.get("decision_mode", "")).strip() or "-"
+    next_step = (
+        str(row.get("applied_next_step", "")).strip()
+        if bool(row.get("applied", False))
+        else str(row.get("candidate_next_step", "")).strip()
+    ) or "-"
+    parts = [f"mode={decision_mode}", f"action={action}", f"verdict={verdict}"]
+    if confidence != "-":
+        parts.append(f"confidence={confidence}")
+    if next_step != "-":
+        parts.append(f"next={next_step}")
+    if bool(row.get("supports_auto_decision", False)):
+        parts.append("auto=yes")
+    return " | ".join(parts)
+
+
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
     headline = str(latest_action.get("headline", "")).strip() or "-"
     reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
@@ -316,6 +358,39 @@ def load_latest_offdesk_judge_decision_summary_for_runtime(
 ) -> str:
     decision = load_latest_offdesk_judge_decision_for_runtime(team_dir, project_alias=project_alias)
     return summarize_offdesk_judge_decision(decision)
+
+
+def load_latest_judge_decision_bridge_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> Dict[str, Any]:
+    alias = str(project_alias or "").strip()
+    if not alias:
+        return {}
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}"
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() != runtime_path:
+            continue
+        bridge = normalize_latest_judge_decision_bridge(row.get("latest_judge_decision_bridge"))
+        if not bridge:
+            continue
+        bridge["at"] = str(row.get("at", "")).strip() or "-"
+        bridge["headline"] = str(row.get("headline", "")).strip() or "-"
+        return bridge
+    return {}
+
+
+def load_latest_judge_decision_bridge_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    bridge = load_latest_judge_decision_bridge_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_latest_judge_decision_bridge(bridge)
 
 
 def load_latest_model_ping_audit_for_runtime(

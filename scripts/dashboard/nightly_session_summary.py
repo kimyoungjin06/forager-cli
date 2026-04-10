@@ -137,6 +137,13 @@ def _latest_judge_decision_summary(team_dir: str, project_alias: str) -> str:
     )
 
 
+def _latest_judge_decision_bridge_summary(team_dir: str, project_alias: str) -> str:
+    return action_audit.load_latest_judge_decision_bridge_summary_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+    )
+
+
 def build_nightly_session_summary(
     *,
     control_root: Path | str,
@@ -199,6 +206,7 @@ def build_nightly_session_summary(
                 "document_registry_summary": detail.document_registry_summary,
                 "latest_judge_summary": _latest_judge_summary(snapshot.team_dir, detail.project_alias),
                 "latest_judge_decision_summary": _latest_judge_decision_summary(snapshot.team_dir, detail.project_alias),
+                "latest_judge_decision_bridge_summary": _latest_judge_decision_bridge_summary(snapshot.team_dir, detail.project_alias),
                 "run_lock_mode": detail.run_lock_mode,
                 "run_lock_note": detail.run_lock_note,
                 "background_slot_limit": detail.background_slot_limit,
@@ -323,6 +331,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- background_queue: {runtime.get('background_queue_summary', '-')}",
                 f"- latest_judge: {runtime.get('latest_judge_summary', '-')}",
                 f"- latest_judge_decision: {runtime.get('latest_judge_decision_summary', '-')}",
+                f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- run_lock: {runtime.get('run_lock_mode', '-')}",
                 f"- run_lock_note: {runtime.get('run_lock_note', '-')}",
                 f"- background_slots: active={runtime.get('background_slot_active', 0)} limit={runtime.get('background_slot_limit', 1)}",

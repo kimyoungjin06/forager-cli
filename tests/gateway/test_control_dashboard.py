@@ -423,6 +423,34 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
             )
         },
     )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Retry | blocked",
+        status="blocked",
+        outcome_kind="retry_run",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked retry",
+        next_step="/retry T-001",
+        remediation="judge decision reuse: action=retry next=/retry T-001",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:05:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "continue",
+                "confidence": "medium",
+                "recommended_action": "retry",
+                "candidate_next_step": "/retry T-001",
+                "applied": True,
+                "applied_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            }
+        },
+    )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -455,6 +483,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "codex_cli-gpt-5-4" in overview_text
     assert "latest_judge_decision" in overview_text
     assert "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in overview_text
+    assert "latest_judge_decision_bridge" in overview_text
+    assert "mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -1996,6 +2026,10 @@ def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judg
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
     assert payload["latest_judge_decision_bridge"]["applied"] is True
     assert payload["latest_judge_decision_bridge"]["applied_next_step"] == "/retry T-001"
+    assert (
+        action_audit.load_latest_judge_decision_bridge_summary_for_runtime(team_dir, project_alias="O2")
+        == "mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes"
+    )
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:

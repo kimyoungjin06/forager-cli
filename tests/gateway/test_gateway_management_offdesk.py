@@ -2070,6 +2070,33 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
                 ),
             }
         )
+        + "\n"
+        + json.dumps(
+            {
+                "at": "2026-04-09T18:05:00+09:00",
+                "headline": "Retry | blocked",
+                "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "planning critic blocked retry",
+                "next_step": "/retry T-501",
+                "remediation": "judge decision reuse: action=retry next=/retry T-501",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+                "latest_judge_decision_bridge": {
+                    "source": "latest_offdesk_judge",
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "recommended_action": "retry",
+                    "candidate_next_step": "/retry T-501",
+                    "applied": True,
+                    "applied_next_step": "/retry T-501",
+                    "decision_mode": "promoted_next_step",
+                    "supports_auto_decision": True,
+                },
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -2091,6 +2118,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "offdesk review" in text
     assert "latest_judge: Offdesk Judge | executed | next=/offdesk review O5 | endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in text
     assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-501 | brief executable" in text
+    assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-501 | auto=yes" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:

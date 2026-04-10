@@ -24,6 +24,7 @@ from aoe_tg_run_lock import project_run_lock_blocks_launch, project_run_lock_mod
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
 from aoe_tg_action_audit import (
+    append_action_audit_row,
     load_latest_action_audit_for_runtime_kind,
     load_latest_offdesk_judge_decision_for_runtime,
 )
@@ -230,6 +231,47 @@ def _retry_blocked_remediation_with_judge_bridge(remediation: str, bridge: Dict[
     suffix = f"judge decision reuse: action={action} next={next_step}"
     base = str(remediation or "").strip()
     return f"{base}; {suffix}" if base else suffix
+
+
+def _append_blocked_retry_replan_audit(
+    *,
+    team_dir: Path,
+    entry: Dict[str, Any],
+    source_command: str,
+    blocked: bool,
+    reason_code: str,
+    detail: str,
+    next_step: str,
+    remediation: str,
+    latest_judge_decision_bridge: Dict[str, Any],
+    now_iso: Any,
+) -> None:
+    if not blocked or not isinstance(entry, dict):
+        return
+    alias = _project_status_ref(str(entry.get("name", "")).strip(), entry)
+    command_head = _command_head(source_command)
+    if command_head not in {"/retry", "/replan"}:
+        return
+    label = "Replan" if command_head == "/replan" else "Retry"
+    outcome_kind = "replan" if command_head == "/replan" else "retry_run"
+    append_action_audit_row(
+        team_dir,
+        headline=f"{label} | blocked",
+        status="blocked",
+        outcome_kind=outcome_kind,
+        outcome_status="blocked",
+        outcome_reason_code=str(reason_code or "").strip() or "-",
+        outcome_detail=str(detail or "").strip() or "-",
+        next_step=str(next_step or "").strip() or "-",
+        remediation=str(remediation or "").strip() or "-",
+        source_command=str(source_command or "").strip() or f"{command_head} {alias}",
+        link_label=f"Runtime {alias}",
+        link_href=f"/control/runtimes/{alias}",
+        at=now_iso(),
+        extra={
+            "latest_judge_decision_bridge": dict(latest_judge_decision_bridge or {}),
+        },
+    )
 
 
 def _now_iso() -> str:
@@ -716,6 +758,18 @@ def _execute_retry_run_transition(
         )
         remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge)
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
+        _append_blocked_retry_replan_audit(
+            team_dir=paths.team_dir,
+            entry=entry,
+            source_command=source_command,
+            blocked=blocked,
+            reason_code=reason_code,
+            detail=str(outcome.get("detail", "")).strip() if outcome else "-",
+            next_step=next_step,
+            remediation=remediation,
+            latest_judge_decision_bridge=latest_judge_decision_bridge,
+            now_iso=_now_iso,
+        )
     return _json(
         {
             "ok": not blocked,
@@ -962,6 +1016,18 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             latest_judge,
         )
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
+        _append_blocked_retry_replan_audit(
+            team_dir=paths.team_dir,
+            entry=entry,
+            source_command=str(spec.get("command", "-")),
+            blocked=True,
+            reason_code=error_code,
+            detail="; ".join(str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()) or "-",
+            next_step=next_step,
+            remediation=remediation,
+            latest_judge_decision_bridge=latest_judge_decision_bridge,
+            now_iso=_now_iso,
+        )
         return _json(
             {
                 "ok": False,

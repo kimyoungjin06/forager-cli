@@ -115,6 +115,7 @@ class RuntimeCardDTO:
     model_registry_summary: str
     latest_judge_summary: str
     latest_judge_decision_summary: str
+    latest_judge_decision_bridge_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -307,6 +308,7 @@ class RuntimeDetailDTO:
     model_registry_summary: str
     latest_judge_summary: str
     latest_judge_decision_summary: str
+    latest_judge_decision_bridge_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -417,6 +419,7 @@ class RecoveryRuntimeDTO:
     model_registry_summary: str
     latest_judge_summary: str
     latest_judge_decision_summary: str
+    latest_judge_decision_bridge_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
