@@ -675,6 +675,43 @@ def test_control_dashboard_audit_route_filters_by_focus_badge(tmp_path: Path) ->
     assert "<span>total_rows</span><strong>1</strong>" in text
 
 
+def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-001",
+        next_step="/retry T-001",
+        remediation="-",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:06:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/audit?focus=auto-route&limit=1", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert '<option value="auto-route" selected>' in text
+    assert 'name="limit"' in text
+    assert 'value="1"' in text
+    assert "<span>limit</span><strong>1</strong>" in text
+
+
 def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

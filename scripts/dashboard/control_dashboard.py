@@ -133,11 +133,17 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
 
     if path == "/control/audit":
         query = parse_qs(parsed.query or "", keep_blank_values=False)
+        limit_raw = str((query.get("limit") or ["50"])[0]).strip()
+        try:
+            limit = max(1, min(100, int(limit_raw or "50")))
+        except Exception:
+            limit = 50
         snapshot, audit = load_dashboard_action_audit_page(
             control_root=config.control_root,
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
             focus=str((query.get("focus") or ["all"])[0]),
+            limit=limit,
         )
         return _html(render_template("dashboard/audit.html", page_title="Action Audit", snapshot=snapshot, audit=audit, current_path=path))
 

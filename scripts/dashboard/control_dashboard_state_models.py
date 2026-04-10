@@ -502,6 +502,7 @@ class ActionAuditPageDTO:
     updated_at: str
     stale: bool
     error: str
+    limit: int
     total_rows: int
     status_summary: str
     focus_summary: str

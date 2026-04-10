@@ -2,9 +2,25 @@
 {% block content %}
 <section class="panel">
   <h2>Action Audit</h2>
+  <form class="inline-form" method="get" action="/control/audit">
+    <label>
+      <span>Focus</span>
+      <select name="focus">
+        {% for token in ['all', 'auto-route', 'judge', 'retry'] %}
+        <option value="{{ token }}" {% if audit.focus_filter == token %}selected{% endif %}>{{ token }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Limit</span>
+      <input type="number" name="limit" min="1" max="100" value="{{ audit.limit }}">
+    </label>
+    <button type="submit">Filter</button>
+  </form>
   <ul class="kv-list">
     <li><span>audit_path</span><strong>{{ audit.audit_path }}</strong></li>
     <li><span>updated_at</span><strong>{{ audit.updated_at or '-' }}</strong></li>
+    <li><span>limit</span><strong>{{ audit.limit }}</strong></li>
     <li><span>total_rows</span><strong>{{ audit.total_rows }}</strong></li>
     <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
     <li><span>focus_summary</span><strong>{{ audit.focus_summary }}</strong></li>

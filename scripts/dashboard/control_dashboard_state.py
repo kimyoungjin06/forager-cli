@@ -393,6 +393,7 @@ def load_dashboard_action_audit_page(
         updated_at=freshness.updated_at,
         stale=bool(freshness.stale),
         error=freshness.error,
+        limit=max(1, int(limit)),
         total_rows=len(filtered_rows),
         status_summary=_action_audit_status_summary(filtered_rows),
         focus_summary=focus_summary,
