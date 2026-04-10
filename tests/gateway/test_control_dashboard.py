@@ -2225,6 +2225,128 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert "quality=" in sync_payload["preview"]["sync_summary"]
 
 
+def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:05:00+09:00",
+        extra={
+            "response_text": json.dumps(
+                {
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "reasoning": "brief executable",
+                    "next_step": "/retry T-001",
+                    "caution": "review lane remains",
+                }
+            )
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan | blocked",
+        status="blocked",
+        outcome_kind="replan",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked replan",
+        next_step="/retry T-001",
+        remediation="judge decision reuse: action=retry next=/retry T-001",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:06:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "continue",
+                "confidence": "medium",
+                "recommended_action": "retry",
+                "candidate_next_step": "/retry T-001",
+                "applied": True,
+                "applied_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            },
+            "replan_auto_decision": {
+                "source": "latest_offdesk_judge",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "bridge_applied": True,
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "confidence": "medium",
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "ready",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    expected_payload = '{"task_ref":"T-001","auto_route_apply":true}'
+    assert any(
+        btn.label == "Apply Judge Auto-Route"
+        and btn.path == "/control/actions/task/replan"
+        and btn.payload_json == expected_payload
+        for btn in runtime_card.runtime_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Apply Judge Auto-Route"
+        and btn.path == "/control/actions/task/replan"
+        and btn.payload_json == expected_payload
+        for btn in runtime_detail.active_task_phase2_action_buttons
+    )
+    assert task_detail is not None
+    assert any(
+        btn.label == "Apply Judge Auto-Route"
+        and btn.path == "/control/actions/task/replan"
+        and btn.payload_json == expected_payload
+        for btn in task_detail.phase2_action_buttons
+    )
+
+
 def test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

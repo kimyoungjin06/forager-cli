@@ -25,6 +25,7 @@ import aoe_tg_task_state as task_state
 import aoe_tg_workspace_brief as workspace_brief
 
 from control_dashboard_state_common import (
+    _append_unique_action_button,
     _background_scheduler_note,
     _compose_backend_summary,
     _compose_phase2_quality,
@@ -33,6 +34,7 @@ from control_dashboard_state_common import (
     _detail_path,
     _provider_repeat_counts,
     _recovery_control_action_buttons,
+    _replan_auto_route_action_button,
     _runtime_action_buttons,
     _runtime_command_contract,
     _runtime_path,
@@ -131,6 +133,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         latest_judge_decision_bridge_summary = "-"
         latest_replan_auto_decision_summary = "-"
         latest_replan_auto_routing_policy_summary = "-"
+        latest_replan_auto_routing_policy: Dict[str, Any] = {}
         workspace_summary = "-"
         document_registry_summary = "-"
         active_task_context_pack_summary = "-"
@@ -202,6 +205,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     root_team_dir,
                     project_alias=str(entry.get("project_alias", "")).strip(),
                 )
+                latest_replan_auto_routing_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
+                )
                 if isinstance(active_task, dict):
                     pack = context_pack.load_context_pack(
                         team_dir,
@@ -223,6 +230,14 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         runtime_safe_action_buttons, runtime_phase2_action_buttons = _runtime_action_buttons(
             project_alias=alias,
             phase2_commands=list(runtime_action_contract.get("phase2") or []),
+        )
+        runtime_phase2_action_buttons = _append_unique_action_button(
+            runtime_phase2_action_buttons,
+            _replan_auto_route_action_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                policy=latest_replan_auto_routing_policy,
+            ),
         )
         cards.append(
             RuntimeCardDTO(
@@ -570,6 +585,14 @@ def _build_runtime_detail(
         if str(root_team_dir or "").strip()
         else "-"
     )
+    latest_replan_auto_routing_policy = (
+        action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else {}
+    )
     active_task_context_pack_profile = "-"
     active_task_context_pack_summary = "-"
     active_task_context_pack_docs = "-"
@@ -649,11 +672,27 @@ def _build_runtime_detail(
         project_alias=target_alias,
         phase2_commands=list(runtime_action_contract.get("phase2") or []),
     )
+    runtime_phase2_action_buttons = _append_unique_action_button(
+        runtime_phase2_action_buttons,
+        _replan_auto_route_action_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=latest_replan_auto_routing_policy,
+        ),
+    )
     active_task_safe_action_buttons, active_task_phase2_action_buttons = _task_action_buttons(
         label=str(row.get("active_task_label", "")).strip(),
         request_id=active_request_id,
         phase2_commands=list(active_task_action_contract.get("phase2") or []),
         include_followup_preview=bool(active_request_id),
+    )
+    active_task_phase2_action_buttons = _append_unique_action_button(
+        active_task_phase2_action_buttons,
+        _replan_auto_route_action_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=latest_replan_auto_routing_policy,
+        ),
     )
     return RuntimeDetailDTO(
         project_key=key,

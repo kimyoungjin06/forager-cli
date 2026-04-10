@@ -24,12 +24,14 @@ import aoe_tg_task_view as task_view
 import aoe_tg_team_observatory as team_observatory
 
 from control_dashboard_state_common import (
+    _append_unique_action_button,
     _compose_backend_summary,
     _compose_lane_summary,
     _compose_phase2_shape,
     _compose_task_quality,
     _completion_contract_for_preset,
     _detail_path,
+    _replan_auto_route_action_button,
     _task_action_buttons,
     _task_command_contract,
     _task_followup_summary,
@@ -186,7 +188,7 @@ def _build_runtime_recent_task_rows(
     return rows[: max(1, int(cap))]
 
 
-def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Optional[TaskDetailDTO]:
+def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_team_dir: Optional[Path] = None) -> Optional[TaskDetailDTO]:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     target = str(request_id or "").strip()
     if not target:
@@ -225,6 +227,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
         pack_excluded = "-"
         judge_binding_summary = "-"
         judge_probe_summary = "-"
+        latest_replan_auto_routing_policy: Dict[str, Any] = {}
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             team_dir = Path(team_dir_raw)
@@ -274,6 +277,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
                 probe_status="unsupported_probe" if judge_binding.get("bound") and provider_kind != "ollama" else ("deferred_live_probe" if judge_binding.get("bound") else "unbound"),
                 probe_summary=judge_probe_summary,
             )
+        if isinstance(root_team_dir, Path):
+            latest_replan_auto_routing_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+                root_team_dir,
+                project_alias=alias,
+            )
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),
@@ -289,6 +297,14 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str) -> Option
             label=task_view.task_display_label(task, fallback_request_id=rid),
             request_id=rid,
             phase2_commands=list(action_contract.get("phase2") or []),
+        )
+        phase2_action_buttons = _append_unique_action_button(
+            phase2_action_buttons,
+            _replan_auto_route_action_button(
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
+                policy=latest_replan_auto_routing_policy,
+            ),
         )
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),

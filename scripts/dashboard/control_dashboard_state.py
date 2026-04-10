@@ -258,7 +258,7 @@ def load_task_detail(
 ) -> Optional[TaskDetailDTO]:
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     manager_loaded = _load_manager_state(paths)
-    return _build_task_detail(manager_loaded.state, request_id)
+    return _build_task_detail(manager_loaded.state, request_id, root_team_dir=paths.team_dir)
 
 
 def task_detail_from_state(manager_state: Dict[str, Any], request_id: str) -> Optional[TaskDetailDTO]:
@@ -277,7 +277,11 @@ def load_dashboard_task_page(
         team_dir=team_dir,
         manager_state_file=manager_state_file,
     )
-    return loaded.snapshot, _build_task_detail(loaded.manager_state, request_id)
+    return loaded.snapshot, _build_task_detail(
+        loaded.manager_state,
+        request_id,
+        root_team_dir=Path(loaded.snapshot.team_dir),
+    )
 
 
 def load_runtime_detail(

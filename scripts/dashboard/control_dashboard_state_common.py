@@ -306,6 +306,61 @@ def _build_action_buttons(commands: Iterable[str]) -> List[ActionButtonDTO]:
     return buttons
 
 
+def _append_unique_action_button(buttons: List[ActionButtonDTO], button: ActionButtonDTO | None) -> List[ActionButtonDTO]:
+    if not isinstance(button, ActionButtonDTO):
+        return list(buttons)
+    existing = {
+        (str(row.path).strip(), str(row.payload_json).strip())
+        for row in buttons
+        if isinstance(row, ActionButtonDTO)
+    }
+    key = (str(button.path).strip(), str(button.payload_json).strip())
+    if key in existing:
+        return list(buttons)
+    return [*buttons, button]
+
+
+def _replan_auto_route_action_button(
+    *,
+    label: str,
+    request_id: str,
+    policy: Dict[str, Any],
+) -> ActionButtonDTO | None:
+    row = policy if isinstance(policy, dict) else {}
+    if str(row.get("status", "")).strip() != "ready":
+        return None
+    if not bool(row.get("can_auto_apply", False)):
+        return None
+    if str(row.get("suggested_action", "")).strip() != "retry":
+        return None
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if task_ref == "-":
+        return None
+    suggested_next_step = str(row.get("suggested_next_step", "")).strip()
+    target_ref = ""
+    if suggested_next_step.startswith("/"):
+        parts = suggested_next_step.split()
+        if len(parts) >= 2:
+            target_ref = str(parts[1]).strip()
+    if target_ref and target_ref not in {task_ref, str(request_id).strip()}:
+        return None
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    next_hint = suggested_next_step or f"/retry {task_ref}"
+    return ActionButtonDTO(
+        label="Apply Judge Auto-Route",
+        command=f"/replan {task_ref} | auto_route_apply=true",
+        method="POST",
+        path="/control/actions/task/replan",
+        mode="phase2",
+        note=f"judge-backed retry promotion | confidence={confidence} | next={next_hint}",
+        payload_json=json.dumps(
+            {"task_ref": task_ref, "auto_route_apply": True},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+
+
 def _task_action_buttons(
     *,
     label: str,
