@@ -180,6 +180,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["latest_replan_auto_decision_summary"] == "from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes"
     assert runtimes[0]["latest_replan_auto_routing_policy_summary"] == "status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
+    assert runtimes[0]["latest_replan_auto_route_status_summary"] == "state=applied | next=/retry T-001 | at=2026-04-09T11:06:00+09:00 | retry_command=/retry T-001"
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -324,6 +325,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes" in markdown
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in markdown
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in markdown
+    assert "auto_route_status: state=applied | next=/retry T-001 | at=2026-04-09T11:06:00+09:00 | retry_command=/retry T-001" in markdown
     assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown
     assert "background_slots: active=0 limit=1" in markdown

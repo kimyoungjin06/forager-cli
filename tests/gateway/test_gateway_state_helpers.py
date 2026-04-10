@@ -1521,6 +1521,21 @@ def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_po
             },
         },
     )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-410",
+        next_step="/retry T-410",
+        remediation="-",
+        source_command="/replan T-410 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:12:00+09:00",
+    )
 
     summary = task_view.summarize_task_lifecycle(
         "Demo",
@@ -1547,6 +1562,10 @@ def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_po
     )
     assert (
         "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-410 | mode=promoted_next_step | confirm=yes"
+        in summary
+    )
+    assert (
+        "auto_route_status: state=applied | next=/retry T-410 | at=2026-04-10T09:12:00+09:00 | retry_command=/retry T-410"
         in summary
     )
 

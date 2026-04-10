@@ -529,6 +529,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in overview_text
     assert "latest_replan_auto_route" in overview_text
     assert "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in overview_text
+    assert "auto_route_status" in overview_text
+    assert "state=applied | next=/retry T-001 | at=2026-04-09T11:06:00+09:00 | retry_command=/retry T-001" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -1215,6 +1217,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "bg=running/local_background" in text
     assert "latest_replan_auto_route" in text
     assert "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in text
+    assert "auto_route_status" in text
+    assert "state=applied | next=/retry T-001 | at=2026-04-09T11:06:00+09:00 | retry_command=/retry T-001" in text
     assert "state_root_mode" in text
     assert str(team_dir.resolve()) in text
     assert "latest_intent_command" in text

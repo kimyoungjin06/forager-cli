@@ -1543,6 +1543,21 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
             },
         },
     )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-001",
+        next_step="/retry T-001",
+        remediation="-",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:18:00+09:00",
+    )
     state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
@@ -1625,6 +1640,10 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
+        in text
+    )
+    assert (
+        "auto_route_status: state=applied | next=/retry T-001 | at=2026-04-10T09:18:00+09:00 | retry_command=/retry T-001"
         in text
     )
 

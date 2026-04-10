@@ -239,6 +239,10 @@ def build_nightly_session_summary(
                 "latest_replan_auto_decision_summary": _latest_replan_auto_decision_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_routing_policy_summary": _latest_replan_auto_routing_policy_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
+                "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+                    snapshot.team_dir,
+                    project_alias=detail.project_alias,
+                ),
                 "run_lock_mode": detail.run_lock_mode,
                 "run_lock_note": detail.run_lock_note,
                 "background_slot_limit": detail.background_slot_limit,
@@ -367,6 +371,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
+                f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
                 f"- run_lock: {runtime.get('run_lock_mode', '-')}",
                 f"- run_lock_note: {runtime.get('run_lock_note', '-')}",
                 f"- background_slots: active={runtime.get('background_slot_active', 0)} limit={runtime.get('background_slot_limit', 1)}",
