@@ -534,6 +534,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00 | apply=dashboard button | api:auto_route_apply=true" in overview_text
     assert "auto_route_status" in overview_text
     assert "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in overview_text
+    assert "Decision Signals" in overview_text
+    assert "Execution Rails" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -712,6 +714,8 @@ def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path:
     assert 'name="limit"' in text
     assert 'value="1"' in text
     assert "<span>limit</span><strong>1</strong>" in text
+    assert "/control/audit?limit=1" in text
+    assert "/control/audit?focus=judge&amp;limit=1" in text
 
 
 def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -> None:
@@ -1218,6 +1222,8 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "background_run_summary" in text
     assert "status running=1" in text
     assert "background_scheduler" in text
+    assert "Decision Signals" in text
+    assert "Execution Rails" in text
     assert "Project Progress Board" in text
     assert "reports/summary.md" in text
     assert "acceptance_gap" in text
@@ -1337,6 +1343,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "background_scheduler" in text
     assert "background_scheduler_note" in text
     assert "no queued scheduler head" in text
+    assert "Decision Signals" in text
+    assert "Execution Rails" in text
     assert "context_pack" in text
     assert "model_plan" in text
     assert "latest_judge" in text

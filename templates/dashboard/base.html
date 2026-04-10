@@ -48,7 +48,8 @@
         <p id="action-result-summary" class="muted">No action has been run yet.</p>
         <ul id="action-result-rows" class="kv-list action-result-rows hidden"></ul>
         <ul id="action-result-links" class="command-list compact hidden"></ul>
-        <section id="action-result-history-panel" class="action-result-history hidden">
+        {% set audit_limit = audit.limit if audit is defined else 20 %}
+        <section id="action-result-history-panel" class="action-result-history hidden" data-audit-limit="{{ audit_limit }}">
           <div class="action-result-history-header">
             <strong>Recent Results</strong>
             <span class="muted">latest 5</span>
@@ -68,7 +69,7 @@
             >
               <div class="action-history-head">
                 <span class="action-history-badge {{ row.status }}">{{ row.status }}</span>
-                {% if row.focus_badge %}<a class="action-history-badge" href="/control/audit?focus={{ row.focus_badge }}">{{ row.focus_badge }}</a>{% endif %}
+                {% if row.focus_badge %}<a class="action-history-badge" href="/control/audit?focus={{ row.focus_badge }}&amp;limit={{ audit_limit }}">{{ row.focus_badge }}</a>{% endif %}
                 <strong>{{ row.at }} | {{ row.headline }}</strong>
               </div>
               {% if row.next_step and row.next_step != '-' %}
@@ -83,10 +84,10 @@
           </ul>
           <p class="muted action-history-footer">
             see more:
-            <a href="/control/audit?limit=20">all</a>
-            <a href="/control/audit?focus=auto-route&amp;limit=20">auto-route</a>
-            <a href="/control/audit?focus=judge&amp;limit=20">judge</a>
-            <a href="/control/audit?focus=retry&amp;limit=20">retry</a>
+            <a href="/control/audit?limit={{ audit_limit }}">all</a>
+            <a href="/control/audit?focus=auto-route&amp;limit={{ audit_limit }}">auto-route</a>
+            <a href="/control/audit?focus=judge&amp;limit={{ audit_limit }}">judge</a>
+            <a href="/control/audit?focus=retry&amp;limit={{ audit_limit }}">retry</a>
           </p>
         </section>
         <details id="action-result-details" class="action-result-details hidden">
@@ -176,6 +177,7 @@
             historyPanel.classList.add("hidden");
             return;
           }
+          const currentAuditLimit = historyPanel.dataset.auditLimit || "20";
           history.forEach((entry) => {
             const item = document.createElement("li");
             const head = document.createElement("div");
@@ -189,7 +191,7 @@
             if (entry.focusBadge) {
               const focus = document.createElement("a");
               focus.className = "action-history-badge";
-              focus.href = `/control/audit?focus=${encodeURIComponent(entry.focusBadge)}`;
+              focus.href = `/control/audit?focus=${encodeURIComponent(entry.focusBadge)}&limit=${encodeURIComponent(currentAuditLimit)}`;
               focus.textContent = entry.focusBadge;
               head.appendChild(focus);
             }
