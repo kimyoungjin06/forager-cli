@@ -60,6 +60,7 @@ class ActionAuditRowDTO:
     link_label: str
     link_href: str
     source_command: str
+    focus_badge: str
 
 
 @dataclass(frozen=True)
@@ -227,11 +228,19 @@ def _load_latest_command_resolution(
 
 
 def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
+    outcome_kind = str(raw.get("outcome_kind", "")).strip() or "-"
+    focus_badge = ""
+    if outcome_kind == "replan_auto_route":
+        focus_badge = "auto-route"
+    elif outcome_kind == "offdesk_judge":
+        focus_badge = "judge"
+    elif outcome_kind == "retry_run":
+        focus_badge = "retry"
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         status=str(raw.get("status", "")).strip() or "unknown",
-        outcome_kind=str(raw.get("outcome_kind", "")).strip() or "-",
+        outcome_kind=outcome_kind,
         outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",
         outcome_reason_code=str(raw.get("outcome_reason_code", "")).strip() or "-",
         outcome_detail=str(raw.get("outcome_detail", "")).strip() or "-",
@@ -240,6 +249,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         link_label=str(raw.get("link_label", "")).strip() or "-",
         link_href=str(raw.get("link_href", "")).strip() or "-",
         source_command=str(raw.get("source_command", "")).strip() or "-",
+        focus_badge=focus_badge,
     )
 
 
@@ -280,6 +290,7 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
                 "link_label": row.link_label,
                 "link_href": row.link_href,
                 "source_command": row.source_command,
+                "focus_badge": row.focus_badge,
             }
             for row in rows
         ]

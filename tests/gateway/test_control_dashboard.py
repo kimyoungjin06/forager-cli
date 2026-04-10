@@ -509,6 +509,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert overview_headers["Content-Type"].startswith("text/html")
     assert "Control Summary" in overview_text
     assert "Action Audit" in overview_text
+    assert "auto-route" in overview_text
     assert "O2 Alpha" in overview_text
     assert "next_retry_target" in overview_text
     assert "state_root_mode" in overview_text
@@ -591,6 +592,21 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
 def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-001",
+        next_step="/retry T-001",
+        remediation="-",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:06:00+09:00",
+    )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -608,9 +624,13 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
     assert "action-history.jsonl" in text
     assert "status_summary" in text
     assert "preview=1" in text
+    assert "focus_summary" in text
+    assert "auto-route=1" in text
     assert "Sync Preview | preview" in text
+    assert "Replan Auto Route | applied" in text
     assert "/sync preview O2 24h" in text
     assert "/control/runtimes/O2" in text
+    assert "auto-route" in text
 
 
 def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -> None:

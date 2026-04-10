@@ -371,6 +371,15 @@ def load_dashboard_action_audit_page(
     )
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     rows, freshness = _load_recent_action_audit(paths.action_audit_file, limit=max(1, int(limit)))
+    focus_counts: Dict[str, int] = {}
+    for row in rows:
+        badge = str(getattr(row, "focus_badge", "")).strip()
+        if not badge:
+            continue
+        focus_counts[badge] = int(focus_counts.get(badge, 0) or 0) + 1
+    focus_summary = " | ".join(
+        f"{label}={focus_counts[label]}" for label in sorted(focus_counts.keys())
+    ) or "-"
     return loaded.snapshot, ActionAuditPageDTO(
         exists=bool(freshness.exists),
         audit_path=freshness.path,
@@ -379,6 +388,7 @@ def load_dashboard_action_audit_page(
         error=freshness.error,
         total_rows=len(rows),
         status_summary=_action_audit_status_summary(rows),
+        focus_summary=focus_summary,
         rows=rows,
     )
 

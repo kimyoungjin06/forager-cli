@@ -500,6 +500,7 @@ class ActionAuditPageDTO:
     error: str
     total_rows: int
     status_summary: str
+    focus_summary: str
     rows: List[ActionAuditRowDTO] = field(default_factory=list)
 
 

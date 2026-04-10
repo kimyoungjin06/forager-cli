@@ -7,6 +7,7 @@
     <li><span>updated_at</span><strong>{{ audit.updated_at or '-' }}</strong></li>
     <li><span>total_rows</span><strong>{{ audit.total_rows }}</strong></li>
     <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
+    <li><span>focus_summary</span><strong>{{ audit.focus_summary }}</strong></li>
     {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if audit.error %}<li><span>audit_error</span><strong>{{ audit.error }}</strong></li>{% endif %}
   </ul>
@@ -30,7 +31,7 @@
       {% for row in audit.rows %}
       <tr>
         <td>{{ row.at }}</td>
-        <td>{{ row.headline }}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
+        <td>{% if row.focus_badge %}<span class="action-history-badge">{{ row.focus_badge }}</span> {% endif %}{{ row.headline }}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
         <td>{{ row.status }}</td>
         <td>{{ row.next_step }}</td>
         <td><code>{{ row.source_command }}</code></td>

@@ -67,6 +67,7 @@
             >
               <div class="action-history-head">
                 <span class="action-history-badge {{ row.status }}">{{ row.status }}</span>
+                {% if row.focus_badge %}<span class="action-history-badge">{{ row.focus_badge }}</span>{% endif %}
                 <strong>{{ row.at }} | {{ row.headline }}</strong>
               </div>
               {% if row.next_step and row.next_step != '-' %}
