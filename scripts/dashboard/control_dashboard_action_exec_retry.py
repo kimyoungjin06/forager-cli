@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -341,6 +342,85 @@ def _replan_auto_routing_policy(
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
     }
+
+
+def _payload_bool(payload: Dict[str, Any], key: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    return token in {"1", "true", "yes", "on"}
+
+
+def _normalize_lane_ids(items: Any) -> List[str]:
+    lane_ids: List[str] = []
+    for row in list(items or []):
+        token = str(row or "").strip()[:32]
+        if token and token not in lane_ids:
+            lane_ids.append(token)
+    return lane_ids
+
+
+def _retry_command_text_from_policy(
+    *,
+    task_ref: str,
+    lane_ids: List[str],
+    policy: Dict[str, Any],
+) -> str:
+    command = str((policy or {}).get("suggested_next_step", "")).strip()
+    if not command.startswith("/retry "):
+        command = f"/retry {str(task_ref or '').strip()}".strip()
+    if lane_ids and " lane " not in command:
+        command += " lane " + ",".join(lane_ids)
+    return command
+
+
+def _append_replan_auto_route_audit(
+    *,
+    team_dir: Path,
+    entry: Dict[str, Any],
+    source_command: str,
+    retry_command: str,
+    policy: Dict[str, Any],
+    now_iso: Any,
+) -> None:
+    append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail=f"retry_command={str(retry_command or '').strip() or '-'}",
+        next_step=str(retry_command or "").strip() or "-",
+        remediation="inspect the retried task outcome and judge policy reuse before applying another auto-route",
+        source_command=str(source_command or "").strip() or "-",
+        link_label=f"Runtime {_project_status_ref(str(entry.get('name', '')).strip(), entry)}",
+        link_href=f"/control/runtimes/{_project_status_ref(str(entry.get('name', '')).strip(), entry)}",
+        at=now_iso(),
+        extra={"replan_auto_routing_policy": dict(policy or {})},
+    )
+
+
+def _json_with_extra_fields(
+    response: Tuple[int, Dict[str, str], bytes],
+    *,
+    extra: Dict[str, Any],
+) -> Tuple[int, Dict[str, str], bytes]:
+    status, headers, body = response
+    content_type = str((headers or {}).get("Content-Type", "")).strip().lower()
+    if "application/json" not in content_type:
+        return response
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return response
+    if not isinstance(payload, dict):
+        return response
+    payload.update(extra or {})
+    return _json(payload, status=status)
 
 
 def _now_iso() -> str:
@@ -1111,6 +1191,50 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             latest_judge,
         )
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
+        if (
+            is_replan
+            and _payload_bool(payload, "auto_route_apply")
+            and str(replan_auto_routing_policy.get("status", "")).strip() == "ready"
+            and str(replan_auto_routing_policy.get("suggested_action", "")).strip() == "retry"
+        ):
+            lane_ids = _normalize_lane_ids(payload.get("lane_ids"))
+            retry_command = _retry_command_text_from_policy(
+                task_ref=task_ref,
+                lane_ids=lane_ids,
+                policy=replan_auto_routing_policy,
+            )
+            _append_replan_auto_route_audit(
+                team_dir=paths.team_dir,
+                entry=entry,
+                source_command=str(spec.get("command", "-")),
+                retry_command=retry_command,
+                policy=replan_auto_routing_policy,
+                now_iso=_now_iso,
+            )
+            retry_payload: Dict[str, Any] = {
+                "task_ref": task_ref,
+                "auto_route_source": "replan_auto_routing_policy",
+            }
+            if lane_ids:
+                retry_payload["lane_ids"] = lane_ids
+            retry_response = _execute_retry_action(
+                {
+                    "path": "/control/actions/task/retry",
+                    "mode": spec.get("mode", "-"),
+                    "command": retry_command,
+                    "payload": retry_payload,
+                },
+                config=config,
+            )
+            return _json_with_extra_fields(
+                retry_response,
+                extra={
+                    "auto_route_applied": True,
+                    "auto_routed_from": str(spec.get("command", "-")),
+                    "auto_route_policy_source": "replan_auto_routing_policy",
+                    "replan_auto_routing_policy": replan_auto_routing_policy,
+                },
+            )
         _append_blocked_retry_replan_audit(
             team_dir=paths.team_dir,
             entry=entry,

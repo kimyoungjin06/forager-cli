@@ -36,12 +36,18 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         if not task_ref:
             raise ValueError("task_ref is required")
         lane_ids = _normalize_lane_ids(payload.get("lane_ids"))
+        auto_route_apply_raw = payload.get("auto_route_apply", False)
+        if not isinstance(auto_route_apply_raw, bool):
+            raise ValueError("auto_route_apply must be a boolean")
         command = f"{'/replan' if path.endswith('/replan') else '/retry'} {task_ref}"
         if lane_ids:
             command += " lane " + ",".join(lane_ids)
         spec = operator_action_contract.http_action_spec(command)
         if spec is None:
             raise ValueError("unsupported retry/replan action contract")
+        spec["payload"] = dict(spec.get("payload") or {})
+        if auto_route_apply_raw:
+            spec["payload"]["auto_route_apply"] = True
         return spec
 
     if path == "/control/actions/task/followup":

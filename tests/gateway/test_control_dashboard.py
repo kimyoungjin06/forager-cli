@@ -2073,6 +2073,104 @@ def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judg
     )
 
 
+def test_control_dashboard_post_replan_route_auto_routes_to_retry_when_confirmed(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T10:05:00+09:00",
+        extra={
+            "response_text": "{\"verdict\":\"continue\",\"confidence\":\"medium\",\"reasoning\":\"brief executable\",\"next_step\":\"/retry T-001\",\"caution\":\"review lane remains\"}",
+        },
+    )
+
+    def _fake_resolve_retry_replan_transition(*, cmd, send, **_kwargs):
+        if cmd == "orch-replan":
+            send("plan gate blocked", context="planning-gate")
+            return {"terminal": True}
+        if cmd == "orch-retry":
+            return {
+                "cmd": "run",
+                "rest": "",
+                "orch_target": "alpha",
+                "run_prompt": "retry it",
+                "run_force_mode": "dispatch",
+                "run_control_mode": "retry",
+                "run_source_request_id": "REQ-1",
+                "run_source_task": {"request_id": "REQ-1"},
+                "run_selected_execution_lane_ids": ["L1"],
+                "run_selected_review_lane_ids": [],
+            }
+        raise AssertionError(cmd)
+
+    def _fake_execute_retry_run_transition(transition, *, config, manager_state, paths, source_command, payload):
+        return dashboard_app._json(
+            {
+                "ok": True,
+                "implemented": True,
+                "executed": True,
+                "status": "executed",
+                "method": "POST",
+                "path": "/control/actions/task/retry",
+                "mode": "phase2",
+                "source_command": source_command,
+                "payload": payload,
+                "next_step": "/task T-001 | analysis-check",
+                "remediation": "review the updated task detail and lane state before repeating another retry",
+            },
+            status=200,
+        )
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+    monkeypatch.setattr(dashboard_app, "_execute_retry_run_transition", _fake_execute_retry_run_transition)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"], "auto_route_apply": True}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["auto_route_applied"] is True
+    assert payload["auto_routed_from"] == "/replan T-001 lane L1"
+    assert payload["auto_route_policy_source"] == "replan_auto_routing_policy"
+    assert payload["source_command"] == "/retry T-001 lane L1"
+    assert payload["payload"]["task_ref"] == "T-001"
+    assert payload["payload"]["lane_ids"] == ["L1"]
+    assert payload["payload"]["auto_route_source"] == "replan_auto_routing_policy"
+    assert payload["replan_auto_routing_policy"]["status"] == "ready"
+    row = action_audit.load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias="O2",
+        outcome_kind="replan_auto_route",
+    )
+    assert row["headline"] == "Replan Auto Route | applied"
+    assert row["next_step"] == "/retry T-001 lane L1"
+    assert row["outcome_detail"] == "retry_command=/retry T-001 lane L1"
+
+
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
