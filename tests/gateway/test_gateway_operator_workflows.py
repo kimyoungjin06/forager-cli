@@ -6,6 +6,7 @@ import subprocess
 import time
 
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_action_audit as action_audit
 import aoe_tg_run_detached_flow as run_detached_flow
 import aoe_tg_document_registry as document_registry
 import aoe_tg_workspace_brief as workspace_brief
@@ -1481,6 +1482,151 @@ def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
     assert "judge_probe: T-001 | judge=unbound:claude-opus-4.1" in text
     assert "escalation_binding: T-001 | bgx=unbound:gpt-oss-or-gemma4" in text
     assert "escalation_probe: T-001 | bgx=unbound:gpt-oss-or-gemma4" in text
+
+
+def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "project_root": str(project_root),
+            "project_alias": "O2",
+            "onboarding_status": "active",
+            "doc_roots": [str(docs_dir.resolve())],
+        },
+        project_root=project_root,
+        entry={"background_runner_target": "local_background"},
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Retry | blocked",
+        status="blocked",
+        outcome_kind="retry_run",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked retry",
+        next_step="/retry T-001",
+        remediation="judge decision reuse: action=retry next=/retry T-001",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:15:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "continue",
+                "confidence": "medium",
+                "recommended_action": "retry",
+                "candidate_next_step": "/retry T-001",
+                "applied": True,
+                "applied_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "ready",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "last_request_id": "REQ-1",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "status": "blocked",
+                "updated_at": "2026-04-10T09:10:00+09:00",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-10T09:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "status"
+    assert (
+        "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes"
+        in text
+    )
+    assert (
+        "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
+        in text
+    )
 
 
 def test_orch_status_prefers_recent_successful_judge_model_ping_over_probe_timeout(

@@ -6,7 +6,11 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from aoe_tg_action_audit import load_latest_action_audit_for_task
+from aoe_tg_action_audit import (
+    load_latest_action_audit_for_task,
+    load_latest_judge_decision_bridge_summary_for_runtime,
+    load_latest_replan_auto_routing_policy_summary_for_runtime,
+)
 from aoe_tg_context_pack import load_context_pack
 from aoe_tg_operator_summary import task_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
@@ -316,6 +320,20 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
             lines.append(f"context_pack_docs: {str(pack.get('docs_summary', '')).strip() or '-'}")
             if str(pack.get("excluded_summary", "")).strip() and str(pack.get("excluded_summary", "")).strip() != "-":
                 lines.append(f"context_pack_excluded: {str(pack.get('excluded_summary', '')).strip()}")
+            project_alias = str(context.get("project_alias", "")).strip()
+            if project_alias:
+                latest_judge_decision_bridge_summary = load_latest_judge_decision_bridge_summary_for_runtime(
+                    team_dir_raw,
+                    project_alias=project_alias,
+                )
+                latest_replan_auto_routing_policy_summary = load_latest_replan_auto_routing_policy_summary_for_runtime(
+                    team_dir_raw,
+                    project_alias=project_alias,
+                )
+                if latest_judge_decision_bridge_summary not in {"", "-"}:
+                    lines.append(f"latest_judge_decision_bridge: {latest_judge_decision_bridge_summary}")
+                if latest_replan_auto_routing_policy_summary not in {"", "-"}:
+                    lines.append(f"replan_auto_routing_policy: {latest_replan_auto_routing_policy_summary}")
 
     lines.append("lifecycle:")
     for name in LIFECYCLE_STAGES:

@@ -11,7 +11,13 @@ import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
 import aoe_tg_worker_task_contract as worker_task_contract
-from aoe_tg_action_audit import append_action_audit_row, normalize_offdesk_judge_decision, prefer_recent_model_ping_probe_summary
+from aoe_tg_action_audit import (
+    append_action_audit_row,
+    load_latest_judge_decision_bridge_summary_for_runtime,
+    load_latest_replan_auto_routing_policy_summary_for_runtime,
+    normalize_offdesk_judge_decision,
+    prefer_recent_model_ping_probe_summary,
+)
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import (
     ensure_local_background_daemon,
@@ -1103,6 +1109,8 @@ def handle_orch_task_command(
         model_registry_line = ""
         judge_binding_line = ""
         judge_probe_line = ""
+        judge_bridge_line = ""
+        replan_auto_routing_policy_line = ""
         escalation_binding_line = ""
         escalation_probe_line = ""
         document_registry_line = ""
@@ -1134,6 +1142,23 @@ def handle_orch_task_command(
                     f"model_registry: {summarize_model_endpoint_registry(team_dir, entry=entry)}\n"
                 )
                 judge_binding_line, judge_probe_line = _judge_binding_lines(entry, team_dir)
+                alias = str(entry.get("project_alias", "")).strip() or str(key).strip()
+                latest_judge_decision_bridge_summary = load_latest_judge_decision_bridge_summary_for_runtime(
+                    team_dir,
+                    project_alias=alias,
+                )
+                latest_replan_auto_routing_policy_summary = load_latest_replan_auto_routing_policy_summary_for_runtime(
+                    team_dir,
+                    project_alias=alias,
+                )
+                if latest_judge_decision_bridge_summary not in {"", "-"}:
+                    judge_bridge_line = (
+                        f"latest_judge_decision_bridge: {latest_judge_decision_bridge_summary}\n"
+                    )
+                if latest_replan_auto_routing_policy_summary not in {"", "-"}:
+                    replan_auto_routing_policy_line = (
+                        f"replan_auto_routing_policy: {latest_replan_auto_routing_policy_summary}\n"
+                    )
                 escalation_binding_line, escalation_probe_line = _escalation_binding_lines(entry, team_dir)
                 workspace_line = (
                     f"workspace: {summarize_workspace_brief(team_dir, entry=entry, project_root=entry.get('project_root'))}\n"
@@ -1152,6 +1177,8 @@ def handle_orch_task_command(
             model_registry_line = ""
             judge_binding_line = ""
             judge_probe_line = ""
+            judge_bridge_line = ""
+            replan_auto_routing_policy_line = ""
             escalation_binding_line = ""
             escalation_probe_line = ""
             document_registry_line = ""
@@ -1214,7 +1241,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

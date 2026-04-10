@@ -4,6 +4,7 @@
 from datetime import datetime
 
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_action_audit as action_audit
 import aoe_tg_operator_action_contract as operator_action_contract
 
 
@@ -1473,6 +1474,81 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
 
     assert "context_pack: profile=followup_preview" in summary
     assert "context_pack_docs: docs/RUNBOOK.md, docs/REQUEST_CONTRACT_SPEC.md" in summary
+
+
+def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_policy(tmp_path: Path) -> None:
+    project_root = tmp_path / "Alpha"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Retry | blocked",
+        status="blocked",
+        outcome_kind="retry_run",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked retry",
+        next_step="/retry T-410",
+        remediation="judge decision reuse: action=retry next=/retry T-410",
+        source_command="/replan T-410 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:10:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "continue",
+                "confidence": "medium",
+                "recommended_action": "retry",
+                "candidate_next_step": "/retry T-410",
+                "applied": True,
+                "applied_next_step": "/retry T-410",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "ready",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-410",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+
+    summary = task_view.summarize_task_lifecycle(
+        "Demo",
+        {
+            "request_id": "REQ-BRIDGE",
+            "short_id": "T-410",
+            "prompt": "Review blocked replan bridge reuse.",
+            "status": "blocked",
+            "mode": "dispatch",
+            "roles": ["Codex-Reviewer"],
+            "context": {
+                "team_dir": str(team_dir),
+                "project_root": str(project_root),
+                "project_alias": "O2",
+                "project_key": "alpha",
+                "task_short_id": "T-410",
+            },
+        },
+    )
+
+    assert (
+        "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-410 | auto=yes"
+        in summary
+    )
+    assert (
+        "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-410 | mode=promoted_next_step | confirm=yes"
+        in summary
+    )
 
 
 def test_task_lifecycle_summary_includes_backend_contract_snapshot() -> None:
