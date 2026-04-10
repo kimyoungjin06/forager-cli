@@ -460,6 +460,18 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
                 "can_auto_apply": True,
                 "confidence": "medium",
             },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "ready",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
         },
     )
     config = dashboard_app.DashboardAppConfig(
@@ -498,6 +510,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes" in overview_text
     assert "replan_auto_decision" in overview_text
     assert "from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes" in overview_text
+    assert "replan_auto_routing_policy" in overview_text
+    assert "status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text

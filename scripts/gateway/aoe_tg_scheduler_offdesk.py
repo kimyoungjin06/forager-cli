@@ -509,6 +509,7 @@ def _handle_offdesk_command(
             latest_judge_decision_summary = str(row.get("latest_judge_decision_summary", "")).strip() or "-"
             latest_judge_decision_bridge_summary = str(row.get("latest_judge_decision_bridge_summary", "")).strip() or "-"
             latest_replan_auto_decision_summary = str(row.get("latest_replan_auto_decision_summary", "")).strip() or "-"
+            latest_replan_auto_routing_policy_summary = str(row.get("latest_replan_auto_routing_policy_summary", "")).strip() or "-"
             if latest_judge_headline:
                 lines.append(
                     "  latest_judge: {headline} | next={next_step} | {detail}".format(
@@ -523,6 +524,8 @@ def _handle_offdesk_command(
                 lines.append("  latest_judge_decision_bridge: " + latest_judge_decision_bridge_summary)
             if latest_replan_auto_decision_summary not in {"", "-"}:
                 lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
+            if latest_replan_auto_routing_policy_summary not in {"", "-"}:
+                lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:
                 lines.append(

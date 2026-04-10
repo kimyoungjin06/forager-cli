@@ -214,6 +214,51 @@ def summarize_replan_auto_decision(decision: Any) -> str:
     return " | ".join(parts)
 
 
+def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return {}
+    return {
+        "source": str(row.get("source", "")).strip() or "latest_offdesk_judge",
+        "status": str(row.get("status", "")).strip() or "-",
+        "current_action": str(row.get("current_action", "")).strip() or "-",
+        "suggested_action": str(row.get("suggested_action", "")).strip() or "-",
+        "suggested_next_step": str(row.get("suggested_next_step", "")).strip() or "-",
+        "decision_mode": str(row.get("decision_mode", "")).strip() or "-",
+        "supports_auto_decision": bool(row.get("supports_auto_decision", False)),
+        "can_auto_apply": bool(row.get("can_auto_apply", False)),
+        "requires_operator_confirmation": bool(row.get("requires_operator_confirmation", False)),
+        "reasoning": str(row.get("reasoning", "")).strip() or "-",
+        "caution": str(row.get("caution", "")).strip() or "-",
+        "confidence": str(row.get("confidence", "")).strip() or "-",
+    }
+
+
+def summarize_replan_auto_routing_policy(policy: Any) -> str:
+    row = policy if isinstance(policy, dict) else normalize_replan_auto_routing_policy(policy)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    parts = [
+        f"status={str(row.get('status', '')).strip() or '-'}",
+        f"from={str(row.get('current_action', '')).strip() or '-'}",
+        f"to={str(row.get('suggested_action', '')).strip() or '-'}",
+    ]
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    next_step = str(row.get("suggested_next_step", "")).strip() or "-"
+    decision_mode = str(row.get("decision_mode", "")).strip() or "-"
+    if confidence != "-":
+        parts.append(f"confidence={confidence}")
+    if next_step != "-":
+        parts.append(f"next={next_step}")
+    if decision_mode != "-":
+        parts.append(f"mode={decision_mode}")
+    if bool(row.get("requires_operator_confirmation", False)):
+        parts.append("confirm=yes")
+    elif bool(row.get("can_auto_apply", False)):
+        parts.append("auto=yes")
+    return " | ".join(parts)
+
+
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
     headline = str(latest_action.get("headline", "")).strip() or "-"
     reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
@@ -465,6 +510,39 @@ def load_latest_replan_auto_decision_summary_for_runtime(
 ) -> str:
     decision = load_latest_replan_auto_decision_for_runtime(team_dir, project_alias=project_alias)
     return summarize_replan_auto_decision(decision)
+
+
+def load_latest_replan_auto_routing_policy_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> Dict[str, Any]:
+    alias = str(project_alias or "").strip()
+    if not alias:
+        return {}
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}"
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() != runtime_path:
+            continue
+        policy = normalize_replan_auto_routing_policy(row.get("replan_auto_routing_policy"))
+        if not policy:
+            continue
+        policy["at"] = str(row.get("at", "")).strip() or "-"
+        policy["headline"] = str(row.get("headline", "")).strip() or "-"
+        return policy
+    return {}
+
+
+def load_latest_replan_auto_routing_policy_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    policy = load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_replan_auto_routing_policy(policy)
 
 
 def load_latest_model_ping_audit_for_runtime(
