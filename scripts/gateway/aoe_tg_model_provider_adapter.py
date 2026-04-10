@@ -12,6 +12,7 @@ import urllib.request
 from typing import Any, Dict
 
 import aoe_tg_model_endpoint_adapter as endpoint_adapter
+import aoe_tg_worker_task_contract as worker_task_contract
 
 
 def _trim(value: Any, limit: int = 240) -> str:
@@ -625,11 +626,23 @@ def invoke_background_ticket_worker(
 ) -> Dict[str, Any]:
     ticket_data = ticket if isinstance(ticket, dict) else {}
     launch_spec = ticket_data.get("launch_spec") if isinstance(ticket_data.get("launch_spec"), dict) else {}
+    prompt_text = _trim(launch_spec.get("provider_prompt"), 8000)
+    system_text = _trim(launch_spec.get("provider_system"), 4000)
+    contract_summary = _trim(launch_spec.get("provider_task_contract_summary"), 320)
+    if not prompt_text:
+        rendered = worker_task_contract.render_worker_task_prompt(
+            launch_spec.get("provider_task_contract_json")
+        )
+        prompt_text = _trim(rendered.get("prompt"), 8000)
+        if not system_text:
+            system_text = _trim(rendered.get("system"), 4000)
+        if not contract_summary:
+            contract_summary = _trim(rendered.get("summary"), 320)
     binding = endpoint_adapter.resolve_background_ticket_worker_binding(team_dir, ticket_data)
     result = invoke_model_binding(
         binding,
-        prompt=launch_spec.get("provider_prompt", ""),
-        system=launch_spec.get("provider_system", ""),
+        prompt=prompt_text,
+        system=system_text,
         timeout_sec=_coerce_timeout_sec(
             timeout_sec if timeout_sec is not None else launch_spec.get("provider_timeout_sec"),
             default=30.0,
@@ -638,6 +651,8 @@ def invoke_background_ticket_worker(
     )
     result["kind"] = "background_worker"
     result["launch_kind"] = _trim(launch_spec.get("kind"), 64)
+    if contract_summary:
+        result["task_contract_summary"] = contract_summary
     return result
 
 

@@ -14,7 +14,9 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_model_endpoint_adapter as endpoint_adapter  # noqa: E402
 import aoe_tg_model_provider_adapter as provider_adapter  # noqa: E402
+import aoe_tg_worker_task_contract as worker_task_contract  # noqa: E402
 from aoe_tg_request_contract import build_local_background_provider_invoke_launch_spec  # noqa: E402
+from aoe_tg_request_contract import build_local_background_provider_task_launch_spec  # noqa: E402
 
 
 def test_invoke_model_binding_returns_unbound_without_execution(tmp_path: Path) -> None:
@@ -601,3 +603,83 @@ def test_invoke_background_ticket_worker_uses_launch_spec_prompt_and_route(tmp_p
     assert result["executed"] is True
     assert result["route_id"] == "background_worker_primary"
     assert result["response_text"] == "ticket: ok"
+
+
+def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missing(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {"background_worker_primary": {"endpoint_id": "ollama-qwen3"}},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "request_id": "REQ-1",
+            "task_id": "T-001",
+            "task_label": "T-001",
+            "project_alias": "O2",
+            "project_label": "Alpha",
+            "pack_profile": "offdesk_execute",
+            "objective": "Ship a bounded worker summary.",
+            "execution_brief_status": "executable",
+            "execution_brief_summary": "do=summary",
+            "constraints": ["run_lock=test_only"],
+            "doc_paths": ["docs/RUNBOOK.md"],
+        }
+    )
+    launch_spec = build_local_background_provider_task_launch_spec(
+        request_id="REQ-1",
+        project_key="alpha",
+        project_root=str(tmp_path),
+        team_dir=str(team_dir),
+        task_contract_json=json.dumps(contract, ensure_ascii=False),
+        task_contract_summary=str(contract.get("summary", "")).strip(),
+        task_contract_profile="offdesk_execute",
+        timeout_sec=19,
+    )
+
+    def _fake_post(url: str, payload: dict, *, timeout_sec: float = 30.0):
+        assert url == "http://172.16.0.37:11434/api/generate"
+        assert payload["model"] == "qwen3-coder:30b"
+        assert "Ship a bounded worker summary." in payload["prompt"]
+        assert "\"doc_paths\": [" in payload["prompt"]
+        assert payload["system"] == worker_task_contract.WORKER_TASK_SYSTEM
+        assert timeout_sec == 19.0
+        return {"response": "task: ok", "done": True}
+
+    result = provider_adapter.invoke_background_ticket_worker(
+        team_dir,
+        ticket={"ticket_id": "BGT-1", "launch_spec": launch_spec},
+        post_json=_fake_post,
+    )
+
+    assert result["ok"] is True
+    assert result["executed"] is True
+    assert result["task_contract_summary"] == contract["summary"]

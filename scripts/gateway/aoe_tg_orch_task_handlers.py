@@ -10,6 +10,7 @@ import aoe_tg_background_runs as background_runs
 import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
+import aoe_tg_worker_task_contract as worker_task_contract
 from aoe_tg_action_audit import append_action_audit_row, normalize_offdesk_judge_decision, prefer_recent_model_ping_probe_summary
 from aoe_tg_executor_runtime import poll_background_tickets_via_adapters
 from aoe_tg_local_background_worker import (
@@ -26,6 +27,7 @@ from aoe_tg_request_contract import (
     build_background_launch_spec,
     build_background_run_ticket,
     build_local_background_provider_invoke_launch_spec,
+    build_local_background_provider_task_launch_spec,
     select_background_runner_target,
 )
 from aoe_tg_priority_actions import external_background_priority_action_snapshot
@@ -264,7 +266,11 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
                 if worker_status in {"running", "idle"}
                 else [{"text": f"/orch bgw-start {alias}"}]
             ),
-            ([{"text": f"/orch bgw-ping {alias}"}] if run_lock_mode == "test_only" else []),
+            (
+                [{"text": f"/orch bgw-ping {alias}"}, {"text": f"/orch bgw-task {alias}"}]
+                if run_lock_mode == "test_only"
+                else []
+            ),
             (
                 [
                     {"text": f"/orch model-ping {alias} research"},
@@ -1460,7 +1466,7 @@ def handle_orch_task_command(
         )
         return True
 
-    if cmd in {"orch-bgw-status", "orch-bgw-start", "orch-bgw-stop", "orch-bgw-ping"}:
+    if cmd in {"orch-bgw-status", "orch-bgw-start", "orch-bgw-stop", "orch-bgw-ping", "orch-bgw-task"}:
         try:
             key, entry, _p_args = get_context(orch_target)
         except Exception as exc:
@@ -1584,6 +1590,154 @@ def handle_orch_task_command(
                 "next:\n"
                 f"- /orch status {alias}",
                 context="orch-bgw-ping",
+                with_menu=True,
+                reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+            )
+            return True
+        if cmd == "orch-bgw-task":
+            run_lock_mode = project_run_lock_mode(entry)
+            if run_lock_mode != "test_only":
+                send(
+                    "background worker task invoke blocked\n"
+                    f"- runtime: {key}\n"
+                    f"- run_lock: {run_lock_mode or 'open'}\n"
+                    "- reason: task-scoped provider harness is limited to test_only runtimes\n"
+                    "next:\n"
+                    f"- /orch status {alias}",
+                    context="orch-bgw-task blocked",
+                    with_menu=True,
+                    reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+                )
+                return True
+            latest_task = _latest_task_for_model_status(entry)
+            if not latest_task:
+                send(
+                    "background worker task invoke blocked\n"
+                    f"- runtime: {key}\n"
+                    "- reason: no latest task found\n"
+                    "next:\n"
+                    f"- /orch status {alias}",
+                    context="orch-bgw-task blocked",
+                    with_menu=True,
+                    reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+                )
+                return True
+            task_label = str(task_display_label(latest_task)).strip() or (
+                str(latest_task.get("short_id", "")).strip()
+                or str(latest_task.get("request_id", "")).strip()
+                or "-"
+            )
+            active_bg_status = str(latest_task.get("background_run_status", "")).strip().lower()
+            if active_bg_status in {"queued", "dispatching", "running"}:
+                send(
+                    "background worker task invoke blocked\n"
+                    f"- runtime: {key}\n"
+                    f"- task: {task_label}\n"
+                    f"- background_run: {active_bg_status}\n"
+                    "- reason: active background run already exists for the latest task\n"
+                    "next:\n"
+                    f"- /orch status {alias}",
+                    context="orch-bgw-task blocked",
+                    with_menu=True,
+                    reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+                )
+                return True
+            request_id = str(latest_task.get("request_id", "")).strip()
+            if not request_id:
+                send(
+                    "background worker task invoke blocked\n"
+                    f"- runtime: {key}\n"
+                    "- reason: latest task is missing request_id\n"
+                    "next:\n"
+                    f"- /orch status {alias}",
+                    context="orch-bgw-task blocked",
+                    with_menu=True,
+                    reply_markup=_orch_status_reply_markup(manager_state, key, entry),
+                )
+                return True
+            contract = worker_task_contract.build_worker_task_contract(
+                team_dir,
+                entry=entry,
+                task=latest_task,
+                project_root=entry.get("project_root"),
+                pack_profile_override="offdesk_execute",
+            )
+            launch_spec = build_local_background_provider_task_launch_spec(
+                request_id=request_id,
+                project_key=str(key or "").strip(),
+                project_root=str(entry.get("project_root", "") or "").strip(),
+                team_dir=str(team_dir),
+                manager_state_file=str(args.manager_state_file),
+                launch_mode="orch_bgw_task",
+                source_surface="orch_bgw_task",
+                created_by=f"telegram:{chat_id}",
+                task_contract_json=json.dumps(contract, ensure_ascii=False),
+                task_contract_summary=str(contract.get("summary", "")).strip(),
+                task_contract_profile=str(contract.get("pack_profile", "")).strip(),
+                timeout_sec=45,
+            )
+            ticket = build_background_run_ticket(
+                request_id=request_id,
+                project_key=str(key or "").strip(),
+                execution_brief_status=str(latest_task.get("execution_brief_status", "")).strip() or "executable",
+                runner_target="local_background",
+                launch_mode="orch_bgw_task",
+                created_at=now_iso(),
+                created_by=f"telegram:{chat_id}",
+                source_surface="orch_bgw_task",
+                status="queued",
+                launch_spec=launch_spec,
+            )
+            background_runs.upsert_background_run_ticket(queue_path, ticket, now_iso=now_iso)
+            try:
+                run_local_background_ticket(
+                    queue_path=queue_path,
+                    ticket_id=str(ticket.get("ticket_id", "")).strip(),
+                    now_iso=now_iso,
+                    run_target=lambda: None,
+                    on_ticket_update=lambda _ticket: None,
+                    on_queue_error=lambda _event_name, _exc: None,
+                    runner_target="local_background",
+                    launch_mode="orch_bgw_task",
+                    claimed_by=f"telegram:{chat_id}",
+                    source_surface="orch_bgw_task",
+                )
+            except Exception:
+                pass
+            if not args.dry_run and _sync_background_run_snapshots_from_queue(entry, queue_path):
+                entry["updated_at"] = now_iso()
+                save_manager_state(args.manager_state_file, manager_state)
+            final_ticket = background_runs.get_background_run_ticket(queue_path, str(ticket.get("ticket_id", "")).strip())
+            final_status = str(final_ticket.get("status", "")).strip() or "unknown"
+            final_runtime = str(final_ticket.get("runtime_summary", "-")).strip() or "-"
+            final_evidence = str(final_ticket.get("evidence_bundle", "-")).strip() or "-"
+            append_action_audit_row(
+                team_dir,
+                headline="Background Worker Task Invoke | executed",
+                status="executed" if final_status == "completed" else "blocked",
+                outcome_kind="background_worker",
+                outcome_status="executed" if final_status == "completed" else "blocked",
+                outcome_reason_code=(final_status or "unknown").lower(),
+                outcome_detail=final_runtime,
+                next_step=f"/orch status {alias}",
+                remediation="inspect task detail, context pack, and background evidence before re-running the bounded worker task invoke",
+                source_command=f"/orch bgw-task {alias}",
+                link_label="runtime detail",
+                link_href=_runtime_action_link(alias),
+                at=now_iso(),
+            )
+            response_hint = final_evidence.split("response=", 1)[1] if "response=" in final_evidence else "-"
+            send(
+                "background worker task invoke\n"
+                f"- runtime: {key}\n"
+                f"- task: {task_label}\n"
+                f"- contract: {str(contract.get('summary', '')).strip() or '-'}\n"
+                f"- status: {final_status}\n"
+                f"- runtime_summary: {final_runtime}\n"
+                f"- response: {response_hint or '-'}\n"
+                "next:\n"
+                f"- /orch status {alias}",
+                context="orch-bgw-task",
                 with_menu=True,
                 reply_markup=_orch_status_reply_markup(manager_state, key, entry),
             )

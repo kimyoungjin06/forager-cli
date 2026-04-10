@@ -351,6 +351,140 @@ def test_orch_model_ping_executes_research_stub(tmp_path: Path, monkeypatch: pyt
     assert audit_rows[-1]["outcome_reason_code"] == "ok"
 
 
+def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "alias": "analysis-check",
+                "prompt": "check the analysis summary",
+                "status": "blocked",
+                "tf_phase": "needs_retry",
+                "execution_brief_status": "executable",
+                "execution_brief_summary": "do=summary",
+                "followup_brief_status": "preview_only",
+                "followup_brief_summary": "followup preview only",
+                "reentry_rails_summary": "retry=ready exec=L1 review=R1 | followup=preview_only",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    def _send(body: str, **kwargs):
+        sent.append((body, kwargs.get("context"), kwargs.get("reply_markup")))
+        return True
+
+    monkeypatch.setattr(
+        orch_task_handlers.model_provider_adapter,
+        "invoke_background_ticket_worker",
+        lambda team_dir, *, ticket: {
+            "ok": True,
+            "executed": True,
+            "route_id": "background_worker_primary",
+            "endpoint_id": "ollama-qwen3",
+            "model": "qwen3-coder:30b",
+            "response_text": "TASK_WORKER_OK",
+            "task_contract_summary": "task=T-001 | pack=offdesk_execute | brief=executable | docs=1",
+        },
+    )
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda team_dir, ticket: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 status=ok",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-10T10:00:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-task", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgw-task"
+    assert "background worker task invoke" in text
+    assert "- task: T-001" in text
+    assert "task=T-001 | pack=offdesk_execute | brief=executable | docs=1" in text
+    assert "TASK_WORKER_OK" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-task O2" in buttons
+    queue_file = team_dir / "background_runs.json"
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    assert len(rows) == 1
+    assert rows[0]["status"] == "completed"
+    assert rows[0]["launch_spec"]["provider_task_contract_profile"] == "offdesk_execute"
+    assert rows[0]["launch_spec"]["provider_task_contract_summary"].startswith("task=T-001")
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert audit_rows[-1]["source_command"] == "/orch bgw-task O2"
+    assert audit_rows[-1]["outcome_reason_code"] == "completed"
+
+
 def test_orch_judge_executes_bound_review_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = _empty_state()
     project_root = tmp_path / "TwinPaper"

@@ -276,6 +276,9 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         ("model_escalation_probe_summary", 240),
         ("provider_prompt", 8000),
         ("provider_system", 4000),
+        ("provider_task_contract_json", 12000),
+        ("provider_task_contract_summary", 320),
+        ("provider_task_contract_profile", 64),
         ("provider_timeout_sec", 16),
     ):
         token = _trim(raw.get(key, ""), limit)
@@ -681,6 +684,54 @@ def build_local_background_provider_invoke_launch_spec(
         payload["provider_prompt"] = prompt_text
     if system_text:
         payload["provider_system"] = system_text
+    if timeout_sec is not None:
+        payload["provider_timeout_sec"] = _trim(timeout_sec, 16)
+    return normalize_background_launch_spec_snapshot(payload)
+
+
+def build_local_background_provider_task_launch_spec(
+    *,
+    request_id: str,
+    project_key: str,
+    project_root: str = "",
+    team_dir: str = "",
+    manager_state_file: str = "",
+    launch_mode: str = "offdesk_manual",
+    source_surface: str = "",
+    created_by: str = "",
+    task_contract_json: str,
+    task_contract_summary: str = "",
+    task_contract_profile: str = "",
+    timeout_sec: int | float | None = None,
+) -> Dict[str, Any]:
+    spec = build_background_launch_spec(
+        request_id=request_id,
+        project_key=project_key,
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        runner_target="local_background",
+        launch_mode=launch_mode,
+        source_surface=source_surface,
+        created_by=created_by,
+        kind="provider_invoke",
+        mode="model_route_json",
+        entrypoint="aoe-model-provider",
+        argv=["invoke", "--kind", "worker"],
+        env_keys=["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        externalizable=False,
+        blocked_reason="host-local provider invoke",
+    )
+    payload = dict(spec)
+    contract_json = _trim(task_contract_json, 12000)
+    if contract_json:
+        payload["provider_task_contract_json"] = contract_json
+    contract_summary = _trim(task_contract_summary, 320)
+    if contract_summary:
+        payload["provider_task_contract_summary"] = contract_summary
+    contract_profile = _trim(task_contract_profile, 64)
+    if contract_profile:
+        payload["provider_task_contract_profile"] = contract_profile
     if timeout_sec is not None:
         payload["provider_timeout_sec"] = _trim(timeout_sec, 16)
     return normalize_background_launch_spec_snapshot(payload)

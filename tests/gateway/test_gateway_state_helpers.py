@@ -3913,6 +3913,7 @@ def test_parse_focus_and_unlock_commands() -> None:
     assert tg_parse.parse_cli_message("aoe orch bgq-clean O2") == {"cmd": "orch-bgq-clean", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch bgw-status O2") == {"cmd": "orch-bgw-status", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch bgw-ping O2") == {"cmd": "orch-bgw-ping", "orch": "O2"}
+    assert tg_parse.parse_cli_message("aoe orch bgw-task O2") == {"cmd": "orch-bgw-task", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch model-ping O2 research") == {"cmd": "orch-model-ping", "orch": "O2", "rest": "research"}
     assert tg_parse.parse_cli_message("aoe orch judge O2") == {"cmd": "orch-judge", "orch": "O2"}
     assert tg_parse.parse_cli_message("aoe orch bgw-start O2") == {"cmd": "orch-bgw-start", "orch": "O2"}

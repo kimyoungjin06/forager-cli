@@ -143,9 +143,12 @@ def dispatch_claimed_background_ticket_via_adapter(
             endpoint_id = str(provider_invoke_result.get("endpoint_id", "")).strip() or "-"
             model_name = str(provider_invoke_result.get("model", "")).strip() or "-"
             response_text = str(provider_invoke_result.get("response_text", "")).strip()
+            contract_summary = str(provider_invoke_result.get("task_contract_summary", "")).strip()
             completed_runtime_summary = (
                 f"provider_invoke_completed | route={route_id} | endpoint={endpoint_id} | model={model_name}"
             )[:240]
+            if contract_summary:
+                completed_runtime_summary = f"{completed_runtime_summary} | {contract_summary}"[:240]
             bundle_parts = [
                 "status=completed",
                 "outcome=provider_invoke_ok",
@@ -153,6 +156,8 @@ def dispatch_claimed_background_ticket_via_adapter(
                 f"endpoint={endpoint_id}",
                 f"model={model_name}",
             ]
+            if contract_summary:
+                bundle_parts.append(contract_summary[:80])
             if response_text:
                 bundle_parts.append(f"response={response_text[:80]}")
             completed_bundle = " | ".join(bundle_parts)[:240]
