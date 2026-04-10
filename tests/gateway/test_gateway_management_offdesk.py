@@ -2159,8 +2159,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-501 | brief executable" in text
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-501 | auto=yes" in text
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | auto=yes" in text
-    assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | confirm=yes" in text
-    assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-501 | retry_command=/retry T-501" in text
+    assert "auto_route_status: ready+applied=/retry T-501 | at=2026-04-09T18:06:00+09:00" in text
     assert "replan_auto_route_ready: /retry T-501 | dashboard=Apply Judge Auto-Route@/control/runtimes/O5 | api=auto_route_apply=true" in text
     assert "first: /retry T-501 |" in text
 

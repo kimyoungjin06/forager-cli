@@ -1565,7 +1565,7 @@ def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_po
         in summary
     )
     assert (
-        "auto_route_status: state=applied | next=/retry T-410 | at=2026-04-10T09:12:00+09:00 | retry_command=/retry T-410"
+        "auto_route_status: ready+applied=/retry T-410 | at=2026-04-10T09:12:00+09:00"
         in summary
     )
 

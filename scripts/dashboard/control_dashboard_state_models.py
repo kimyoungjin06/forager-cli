@@ -501,6 +501,7 @@ class ActionAuditPageDTO:
     total_rows: int
     status_summary: str
     focus_summary: str
+    focus_filter: str
     rows: List[ActionAuditRowDTO] = field(default_factory=list)
 
 

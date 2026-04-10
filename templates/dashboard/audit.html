@@ -8,9 +8,20 @@
     <li><span>total_rows</span><strong>{{ audit.total_rows }}</strong></li>
     <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
     <li><span>focus_summary</span><strong>{{ audit.focus_summary }}</strong></li>
+    <li><span>focus_filter</span><strong>{{ audit.focus_filter }}</strong></li>
     {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if audit.error %}<li><span>audit_error</span><strong>{{ audit.error }}</strong></li>{% endif %}
   </ul>
+  <p class="muted">
+    filter:
+    {% for value in ['all', 'auto-route', 'judge', 'retry'] %}
+      {% if audit.focus_filter == value %}
+      <strong>{{ value }}</strong>
+      {% else %}
+      <a href="/control/audit{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}</a>
+      {% endif %}
+    {% endfor %}
+  </p>
 </section>
 
 <section class="panel">

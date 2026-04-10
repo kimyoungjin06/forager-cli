@@ -132,10 +132,12 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
         return _html(render_template("dashboard/recovery.html", page_title="Recovery", snapshot=snapshot, recovery=recovery, current_path=path))
 
     if path == "/control/audit":
+        query = parse_qs(parsed.query or "", keep_blank_values=False)
         snapshot, audit = load_dashboard_action_audit_page(
             control_root=config.control_root,
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
+            focus=str((query.get("focus") or ["all"])[0]),
         )
         return _html(render_template("dashboard/audit.html", page_title="Action Audit", snapshot=snapshot, audit=audit, current_path=path))
 

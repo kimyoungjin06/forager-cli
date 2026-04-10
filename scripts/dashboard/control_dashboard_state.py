@@ -362,6 +362,7 @@ def load_dashboard_action_audit_page(
     control_root: Path | str,
     team_dir: Path | str | None = None,
     manager_state_file: Path | str | None = None,
+    focus: str = "",
     limit: int = 50,
 ) -> Tuple[DashboardSnapshotDTO, ActionAuditPageDTO]:
     loaded = load_dashboard_snapshot_result(
@@ -371,6 +372,12 @@ def load_dashboard_action_audit_page(
     )
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     rows, freshness = _load_recent_action_audit(paths.action_audit_file, limit=max(1, int(limit)))
+    focus_filter = str(focus or "").strip().lower() or "all"
+    if focus_filter not in {"all", "auto-route", "judge", "retry"}:
+        focus_filter = "all"
+    filtered_rows = rows
+    if focus_filter != "all":
+        filtered_rows = [row for row in rows if str(getattr(row, "focus_badge", "")).strip() == focus_filter]
     focus_counts: Dict[str, int] = {}
     for row in rows:
         badge = str(getattr(row, "focus_badge", "")).strip()
@@ -386,10 +393,11 @@ def load_dashboard_action_audit_page(
         updated_at=freshness.updated_at,
         stale=bool(freshness.stale),
         error=freshness.error,
-        total_rows=len(rows),
-        status_summary=_action_audit_status_summary(rows),
+        total_rows=len(filtered_rows),
+        status_summary=_action_audit_status_summary(filtered_rows),
         focus_summary=focus_summary,
-        rows=rows,
+        focus_filter=focus_filter,
+        rows=filtered_rows,
     )
 
 

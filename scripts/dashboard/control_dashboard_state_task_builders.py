@@ -295,8 +295,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
                     detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
                 )
-                latest_replan_auto_route_status_summary = action_audit.summarize_latest_replan_auto_route(
-                    latest_replan_auto_route
+                latest_replan_auto_route_status_summary = action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+                    root_team_dir,
+                    project_alias=alias,
                 )
         action_contract = _task_command_contract(
             project_alias=alias,

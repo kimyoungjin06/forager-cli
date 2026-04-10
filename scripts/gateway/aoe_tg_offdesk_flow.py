@@ -18,6 +18,7 @@ from aoe_tg_action_audit import (
     load_latest_judge_decision_bridge_summary_for_runtime,
     load_latest_replan_auto_routing_policy_for_runtime,
     load_latest_replan_auto_decision_summary_for_runtime,
+    load_latest_replan_auto_route_status_summary_for_runtime,
     load_latest_replan_auto_routing_policy_summary_for_runtime,
 )
 from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
@@ -789,6 +790,11 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
             detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
         )
+    latest_replan_auto_route_status_summary = (
+        load_latest_replan_auto_route_status_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
     latest_replan_auto_routing_policy = (
         load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=alias)
         if team_dir is not None
@@ -1277,10 +1283,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append("  latest_judge_decision_bridge: " + latest_judge_decision_bridge_summary)
     if latest_replan_auto_decision_summary != "-":
         lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
-    if latest_replan_auto_routing_policy_summary != "-":
-        lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
-    if latest_replan_auto_route_summary != "-":
-        lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+    if latest_replan_auto_route_status_summary != "-":
+        lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
+    else:
+        if latest_replan_auto_routing_policy_summary != "-":
+            lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
+        if latest_replan_auto_route_summary != "-":
+            lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
     if replan_auto_route_ready_action:
         lines.append(
             "  replan_auto_route_ready: {action} | {note}".format(
@@ -1359,6 +1368,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "latest_replan_auto_decision_summary": latest_replan_auto_decision_summary,
         "latest_replan_auto_routing_policy_summary": latest_replan_auto_routing_policy_summary,
         "latest_replan_auto_route_summary": latest_replan_auto_route_summary,
+        "latest_replan_auto_route_status_summary": latest_replan_auto_route_status_summary,
         "replan_auto_route_ready_action": replan_auto_route_ready_action,
         "replan_auto_route_ready_note": replan_auto_route_ready_note,
         "notes": list(notes),

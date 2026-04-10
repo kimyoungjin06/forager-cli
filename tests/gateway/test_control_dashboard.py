@@ -531,7 +531,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "latest_replan_auto_route" in overview_text
     assert "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in overview_text
     assert "auto_route_status" in overview_text
-    assert "state=applied | next=/retry T-001 | at=2026-04-09T11:06:00+09:00 | retry_command=/retry T-001" in overview_text
+    assert "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in overview_text
     assert "latest_intent_command" in overview_text
     assert "offdesk_prepare" in overview_text
     assert "selected=offdesk_prepare" in overview_text
@@ -631,6 +631,43 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
     assert "/sync preview O2 24h" in text
     assert "/control/runtimes/O2" in text
     assert "auto-route" in text
+
+
+def test_control_dashboard_audit_route_filters_by_focus_badge(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-001",
+        next_step="/retry T-001",
+        remediation="-",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:06:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/audit?focus=auto-route", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "focus_filter" in text
+    assert "auto-route" in text
+    assert "Replan Auto Route | applied" in text
+    assert "<span>total_rows</span><strong>1</strong>" in text
 
 
 def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -> None:
@@ -1238,7 +1275,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "latest_replan_auto_route" in text
     assert "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in text
     assert "auto_route_status" in text
-    assert "state=applied | next=/retry T-001 | at=2026-04-09T11:06:00+09:00 | retry_command=/retry T-001" in text
+    assert "applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in text
     assert "state_root_mode" in text
     assert str(team_dir.resolve()) in text
     assert "latest_intent_command" in text
@@ -2445,14 +2482,14 @@ def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_pa
         "Replan Auto Route | applied | next=/retry T-001 lane L1 | retry_command=/retry T-001 lane L1"
     )
     assert runtime_detail.latest_replan_auto_route_status_summary == (
-        "state=applied | next=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00 | retry_command=/retry T-001 lane L1"
+        "applied=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00"
     )
     assert task_detail is not None
     assert task_detail.latest_replan_auto_route_summary == (
         "Replan Auto Route | applied | next=/retry T-001 lane L1 | retry_command=/retry T-001 lane L1"
     )
     assert task_detail.latest_replan_auto_route_status_summary == (
-        "state=applied | next=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00 | retry_command=/retry T-001 lane L1"
+        "applied=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00"
     )
 
 

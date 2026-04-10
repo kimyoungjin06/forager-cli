@@ -527,11 +527,15 @@ def _handle_offdesk_command(
                 lines.append("  latest_judge_decision_bridge: " + latest_judge_decision_bridge_summary)
             if latest_replan_auto_decision_summary not in {"", "-"}:
                 lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
-            if latest_replan_auto_routing_policy_summary not in {"", "-"}:
-                lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
             latest_replan_auto_route_summary = str(row.get("latest_replan_auto_route_summary", "")).strip() or "-"
-            if latest_replan_auto_route_summary not in {"", "-"}:
-                lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+            latest_replan_auto_route_status_summary = str(row.get("latest_replan_auto_route_status_summary", "")).strip() or "-"
+            if latest_replan_auto_route_status_summary not in {"", "-"}:
+                lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
+            else:
+                if latest_replan_auto_routing_policy_summary not in {"", "-"}:
+                    lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
+                if latest_replan_auto_route_summary not in {"", "-"}:
+                    lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
             auto_route_note = str(row.get("replan_auto_route_ready_note", "")).strip() or "-"
             if auto_route_action:
                 lines.append(f"  replan_auto_route_ready: {auto_route_action} | {auto_route_note}")

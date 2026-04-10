@@ -580,13 +580,36 @@ def summarize_latest_replan_auto_route(row: Any) -> str:
     return f"state={state} | next={next_step} | at={at} | {detail}"
 
 
+def summarize_replan_auto_operator_status(
+    *,
+    policy: Any,
+    route_row: Any,
+) -> str:
+    normalized_policy = normalize_replan_auto_routing_policy(policy)
+    normalized_route = route_row if isinstance(route_row, dict) else {}
+    ready_status = str(normalized_policy.get("status", "")).strip().lower()
+    ready_next = str(normalized_policy.get("suggested_next_step", "")).strip() or "-"
+    applied_next = str(normalized_route.get("next_step", "")).strip() or "-"
+    applied_at = str(normalized_route.get("at", "")).strip() or "-"
+    if ready_status == "ready" and ready_next not in {"", "-"} and applied_next not in {"", "-"}:
+        if ready_next == applied_next:
+            return f"ready+applied={applied_next} | at={applied_at}"
+        return f"ready={ready_next} | applied={applied_next} | at={applied_at}"
+    if ready_status == "ready" and ready_next not in {"", "-"}:
+        return f"ready={ready_next} | waiting_for_apply"
+    if applied_next not in {"", "-"}:
+        return f"applied={applied_next} | at={applied_at}"
+    return "-"
+
+
 def load_latest_replan_auto_route_status_summary_for_runtime(
     team_dir: Any,
     *,
     project_alias: Any,
 ) -> str:
     row = load_latest_replan_auto_route_for_runtime(team_dir, project_alias=project_alias)
-    return summarize_latest_replan_auto_route(row)
+    policy = load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_replan_auto_operator_status(policy=policy, route_row=row)
 
 
 def load_latest_model_ping_audit_for_runtime(

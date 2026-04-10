@@ -1643,7 +1643,7 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
         in text
     )
     assert (
-        "auto_route_status: state=applied | next=/retry T-001 | at=2026-04-10T09:18:00+09:00 | retry_command=/retry T-001"
+        "auto_route_status: ready+applied=/retry T-001 | at=2026-04-10T09:18:00+09:00"
         in text
     )
 
