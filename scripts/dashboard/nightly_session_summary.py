@@ -158,6 +158,21 @@ def _latest_replan_auto_routing_policy_summary(team_dir: str, project_alias: str
     )
 
 
+def _latest_replan_auto_route_summary(team_dir: str, project_alias: str) -> str:
+    row = action_audit.load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=project_alias,
+        outcome_kind="replan_auto_route",
+    )
+    if not row:
+        return "-"
+    return "{headline} | next={next_step} | {detail}".format(
+        headline=str(row.get("headline", "")).strip() or "Replan Auto Route",
+        next_step=str(row.get("next_step", "")).strip() or "-",
+        detail=str(row.get("outcome_detail", "")).strip() or "-",
+    )
+
+
 def build_nightly_session_summary(
     *,
     control_root: Path | str,
@@ -223,6 +238,7 @@ def build_nightly_session_summary(
                 "latest_judge_decision_bridge_summary": _latest_judge_decision_bridge_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_decision_summary": _latest_replan_auto_decision_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_routing_policy_summary": _latest_replan_auto_routing_policy_summary(snapshot.team_dir, detail.project_alias),
+                "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "run_lock_mode": detail.run_lock_mode,
                 "run_lock_note": detail.run_lock_note,
                 "background_slot_limit": detail.background_slot_limit,
@@ -350,6 +366,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
+                f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- run_lock: {runtime.get('run_lock_mode', '-')}",
                 f"- run_lock_note: {runtime.get('run_lock_note', '-')}",
                 f"- background_slots: active={runtime.get('background_slot_active', 0)} limit={runtime.get('background_slot_limit', 1)}",

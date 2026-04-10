@@ -450,12 +450,12 @@ def _handle_offdesk_command(
             alias = str(row.get("alias", "")).strip() or "-"
             display = str(row.get("display", "")).strip() or alias
             actions: List[str] = []
-            first_action = str(row.get("priority_action", "")).strip()
-            if first_action:
-                actions.append(first_action)
             auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
             if auto_route_action:
                 actions.append(auto_route_action)
+            first_action = str(row.get("priority_action", "")).strip()
+            if first_action:
+                actions.append(first_action)
             active_rate_limit = row.get("active_task_rate_limit") if isinstance(row.get("active_task_rate_limit"), dict) else {}
             if active_rate_limit:
                 actions.append("/auto status")
@@ -486,8 +486,8 @@ def _handle_offdesk_command(
             lines.append(f"- {alias} {display} [{row.get('status', '-')}]")
             lines.append(f"  attention: {str(row.get('attention_summary', '-')).strip() or '-'}")
             first_reason = str(row.get("priority_reason", "")).strip() or "-"
-            first_action = first_action or "-"
-            lines.append(f"  first: {first_action} | {first_reason}")
+            first_display_action = auto_route_action or first_action or "-"
+            lines.append(f"  first: {first_display_action} | {first_reason}")
             active_degraded_by = [str(x).strip() for x in (row.get("active_task_degraded_by") or []) if str(x).strip()]
             if active_rate_limit:
                 providers = [

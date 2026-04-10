@@ -2162,6 +2162,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | confirm=yes" in text
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-501 | retry_command=/retry T-501" in text
     assert "replan_auto_route_ready: /retry T-501 | dashboard=/control/runtimes/O5" in text
+    assert "first: /retry T-501 |" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
@@ -2255,6 +2256,7 @@ def test_offdesk_review_reply_markup_includes_auto_route_ready_action() -> None:
     assert "/orch judge O5" in buttons
     assert "/retry T-501" in buttons
     assert "/task T-501" in buttons
+    assert buttons.index("/retry T-501") < buttons.index("/orch judge O5")
 
 
 def test_offdesk_review_prefers_task_link_for_active_planning_task(tmp_path: Path) -> None:

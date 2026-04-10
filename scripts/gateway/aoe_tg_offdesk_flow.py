@@ -1430,12 +1430,12 @@ def offdesk_review_reply_markup(
         primary: List[Dict[str, str]] = []
         secondary: List[Dict[str, str]] = []
         tertiary: List[Dict[str, str]] = []
-        priority_action = str(row.get("priority_action", "")).strip()
-        if priority_action:
-            primary.append({"text": priority_action})
         auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
         if auto_route_action:
             primary.append({"text": auto_route_action})
+        priority_action = str(row.get("priority_action", "")).strip()
+        if priority_action:
+            primary.append({"text": priority_action})
         active_rate_limit = row.get("active_task_rate_limit") if isinstance(row.get("active_task_rate_limit"), dict) else {}
         if active_rate_limit:
             primary.append({"text": "/auto status"})
