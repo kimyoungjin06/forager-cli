@@ -229,6 +229,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         judge_probe_summary = "-"
         latest_replan_auto_routing_policy: Dict[str, Any] = {}
         latest_replan_auto_route_summary = "-"
+        latest_replan_auto_route_status_summary = "-"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             team_dir = Path(team_dir_raw)
@@ -293,6 +294,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     headline=str(latest_replan_auto_route.get("headline", "")).strip() or "Replan Auto Route",
                     next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
                     detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
+                )
+                latest_replan_auto_route_status_summary = action_audit.summarize_latest_replan_auto_route(
+                    latest_replan_auto_route
                 )
         action_contract = _task_command_contract(
             project_alias=alias,
@@ -413,6 +417,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 str(task.get("background_run_model_escalation_probe_summary", "")).strip() or "-"
             ),
             latest_replan_auto_route_summary=latest_replan_auto_route_summary,
+            latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,

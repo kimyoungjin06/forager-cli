@@ -614,6 +614,14 @@ def _build_runtime_detail(
         if str(root_team_dir or "").strip()
         else "-"
     )
+    latest_replan_auto_route_status_summary = (
+        action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
     latest_replan_auto_routing_policy = (
         action_audit.load_latest_replan_auto_routing_policy_for_runtime(
             Path(str(root_team_dir or "")).expanduser(),
@@ -864,6 +872,7 @@ def _build_runtime_detail(
         latest_replan_auto_decision_summary=latest_replan_auto_decision_summary,
         latest_replan_auto_routing_policy_summary=latest_replan_auto_routing_policy_summary,
         latest_replan_auto_route_summary=latest_replan_auto_route_summary,
+        latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,

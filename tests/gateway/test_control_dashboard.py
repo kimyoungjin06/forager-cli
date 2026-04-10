@@ -2373,6 +2373,7 @@ def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> 
         for btn in runtime_detail.active_task_phase2_action_buttons
     )
     assert runtime_detail.latest_replan_auto_route_summary == "-"
+    assert runtime_detail.latest_replan_auto_route_status_summary == "-"
     assert task_detail is not None
     assert any(
         btn.label == "Apply Judge Auto-Route"
@@ -2381,6 +2382,7 @@ def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> 
         for btn in task_detail.phase2_action_buttons
     )
     assert task_detail.latest_replan_auto_route_summary == "-"
+    assert task_detail.latest_replan_auto_route_status_summary == "-"
 
 
 def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_path: Path) -> None:
@@ -2418,9 +2420,15 @@ def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_pa
     assert runtime_detail.latest_replan_auto_route_summary == (
         "Replan Auto Route | applied | next=/retry T-001 lane L1 | retry_command=/retry T-001 lane L1"
     )
+    assert runtime_detail.latest_replan_auto_route_status_summary == (
+        "state=applied | next=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00 | retry_command=/retry T-001 lane L1"
+    )
     assert task_detail is not None
     assert task_detail.latest_replan_auto_route_summary == (
         "Replan Auto Route | applied | next=/retry T-001 lane L1 | retry_command=/retry T-001 lane L1"
+    )
+    assert task_detail.latest_replan_auto_route_status_summary == (
+        "state=applied | next=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00 | retry_command=/retry T-001 lane L1"
     )
 
 

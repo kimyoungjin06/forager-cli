@@ -545,6 +545,50 @@ def load_latest_replan_auto_routing_policy_summary_for_runtime(
     return summarize_replan_auto_routing_policy(policy)
 
 
+def load_latest_replan_auto_route_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> Dict[str, Any]:
+    alias = str(project_alias or "").strip()
+    if not alias:
+        return {}
+    row = load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=alias,
+        outcome_kind="replan_auto_route",
+    )
+    if not row:
+        return {}
+    enriched = dict(row)
+    enriched["at"] = str(row.get("at", "")).strip() or "-"
+    return enriched
+
+
+def summarize_latest_replan_auto_route(row: Any) -> str:
+    if not isinstance(row, dict) or not row:
+        return "-"
+    headline = str(row.get("headline", "")).strip()
+    state = "-"
+    if "|" in headline:
+        state = str(headline.split("|", 1)[1]).strip() or "-"
+    if state == "-":
+        state = str(row.get("status", "")).strip() or "-"
+    next_step = str(row.get("next_step", "")).strip() or "-"
+    detail = str(row.get("outcome_detail", "")).strip() or "-"
+    at = str(row.get("at", "")).strip() or "-"
+    return f"state={state} | next={next_step} | at={at} | {detail}"
+
+
+def load_latest_replan_auto_route_status_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    row = load_latest_replan_auto_route_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_latest_replan_auto_route(row)
+
+
 def load_latest_model_ping_audit_for_runtime(
     team_dir: Any,
     *,

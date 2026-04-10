@@ -806,7 +806,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             and suggested_next_step.startswith("/")
         ):
             replan_auto_route_ready_action = suggested_next_step
-            replan_auto_route_ready_note = f"dashboard=/control/runtimes/{alias}"
+            replan_auto_route_ready_note = (
+                f"dashboard=Apply Judge Auto-Route@/control/runtimes/{alias} | api=auto_route_apply=true"
+            )
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
