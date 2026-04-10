@@ -150,6 +150,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         latest_replan_auto_routing_policy_summary = "-"
         latest_replan_auto_route_summary = "-"
         latest_replan_auto_route_status_summary = "-"
+        latest_replan_auto_operator_summary = "-"
         latest_replan_auto_routing_policy: Dict[str, Any] = {}
         workspace_summary = "-"
         document_registry_summary = "-"
@@ -228,6 +229,12 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 )
                 latest_replan_auto_route_status_summary = (
                     action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+                        root_team_dir,
+                        project_alias=str(entry.get("project_alias", "")).strip(),
+                    )
+                )
+                latest_replan_auto_operator_summary = (
+                    action_audit.load_latest_replan_auto_operator_summary_for_runtime(
                         root_team_dir,
                         project_alias=str(entry.get("project_alias", "")).strip(),
                     )
@@ -391,6 +398,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_replan_auto_routing_policy_summary=latest_replan_auto_routing_policy_summary,
                 latest_replan_auto_route_summary=latest_replan_auto_route_summary,
                 latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
+                latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
                 run_lock_mode=run_lock_mode,
                 run_lock_note=run_lock_note,
                 background_slot_limit=background_slot_limit,
@@ -624,6 +632,14 @@ def _build_runtime_detail(
     )
     latest_replan_auto_route_status_summary = (
         action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
+    latest_replan_auto_operator_summary = (
+        action_audit.load_latest_replan_auto_operator_summary_for_runtime(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
         )
@@ -881,6 +897,7 @@ def _build_runtime_detail(
         latest_replan_auto_routing_policy_summary=latest_replan_auto_routing_policy_summary,
         latest_replan_auto_route_summary=latest_replan_auto_route_summary,
         latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
+        latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,

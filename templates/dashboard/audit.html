@@ -15,10 +15,11 @@
   <p class="muted">
     filter:
     {% for value in ['all', 'auto-route', 'judge', 'retry'] %}
+      {% set count = audit.focus_counts.get(value, 0) %}
       {% if audit.focus_filter == value %}
-      <strong>{{ value }}</strong>
+      <strong>{{ value }}={{ count }}</strong>
       {% else %}
-      <a href="/control/audit{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}</a>
+      <a href="/control/audit{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}={{ count }}</a>
       {% endif %}
     {% endfor %}
   </p>

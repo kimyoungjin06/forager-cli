@@ -397,6 +397,7 @@ def load_dashboard_action_audit_page(
         status_summary=_action_audit_status_summary(filtered_rows),
         focus_summary=focus_summary,
         focus_filter=focus_filter,
+        focus_counts={"all": len(rows), **focus_counts},
         rows=filtered_rows,
     )
 

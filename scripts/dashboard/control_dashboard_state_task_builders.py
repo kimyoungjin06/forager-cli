@@ -230,6 +230,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         latest_replan_auto_routing_policy: Dict[str, Any] = {}
         latest_replan_auto_route_summary = "-"
         latest_replan_auto_route_status_summary = "-"
+        latest_replan_auto_operator_summary = "-"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             team_dir = Path(team_dir_raw)
@@ -296,6 +297,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
                 )
                 latest_replan_auto_route_status_summary = action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+                    root_team_dir,
+                    project_alias=alias,
+                )
+                latest_replan_auto_operator_summary = action_audit.load_latest_replan_auto_operator_summary_for_runtime(
                     root_team_dir,
                     project_alias=alias,
                 )
@@ -419,6 +424,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             ),
             latest_replan_auto_route_summary=latest_replan_auto_route_summary,
             latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
+            latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,

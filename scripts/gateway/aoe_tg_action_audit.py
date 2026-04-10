@@ -602,6 +602,25 @@ def summarize_replan_auto_operator_status(
     return "-"
 
 
+def summarize_replan_auto_operator_summary(
+    *,
+    policy: Any,
+    route_row: Any,
+) -> str:
+    status_summary = summarize_replan_auto_operator_status(policy=policy, route_row=route_row)
+    if status_summary == "-":
+        return "-"
+    normalized_policy = normalize_replan_auto_routing_policy(policy)
+    if (
+        str(normalized_policy.get("status", "")).strip() == "ready"
+        and bool(normalized_policy.get("can_auto_apply", False))
+        and str(normalized_policy.get("suggested_action", "")).strip() == "retry"
+        and str(normalized_policy.get("suggested_next_step", "")).strip().startswith("/")
+    ):
+        return f"{status_summary} | apply=dashboard button | api:auto_route_apply=true"
+    return status_summary
+
+
 def load_latest_replan_auto_route_status_summary_for_runtime(
     team_dir: Any,
     *,
@@ -610,6 +629,16 @@ def load_latest_replan_auto_route_status_summary_for_runtime(
     row = load_latest_replan_auto_route_for_runtime(team_dir, project_alias=project_alias)
     policy = load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=project_alias)
     return summarize_replan_auto_operator_status(policy=policy, route_row=row)
+
+
+def load_latest_replan_auto_operator_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    row = load_latest_replan_auto_route_for_runtime(team_dir, project_alias=project_alias)
+    policy = load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_replan_auto_operator_summary(policy=policy, route_row=row)
 
 
 def load_latest_model_ping_audit_for_runtime(
