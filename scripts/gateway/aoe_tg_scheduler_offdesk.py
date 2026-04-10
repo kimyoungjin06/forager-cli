@@ -529,7 +529,10 @@ def _handle_offdesk_command(
                 lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
             latest_replan_auto_route_summary = str(row.get("latest_replan_auto_route_summary", "")).strip() or "-"
             latest_replan_auto_route_status_summary = str(row.get("latest_replan_auto_route_status_summary", "")).strip() or "-"
-            if latest_replan_auto_route_status_summary not in {"", "-"}:
+            auto_route_operator_summary = str(row.get("replan_auto_route_operator_summary", "")).strip() or "-"
+            if auto_route_operator_summary not in {"", "-"}:
+                lines.append("  auto_route: " + auto_route_operator_summary)
+            elif latest_replan_auto_route_status_summary not in {"", "-"}:
                 lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
             else:
                 if latest_replan_auto_routing_policy_summary not in {"", "-"}:
@@ -537,7 +540,7 @@ def _handle_offdesk_command(
                 if latest_replan_auto_route_summary not in {"", "-"}:
                     lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
             auto_route_note = str(row.get("replan_auto_route_ready_note", "")).strip() or "-"
-            if auto_route_action:
+            if auto_route_action and auto_route_operator_summary in {"", "-"}:
                 lines.append(f"  replan_auto_route_ready: {auto_route_action} | {auto_route_note}")
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:

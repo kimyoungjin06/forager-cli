@@ -64,10 +64,11 @@
               data-link-label="{{ row.link_label }}"
               data-link-href="{{ row.link_href }}"
               data-status="{{ row.status }}"
+              data-focus-badge="{{ row.focus_badge }}"
             >
               <div class="action-history-head">
                 <span class="action-history-badge {{ row.status }}">{{ row.status }}</span>
-                {% if row.focus_badge %}<span class="action-history-badge">{{ row.focus_badge }}</span>{% endif %}
+                {% if row.focus_badge %}<a class="action-history-badge" href="/control/audit?focus={{ row.focus_badge }}">{{ row.focus_badge }}</a>{% endif %}
                 <strong>{{ row.at }} | {{ row.headline }}</strong>
               </div>
               {% if row.next_step and row.next_step != '-' %}
@@ -118,6 +119,7 @@
               linkLabel: item.dataset.linkLabel || "-",
               linkHref: item.dataset.linkHref || "-",
               status: item.dataset.status || "unknown",
+              focusBadge: item.dataset.focusBadge || "",
             });
           });
           return seeded;
@@ -177,6 +179,13 @@
             const headline = document.createElement("strong");
             headline.textContent = `${entry.at} | ${entry.headline}`;
             head.appendChild(badge);
+            if (entry.focusBadge) {
+              const focus = document.createElement("a");
+              focus.className = "action-history-badge";
+              focus.href = `/control/audit?focus=${encodeURIComponent(entry.focusBadge)}`;
+              focus.textContent = entry.focusBadge;
+              head.appendChild(focus);
+            }
             head.appendChild(headline);
             item.appendChild(head);
             if (entry.nextStep && entry.nextStep !== "-") {
