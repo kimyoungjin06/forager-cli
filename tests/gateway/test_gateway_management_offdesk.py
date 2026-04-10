@@ -2073,6 +2073,22 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
         + "\n"
         + json.dumps(
             {
+                "at": "2026-04-09T18:06:00+09:00",
+                "headline": "Replan Auto Route | applied",
+                "status": "executed",
+                "outcome_kind": "replan_auto_route",
+                "outcome_status": "executed",
+                "outcome_reason_code": "judge_policy_ready",
+                "outcome_detail": "retry_command=/retry T-501",
+                "next_step": "/retry T-501",
+                "remediation": "inspect the retried task outcome and judge policy reuse before applying another auto-route",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "at": "2026-04-09T18:05:00+09:00",
                 "headline": "Retry | blocked",
                 "status": "blocked",
@@ -2144,6 +2160,8 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-501 | auto=yes" in text
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | auto=yes" in text
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | confirm=yes" in text
+    assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-501 | retry_command=/retry T-501" in text
+    assert "replan_auto_route_ready: /retry T-501 | dashboard=/control/runtimes/O5" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
@@ -2217,6 +2235,26 @@ def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path
     assert "/retry T-101 lane L2,R1" in buttons
     assert "/orch status O6" in buttons
     assert "/todo O6" in buttons
+
+
+def test_offdesk_review_reply_markup_includes_auto_route_ready_action() -> None:
+    markup = offdesk_flow.offdesk_review_reply_markup(
+        [
+            {
+                "alias": "O5",
+                "priority_action": "/orch judge O5",
+                "replan_auto_route_ready_action": "/retry T-501",
+                "active_task_label": "T-501",
+                "active_task_tf_phase": "blocked",
+                "status": "warn",
+            }
+        ]
+    )
+
+    buttons = _button_texts(markup)
+    assert "/orch judge O5" in buttons
+    assert "/retry T-501" in buttons
+    assert "/task T-501" in buttons
 
 
 def test_offdesk_review_prefers_task_link_for_active_planning_task(tmp_path: Path) -> None:

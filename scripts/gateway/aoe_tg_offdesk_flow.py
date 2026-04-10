@@ -16,6 +16,7 @@ from aoe_tg_action_audit import (
     load_latest_action_audit_for_runtime_kind,
     load_latest_offdesk_judge_decision_summary_for_runtime,
     load_latest_judge_decision_bridge_summary_for_runtime,
+    load_latest_replan_auto_routing_policy_for_runtime,
     load_latest_replan_auto_decision_summary_for_runtime,
     load_latest_replan_auto_routing_policy_summary_for_runtime,
 )
@@ -776,6 +777,36 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         if team_dir is not None
         else "-"
     )
+    latest_replan_auto_route = (
+        load_latest_action_audit_for_runtime_kind(team_dir, project_alias=alias, outcome_kind="replan_auto_route")
+        if team_dir is not None
+        else {}
+    )
+    latest_replan_auto_route_summary = "-"
+    if latest_replan_auto_route:
+        latest_replan_auto_route_summary = "{headline} | next={next_step} | {detail}".format(
+            headline=str(latest_replan_auto_route.get("headline", "")).strip() or "Replan Auto Route",
+            next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
+            detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
+        )
+    latest_replan_auto_routing_policy = (
+        load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else {}
+    )
+    replan_auto_route_ready_action = ""
+    replan_auto_route_ready_note = ""
+    if isinstance(latest_replan_auto_routing_policy, dict):
+        suggested_action = str(latest_replan_auto_routing_policy.get("suggested_action", "")).strip()
+        suggested_next_step = str(latest_replan_auto_routing_policy.get("suggested_next_step", "")).strip()
+        if (
+            str(latest_replan_auto_routing_policy.get("status", "")).strip() == "ready"
+            and bool(latest_replan_auto_routing_policy.get("can_auto_apply", False))
+            and suggested_action == "retry"
+            and suggested_next_step.startswith("/")
+        ):
+            replan_auto_route_ready_action = suggested_next_step
+            replan_auto_route_ready_note = f"dashboard=/control/runtimes/{alias}"
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -1246,6 +1277,15 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
     if latest_replan_auto_routing_policy_summary != "-":
         lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
+    if latest_replan_auto_route_summary != "-":
+        lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+    if replan_auto_route_ready_action:
+        lines.append(
+            "  replan_auto_route_ready: {action} | {note}".format(
+                action=replan_auto_route_ready_action,
+                note=replan_auto_route_ready_note or "-",
+            )
+        )
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()
@@ -1316,6 +1356,9 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "latest_judge_decision_bridge_summary": latest_judge_decision_bridge_summary,
         "latest_replan_auto_decision_summary": latest_replan_auto_decision_summary,
         "latest_replan_auto_routing_policy_summary": latest_replan_auto_routing_policy_summary,
+        "latest_replan_auto_route_summary": latest_replan_auto_route_summary,
+        "replan_auto_route_ready_action": replan_auto_route_ready_action,
+        "replan_auto_route_ready_note": replan_auto_route_ready_note,
         "notes": list(notes),
     }
 
@@ -1390,6 +1433,9 @@ def offdesk_review_reply_markup(
         priority_action = str(row.get("priority_action", "")).strip()
         if priority_action:
             primary.append({"text": priority_action})
+        auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
+        if auto_route_action:
+            primary.append({"text": auto_route_action})
         active_rate_limit = row.get("active_task_rate_limit") if isinstance(row.get("active_task_rate_limit"), dict) else {}
         if active_rate_limit:
             primary.append({"text": "/auto status"})

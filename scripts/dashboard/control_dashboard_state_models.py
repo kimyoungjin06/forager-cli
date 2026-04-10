@@ -118,6 +118,7 @@ class RuntimeCardDTO:
     latest_judge_decision_bridge_summary: str
     latest_replan_auto_decision_summary: str
     latest_replan_auto_routing_policy_summary: str
+    latest_replan_auto_route_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -221,6 +222,7 @@ class TaskDetailDTO:
     background_run_model_judge_probe_summary: str = ""
     background_run_model_escalation_binding_summary: str = ""
     background_run_model_escalation_probe_summary: str = ""
+    latest_replan_auto_route_summary: str = ""
     backend_summary: str = ""
     backend_note: str = ""
     rate_limit_summary: str = ""
@@ -313,6 +315,7 @@ class RuntimeDetailDTO:
     latest_judge_decision_bridge_summary: str
     latest_replan_auto_decision_summary: str
     latest_replan_auto_routing_policy_summary: str
+    latest_replan_auto_route_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int

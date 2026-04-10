@@ -2338,12 +2338,55 @@ def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> 
         and btn.payload_json == expected_payload
         for btn in runtime_detail.active_task_phase2_action_buttons
     )
+    assert runtime_detail.latest_replan_auto_route_summary == "-"
     assert task_detail is not None
     assert any(
         btn.label == "Apply Judge Auto-Route"
         and btn.path == "/control/actions/task/replan"
         and btn.payload_json == expected_payload
         for btn in task_detail.phase2_action_buttons
+    )
+    assert task_detail.latest_replan_auto_route_summary == "-"
+
+
+def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-001 lane L1",
+        next_step="/retry T-001 lane L1",
+        remediation="inspect the retried task outcome and judge policy reuse before applying another auto-route",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:08:00+09:00",
+    )
+
+    _snapshot, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    assert runtime_detail.latest_replan_auto_route_summary == (
+        "Replan Auto Route | applied | next=/retry T-001 lane L1 | retry_command=/retry T-001 lane L1"
+    )
+    assert task_detail is not None
+    assert task_detail.latest_replan_auto_route_summary == (
+        "Replan Auto Route | applied | next=/retry T-001 lane L1 | retry_command=/retry T-001 lane L1"
     )
 
 

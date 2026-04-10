@@ -228,6 +228,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         judge_binding_summary = "-"
         judge_probe_summary = "-"
         latest_replan_auto_routing_policy: Dict[str, Any] = {}
+        latest_replan_auto_route_summary = "-"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             team_dir = Path(team_dir_raw)
@@ -282,6 +283,17 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 root_team_dir,
                 project_alias=alias,
             )
+            latest_replan_auto_route = action_audit.load_latest_action_audit_for_runtime_kind(
+                root_team_dir,
+                project_alias=alias,
+                outcome_kind="replan_auto_route",
+            )
+            if latest_replan_auto_route:
+                latest_replan_auto_route_summary = "{headline} | next={next_step} | {detail}".format(
+                    headline=str(latest_replan_auto_route.get("headline", "")).strip() or "Replan Auto Route",
+                    next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
+                    detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
+                )
         action_contract = _task_command_contract(
             project_alias=alias,
             label=task_view.task_display_label(task, fallback_request_id=rid),
@@ -400,6 +412,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             background_run_model_escalation_probe_summary=(
                 str(task.get("background_run_model_escalation_probe_summary", "")).strip() or "-"
             ),
+            latest_replan_auto_route_summary=latest_replan_auto_route_summary,
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,

@@ -104,6 +104,21 @@ def _latest_replan_auto_routing_policy_summary(team_dir: Path, *, project_alias:
     )
 
 
+def _latest_replan_auto_route_summary(team_dir: Path, *, project_alias: str) -> str:
+    row = action_audit.load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=project_alias,
+        outcome_kind="replan_auto_route",
+    )
+    if not row:
+        return "-"
+    return "{headline} | next={next_step} | {detail}".format(
+        headline=str(row.get("headline", "")).strip() or "Replan Auto Route",
+        next_step=str(row.get("next_step", "")).strip() or "-",
+        detail=str(row.get("outcome_detail", "")).strip() or "-",
+    )
+
+
 def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any], *, root_team_dir: Path) -> List[RuntimeCardDTO]:
     reports = _runtime_reports(manager_state, provider_state)
 
@@ -133,6 +148,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         latest_judge_decision_bridge_summary = "-"
         latest_replan_auto_decision_summary = "-"
         latest_replan_auto_routing_policy_summary = "-"
+        latest_replan_auto_route_summary = "-"
         latest_replan_auto_routing_policy: Dict[str, Any] = {}
         workspace_summary = "-"
         document_registry_summary = "-"
@@ -202,6 +218,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     project_alias=str(entry.get("project_alias", "")).strip(),
                 )
                 latest_replan_auto_routing_policy_summary = _latest_replan_auto_routing_policy_summary(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
+                )
+                latest_replan_auto_route_summary = _latest_replan_auto_route_summary(
                     root_team_dir,
                     project_alias=str(entry.get("project_alias", "")).strip(),
                 )
@@ -362,6 +382,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_judge_decision_bridge_summary=latest_judge_decision_bridge_summary,
                 latest_replan_auto_decision_summary=latest_replan_auto_decision_summary,
                 latest_replan_auto_routing_policy_summary=latest_replan_auto_routing_policy_summary,
+                latest_replan_auto_route_summary=latest_replan_auto_route_summary,
                 run_lock_mode=run_lock_mode,
                 run_lock_note=run_lock_note,
                 background_slot_limit=background_slot_limit,
@@ -579,6 +600,14 @@ def _build_runtime_detail(
     )
     latest_replan_auto_routing_policy_summary = (
         _latest_replan_auto_routing_policy_summary(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
+    latest_replan_auto_route_summary = (
+        _latest_replan_auto_route_summary(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
         )
@@ -834,6 +863,7 @@ def _build_runtime_detail(
         latest_judge_decision_bridge_summary=latest_judge_decision_bridge_summary,
         latest_replan_auto_decision_summary=latest_replan_auto_decision_summary,
         latest_replan_auto_routing_policy_summary=latest_replan_auto_routing_policy_summary,
+        latest_replan_auto_route_summary=latest_replan_auto_route_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,

@@ -453,6 +453,9 @@ def _handle_offdesk_command(
             first_action = str(row.get("priority_action", "")).strip()
             if first_action:
                 actions.append(first_action)
+            auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
+            if auto_route_action:
+                actions.append(auto_route_action)
             active_rate_limit = row.get("active_task_rate_limit") if isinstance(row.get("active_task_rate_limit"), dict) else {}
             if active_rate_limit:
                 actions.append("/auto status")
@@ -526,6 +529,12 @@ def _handle_offdesk_command(
                 lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
             if latest_replan_auto_routing_policy_summary not in {"", "-"}:
                 lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
+            latest_replan_auto_route_summary = str(row.get("latest_replan_auto_route_summary", "")).strip() or "-"
+            if latest_replan_auto_route_summary not in {"", "-"}:
+                lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+            auto_route_note = str(row.get("replan_auto_route_ready_note", "")).strip() or "-"
+            if auto_route_action:
+                lines.append(f"  replan_auto_route_ready: {auto_route_action} | {auto_route_note}")
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:
                 lines.append(
