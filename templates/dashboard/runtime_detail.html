@@ -18,6 +18,9 @@
     <li><span>document_registry</span><strong>{{ detail.document_registry_summary }}</strong></li>
     <li><span>model_routing</span><strong>{{ detail.model_routing_summary }}</strong></li>
     <li><span>model_registry</span><strong>{{ detail.model_registry_summary }}</strong></li>
+  </ul>
+  <h3 class="panel-subheading">Decision Signals</h3>
+  <ul class="kv-list">
     <li><span>latest_judge</span><strong>{{ detail.latest_judge_summary }}</strong></li>
     <li><span>latest_judge_decision</span><strong>{{ detail.latest_judge_decision_summary }}</strong></li>
     <li><span>latest_judge_decision_bridge</span><strong>{{ detail.latest_judge_decision_bridge_summary }}</strong></li>
@@ -65,6 +68,20 @@
     <li><span>model_plan</span><strong>{{ detail.active_task_model_plan_summary }}</strong></li>
     <li><span>judge_binding</span><strong>{{ detail.active_task_judge_binding_summary }}</strong></li>
     <li><span>judge_probe</span><strong>{{ detail.active_task_judge_probe_summary }}</strong></li>
+  </ul>
+  <h3 class="panel-subheading">Decision Signals</h3>
+  <ul class="kv-list">
+    <li><span>latest_judge</span><strong>{{ detail.latest_judge_summary }}</strong></li>
+    <li><span>latest_judge_decision</span><strong>{{ detail.latest_judge_decision_summary }}</strong></li>
+    <li><span>latest_judge_decision_bridge</span><strong>{{ detail.latest_judge_decision_bridge_summary }}</strong></li>
+    <li><span>replan_auto_decision</span><strong>{{ detail.latest_replan_auto_decision_summary }}</strong></li>
+    <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
+    <li><span>replan_auto_routing_policy</span><strong>{{ detail.latest_replan_auto_routing_policy_summary }}</strong></li>
+    <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
+    <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
+  </ul>
+  <h3 class="panel-subheading">Execution Rails</h3>
+  <ul class="kv-list">
     <li><span>reentry_rails</span><strong>{{ detail.active_task_reentry_rails_summary }}</strong></li>
     <li><span>background_run</span><strong>{{ detail.active_task_background_run_status }}</strong></li>
     <li><span>runner_target</span><strong>{{ detail.active_task_background_run_runner_target }}</strong></li>
@@ -81,9 +98,6 @@
     <li><span>background_judge_probe</span><strong>{{ detail.active_task_background_run_model_judge_probe_summary }}</strong></li>
     <li><span>background_escalation_binding</span><strong>{{ detail.active_task_background_run_model_escalation_binding_summary }}</strong></li>
     <li><span>background_escalation_probe</span><strong>{{ detail.active_task_background_run_model_escalation_probe_summary }}</strong></li>
-    <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
-    <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
-    <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
     <li><span>evidence_bundle</span><strong>{{ detail.active_task_background_run_evidence_bundle }}</strong></li>
     <li><span>evidence_artifacts</span><strong>{{ detail.active_task_background_run_evidence_artifacts }}</strong></li>
     <li><span>background_worker</span><strong>{{ detail.background_worker_summary }}</strong></li>

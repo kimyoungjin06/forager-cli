@@ -81,6 +81,13 @@
             {% endfor %}
             {% endif %}
           </ul>
+          <p class="muted action-history-footer">
+            see more:
+            <a href="/control/audit?limit=20">all</a>
+            <a href="/control/audit?focus=auto-route&amp;limit=20">auto-route</a>
+            <a href="/control/audit?focus=judge&amp;limit=20">judge</a>
+            <a href="/control/audit?focus=retry&amp;limit=20">retry</a>
+          </p>
         </section>
         <details id="action-result-details" class="action-result-details hidden">
           <summary>Raw Payload</summary>

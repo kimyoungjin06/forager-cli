@@ -577,6 +577,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "action-result-history" in overview_text
     assert "action-history-badge" in overview_text
     assert "/control/audit?focus=auto-route" in overview_text
+    assert "/control/audit?limit=20" in overview_text
+    assert "/control/audit?focus=judge&amp;limit=20" in overview_text
     assert "remediation" in overview_text
     assert "Sync Preview | preview" in overview_text
     assert "/control/runtimes/O2" in overview_text
@@ -2538,6 +2540,28 @@ def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_pa
     assert task_detail.latest_replan_auto_operator_summary == (
         "applied=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00"
     )
+    runtime_html = dashboard_app.build_dashboard_response(
+        "/control/runtimes/O2",
+        dashboard_app.DashboardAppConfig(
+            control_root=control_root,
+            team_dir=team_dir,
+            manager_state_file=manager_state_file,
+            host="127.0.0.1",
+            port=8765,
+        ),
+    )[2].decode("utf-8")
+    task_html = dashboard_app.build_dashboard_response(
+        "/control/tasks/by-request/REQ-1",
+        dashboard_app.DashboardAppConfig(
+            control_root=control_root,
+            team_dir=team_dir,
+            manager_state_file=manager_state_file,
+            host="127.0.0.1",
+            port=8765,
+        ),
+    )[2].decode("utf-8")
+    assert "Decision Signals" in runtime_html
+    assert "Decision Signals" in task_html
     assert task_detail.latest_replan_auto_route_status_summary == (
         "applied=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00"
     )

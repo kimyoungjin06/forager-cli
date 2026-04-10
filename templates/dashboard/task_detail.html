@@ -32,6 +32,15 @@
     <li><span>context_pack_excluded</span><strong>{{ detail.context_pack_excluded }}</strong></li>
     <li><span>judge_binding</span><strong>{{ detail.judge_binding_summary }}</strong></li>
     <li><span>judge_probe</span><strong>{{ detail.judge_probe_summary }}</strong></li>
+  </ul>
+  <h3 class="panel-subheading">Decision Signals</h3>
+  <ul class="kv-list">
+    <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
+    <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
+    <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
+  </ul>
+  <h3 class="panel-subheading">Execution Rails</h3>
+  <ul class="kv-list">
     <li><span>reentry_rails</span><strong>{{ detail.reentry_rails_summary }}</strong></li>
     <li><span>run_lock</span><strong>{{ detail.run_lock_mode }}</strong></li>
     <li><span>run_lock_note</span><strong>{{ detail.run_lock_note }}</strong></li>
@@ -52,9 +61,6 @@
     <li><span>background_judge_probe</span><strong>{{ detail.background_run_model_judge_probe_summary }}</strong></li>
     <li><span>background_escalation_binding</span><strong>{{ detail.background_run_model_escalation_binding_summary }}</strong></li>
     <li><span>background_escalation_probe</span><strong>{{ detail.background_run_model_escalation_probe_summary }}</strong></li>
-    <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
-    <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
-    <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
     <li><span>evidence_bundle</span><strong>{{ detail.background_run_evidence_bundle }}</strong></li>
     <li><span>evidence_artifacts</span><strong>{{ detail.background_run_evidence_artifacts }}</strong></li>
     <li><span>control_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
