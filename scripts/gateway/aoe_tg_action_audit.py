@@ -173,6 +173,47 @@ def summarize_latest_judge_decision_bridge(bridge: Any) -> str:
     return " | ".join(parts)
 
 
+def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return {}
+    return {
+        "source": str(row.get("source", "")).strip() or "latest_offdesk_judge",
+        "current_action": str(row.get("current_action", "")).strip() or "-",
+        "suggested_action": str(row.get("suggested_action", "")).strip() or "-",
+        "suggested_next_step": str(row.get("suggested_next_step", "")).strip() or "-",
+        "decision_mode": str(row.get("decision_mode", "")).strip() or "-",
+        "bridge_applied": bool(row.get("bridge_applied", False)),
+        "supports_auto_decision": bool(row.get("supports_auto_decision", False)),
+        "can_auto_apply": bool(row.get("can_auto_apply", False)),
+        "reasoning": str(row.get("reasoning", "")).strip() or "-",
+        "caution": str(row.get("caution", "")).strip() or "-",
+        "confidence": str(row.get("confidence", "")).strip() or "-",
+    }
+
+
+def summarize_replan_auto_decision(decision: Any) -> str:
+    row = decision if isinstance(decision, dict) else normalize_replan_auto_decision(decision)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    parts = [
+        f"from={str(row.get('current_action', '')).strip() or '-'}",
+        f"to={str(row.get('suggested_action', '')).strip() or '-'}",
+    ]
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    next_step = str(row.get("suggested_next_step", "")).strip() or "-"
+    decision_mode = str(row.get("decision_mode", "")).strip() or "-"
+    if confidence != "-":
+        parts.append(f"confidence={confidence}")
+    if next_step != "-":
+        parts.append(f"next={next_step}")
+    if decision_mode != "-":
+        parts.append(f"mode={decision_mode}")
+    if bool(row.get("can_auto_apply", False)):
+        parts.append("auto=yes")
+    return " | ".join(parts)
+
+
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
     headline = str(latest_action.get("headline", "")).strip() or "-"
     reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
@@ -391,6 +432,39 @@ def load_latest_judge_decision_bridge_summary_for_runtime(
 ) -> str:
     bridge = load_latest_judge_decision_bridge_for_runtime(team_dir, project_alias=project_alias)
     return summarize_latest_judge_decision_bridge(bridge)
+
+
+def load_latest_replan_auto_decision_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> Dict[str, Any]:
+    alias = str(project_alias or "").strip()
+    if not alias:
+        return {}
+    rows = _load_action_audit_rows(team_dir)
+    if not rows:
+        return {}
+    runtime_path = f"/control/runtimes/{quote(alias, safe='')}"
+    for row in reversed(rows):
+        if str(row.get("link_href", "")).strip() != runtime_path:
+            continue
+        decision = normalize_replan_auto_decision(row.get("replan_auto_decision"))
+        if not decision:
+            continue
+        decision["at"] = str(row.get("at", "")).strip() or "-"
+        decision["headline"] = str(row.get("headline", "")).strip() or "-"
+        return decision
+    return {}
+
+
+def load_latest_replan_auto_decision_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    decision = load_latest_replan_auto_decision_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_replan_auto_decision(decision)
 
 
 def load_latest_model_ping_audit_for_runtime(

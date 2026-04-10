@@ -16,6 +16,7 @@ from aoe_tg_action_audit import (
     load_latest_action_audit_for_runtime_kind,
     load_latest_offdesk_judge_decision_summary_for_runtime,
     load_latest_judge_decision_bridge_summary_for_runtime,
+    load_latest_replan_auto_decision_summary_for_runtime,
 )
 from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
 from aoe_tg_background_runs import (
@@ -764,6 +765,11 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         if team_dir is not None
         else "-"
     )
+    latest_replan_auto_decision_summary = (
+        load_latest_replan_auto_decision_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -1230,6 +1236,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append("  latest_judge_decision: " + latest_judge_decision_summary)
     if latest_judge_decision_bridge_summary != "-":
         lines.append("  latest_judge_decision_bridge: " + latest_judge_decision_bridge_summary)
+    if latest_replan_auto_decision_summary != "-":
+        lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()
@@ -1298,6 +1306,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "latest_judge_detail": latest_judge_detail,
         "latest_judge_decision_summary": latest_judge_decision_summary,
         "latest_judge_decision_bridge_summary": latest_judge_decision_bridge_summary,
+        "latest_replan_auto_decision_summary": latest_replan_auto_decision_summary,
         "notes": list(notes),
     }
 

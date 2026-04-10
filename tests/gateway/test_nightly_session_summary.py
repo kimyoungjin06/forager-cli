@@ -74,7 +74,18 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
                 "applied_next_step": "/retry T-001",
                 "decision_mode": "promoted_next_step",
                 "supports_auto_decision": True,
-            }
+            },
+            "replan_auto_decision": {
+                "source": "latest_offdesk_judge",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "bridge_applied": True,
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "confidence": "medium",
+            },
         },
     )
     assert action_audit.append_action_audit_row(
@@ -139,6 +150,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["latest_judge_summary"] == "Offdesk Judge | next=/offdesk review O2 | endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed"
     assert runtimes[0]["latest_judge_decision_summary"] == "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable"
     assert runtimes[0]["latest_judge_decision_bridge_summary"] == "mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes"
+    assert runtimes[0]["latest_replan_auto_decision_summary"] == "from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes"
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -205,7 +217,18 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
                 "applied_next_step": "/retry T-001",
                 "decision_mode": "promoted_next_step",
                 "supports_auto_decision": True,
-            }
+            },
+            "replan_auto_decision": {
+                "source": "latest_offdesk_judge",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "bridge_applied": True,
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "confidence": "medium",
+            },
         },
     )
 
@@ -242,6 +265,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "latest_judge: Offdesk Judge | next=/offdesk review O2 | endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in markdown
     assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in markdown
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes" in markdown
+    assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes" in markdown
     assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown
     assert "background_slots: active=0 limit=1" in markdown

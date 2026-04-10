@@ -2095,6 +2095,17 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
                     "decision_mode": "promoted_next_step",
                     "supports_auto_decision": True,
                 },
+                "replan_auto_decision": {
+                    "source": "latest_offdesk_judge",
+                    "current_action": "replan",
+                    "suggested_action": "retry",
+                    "suggested_next_step": "/retry T-501",
+                    "decision_mode": "promoted_next_step",
+                    "bridge_applied": True,
+                    "supports_auto_decision": True,
+                    "can_auto_apply": True,
+                    "confidence": "medium",
+                },
             }
         )
         + "\n",
@@ -2119,6 +2130,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "latest_judge: Offdesk Judge | executed | next=/offdesk review O5 | endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in text
     assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-501 | brief executable" in text
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-501 | auto=yes" in text
+    assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | auto=yes" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
