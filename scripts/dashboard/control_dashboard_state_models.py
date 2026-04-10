@@ -212,6 +212,7 @@ class TaskDetailDTO:
     background_run_evidence_bundle: str = ""
     background_run_evidence_artifacts: str = ""
     background_run_launch_spec_summary: str = ""
+    background_run_task_contract_summary: str = ""
     background_run_model_plan_summary: str = ""
     background_run_model_judge_binding_summary: str = ""
     background_run_model_judge_probe_summary: str = ""
@@ -294,6 +295,7 @@ class RuntimeDetailDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    active_task_background_run_task_contract_summary: str
     active_task_background_run_model_plan_summary: str
     active_task_background_run_model_judge_binding_summary: str
     active_task_background_run_model_judge_probe_summary: str

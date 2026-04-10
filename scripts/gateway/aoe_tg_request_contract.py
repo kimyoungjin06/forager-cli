@@ -1332,6 +1332,8 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_launch_spec_mode": launch_spec.get("mode", ""),
             "background_run_launch_spec_summary": launch_spec.get("summary", ""),
             "background_run_launch_spec_externalizable": bool(launch_spec.get("externalizable", False)),
+            "background_run_task_contract_profile": launch_spec.get("provider_task_contract_profile", ""),
+            "background_run_task_contract_summary": launch_spec.get("provider_task_contract_summary", ""),
             "background_run_model_pack_profile": launch_spec.get("model_pack_profile", ""),
             "background_run_model_plan_summary": launch_spec.get("model_plan_summary", ""),
             "background_run_model_worker_route_id": launch_spec.get("model_worker_route_id", ""),

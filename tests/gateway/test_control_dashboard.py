@@ -569,6 +569,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["followup_brief_execution_lane_ids"] = ["L2"]
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -631,6 +632,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "tmux_session=aoe_bg_bgt_001" in text
     assert "launch_spec" in text
     assert "gateway_dispatch | mode=in_process_callback" in text
+    assert "background_task_contract" in text
+    assert "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "control_intent_action" in text
@@ -708,6 +711,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["followup_brief_execution_lane_ids"] = ["L2"]
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -767,6 +771,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "tmux_session=aoe_bg_bgt_001" in text
     assert "launch_spec" in text
     assert "gateway_dispatch | mode=in_process_callback" in text
+    assert "background_task_contract" in text
+    assert "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "analysis-followup" in text
@@ -1928,6 +1934,8 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
     assert payload["latest_judge_decision"]["verdict"] == "continue"
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
+    assert payload["latest_judge_decision_bridge"]["applied"] is False
+    assert payload["latest_judge_decision_bridge"]["recommended_action"] == "retry"
 
 
 def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judge_next_step(tmp_path: Path, monkeypatch) -> None:
@@ -1980,11 +1988,14 @@ def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judg
     assert payload["source_command"] == "/replan T-001 lane L1"
     assert "/orch judge" in payload["remediation"]
     assert "latest judge: Offdesk Judge" in payload["remediation"]
+    assert "judge decision reuse: action=retry next=/retry T-001" in payload["remediation"]
     assert "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in payload["remediation"]
     assert payload["latest_judge"]["headline"] == "Offdesk Judge"
     assert payload["latest_judge"]["next_step"] == "/offdesk review O2"
     assert payload["latest_judge_decision"]["verdict"] == "continue"
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
+    assert payload["latest_judge_decision_bridge"]["applied"] is True
+    assert payload["latest_judge_decision_bridge"]["applied_next_step"] == "/retry T-001"
 
 
 def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_preview(tmp_path: Path) -> None:
@@ -2733,6 +2744,7 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert payload["latest_judge"]["detail"].startswith("endpoint=claude_code_cli-opus")
     assert payload["latest_judge_decision"]["verdict"] == "continue"
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
+    assert payload["latest_judge_decision_bridge"]["applied"] is False
 
 
 def test_execute_retry_run_transition_requires_structured_outcome(tmp_path: Path, monkeypatch) -> None:

@@ -705,6 +705,9 @@ def _build_runtime_detail(
         active_task_background_run_launch_spec_summary=(
             str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
         ),
+        active_task_background_run_task_contract_summary=(
+            str((active_task or {}).get("background_run_task_contract_summary", "")).strip() or "-"
+        ),
         active_task_background_run_model_plan_summary=(
             str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
         ),

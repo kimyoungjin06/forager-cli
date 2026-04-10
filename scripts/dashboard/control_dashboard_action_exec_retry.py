@@ -188,6 +188,50 @@ def _promote_blocked_next_step_from_latest_judge(
     return candidate if candidate.startswith("/") else current
 
 
+def _latest_judge_decision_bridge(
+    current_next_step: str,
+    *,
+    latest_judge_decision: Dict[str, str],
+    source_command: str,
+) -> Tuple[str, Dict[str, Any]]:
+    current = str(current_next_step or "").strip()
+    if not isinstance(latest_judge_decision, dict) or not latest_judge_decision:
+        return current, {}
+    promoted = _promote_blocked_next_step_from_latest_judge(
+        current,
+        latest_judge_decision=latest_judge_decision,
+        source_command=source_command,
+    )
+    recommended_action = str(latest_judge_decision.get("recommended_action", "")).strip() or "-"
+    candidate_next_step = str(latest_judge_decision.get("next_step", "")).strip() or "-"
+    bridge = {
+        "source": "latest_offdesk_judge",
+        "verdict": str(latest_judge_decision.get("verdict", "")).strip() or "-",
+        "confidence": str(latest_judge_decision.get("confidence", "")).strip() or "-",
+        "recommended_action": recommended_action,
+        "reasoning": str(latest_judge_decision.get("reasoning", "")).strip() or "-",
+        "caution": str(latest_judge_decision.get("caution", "")).strip() or "-",
+        "candidate_next_step": candidate_next_step,
+        "applied": promoted != current,
+        "applied_next_step": promoted if promoted != current else "-",
+        "decision_mode": "promoted_next_step" if promoted != current else "observe_only",
+        "supports_auto_decision": recommended_action in {"retry", "replan", "followup", "review", "judge"},
+    }
+    return promoted, bridge
+
+
+def _retry_blocked_remediation_with_judge_bridge(remediation: str, bridge: Dict[str, Any]) -> str:
+    if not isinstance(bridge, dict) or not bridge:
+        return remediation
+    if not bool(bridge.get("applied")):
+        return remediation
+    action = str(bridge.get("recommended_action", "")).strip() or "-"
+    next_step = str(bridge.get("applied_next_step", "")).strip() or "-"
+    suffix = f"judge decision reuse: action={action} next={next_step}"
+    base = str(remediation or "").strip()
+    return f"{base}; {suffix}" if base else suffix
+
+
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
@@ -663,12 +707,15 @@ def _execute_retry_run_transition(
         remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
     latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
-    next_step = _promote_blocked_next_step_from_latest_judge(
-        next_step,
-        latest_judge_decision=latest_judge_decision,
-        source_command=source_command,
-    ) if blocked else next_step
-    remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge) if blocked else remediation
+    latest_judge_decision_bridge: Dict[str, Any] = {}
+    if blocked:
+        next_step, latest_judge_decision_bridge = _latest_judge_decision_bridge(
+            next_step,
+            latest_judge_decision=latest_judge_decision,
+            source_command=source_command,
+        )
+        remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge)
+        remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
     return _json(
         {
             "ok": not blocked,
@@ -702,6 +749,7 @@ def _execute_retry_run_transition(
             "remediation": remediation,
             "latest_judge": latest_judge,
             "latest_judge_decision": latest_judge_decision,
+            "latest_judge_decision_bridge": latest_judge_decision_bridge,
         },
         status=409 if blocked else 200,
     )
@@ -904,11 +952,16 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             entry=entry,
             fallback="/offdesk review",
         )
-        next_step = _promote_blocked_next_step_from_latest_judge(
+        next_step, latest_judge_decision_bridge = _latest_judge_decision_bridge(
             next_step,
             latest_judge_decision=latest_judge_decision,
             source_command=str(spec.get("command", "-")),
         )
+        remediation = _retry_blocked_remediation_with_latest_judge(
+            _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
+            latest_judge,
+        )
+        remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
         return _json(
             {
                 "ok": False,
@@ -923,12 +976,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "payload": payload,
                 "messages": messages,
                 "next_step": next_step,
-                "remediation": _retry_blocked_remediation_with_latest_judge(
-                    _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
-                    latest_judge,
-                ),
+                "remediation": remediation,
                 "latest_judge": latest_judge,
                 "latest_judge_decision": latest_judge_decision,
+                "latest_judge_decision_bridge": latest_judge_decision_bridge,
             },
             status=409,
         )

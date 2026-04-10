@@ -584,6 +584,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_model_plan = str(task.get("background_run_model_plan_summary", "")).strip()
     if background_model_plan:
         lines.append("background_run_model_plan: " + background_model_plan[:240])
+    background_task_contract = str(task.get("background_run_task_contract_summary", "")).strip()
+    if background_task_contract:
+        lines.append("background_run_task_contract: " + background_task_contract[:240])
     background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
     if background_judge_binding:
         lines.append("background_run_model_judge: " + background_judge_binding[:240])
