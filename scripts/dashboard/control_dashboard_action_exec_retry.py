@@ -245,6 +245,7 @@ def _append_blocked_retry_replan_audit(
     remediation: str,
     latest_judge_decision_bridge: Dict[str, Any],
     replan_auto_decision: Dict[str, Any],
+    replan_auto_routing_policy: Dict[str, Any],
     now_iso: Any,
 ) -> None:
     if not blocked or not isinstance(entry, dict):
@@ -272,6 +273,7 @@ def _append_blocked_retry_replan_audit(
         extra={
             "latest_judge_decision_bridge": dict(latest_judge_decision_bridge or {}),
             "replan_auto_decision": dict(replan_auto_decision or {}),
+            "replan_auto_routing_policy": dict(replan_auto_routing_policy or {}),
         },
     )
 
@@ -304,6 +306,37 @@ def _replan_auto_decision_stub(
         "bridge_applied": bool(bridge.get("applied", False)),
         "supports_auto_decision": bool(bridge.get("supports_auto_decision", False)),
         "can_auto_apply": suggested_action in {"retry", "replan", "followup_execute"} and suggested_next_step.startswith("/"),
+        "reasoning": str(decision.get("reasoning", "")).strip() or "-",
+        "caution": str(decision.get("caution", "")).strip() or "-",
+        "confidence": str(decision.get("confidence", "")).strip() or "-",
+    }
+
+
+def _replan_auto_routing_policy(
+    *,
+    source_command: str,
+    replan_auto_decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    if _command_head(source_command) != "/replan":
+        return {}
+    decision = replan_auto_decision if isinstance(replan_auto_decision, dict) else {}
+    if not decision:
+        return {}
+    suggested_action = str(decision.get("suggested_action", "")).strip() or "-"
+    suggested_next_step = str(decision.get("suggested_next_step", "")).strip() or "-"
+    supports_auto_decision = bool(decision.get("supports_auto_decision", False))
+    can_auto_apply = bool(decision.get("can_auto_apply", False)) and suggested_next_step.startswith("/")
+    status = "ready" if can_auto_apply else ("observe_only" if supports_auto_decision else "unavailable")
+    return {
+        "source": str(decision.get("source", "")).strip() or "latest_offdesk_judge",
+        "status": status,
+        "current_action": str(decision.get("current_action", "")).strip() or "replan",
+        "suggested_action": suggested_action,
+        "suggested_next_step": suggested_next_step,
+        "decision_mode": str(decision.get("decision_mode", "")).strip() or "none",
+        "supports_auto_decision": supports_auto_decision,
+        "can_auto_apply": can_auto_apply,
+        "requires_operator_confirmation": can_auto_apply,
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
@@ -787,6 +820,7 @@ def _execute_retry_run_transition(
     latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     latest_judge_decision_bridge: Dict[str, Any] = {}
     replan_auto_decision: Dict[str, Any] = {}
+    replan_auto_routing_policy: Dict[str, Any] = {}
     if blocked:
         next_step, latest_judge_decision_bridge = _latest_judge_decision_bridge(
             next_step,
@@ -798,6 +832,10 @@ def _execute_retry_run_transition(
             next_step=next_step,
             latest_judge_decision=latest_judge_decision,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
+        )
+        replan_auto_routing_policy = _replan_auto_routing_policy(
+            source_command=source_command,
+            replan_auto_decision=replan_auto_decision,
         )
         remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge)
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
@@ -812,6 +850,7 @@ def _execute_retry_run_transition(
             remediation=remediation,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
             replan_auto_decision=replan_auto_decision,
+            replan_auto_routing_policy=replan_auto_routing_policy,
             now_iso=_now_iso,
         )
     return _json(
@@ -849,6 +888,7 @@ def _execute_retry_run_transition(
             "latest_judge_decision": latest_judge_decision,
             "latest_judge_decision_bridge": latest_judge_decision_bridge,
             "replan_auto_decision": replan_auto_decision,
+            "replan_auto_routing_policy": replan_auto_routing_policy,
         },
         status=409 if blocked else 200,
     )
@@ -1062,6 +1102,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             latest_judge_decision=latest_judge_decision,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
         )
+        replan_auto_routing_policy = _replan_auto_routing_policy(
+            source_command=str(spec.get("command", "-")),
+            replan_auto_decision=replan_auto_decision,
+        )
         remediation = _retry_blocked_remediation_with_latest_judge(
             _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
             latest_judge,
@@ -1078,6 +1122,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             remediation=remediation,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
             replan_auto_decision=replan_auto_decision,
+            replan_auto_routing_policy=replan_auto_routing_policy,
             now_iso=_now_iso,
         )
         return _json(
@@ -1099,6 +1144,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "latest_judge_decision": latest_judge_decision,
                 "latest_judge_decision_bridge": latest_judge_decision_bridge,
                 "replan_auto_decision": replan_auto_decision,
+                "replan_auto_routing_policy": replan_auto_routing_policy,
             },
             status=409,
         )
