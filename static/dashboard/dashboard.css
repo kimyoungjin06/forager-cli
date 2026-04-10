@@ -153,6 +153,13 @@ body {
   text-transform: uppercase;
   border: 1px solid var(--line);
   background: #f5f0e3;
+  text-decoration: none;
+  color: inherit;
+}
+.action-history-badge.active-focus {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
 }
 .action-history-badge.preview,
 .action-history-badge.pending {

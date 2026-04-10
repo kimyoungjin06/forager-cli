@@ -17,9 +17,9 @@
     {% for value in ['all', 'auto-route', 'judge', 'retry'] %}
       {% set count = audit.focus_counts.get(value, 0) %}
       {% if audit.focus_filter == value %}
-      <strong>{{ value }}={{ count }}</strong>
+      <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
       {% else %}
-      <a href="/control/audit{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}={{ count }}</a>
+      <a class="action-history-badge" href="/control/audit{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}={{ count }}</a>
       {% endif %}
     {% endfor %}
   </p>
@@ -43,7 +43,7 @@
       {% for row in audit.rows %}
       <tr>
         <td>{{ row.at }}</td>
-        <td>{% if row.focus_badge %}<span class="action-history-badge">{{ row.focus_badge }}</span> {% endif %}{{ row.headline }}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
+        <td>{% if row.focus_badge %}<span class="action-history-badge{% if audit.focus_filter != 'all' and audit.focus_filter == row.focus_badge %} active-focus{% endif %}">{{ row.focus_badge }}</span> {% endif %}{{ row.headline }}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
         <td>{{ row.status }}</td>
         <td>{{ row.next_step }}</td>
         <td><code>{{ row.source_command }}</code></td>
