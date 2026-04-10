@@ -407,6 +407,36 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             background_run_task_contract_summary=(
                 str(task.get("background_run_task_contract_summary", "")).strip() or "-"
             ),
+            background_run_worker_result_summary=(
+                str(task.get("background_run_worker_result_summary", "")).strip() or "-"
+            ),
+            background_run_worker_result_actions=", ".join(
+                str(item).strip()
+                for item in (
+                    (task.get("background_run_worker_result_actions") if isinstance(task.get("background_run_worker_result_actions"), list) else [])
+                    or []
+                )
+                if str(item).strip()
+            )
+            or "-",
+            background_run_worker_result_cautions=", ".join(
+                str(item).strip()
+                for item in (
+                    (task.get("background_run_worker_result_cautions") if isinstance(task.get("background_run_worker_result_cautions"), list) else [])
+                    or []
+                )
+                if str(item).strip()
+            )
+            or "-",
+            background_run_worker_result_evidence_refs=", ".join(
+                str(item).strip()
+                for item in (
+                    (task.get("background_run_worker_result_evidence_refs") if isinstance(task.get("background_run_worker_result_evidence_refs"), list) else [])
+                    or []
+                )
+                if str(item).strip()
+            )
+            or "-",
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"
             ),

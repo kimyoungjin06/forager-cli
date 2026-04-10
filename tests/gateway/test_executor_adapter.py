@@ -193,6 +193,11 @@ def test_executor_runtime_dispatches_provider_invoke_local_background_ticket(mon
             "endpoint_id": "ollama-qwen3",
             "model": "qwen3-coder:30b",
             "response_text": "QUEUE_OK",
+            "task_result_status": "ready",
+            "task_result_summary": "status=ready | queue summary drafted | actions=1 | refs=1",
+            "task_result_actions": ["update reports/summary.md"],
+            "task_result_cautions": ["keep review lane open"],
+            "task_result_evidence_refs": ["reports/summary.md"],
         },
     )
 
@@ -218,6 +223,10 @@ def test_executor_runtime_dispatches_provider_invoke_local_background_ticket(mon
     assert updates[0]["runtime_summary"].startswith("provider_invoke_started")
     assert updates[1]["status"] == "completed"
     assert "provider_invoke_ok" in updates[1]["evidence_bundle"]
+    assert updates[1]["worker_result_status"] == "ready"
+    assert updates[1]["worker_result_summary"] == "status=ready | queue summary drafted | actions=1 | refs=1"
+    assert updates[1]["worker_result_evidence_refs"] == ["reports/summary.md"]
+    assert updates[1]["evidence_artifacts"] == ["reports/summary.md"]
     assert not errors
 
 

@@ -579,6 +579,11 @@ def advance_background_run_ticket(
     execution_brief_status: str = "",
     runtime_handle: str = "",
     runtime_summary: str = "",
+    worker_result_status: str = "",
+    worker_result_summary: str = "",
+    worker_result_actions: List[Any] | None = None,
+    worker_result_cautions: List[Any] | None = None,
+    worker_result_evidence_refs: List[Any] | None = None,
     evidence_bundle: str = "",
     evidence_artifacts: List[Any] | None = None,
 ) -> Dict[str, Any]:
@@ -605,6 +610,16 @@ def advance_background_run_ticket(
         updated["runtime_handle"] = str(runtime_handle or "").strip()
     if str(runtime_summary or "").strip():
         updated["runtime_summary"] = str(runtime_summary or "").strip()
+    if str(worker_result_status or "").strip():
+        updated["worker_result_status"] = str(worker_result_status or "").strip()
+    if str(worker_result_summary or "").strip():
+        updated["worker_result_summary"] = str(worker_result_summary or "").strip()
+    if worker_result_actions is not None:
+        updated["worker_result_actions"] = list(worker_result_actions or [])
+    if worker_result_cautions is not None:
+        updated["worker_result_cautions"] = list(worker_result_cautions or [])
+    if worker_result_evidence_refs is not None:
+        updated["worker_result_evidence_refs"] = list(worker_result_evidence_refs or [])
     if str(evidence_bundle or "").strip():
         updated["evidence_bundle"] = str(evidence_bundle or "").strip()
     if evidence_artifacts is not None:

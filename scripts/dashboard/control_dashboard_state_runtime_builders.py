@@ -871,6 +871,36 @@ def _build_runtime_detail(
         active_task_background_run_task_contract_summary=(
             str((active_task or {}).get("background_run_task_contract_summary", "")).strip() or "-"
         ),
+        active_task_background_run_worker_result_summary=(
+            str((active_task or {}).get("background_run_worker_result_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_worker_result_actions=", ".join(
+            str(item).strip()
+            for item in (
+                (((active_task or {}).get("background_run_worker_result_actions")) if isinstance((active_task or {}).get("background_run_worker_result_actions"), list) else [])
+                or []
+            )
+            if str(item).strip()
+        )
+        or "-",
+        active_task_background_run_worker_result_cautions=", ".join(
+            str(item).strip()
+            for item in (
+                (((active_task or {}).get("background_run_worker_result_cautions")) if isinstance((active_task or {}).get("background_run_worker_result_cautions"), list) else [])
+                or []
+            )
+            if str(item).strip()
+        )
+        or "-",
+        active_task_background_run_worker_result_evidence_refs=", ".join(
+            str(item).strip()
+            for item in (
+                (((active_task or {}).get("background_run_worker_result_evidence_refs")) if isinstance((active_task or {}).get("background_run_worker_result_evidence_refs"), list) else [])
+                or []
+            )
+            if str(item).strip()
+        )
+        or "-",
         active_task_background_run_model_plan_summary=(
             str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
         ),

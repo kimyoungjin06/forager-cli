@@ -653,6 +653,14 @@ def invoke_background_ticket_worker(
     result["launch_kind"] = _trim(launch_spec.get("kind"), 64)
     if contract_summary:
         result["task_contract_summary"] = contract_summary
+    if bool(result.get("ok")):
+        task_result = worker_task_contract.load_worker_task_result(result.get("response_text"))
+        if task_result:
+            result["task_result_status"] = _trim(task_result.get("status"), 48) or "-"
+            result["task_result_summary"] = _trim(task_result.get("summary_line"), 320) or "-"
+            result["task_result_actions"] = list(task_result.get("actions") or [])
+            result["task_result_cautions"] = list(task_result.get("cautions") or [])
+            result["task_result_evidence_refs"] = list(task_result.get("evidence_refs") or [])
     return result
 
 

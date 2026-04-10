@@ -348,6 +348,8 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         ("launch_mode", 64),
         ("runtime_handle", 120),
         ("runtime_summary", 240),
+        ("worker_result_status", 48),
+        ("worker_result_summary", 240),
         ("created_at", 64),
         ("touched_at", 64),
         ("created_by", 96),
@@ -384,6 +386,15 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         snapshot["evidence_bundle"] = evidence_summary
     if evidence_artifacts:
         snapshot["evidence_artifacts"] = evidence_artifacts
+
+    for key, limit in (
+        ("worker_result_actions", 4),
+        ("worker_result_cautions", 4),
+        ("worker_result_evidence_refs", 8),
+    ):
+        rows = _dedupe_rows(list(raw.get(key) or []), limit=limit, text_limit=160)
+        if rows:
+            snapshot[key] = rows
 
     launch_spec = normalize_background_launch_spec_snapshot(raw.get("launch_spec"))
     if launch_spec:
@@ -1319,6 +1330,11 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_launch_mode": snapshot.get("launch_mode", ""),
             "background_run_runtime_handle": snapshot.get("runtime_handle", ""),
             "background_run_runtime_summary": snapshot.get("runtime_summary", ""),
+            "background_run_worker_result_status": snapshot.get("worker_result_status", ""),
+            "background_run_worker_result_summary": snapshot.get("worker_result_summary", ""),
+            "background_run_worker_result_actions": list(snapshot.get("worker_result_actions") or []),
+            "background_run_worker_result_cautions": list(snapshot.get("worker_result_cautions") or []),
+            "background_run_worker_result_evidence_refs": list(snapshot.get("worker_result_evidence_refs") or []),
             "background_run_created_at": snapshot.get("created_at", ""),
             "background_run_created_by": snapshot.get("created_by", ""),
             "background_run_source_surface": snapshot.get("source_surface", ""),

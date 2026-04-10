@@ -751,6 +751,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update reports/summary.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -815,6 +819,13 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "gateway_dispatch | mode=in_process_callback" in text
     assert "background_task_contract" in text
     assert "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2" in text
+    assert "background_worker_result" in text
+    assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
+    assert "background_worker_actions" in text
+    assert "update reports/summary.md" in text
+    assert "background_worker_cautions" in text
+    assert "keep review lane open" in text
+    assert "background_worker_refs" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "control_intent_action" in text
@@ -893,6 +904,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update reports/summary.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -954,6 +969,13 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "gateway_dispatch | mode=in_process_callback" in text
     assert "background_task_contract" in text
     assert "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2" in text
+    assert "background_worker_result" in text
+    assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
+    assert "background_worker_actions" in text
+    assert "update reports/summary.md" in text
+    assert "background_worker_cautions" in text
+    assert "keep review lane open" in text
+    assert "background_worker_refs" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "analysis-followup" in text

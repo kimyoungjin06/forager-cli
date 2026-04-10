@@ -672,7 +672,18 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
         assert "\"doc_paths\": [" in payload["prompt"]
         assert payload["system"] == worker_task_contract.WORKER_TASK_SYSTEM
         assert timeout_sec == 19.0
-        return {"response": "task: ok", "done": True}
+        return {
+            "response": json.dumps(
+                {
+                    "status": "ready",
+                    "summary": "worker summary drafted",
+                    "actions": ["update reports/summary.md"],
+                    "cautions": ["keep review lane open"],
+                    "evidence_refs": ["reports/summary.md"],
+                }
+            ),
+            "done": True,
+        }
 
     result = provider_adapter.invoke_background_ticket_worker(
         team_dir,
@@ -683,3 +694,8 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
     assert result["ok"] is True
     assert result["executed"] is True
     assert result["task_contract_summary"] == contract["summary"]
+    assert result["task_result_status"] == "ready"
+    assert result["task_result_summary"] == "status=ready | worker summary drafted | actions=1 | cautions=1 | refs=1"
+    assert result["task_result_actions"] == ["update reports/summary.md"]
+    assert result["task_result_cautions"] == ["keep review lane open"]
+    assert result["task_result_evidence_refs"] == ["reports/summary.md"]

@@ -612,6 +612,39 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_task_contract = str(task.get("background_run_task_contract_summary", "")).strip()
     if background_task_contract:
         lines.append("background_run_task_contract: " + background_task_contract[:240])
+    background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
+    if background_worker_result:
+        lines.append("background_run_worker_result: " + background_worker_result[:240])
+    background_worker_result_actions = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_result_actions") if isinstance(task.get("background_run_worker_result_actions"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_result_actions:
+        lines.append("background_run_worker_actions: " + ", ".join(background_worker_result_actions[:4])[:240])
+    background_worker_result_cautions = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_result_cautions") if isinstance(task.get("background_run_worker_result_cautions"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_result_cautions:
+        lines.append("background_run_worker_cautions: " + ", ".join(background_worker_result_cautions[:4])[:240])
+    background_worker_result_refs = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_result_evidence_refs") if isinstance(task.get("background_run_worker_result_evidence_refs"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_result_refs:
+        lines.append("background_run_worker_refs: " + ", ".join(background_worker_result_refs[:6])[:240])
     background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
     if background_judge_binding:
         lines.append("background_run_model_judge: " + background_judge_binding[:240])

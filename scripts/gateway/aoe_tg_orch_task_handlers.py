@@ -1749,6 +1749,7 @@ def handle_orch_task_command(
             final_status = str(final_ticket.get("status", "")).strip() or "unknown"
             final_runtime = str(final_ticket.get("runtime_summary", "-")).strip() or "-"
             final_evidence = str(final_ticket.get("evidence_bundle", "-")).strip() or "-"
+            final_worker_result = str(final_ticket.get("worker_result_summary", "-")).strip() or "-"
             append_action_audit_row(
                 team_dir,
                 headline="Background Worker Task Invoke | executed",
@@ -1756,7 +1757,7 @@ def handle_orch_task_command(
                 outcome_kind="background_worker",
                 outcome_status="executed" if final_status == "completed" else "blocked",
                 outcome_reason_code=(final_status or "unknown").lower(),
-                outcome_detail=final_runtime,
+                outcome_detail=(f"{final_runtime} | {final_worker_result}" if final_worker_result and final_worker_result != "-" else final_runtime)[:240],
                 next_step=f"/orch status {alias}",
                 remediation="inspect task detail, context pack, and background evidence before re-running the bounded worker task invoke",
                 source_command=f"/orch bgw-task {alias}",
@@ -1764,7 +1765,9 @@ def handle_orch_task_command(
                 link_href=_runtime_action_link(alias),
                 at=now_iso(),
             )
-            response_hint = final_evidence.split("response=", 1)[1] if "response=" in final_evidence else "-"
+            response_hint = final_evidence.split("response=", 1)[1] if "response=" in final_evidence else ""
+            if not response_hint:
+                response_hint = final_worker_result if final_worker_result and final_worker_result != "-" else "-"
             send(
                 "background worker task invoke\n"
                 f"- runtime: {key}\n"
@@ -1772,6 +1775,7 @@ def handle_orch_task_command(
                 f"- contract: {str(contract.get('summary', '')).strip() or '-'}\n"
                 f"- status: {final_status}\n"
                 f"- runtime_summary: {final_runtime}\n"
+                f"- worker_result: {final_worker_result}\n"
                 f"- response: {response_hint or '-'}\n"
                 "next:\n"
                 f"- /orch status {alias}",
