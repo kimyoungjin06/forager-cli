@@ -1966,6 +1966,7 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
     assert payload["latest_judge_decision_bridge"]["applied"] is False
     assert payload["latest_judge_decision_bridge"]["recommended_action"] == "retry"
+    assert payload["replan_auto_decision"] == {}
 
 
 def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judge_next_step(tmp_path: Path, monkeypatch) -> None:
@@ -2026,6 +2027,12 @@ def test_control_dashboard_post_replan_route_terminal_block_promotes_latest_judg
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
     assert payload["latest_judge_decision_bridge"]["applied"] is True
     assert payload["latest_judge_decision_bridge"]["applied_next_step"] == "/retry T-001"
+    assert payload["replan_auto_decision"]["current_action"] == "replan"
+    assert payload["replan_auto_decision"]["suggested_action"] == "retry"
+    assert payload["replan_auto_decision"]["suggested_next_step"] == "/retry T-001"
+    assert payload["replan_auto_decision"]["decision_mode"] == "promoted_next_step"
+    assert payload["replan_auto_decision"]["bridge_applied"] is True
+    assert payload["replan_auto_decision"]["can_auto_apply"] is True
     assert (
         action_audit.load_latest_judge_decision_bridge_summary_for_runtime(team_dir, project_alias="O2")
         == "mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes"
@@ -2779,6 +2786,7 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
     assert payload["latest_judge_decision"]["verdict"] == "continue"
     assert payload["latest_judge_decision"]["recommended_action"] == "retry"
     assert payload["latest_judge_decision_bridge"]["applied"] is False
+    assert payload["replan_auto_decision"] == {}
 
 
 def test_execute_retry_run_transition_requires_structured_outcome(tmp_path: Path, monkeypatch) -> None:

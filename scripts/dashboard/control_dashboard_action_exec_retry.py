@@ -244,6 +244,7 @@ def _append_blocked_retry_replan_audit(
     next_step: str,
     remediation: str,
     latest_judge_decision_bridge: Dict[str, Any],
+    replan_auto_decision: Dict[str, Any],
     now_iso: Any,
 ) -> None:
     if not blocked or not isinstance(entry, dict):
@@ -270,8 +271,43 @@ def _append_blocked_retry_replan_audit(
         at=now_iso(),
         extra={
             "latest_judge_decision_bridge": dict(latest_judge_decision_bridge or {}),
+            "replan_auto_decision": dict(replan_auto_decision or {}),
         },
     )
+
+
+def _replan_auto_decision_stub(
+    *,
+    source_command: str,
+    next_step: str,
+    latest_judge_decision: Dict[str, str],
+    latest_judge_decision_bridge: Dict[str, Any],
+) -> Dict[str, Any]:
+    if _command_head(source_command) != "/replan":
+        return {}
+    decision = latest_judge_decision if isinstance(latest_judge_decision, dict) else {}
+    bridge = latest_judge_decision_bridge if isinstance(latest_judge_decision_bridge, dict) else {}
+    suggested_action = str(bridge.get("recommended_action", "")).strip() or str(decision.get("recommended_action", "")).strip() or "-"
+    suggested_next_step = (
+        str(bridge.get("applied_next_step", "")).strip()
+        or str(bridge.get("candidate_next_step", "")).strip()
+        or str(decision.get("next_step", "")).strip()
+        or str(next_step or "").strip()
+        or "-"
+    )
+    return {
+        "source": "latest_offdesk_judge",
+        "current_action": "replan",
+        "suggested_action": suggested_action,
+        "suggested_next_step": suggested_next_step,
+        "decision_mode": str(bridge.get("decision_mode", "")).strip() or ("judge_signal" if decision else "none"),
+        "bridge_applied": bool(bridge.get("applied", False)),
+        "supports_auto_decision": bool(bridge.get("supports_auto_decision", False)),
+        "can_auto_apply": suggested_action in {"retry", "replan", "followup_execute"} and suggested_next_step.startswith("/"),
+        "reasoning": str(decision.get("reasoning", "")).strip() or "-",
+        "caution": str(decision.get("caution", "")).strip() or "-",
+        "confidence": str(decision.get("confidence", "")).strip() or "-",
+    }
 
 
 def _now_iso() -> str:
@@ -750,11 +786,18 @@ def _execute_retry_run_transition(
     latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     latest_judge_decision_bridge: Dict[str, Any] = {}
+    replan_auto_decision: Dict[str, Any] = {}
     if blocked:
         next_step, latest_judge_decision_bridge = _latest_judge_decision_bridge(
             next_step,
             latest_judge_decision=latest_judge_decision,
             source_command=source_command,
+        )
+        replan_auto_decision = _replan_auto_decision_stub(
+            source_command=source_command,
+            next_step=next_step,
+            latest_judge_decision=latest_judge_decision,
+            latest_judge_decision_bridge=latest_judge_decision_bridge,
         )
         remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge)
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
@@ -768,6 +811,7 @@ def _execute_retry_run_transition(
             next_step=next_step,
             remediation=remediation,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
+            replan_auto_decision=replan_auto_decision,
             now_iso=_now_iso,
         )
     return _json(
@@ -804,6 +848,7 @@ def _execute_retry_run_transition(
             "latest_judge": latest_judge,
             "latest_judge_decision": latest_judge_decision,
             "latest_judge_decision_bridge": latest_judge_decision_bridge,
+            "replan_auto_decision": replan_auto_decision,
         },
         status=409 if blocked else 200,
     )
@@ -1011,6 +1056,12 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             latest_judge_decision=latest_judge_decision,
             source_command=str(spec.get("command", "-")),
         )
+        replan_auto_decision = _replan_auto_decision_stub(
+            source_command=str(spec.get("command", "-")),
+            next_step=next_step,
+            latest_judge_decision=latest_judge_decision,
+            latest_judge_decision_bridge=latest_judge_decision_bridge,
+        )
         remediation = _retry_blocked_remediation_with_latest_judge(
             _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
             latest_judge,
@@ -1026,6 +1077,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             next_step=next_step,
             remediation=remediation,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
+            replan_auto_decision=replan_auto_decision,
             now_iso=_now_iso,
         )
         return _json(
@@ -1046,6 +1098,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "latest_judge": latest_judge,
                 "latest_judge_decision": latest_judge_decision,
                 "latest_judge_decision_bridge": latest_judge_decision_bridge,
+                "replan_auto_decision": replan_auto_decision,
             },
             status=409,
         )
