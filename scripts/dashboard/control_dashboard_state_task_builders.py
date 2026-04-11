@@ -22,6 +22,7 @@ import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
 import aoe_tg_task_view as task_view
 import aoe_tg_team_observatory as team_observatory
+import aoe_tg_worker_task_contract as worker_task_contract
 
 from control_dashboard_state_common import (
     _append_unique_action_button,
@@ -42,6 +43,17 @@ from control_dashboard_state_common import (
     _runtime_path,
 )
 from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
+
+
+def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
+    return worker_task_contract.summarize_worker_update_operator_summary(
+        {
+            "status": task.get("background_run_worker_update_stub_status"),
+            "summary_line": task.get("background_run_worker_update_stub_summary"),
+            "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+        },
+        task.get("background_run_worker_update_proposal_ids"),
+    )
 
 
 def _selected_slot_runner(entry: Dict[str, Any], task: Dict[str, Any]) -> str:
@@ -449,6 +461,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 if str(item).strip()
             )
             or "-",
+            background_run_worker_update_proposal_summary=(
+                str(task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
+            ),
+            background_run_worker_update_operator_summary=_worker_update_operator_summary(task),
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"
             ),

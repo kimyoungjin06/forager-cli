@@ -22,6 +22,7 @@ import aoe_tg_document_registry as document_registry
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
+import aoe_tg_worker_task_contract as worker_task_contract
 import aoe_tg_workspace_brief as workspace_brief
 
 from control_dashboard_state_common import (
@@ -45,6 +46,17 @@ from control_dashboard_state_common import (
     _task_rerun_summary,
 )
 from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
+
+
+def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
+    return worker_task_contract.summarize_worker_update_operator_summary(
+        {
+            "status": task.get("background_run_worker_update_stub_status"),
+            "summary_line": task.get("background_run_worker_update_stub_summary"),
+            "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+        },
+        task.get("background_run_worker_update_proposal_ids"),
+    )
 from control_dashboard_state_task_builders import _build_runtime_recent_task_rows
 
 
@@ -383,6 +395,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 or "-",
                 active_task_background_run_launch_spec_summary=(
                     str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_worker_update_operator_summary=_worker_update_operator_summary(active_task or {}),
+                active_task_background_run_worker_update_proposal_summary=(
+                    str((active_task or {}).get("background_run_worker_update_proposal_summary", "")).strip() or "-"
                 ),
                 active_task_background_run_model_plan_summary=(
                     str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
@@ -913,6 +929,10 @@ def _build_runtime_detail(
             if str(item).strip()
         )
         or "-",
+        active_task_background_run_worker_update_proposal_summary=(
+            str((active_task or {}).get("background_run_worker_update_proposal_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_worker_update_operator_summary=_worker_update_operator_summary(active_task or {}),
         active_task_background_run_model_plan_summary=(
             str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
         ),

@@ -14,6 +14,7 @@ from aoe_tg_context_pack import load_context_pack
 WORKER_TASK_CONTRACT_VERSION = "2026-04-10.v1"
 WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
+WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_SYSTEM = (
     "You are the bounded background worker. Return strict JSON with keys: "
     "status, summary, actions, cautions, evidence_refs. Keep every field concise."
@@ -308,3 +309,133 @@ def derive_worker_task_update_stub(contract: Any, result: Any) -> Dict[str, Any]
             "evidence_refs": refs,
         }
     )
+
+
+def _proposal_key(text: Any) -> str:
+    return " ".join(str(text or "").strip().split()).lower()[:240]
+
+
+def _proposal_priority(update_stub: Dict[str, Any]) -> str:
+    caution_text = " ".join(str(item).strip().lower() for item in (update_stub.get("cautions") or []) if str(item).strip())
+    if any(token in caution_text for token in ("risk", "blocked", "error", "fail", "manual")):
+        return "P1"
+    if list(update_stub.get("target_artifacts") or []):
+        return "P2"
+    return "P3"
+
+
+def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List[Dict[str, Any]]:
+    contract_row = load_worker_task_contract(contract)
+    stub = sanitize_worker_task_update_stub(update_stub)
+    if not stub:
+        return []
+    status = _trim(stub.get("status"), 48).lower()
+    if status in {"", "-", "none"}:
+        return []
+    task_label = _trim(contract_row.get("task_label"), 96) or "task"
+    reason = _trim(stub.get("summary_line"), 240) or _update_stub_summary(stub)
+    priority = _proposal_priority(stub)
+    targets = list(stub.get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
+    actions = list(stub.get("actions") or [])
+    proposals: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for target in targets[:3]:
+        clean = _trim(target, 160)
+        if not clean:
+            continue
+        summary = f"review worker artifact update for {task_label}: {clean}"[:600]
+        key = _proposal_key(summary)
+        if key in seen:
+            continue
+        seen.add(key)
+        proposals.append(
+            {
+                "version": WORKER_TASK_PROPOSAL_STUB_VERSION,
+                "summary": summary,
+                "priority": priority,
+                "kind": "handoff",
+                "reason": reason,
+                "confidence": 0.72,
+                "created_by": "worker",
+                "source_file": clean,
+                "source_reason": "worker_update_stub",
+            }
+        )
+    if not proposals:
+        action_head = _trim(actions[0] if actions else "", 160)
+        summary = (
+            f"review worker follow-up for {task_label}: {action_head}"[:600]
+            if action_head
+            else f"review worker update stub for {task_label}"[:600]
+        )
+        proposals.append(
+            {
+                "version": WORKER_TASK_PROPOSAL_STUB_VERSION,
+                "summary": summary,
+                "priority": priority,
+                "kind": "followup",
+                "reason": reason,
+                "confidence": 0.64,
+                "created_by": "worker",
+                "source_reason": "worker_update_stub",
+            }
+        )
+    return proposals
+
+
+def match_worker_update_proposal_ids(
+    proposals_store: Any,
+    *,
+    request_id: Any,
+    proposal_payloads: Any,
+) -> List[str]:
+    store = proposals_store if isinstance(proposals_store, list) else []
+    payloads = proposal_payloads if isinstance(proposal_payloads, list) else []
+    request_token = _trim(request_id, 128)
+    target_keys = {
+        _proposal_key(row.get("summary"))
+        for row in payloads
+        if isinstance(row, dict) and _proposal_key(row.get("summary"))
+    }
+    if not target_keys:
+        return []
+    ids: List[str] = []
+    for row in store:
+        if not isinstance(row, dict):
+            continue
+        if request_token and _trim(row.get("source_request_id"), 128) != request_token:
+            continue
+        if _proposal_key(row.get("summary")) not in target_keys:
+            continue
+        proposal_id = _trim(row.get("id"), 32)
+        if proposal_id and proposal_id not in ids:
+            ids.append(proposal_id)
+    return ids[:8]
+
+
+def summarize_worker_update_proposal_summary(update_stub: Any, proposal_ids: Any) -> str:
+    stub = sanitize_worker_task_update_stub(update_stub)
+    ids = _uniq(proposal_ids, limit=8, text_limit=32)
+    if not stub and not ids:
+        return "-"
+    target_text = ",".join(list(stub.get("target_artifacts") or [])[:2]) if stub else "-"
+    parts = []
+    status = _trim((stub or {}).get("status"), 48) or "-"
+    if status != "-":
+        parts.append(f"status={status}")
+    if ids:
+        parts.append(f"proposals={len(ids)}")
+        parts.append(f"ids={','.join(ids[:2])}")
+    if target_text and target_text != "-":
+        parts.append(f"targets={target_text}")
+    return " | ".join(parts)[:320] if parts else "-"
+
+
+def summarize_worker_update_operator_summary(update_stub: Any, proposal_ids: Any) -> str:
+    stub = sanitize_worker_task_update_stub(update_stub)
+    proposal_summary = summarize_worker_update_proposal_summary(stub, proposal_ids)
+    if proposal_summary != "-":
+        return proposal_summary
+    if not stub:
+        return "-"
+    return _trim(stub.get("summary_line"), 320) or _update_stub_summary(stub)

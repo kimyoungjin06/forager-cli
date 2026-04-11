@@ -217,7 +217,15 @@ def _latest_judge_decision_bridge(
         "applied": promoted != current,
         "applied_next_step": promoted if promoted != current else "-",
         "decision_mode": "promoted_next_step" if promoted != current else "observe_only",
-        "supports_auto_decision": recommended_action in {"retry", "replan", "followup", "review", "judge"},
+        "supports_auto_decision": recommended_action in {
+            "retry",
+            "replan",
+            "followup",
+            "followup_execute",
+            "review",
+            "manual_review",
+            "judge",
+        },
     }
     return promoted, bridge
 
@@ -327,7 +335,13 @@ def _replan_auto_routing_policy(
     suggested_next_step = str(decision.get("suggested_next_step", "")).strip() or "-"
     supports_auto_decision = bool(decision.get("supports_auto_decision", False))
     can_auto_apply = bool(decision.get("can_auto_apply", False)) and suggested_next_step.startswith("/")
-    status = "ready" if can_auto_apply else ("observe_only" if supports_auto_decision else "unavailable")
+    manual_ready = (
+        supports_auto_decision
+        and not can_auto_apply
+        and suggested_next_step.startswith("/")
+        and suggested_action in {"followup", "manual_review", "review", "judge"}
+    )
+    status = "ready" if can_auto_apply else ("manual_ready" if manual_ready else ("observe_only" if supports_auto_decision else "unavailable"))
     return {
         "source": str(decision.get("source", "")).strip() or "latest_offdesk_judge",
         "status": status,
@@ -337,7 +351,7 @@ def _replan_auto_routing_policy(
         "decision_mode": str(decision.get("decision_mode", "")).strip() or "none",
         "supports_auto_decision": supports_auto_decision,
         "can_auto_apply": can_auto_apply,
-        "requires_operator_confirmation": can_auto_apply,
+        "requires_operator_confirmation": can_auto_apply or manual_ready,
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",

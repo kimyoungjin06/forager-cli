@@ -183,6 +183,12 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 active_task_background_run_external_phase=str(row.get("active_task_background_run_external_phase", "")).strip() or "-",
                 active_task_background_run_external_note=str(row.get("active_task_background_run_external_note", "")).strip() or "-",
                 active_task_background_run_launch_spec_summary=str(row.get("active_task_background_run_launch_spec_summary", "")).strip() or "-",
+                active_task_background_run_worker_update_operator_summary=(
+                    str(row.get("active_task_background_run_worker_update_operator_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_worker_update_proposal_summary=(
+                    str(row.get("active_task_background_run_worker_update_proposal_summary", "")).strip() or "-"
+                ),
                 active_task_background_run_model_plan_summary=str(row.get("active_task_background_run_model_plan_summary", "")).strip() or "-",
                 workspace_summary=str(row.get("workspace_summary", "")).strip() or "-",
                 document_registry_summary=str(row.get("document_registry_summary", "")).strip() or "-",

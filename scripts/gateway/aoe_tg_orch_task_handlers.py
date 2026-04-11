@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Orchestrator task lifecycle handlers for Telegram gateway."""
 
+from datetime import datetime
 import json
 from pathlib import Path
 from urllib.parse import quote
@@ -50,6 +51,7 @@ from aoe_tg_external_background_worker import (
     read_external_background_result,
 )
 from aoe_tg_task_state import derive_background_run_external_snapshot
+from aoe_tg_todo_state import ensure_todo_proposal_store, merge_todo_proposals
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
 
@@ -661,6 +663,7 @@ def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path:
             str(task.get("background_run_ticket_id", "")).strip(),
             str(task.get("background_run_evidence_bundle", "")).strip(),
             str(task.get("background_run_runtime_handle", "")).strip(),
+            str(task.get("background_run_worker_update_proposal_summary", "")).strip(),
         )
         apply_background_run_ticket_snapshot(task, ticket)
         external_snapshot = derive_background_run_external_snapshot(task)
@@ -678,11 +681,53 @@ def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path:
             bundle = str(ticket.get("evidence_bundle", "")).strip()
             if bundle:
                 task["result"]["background_run_evidence_bundle"] = bundle
+        launch_spec = ticket.get("launch_spec") if isinstance(ticket.get("launch_spec"), dict) else {}
+        update_stub = {
+            "status": ticket.get("worker_update_stub_status"),
+            "summary_line": ticket.get("worker_update_stub_summary"),
+            "target_artifacts": ticket.get("worker_update_stub_targets"),
+        }
+        proposal_ids: List[str] = []
+        proposal_summary = "-"
+        if str(ticket.get("status", "")).strip().lower() == "completed":
+            proposal_payloads = worker_task_contract.derive_worker_update_todo_proposals(
+                launch_spec.get("provider_task_contract_json"),
+                update_stub,
+            )
+            if proposal_payloads:
+                merge_todo_proposals(
+                    entry=entry,
+                    request_id=request_id,
+                    task=task,
+                    source_todo_id=str(task.get("source_todo_id", "")).strip(),
+                    proposals_data=proposal_payloads,
+                    now_iso=lambda: datetime.now().astimezone().replace(microsecond=0).isoformat(),
+                )
+                proposals_store, _proposal_seq = ensure_todo_proposal_store(entry)
+                proposal_ids = worker_task_contract.match_worker_update_proposal_ids(
+                    proposals_store,
+                    request_id=request_id,
+                    proposal_payloads=proposal_payloads,
+                )
+        proposal_summary = worker_task_contract.summarize_worker_update_proposal_summary(update_stub, proposal_ids)
+        if proposal_summary not in {"", "-"}:
+            task["background_run_worker_update_proposal_summary"] = proposal_summary
+            task["background_run_worker_update_proposal_ids"] = list(proposal_ids or [])
+            if isinstance(task.get("result"), dict):
+                task["result"]["background_run_worker_update_proposal_summary"] = proposal_summary
+                task["result"]["background_run_worker_update_proposal_ids"] = list(proposal_ids or [])
+        else:
+            task.pop("background_run_worker_update_proposal_summary", None)
+            task.pop("background_run_worker_update_proposal_ids", None)
+            if isinstance(task.get("result"), dict):
+                task["result"].pop("background_run_worker_update_proposal_summary", None)
+                task["result"].pop("background_run_worker_update_proposal_ids", None)
         after = (
             str(task.get("background_run_status", "")).strip(),
             str(task.get("background_run_ticket_id", "")).strip(),
             str(task.get("background_run_evidence_bundle", "")).strip(),
             str(task.get("background_run_runtime_handle", "")).strip(),
+            str(task.get("background_run_worker_update_proposal_summary", "")).strip(),
         )
         if after != before:
             changed = True
@@ -1751,6 +1796,7 @@ def handle_orch_task_command(
             final_evidence = str(final_ticket.get("evidence_bundle", "-")).strip() or "-"
             final_worker_result = str(final_ticket.get("worker_result_summary", "-")).strip() or "-"
             final_worker_update_stub = str(final_ticket.get("worker_update_stub_summary", "-")).strip() or "-"
+            final_worker_proposals = str(latest_task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
             append_action_audit_row(
                 team_dir,
                 headline="Background Worker Task Invoke | executed",
@@ -1778,6 +1824,7 @@ def handle_orch_task_command(
                 f"- runtime_summary: {final_runtime}\n"
                 f"- worker_result: {final_worker_result}\n"
                 f"- update_stub: {final_worker_update_stub}\n"
+                f"- proposal_stub: {final_worker_proposals}\n"
                 f"- response: {response_hint or '-'}\n"
                 "next:\n"
                 f"- /orch status {alias}",

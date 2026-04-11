@@ -658,6 +658,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     ]
     if background_worker_update_targets:
         lines.append("background_run_worker_targets: " + ", ".join(background_worker_update_targets[:6])[:240])
+    background_worker_update_proposals = str(task.get("background_run_worker_update_proposal_summary", "")).strip()
+    if background_worker_update_proposals:
+        lines.append("background_run_worker_update_proposals: " + background_worker_update_proposals[:240])
     background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
     if background_judge_binding:
         lines.append("background_run_model_judge: " + background_judge_binding[:240])

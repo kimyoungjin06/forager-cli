@@ -108,6 +108,8 @@ class RuntimeCardDTO:
     active_task_background_run_evidence_bundle: str
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
+    active_task_background_run_worker_update_operator_summary: str
+    active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_model_plan_summary: str
     workspace_summary: str
     document_registry_summary: str
@@ -225,6 +227,8 @@ class TaskDetailDTO:
     background_run_worker_result_evidence_refs: str = ""
     background_run_worker_update_stub_summary: str = ""
     background_run_worker_update_stub_targets: str = ""
+    background_run_worker_update_proposal_summary: str = ""
+    background_run_worker_update_operator_summary: str = ""
     background_run_model_plan_summary: str = ""
     background_run_model_judge_binding_summary: str = ""
     background_run_model_judge_probe_summary: str = ""
@@ -317,6 +321,8 @@ class RuntimeDetailDTO:
     active_task_background_run_worker_result_evidence_refs: str
     active_task_background_run_worker_update_stub_summary: str
     active_task_background_run_worker_update_stub_targets: str
+    active_task_background_run_worker_update_proposal_summary: str
+    active_task_background_run_worker_update_operator_summary: str
     active_task_background_run_model_plan_summary: str
     active_task_background_run_model_judge_binding_summary: str
     active_task_background_run_model_judge_probe_summary: str
@@ -437,6 +443,8 @@ class RecoveryRuntimeDTO:
     active_task_background_run_external_phase: str
     active_task_background_run_external_note: str
     active_task_background_run_launch_spec_summary: str
+    active_task_background_run_worker_update_operator_summary: str
+    active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_model_plan_summary: str
     workspace_summary: str
     document_registry_summary: str

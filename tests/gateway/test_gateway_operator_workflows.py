@@ -481,6 +481,7 @@ def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypa
     assert "task=T-001 | pack=offdesk_execute | brief=executable | docs=1" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "status=ready | targets=reports/summary.md | actions=1 | refs=1" in text
+    assert "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
     assert "TASK_WORKER_OK" in text
     buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
     assert "/orch bgw-task O2" in buttons
@@ -496,6 +497,15 @@ def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypa
     assert rows[0]["worker_update_stub_status"] == "ready"
     assert rows[0]["worker_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
     assert rows[0]["worker_update_stub_targets"] == ["reports/summary.md"]
+    proposals = state["projects"]["twinpaper"].get("todo_proposals") or []
+    assert len(proposals) == 1
+    assert proposals[0]["summary"] == "review worker artifact update for T-001: reports/summary.md"
+    assert proposals[0]["kind"] == "handoff"
+    assert proposals[0]["created_by"] == "worker"
+    assert (
+        state["projects"]["twinpaper"]["tasks"]["REQ-1"]["background_run_worker_update_proposal_summary"]
+        == "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    )
     audit_file = team_dir / "dashboard" / "action-history.jsonl"
     audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert audit_rows[-1]["source_command"] == "/orch bgw-task O2"

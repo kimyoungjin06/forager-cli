@@ -83,6 +83,8 @@ def _judge_recommended_action(next_step: str, verdict: str) -> str:
         return "replan"
     if step.startswith("/retry "):
         return "retry"
+    if step.startswith("/followup "):
+        return "followup"
     if step.startswith("/followup-exec "):
         return "followup_execute"
     if step.startswith("/offdesk review") or step.startswith("/orch judge "):
@@ -597,6 +599,8 @@ def summarize_replan_auto_operator_status(
         return f"ready={ready_next} | applied={applied_next} | at={applied_at}"
     if ready_status == "ready" and ready_next not in {"", "-"}:
         return f"ready={ready_next} | waiting_for_apply"
+    if ready_status == "manual_ready" and ready_next not in {"", "-"}:
+        return f"manual={ready_next} | waiting_for_operator"
     if applied_next not in {"", "-"}:
         return f"applied={applied_next} | at={applied_at}"
     return "-"
@@ -618,6 +622,11 @@ def summarize_replan_auto_operator_summary(
         and str(normalized_policy.get("suggested_next_step", "")).strip().startswith("/")
     ):
         return f"{status_summary} | apply=dashboard button | api:auto_route_apply=true"
+    if (
+        str(normalized_policy.get("status", "")).strip() == "manual_ready"
+        and str(normalized_policy.get("suggested_next_step", "")).strip().startswith("/")
+    ):
+        return f"{status_summary} | do={str(normalized_policy.get('suggested_next_step', '')).strip()}"
     return status_summary
 
 

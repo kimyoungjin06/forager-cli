@@ -230,6 +230,8 @@ def build_nightly_session_summary(
                 "active_task_background_run_evidence_bundle": detail.active_task_background_run_evidence_bundle,
                 "active_task_background_run_evidence_artifacts": detail.active_task_background_run_evidence_artifacts,
                 "active_task_background_run_launch_spec_summary": detail.active_task_background_run_launch_spec_summary,
+                "active_task_background_run_worker_update_operator_summary": detail.active_task_background_run_worker_update_operator_summary,
+                "active_task_background_run_worker_update_proposal_summary": detail.active_task_background_run_worker_update_proposal_summary,
                 "active_task_background_run_model_plan_summary": detail.active_task_background_run_model_plan_summary,
                 "workspace_summary": detail.workspace_summary,
                 "document_registry_summary": detail.document_registry_summary,
@@ -411,6 +413,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     f"  - backend: {runtime.get('active_task_backend', '-')}",
                     f"  - backend_note: {runtime.get('active_task_backend_note', '-') or '-'}",
                     f"  - rate_limit: {runtime.get('active_task_rate_limit', '-')}",
+                    f"  - worker_update: {runtime.get('active_task_background_run_worker_update_operator_summary', '-')}",
                 ]
             )
             active_task_hints = runtime.get("active_task_hints") if isinstance(runtime.get("active_task_hints"), list) else []
