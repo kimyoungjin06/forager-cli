@@ -45,6 +45,7 @@ from control_dashboard_state_common import (
     _task_command_contract,
     _task_followup_summary,
     _task_rerun_summary,
+    _worker_apply_proposal_button,
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
@@ -288,18 +289,35 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 policy=latest_replan_auto_routing_policy,
             ),
         )
-        runtime_safe_action_buttons = _append_unique_action_button(
-            runtime_safe_action_buttons,
-            _replan_manual_route_action_button(
-                project_alias=alias,
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                policy=latest_replan_auto_routing_policy,
-            ),
+        runtime_manual_route_button = _replan_manual_route_action_button(
+            project_alias=alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=latest_replan_auto_routing_policy,
         )
+        if runtime_manual_route_button is not None and str(runtime_manual_route_button.mode).strip() == "phase2":
+            runtime_phase2_action_buttons = _append_unique_action_button(runtime_phase2_action_buttons, runtime_manual_route_button)
+        else:
+            runtime_safe_action_buttons = _append_unique_action_button(runtime_safe_action_buttons, runtime_manual_route_button)
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                update_stub={
+                    "status": (active_task or {}).get("background_run_worker_update_stub_status"),
+                    "summary_line": (active_task or {}).get("background_run_worker_update_stub_summary"),
+                    "target_artifacts": (active_task or {}).get("background_run_worker_update_stub_targets"),
+                    "actions": (active_task or {}).get("background_run_worker_result_actions"),
+                    "cautions": (active_task or {}).get("background_run_worker_result_cautions"),
+                    "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
+                },
+                proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        runtime_phase2_action_buttons = _append_unique_action_button(
+            runtime_phase2_action_buttons,
+            _worker_apply_proposal_button(
                 label=str(row.get("active_task_label", "")).strip(),
                 request_id=active_request_id,
                 update_stub={
@@ -822,18 +840,35 @@ def _build_runtime_detail(
             policy=latest_replan_auto_routing_policy,
         ),
     )
-    active_task_safe_action_buttons = _append_unique_action_button(
-        active_task_safe_action_buttons,
-        _replan_manual_route_action_button(
-            project_alias=target_alias,
-            label=str(row.get("active_task_label", "")).strip(),
-            request_id=active_request_id,
-            policy=latest_replan_auto_routing_policy,
-        ),
+    active_task_manual_route_button = _replan_manual_route_action_button(
+        project_alias=target_alias,
+        label=str(row.get("active_task_label", "")).strip(),
+        request_id=active_request_id,
+        policy=latest_replan_auto_routing_policy,
     )
+    if active_task_manual_route_button is not None and str(active_task_manual_route_button.mode).strip() == "phase2":
+        active_task_phase2_action_buttons = _append_unique_action_button(active_task_phase2_action_buttons, active_task_manual_route_button)
+    else:
+        active_task_safe_action_buttons = _append_unique_action_button(active_task_safe_action_buttons, active_task_manual_route_button)
     active_task_safe_action_buttons = _append_unique_action_button(
         active_task_safe_action_buttons,
         _worker_update_preview_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            update_stub={
+                "status": (active_task or {}).get("background_run_worker_update_stub_status"),
+                "summary_line": (active_task or {}).get("background_run_worker_update_stub_summary"),
+                "target_artifacts": (active_task or {}).get("background_run_worker_update_stub_targets"),
+                "actions": (active_task or {}).get("background_run_worker_result_actions"),
+                "cautions": (active_task or {}).get("background_run_worker_result_cautions"),
+                "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
+            },
+            proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+        ),
+    )
+    active_task_phase2_action_buttons = _append_unique_action_button(
+        active_task_phase2_action_buttons,
+        _worker_apply_proposal_button(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
             update_stub={

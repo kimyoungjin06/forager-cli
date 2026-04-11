@@ -2323,6 +2323,68 @@ def test_control_dashboard_post_replan_route_surfaces_manual_ready_followup_poli
     assert payload["replan_auto_routing_policy"]["can_auto_apply"] is False
 
 
+def test_control_dashboard_post_replan_route_surfaces_manual_ready_followup_execute_policy(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T10:06:00+09:00",
+        extra={
+            "response_text": (
+                "{\"verdict\":\"hold\",\"confidence\":\"medium\",\"reasoning\":\"execution slice is safe\","
+                "\"recommended_action\":\"followup_execute\",\"next_step\":\"/followup-exec T-001 lane L2\","
+                "\"caution\":\"keep review lane manual\"}"
+            ),
+        },
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["next_step"] == "/followup-exec T-001 lane L2"
+    assert payload["latest_judge_decision"]["recommended_action"] == "followup_execute"
+    assert payload["replan_auto_decision"]["suggested_action"] == "followup_execute"
+    assert payload["replan_auto_decision"]["suggested_next_step"] == "/followup-exec T-001 lane L2"
+    assert payload["replan_auto_decision"]["can_auto_apply"] is False
+    assert payload["replan_auto_routing_policy"]["status"] == "manual_ready"
+    assert payload["replan_auto_routing_policy"]["suggested_action"] == "followup_execute"
+    assert payload["replan_auto_routing_policy"]["suggested_next_step"] == "/followup-exec T-001 lane L2"
+    assert payload["replan_auto_routing_policy"]["requires_operator_confirmation"] is True
+    assert payload["replan_auto_routing_policy"]["can_auto_apply"] is False
+
+
 def test_control_dashboard_post_replan_route_auto_routes_to_retry_when_confirmed(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -2804,6 +2866,128 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
     assert "Accept Worker Proposal" in recovery_text
 
 
+def test_dashboard_surfaces_manual_ready_followup_execute_and_worker_apply_button(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | target=reports/summary.md"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan | blocked",
+        status="blocked",
+        outcome_kind="replan",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked replan",
+        next_step="/followup-exec T-001 lane L2",
+        remediation="judge decision reuse: action=followup_execute next=/followup-exec T-001 lane L2",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:07:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "hold",
+                "confidence": "medium",
+                "recommended_action": "followup_execute",
+                "candidate_next_step": "/followup-exec T-001 lane L2",
+                "applied": True,
+                "applied_next_step": "/followup-exec T-001 lane L2",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            },
+            "replan_auto_decision": {
+                "source": "latest_offdesk_judge",
+                "current_action": "replan",
+                "suggested_action": "followup_execute",
+                "suggested_next_step": "/followup-exec T-001 lane L2",
+                "decision_mode": "promoted_next_step",
+                "bridge_applied": True,
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "confidence": "medium",
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "manual_ready",
+                "current_action": "replan",
+                "suggested_action": "followup_execute",
+                "suggested_next_step": "/followup-exec T-001 lane L2",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    expected_manual_payload = '{"task_ref":"T-001","lane_ids":["L2"]}'
+    expected_apply_payload = '{"task_ref":"T-001"}'
+    assert any(
+        btn.label == "Apply Judge Manual Step"
+        and btn.path == "/control/actions/task/followup-execute"
+        and btn.payload_json == expected_manual_payload
+        for btn in runtime_card.runtime_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Propose Artifact Apply"
+        and btn.path == "/control/actions/task/worker-apply-propose"
+        and btn.payload_json == expected_apply_payload
+        for btn in runtime_card.runtime_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Apply Judge Manual Step"
+        and btn.path == "/control/actions/task/followup-execute"
+        and btn.payload_json == expected_manual_payload
+        for btn in runtime_detail.active_task_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Propose Artifact Apply"
+        and btn.path == "/control/actions/task/worker-apply-propose"
+        and btn.payload_json == expected_apply_payload
+        for btn in runtime_detail.active_task_phase2_action_buttons
+    )
+    assert task_detail is not None
+    assert any(
+        btn.label == "Apply Judge Manual Step"
+        and btn.path == "/control/actions/task/followup-execute"
+        and btn.payload_json == expected_manual_payload
+        for btn in task_detail.phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Propose Artifact Apply"
+        and btn.path == "/control/actions/task/worker-apply-propose"
+        and btn.payload_json == expected_apply_payload
+        for btn in task_detail.phase2_action_buttons
+    )
+
+
 def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -2973,6 +3157,59 @@ def test_control_dashboard_post_task_worker_update_preview_route_returns_preview
     assert payload["preview"]["actions"] == ["update reports/summary.md"]
     assert payload["preview"]["cautions"] == ["keep review lane open"]
     assert payload["preview"]["evidence_refs"] == ["reports/summary.md"]
+
+
+def test_control_dashboard_post_task_worker_apply_propose_route_creates_apply_proposal(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update reports/summary.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-propose",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/task T-001 | worker-apply-propose"
+    assert payload["next_step"] == "/todo O2 accept PROP-001"
+    assert payload["proposal"]["created_count"] == 1
+    assert payload["proposal"]["proposal_ids"] == ["PROP-001"]
+    assert payload["proposal"]["summary"] == "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    assert payload["preview"]["proposal_payloads"][0]["summary"] == "apply worker artifact update for T-001: reports/summary.md"
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_worker_update_proposal_ids"] == ["PROP-001"]
+    assert updated_task["background_run_worker_update_proposal_summary"] == (
+        "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    )
+    proposals = updated["projects"]["alpha"]["todo_proposals"]
+    assert len(proposals) == 1
+    assert proposals[0]["summary"] == "apply worker artifact update for T-001: reports/summary.md"
+    assert proposals[0]["status"] == "open"
 
 
 def test_control_dashboard_post_runtime_judge_route_executes_bound_review(tmp_path: Path, monkeypatch) -> None:

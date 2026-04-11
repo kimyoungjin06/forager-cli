@@ -269,6 +269,8 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
         return "Follow-up Execute" if not lane_ids else f"Follow-up Execute ({','.join(lane_ids)})"
     if path == "/control/actions/task/worker-update-preview":
         return "Preview Worker Update"
+    if path == "/control/actions/task/worker-apply-propose":
+        return "Propose Artifact Apply"
     if path == "/control/actions/runtime/judge":
         return "Run Offdesk Judge"
     if path == "/control/actions/runtime/todo-accept":
@@ -388,38 +390,38 @@ def _replan_manual_route_action_button(
     row = policy if isinstance(policy, dict) else {}
     if str(row.get("status", "")).strip() != "manual_ready":
         return None
-    suggested_action = str(row.get("suggested_action", "")).strip()
     suggested_next_step = str(row.get("suggested_next_step", "")).strip()
     confidence = str(row.get("confidence", "")).strip() or "-"
     task_ref = operator_action_contract.task_command_ref(label, request_id)
-    next_parts = suggested_next_step.split()
-    next_ref = next_parts[1].strip() if len(next_parts) >= 2 else ""
-    if suggested_action == "followup" and suggested_next_step.startswith("/followup "):
-        payload_task_ref = next_ref or task_ref
-        if not payload_task_ref or payload_task_ref == "-":
+    spec = operator_action_contract.http_action_spec(suggested_next_step)
+    if not isinstance(spec, dict):
+        return None
+    path = str(spec.get("path", "")).strip()
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    if path in {"/control/actions/task/followup", "/control/actions/task/followup-execute"}:
+        payload_task_ref = str(payload.get("task_ref", "")).strip()
+        if payload_task_ref not in {"", "-", task_ref, str(request_id).strip()}:
             return None
-        return ActionButtonDTO(
-            label="Apply Judge Manual Step",
-            command=suggested_next_step,
-            method="POST",
-            path="/control/actions/task/followup",
-            mode="safe",
-            note=f"judge-backed followup handoff | confidence={confidence} | next={suggested_next_step}",
-            payload_json=json.dumps({"task_ref": payload_task_ref, "lane_ids": []}, ensure_ascii=False, separators=(",", ":")),
-        )
-    if suggested_action in {"manual_review", "review", "judge"} and suggested_next_step.startswith("/orch judge "):
-        payload_project_ref = next_ref or project_alias
-        if not payload_project_ref:
+    elif path == "/control/actions/runtime/judge":
+        payload_project_ref = str(payload.get("project_ref", "")).strip()
+        if payload_project_ref not in {"", project_alias}:
             return None
-        return ActionButtonDTO(
-            label="Apply Judge Manual Step",
-            command=suggested_next_step,
-            method="POST",
-            path="/control/actions/runtime/judge",
-            mode="safe",
-            note=f"judge-backed manual review | confidence={confidence} | next={suggested_next_step}",
-            payload_json=json.dumps({"project_ref": payload_project_ref}, ensure_ascii=False, separators=(",", ":")),
-        )
+    else:
+        return None
+    note_prefix = {
+        "/control/actions/task/followup": "judge-backed followup handoff",
+        "/control/actions/task/followup-execute": "judge-backed followup execute",
+        "/control/actions/runtime/judge": "judge-backed manual review",
+    }.get(path, "judge-backed manual step")
+    return ActionButtonDTO(
+        label="Apply Judge Manual Step",
+        command=suggested_next_step,
+        method=str(spec.get("method", "POST")).strip() or "POST",
+        path=path,
+        mode=str(spec.get("mode", "safe")).strip() or "safe",
+        note=f"{note_prefix} | confidence={confidence} | next={suggested_next_step}",
+        payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    )
     return None
 
 
@@ -473,6 +475,46 @@ def _worker_update_preview_button(
         method="POST",
         path="/control/actions/task/worker-update-preview",
         mode="safe",
+        note=note,
+        payload_json=json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _worker_apply_proposal_button(
+    *,
+    label: str,
+    request_id: str,
+    update_stub: Any,
+    proposal_ids: Any = None,
+) -> ActionButtonDTO | None:
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if not task_ref or task_ref == "-":
+        return None
+    stub = worker_task_contract.sanitize_worker_task_update_stub(update_stub)
+    if not stub:
+        return None
+    status = str(stub.get("status", "")).strip().lower()
+    if status in {"", "-", "none"}:
+        return None
+    existing_ids = [
+        str(item).strip()
+        for item in (proposal_ids if isinstance(proposal_ids, list) else list(proposal_ids or []))
+        if str(item).strip()
+    ]
+    if existing_ids:
+        return None
+    operator_summary = worker_task_contract.summarize_worker_update_operator_summary(stub, [])
+    note = (
+        f"promote the bounded worker update into an artifact-apply proposal | {operator_summary}"
+        if operator_summary not in {"", "-"}
+        else "promote the bounded worker update into an artifact-apply proposal"
+    )
+    return ActionButtonDTO(
+        label="Propose Artifact Apply",
+        command=f"/task {task_ref} | worker-apply-propose",
+        method="POST",
+        path="/control/actions/task/worker-apply-propose",
+        mode="phase2",
         note=note,
         payload_json=json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":")),
     )

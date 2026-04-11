@@ -15,6 +15,7 @@ WORKER_TASK_CONTRACT_VERSION = "2026-04-10.v1"
 WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
+WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_SYSTEM = (
     "You are the bounded background worker. Return strict JSON with keys: "
     "status, summary, actions, cautions, evidence_refs. Keep every field concise."
@@ -383,6 +384,65 @@ def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List
     return proposals
 
 
+def derive_worker_artifact_apply_todo_proposals(contract: Any, update_stub: Any) -> List[Dict[str, Any]]:
+    contract_row = load_worker_task_contract(contract)
+    stub = sanitize_worker_task_update_stub(update_stub)
+    if not stub:
+        return []
+    status = _trim(stub.get("status"), 48).lower()
+    if status in {"", "-", "none"}:
+        return []
+    task_label = _trim(contract_row.get("task_label"), 96) or "task"
+    reason = _trim(stub.get("summary_line"), 240) or _update_stub_summary(stub)
+    priority = _proposal_priority(stub)
+    targets = list(stub.get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
+    actions = list(stub.get("actions") or [])
+    proposals: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for target in targets[:3]:
+        clean = _trim(target, 160)
+        if not clean:
+            continue
+        summary = f"apply worker artifact update for {task_label}: {clean}"[:600]
+        key = _proposal_key(summary)
+        if key in seen:
+            continue
+        seen.add(key)
+        proposals.append(
+            {
+                "version": WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION,
+                "summary": summary,
+                "priority": priority,
+                "kind": "handoff",
+                "reason": reason,
+                "confidence": 0.8,
+                "created_by": "worker",
+                "source_file": clean,
+                "source_reason": "worker_artifact_apply",
+            }
+        )
+    if not proposals:
+        action_head = _trim(actions[0] if actions else "", 160)
+        summary = (
+            f"apply worker follow-up update for {task_label}: {action_head}"[:600]
+            if action_head
+            else f"apply worker update for {task_label}"[:600]
+        )
+        proposals.append(
+            {
+                "version": WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION,
+                "summary": summary,
+                "priority": priority,
+                "kind": "followup",
+                "reason": reason,
+                "confidence": 0.72,
+                "created_by": "worker",
+                "source_reason": "worker_artifact_apply",
+            }
+        )
+    return proposals
+
+
 def match_worker_update_proposal_ids(
     proposals_store: Any,
     *,
@@ -439,3 +499,21 @@ def summarize_worker_update_operator_summary(update_stub: Any, proposal_ids: Any
     if not stub:
         return "-"
     return _trim(stub.get("summary_line"), 320) or _update_stub_summary(stub)
+
+
+def summarize_worker_artifact_apply_proposal_summary(update_stub: Any, proposal_ids: Any) -> str:
+    stub = sanitize_worker_task_update_stub(update_stub)
+    ids = _uniq(proposal_ids, limit=8, text_limit=32)
+    if not stub and not ids:
+        return "-"
+    target_text = ",".join(list(stub.get("target_artifacts") or [])[:2]) if stub else "-"
+    parts = []
+    status = _trim((stub or {}).get("status"), 48) or "-"
+    if status != "-":
+        parts.append(f"status={status}")
+    if ids:
+        parts.append(f"apply_proposals={len(ids)}")
+        parts.append(f"ids={','.join(ids[:2])}")
+    if target_text and target_text != "-":
+        parts.append(f"targets={target_text}")
+    return " | ".join(parts)[:320] if parts else "-"

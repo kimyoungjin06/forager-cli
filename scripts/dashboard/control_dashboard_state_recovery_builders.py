@@ -25,6 +25,7 @@ from control_dashboard_state_common import (
     _runtime_path,
     _task_action_buttons,
     _task_command_contract,
+    _worker_apply_proposal_button,
     _worker_update_preview_button,
     _worker_update_proposal_accept_button,
 )
@@ -63,6 +64,19 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(
+                label=label,
+                request_id=request_id,
+                update_stub={
+                    "status": row.get("background_run_worker_update_stub_status"),
+                    "summary_line": row.get("background_run_worker_update_stub_summary"),
+                    "target_artifacts": str(row.get("background_run_worker_update_stub_targets", "")).split(","),
+                },
+                proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        phase2_action_buttons = _append_unique_action_button(
+            phase2_action_buttons,
+            _worker_apply_proposal_button(
                 label=label,
                 request_id=request_id,
                 update_stub={
@@ -163,18 +177,32 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             project_alias=alias,
             phase2_commands=list(runtime_action_contract.get("phase2") or []),
         )
-        runtime_safe_action_buttons = _append_unique_action_button(
-            runtime_safe_action_buttons,
-            _replan_manual_route_action_button(
-                project_alias=alias,
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                policy=row.get("latest_replan_auto_routing_policy") if isinstance(row.get("latest_replan_auto_routing_policy"), dict) else {},
-            ),
+        runtime_manual_route_button = _replan_manual_route_action_button(
+            project_alias=alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=row.get("latest_replan_auto_routing_policy") if isinstance(row.get("latest_replan_auto_routing_policy"), dict) else {},
         )
+        if runtime_manual_route_button is not None and str(runtime_manual_route_button.mode).strip() == "phase2":
+            runtime_phase2_action_buttons = _append_unique_action_button(runtime_phase2_action_buttons, runtime_manual_route_button)
+        else:
+            runtime_safe_action_buttons = _append_unique_action_button(runtime_safe_action_buttons, runtime_manual_route_button)
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                update_stub={
+                    "status": row.get("active_task_background_run_worker_update_stub_status"),
+                    "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
+                    "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
+                },
+                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        runtime_phase2_action_buttons = _append_unique_action_button(
+            runtime_phase2_action_buttons,
+            _worker_apply_proposal_button(
                 label=str(row.get("active_task_label", "")).strip(),
                 request_id=active_request_id,
                 update_stub={
@@ -198,18 +226,32 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             phase2_commands=list(active_task_action_contract.get("phase2") or []),
             include_followup_preview=bool(active_request_id),
         )
-        active_task_safe_action_buttons = _append_unique_action_button(
-            active_task_safe_action_buttons,
-            _replan_manual_route_action_button(
-                project_alias=alias,
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                policy=row.get("latest_replan_auto_routing_policy") if isinstance(row.get("latest_replan_auto_routing_policy"), dict) else {},
-            ),
+        active_task_manual_route_button = _replan_manual_route_action_button(
+            project_alias=alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=row.get("latest_replan_auto_routing_policy") if isinstance(row.get("latest_replan_auto_routing_policy"), dict) else {},
         )
+        if active_task_manual_route_button is not None and str(active_task_manual_route_button.mode).strip() == "phase2":
+            active_task_phase2_action_buttons = _append_unique_action_button(active_task_phase2_action_buttons, active_task_manual_route_button)
+        else:
+            active_task_safe_action_buttons = _append_unique_action_button(active_task_safe_action_buttons, active_task_manual_route_button)
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
             _worker_update_preview_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                update_stub={
+                    "status": row.get("active_task_background_run_worker_update_stub_status"),
+                    "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
+                    "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
+                },
+                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        active_task_phase2_action_buttons = _append_unique_action_button(
+            active_task_phase2_action_buttons,
+            _worker_apply_proposal_button(
                 label=str(row.get("active_task_label", "")).strip(),
                 request_id=active_request_id,
                 update_stub={

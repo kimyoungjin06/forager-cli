@@ -314,7 +314,7 @@ def _replan_auto_decision_stub(
         "decision_mode": str(bridge.get("decision_mode", "")).strip() or ("judge_signal" if decision else "none"),
         "bridge_applied": bool(bridge.get("applied", False)),
         "supports_auto_decision": bool(bridge.get("supports_auto_decision", False)),
-        "can_auto_apply": suggested_action in {"retry", "replan", "followup_execute"} and suggested_next_step.startswith("/"),
+        "can_auto_apply": suggested_action in {"retry", "replan"} and suggested_next_step.startswith("/"),
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
@@ -339,7 +339,7 @@ def _replan_auto_routing_policy(
         supports_auto_decision
         and not can_auto_apply
         and suggested_next_step.startswith("/")
-        and suggested_action in {"followup", "manual_review", "review", "judge"}
+        and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}
     )
     status = "ready" if can_auto_apply else ("manual_ready" if manual_ready else ("observe_only" if supports_auto_decision else "unavailable"))
     return {
