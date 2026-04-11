@@ -20,6 +20,7 @@ import aoe_tg_orch_contract as orch_contract
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_task_view as task_view
+import aoe_tg_worker_task_contract as worker_task_contract
 from control_dashboard_state_models import ActionButtonDTO
 
 
@@ -266,6 +267,8 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
     if path == "/control/actions/task/followup-execute":
         lane_ids = [str(item).strip() for item in (payload.get("lane_ids") or []) if str(item).strip()]
         return "Follow-up Execute" if not lane_ids else f"Follow-up Execute ({','.join(lane_ids)})"
+    if path == "/control/actions/task/worker-update-preview":
+        return "Preview Worker Update"
     if path == "/control/actions/runtime/judge":
         return "Run Offdesk Judge"
     if path == "/control/actions/runtime/todo-accept":
@@ -439,6 +442,39 @@ def _worker_update_proposal_accept_button(
         mode="phase2",
         note=f"promote worker update proposal into runtime todo queue | proposal={first}",
         payload_json=json.dumps({"project_ref": alias, "proposal_ref": first}, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _worker_update_preview_button(
+    *,
+    label: str,
+    request_id: str,
+    update_stub: Any,
+    proposal_ids: Any = None,
+) -> ActionButtonDTO | None:
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if not task_ref or task_ref == "-":
+        return None
+    stub = worker_task_contract.sanitize_worker_task_update_stub(update_stub)
+    if not stub:
+        return None
+    status = str(stub.get("status", "")).strip().lower()
+    if status in {"", "-", "none"}:
+        return None
+    operator_summary = worker_task_contract.summarize_worker_update_operator_summary(stub, proposal_ids)
+    note = (
+        f"inspect bounded worker update before accepting any proposal | {operator_summary}"
+        if operator_summary not in {"", "-"}
+        else "inspect bounded worker update before accepting any proposal"
+    )
+    return ActionButtonDTO(
+        label="Preview Worker Update",
+        command=f"/task {task_ref} | worker-update-preview",
+        method="POST",
+        path="/control/actions/task/worker-update-preview",
+        mode="safe",
+        note=note,
+        payload_json=json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":")),
     )
 
 

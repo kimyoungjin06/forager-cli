@@ -16,6 +16,7 @@ from control_dashboard_action_exec import (
     _execute_runtime_judge_action,
     _execute_retry_action,
     _execute_todo_proposal_action,
+    _execute_worker_update_preview_action,
 )
 from control_dashboard_audit import _with_action_audit
 from control_dashboard_common import (
@@ -77,6 +78,19 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         if spec is None:
             raise ValueError("unsupported followup execute action contract")
         return spec
+
+    if path == "/control/actions/task/worker-update-preview":
+        task_ref = str(payload.get("task_ref", "")).strip()
+        if not task_ref:
+            raise ValueError("task_ref is required")
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"/task {task_ref} | worker-update-preview",
+            "note": "inspect bounded worker update before accepting any proposal",
+            "payload": {"task_ref": task_ref},
+        }
 
     if path == "/control/actions/runtime/judge":
         project_ref = str(payload.get("project_ref", "")).strip()
@@ -269,6 +283,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/task/followup-execute":
         return _with_action_audit(_execute_followup_action(spec, config=config), config=config)
+
+    if path == "/control/actions/task/worker-update-preview":
+        return _with_action_audit(_execute_worker_update_preview_action(spec, config=config), config=config)
 
     if path == "/control/actions/runtime/sync-preview":
         return _with_action_audit(_preview_sync_action(spec, config=config), config=config)

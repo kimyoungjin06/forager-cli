@@ -46,6 +46,7 @@ from control_dashboard_state_common import (
     _task_followup_summary,
     _task_rerun_summary,
     _worker_update_proposal_accept_button,
+    _worker_update_preview_button,
 )
 from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
 
@@ -294,6 +295,22 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 label=str(row.get("active_task_label", "")).strip(),
                 request_id=active_request_id,
                 policy=latest_replan_auto_routing_policy,
+            ),
+        )
+        runtime_safe_action_buttons = _append_unique_action_button(
+            runtime_safe_action_buttons,
+            _worker_update_preview_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                update_stub={
+                    "status": (active_task or {}).get("background_run_worker_update_stub_status"),
+                    "summary_line": (active_task or {}).get("background_run_worker_update_stub_summary"),
+                    "target_artifacts": (active_task or {}).get("background_run_worker_update_stub_targets"),
+                    "actions": (active_task or {}).get("background_run_worker_result_actions"),
+                    "cautions": (active_task or {}).get("background_run_worker_result_cautions"),
+                    "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
+                },
+                proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
             ),
         )
         runtime_phase2_action_buttons = _append_unique_action_button(
@@ -814,6 +831,22 @@ def _build_runtime_detail(
             policy=latest_replan_auto_routing_policy,
         ),
     )
+    active_task_safe_action_buttons = _append_unique_action_button(
+        active_task_safe_action_buttons,
+        _worker_update_preview_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            update_stub={
+                "status": (active_task or {}).get("background_run_worker_update_stub_status"),
+                "summary_line": (active_task or {}).get("background_run_worker_update_stub_summary"),
+                "target_artifacts": (active_task or {}).get("background_run_worker_update_stub_targets"),
+                "actions": (active_task or {}).get("background_run_worker_result_actions"),
+                "cautions": (active_task or {}).get("background_run_worker_result_cautions"),
+                "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
+            },
+            proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+        ),
+    )
     active_task_phase2_action_buttons = _append_unique_action_button(
         active_task_phase2_action_buttons,
         _worker_update_proposal_accept_button(
@@ -967,6 +1000,9 @@ def _build_runtime_detail(
             if str(item).strip()
         )
         or "-",
+        active_task_background_run_worker_update_stub_status=(
+            str((active_task or {}).get("background_run_worker_update_stub_status", "")).strip() or "-"
+        ),
         active_task_background_run_worker_update_stub_summary=(
             str((active_task or {}).get("background_run_worker_update_stub_summary", "")).strip() or "-"
         ),
@@ -982,6 +1018,11 @@ def _build_runtime_detail(
         active_task_background_run_worker_update_proposal_summary=(
             str((active_task or {}).get("background_run_worker_update_proposal_summary", "")).strip() or "-"
         ),
+        active_task_background_run_worker_update_proposal_ids=[
+            str(item).strip()
+            for item in ((active_task or {}).get("background_run_worker_update_proposal_ids") or [])
+            if str(item).strip()
+        ],
         active_task_background_run_worker_update_operator_summary=_worker_update_operator_summary(active_task or {}),
         active_task_background_run_model_plan_summary=(
             str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"

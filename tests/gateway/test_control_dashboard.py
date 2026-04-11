@@ -2723,11 +2723,18 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
     )
 
     expected_manual_payload = '{"task_ref":"T-001","lane_ids":[]}'
+    expected_preview_payload = '{"task_ref":"T-001"}'
     expected_proposal_payload = '{"project_ref":"O2","proposal_ref":"PROP-001"}'
     assert any(
         btn.label == "Apply Judge Manual Step"
         and btn.path == "/control/actions/task/followup"
         and btn.payload_json == expected_manual_payload
+        for btn in runtime_card.runtime_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Preview Worker Update"
+        and btn.path == "/control/actions/task/worker-update-preview"
+        and btn.payload_json == expected_preview_payload
         for btn in runtime_card.runtime_safe_action_buttons
     )
     assert any(
@@ -2740,6 +2747,12 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         btn.label == "Apply Judge Manual Step"
         and btn.path == "/control/actions/task/followup"
         and btn.payload_json == expected_manual_payload
+        for btn in runtime_detail.active_task_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Preview Worker Update"
+        and btn.path == "/control/actions/task/worker-update-preview"
+        and btn.payload_json == expected_preview_payload
         for btn in runtime_detail.active_task_safe_action_buttons
     )
     assert any(
@@ -2756,11 +2769,39 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         for btn in task_detail.safe_action_buttons
     )
     assert any(
+        btn.label == "Preview Worker Update"
+        and btn.path == "/control/actions/task/worker-update-preview"
+        and btn.payload_json == expected_preview_payload
+        for btn in task_detail.safe_action_buttons
+    )
+    assert any(
         btn.label == "Accept Worker Proposal"
         and btn.path == "/control/actions/runtime/todo-accept"
         and btn.payload_json == expected_proposal_payload
         for btn in task_detail.phase2_action_buttons
     )
+
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    recovery_text = dashboard_app.build_dashboard_response("/control/recovery", config)[2].decode("utf-8")
+    assert "Apply Judge Manual Step" in recovery_text
+    assert "Preview Worker Update" in recovery_text
+    assert "Accept Worker Proposal" in recovery_text
 
 
 def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_path: Path) -> None:
@@ -2887,6 +2928,51 @@ def test_control_dashboard_post_runtime_todo_accept_route_promotes_worker_propos
     assert proposal["accepted_todo_id"] == "TODO-002"
     todos = updated["projects"]["alpha"]["todos"]
     assert any(row["id"] == "TODO-002" and row["summary"] == "review worker artifact update for T-001: reports/summary.md" for row in todos)
+
+
+def test_control_dashboard_post_task_worker_update_preview_route_returns_preview(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update reports/summary.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-update-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "preview"
+    assert payload["source_command"] == "/task T-001 | worker-update-preview"
+    assert payload["next_step"] == "/todo O2 accept PROP-001"
+    assert payload["preview"]["update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert payload["preview"]["proposal_summary"] == "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    assert payload["preview"]["target_artifacts"] == ["reports/summary.md"]
+    assert payload["preview"]["actions"] == ["update reports/summary.md"]
+    assert payload["preview"]["cautions"] == ["keep review lane open"]
+    assert payload["preview"]["evidence_refs"] == ["reports/summary.md"]
 
 
 def test_control_dashboard_post_runtime_judge_route_executes_bound_review(tmp_path: Path, monkeypatch) -> None:

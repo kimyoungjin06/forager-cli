@@ -101,6 +101,13 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
         "backend_summary": task.backend_summary,
         "backend_note": task.backend_note,
         "rate_limit_summary": task.rate_limit_summary,
+        "background_run_worker_update_stub_status": getattr(task, "background_run_worker_update_stub_status", ""),
+        "background_run_worker_update_stub_summary": task.background_run_worker_update_stub_summary,
+        "background_run_worker_update_stub_targets": task.background_run_worker_update_stub_targets,
+        "background_run_worker_update_proposal_summary": task.background_run_worker_update_proposal_summary,
+        "background_run_worker_update_proposal_ids": list(
+            getattr(task, "background_run_worker_update_proposal_ids", []) or []
+        ),
         "observatory": {
             "headline": task.observatory_headline,
             "first_focus": task.observatory_first_focus,
@@ -230,8 +237,14 @@ def build_nightly_session_summary(
                 "active_task_background_run_evidence_bundle": detail.active_task_background_run_evidence_bundle,
                 "active_task_background_run_evidence_artifacts": detail.active_task_background_run_evidence_artifacts,
                 "active_task_background_run_launch_spec_summary": detail.active_task_background_run_launch_spec_summary,
+                "active_task_background_run_worker_update_stub_status": detail.active_task_background_run_worker_update_stub_status,
+                "active_task_background_run_worker_update_stub_summary": detail.active_task_background_run_worker_update_stub_summary,
+                "active_task_background_run_worker_update_stub_targets": detail.active_task_background_run_worker_update_stub_targets,
                 "active_task_background_run_worker_update_operator_summary": detail.active_task_background_run_worker_update_operator_summary,
                 "active_task_background_run_worker_update_proposal_summary": detail.active_task_background_run_worker_update_proposal_summary,
+                "active_task_background_run_worker_update_proposal_ids": list(
+                    getattr(detail, "active_task_background_run_worker_update_proposal_ids", []) or []
+                ),
                 "active_task_background_run_model_plan_summary": detail.active_task_background_run_model_plan_summary,
                 "workspace_summary": detail.workspace_summary,
                 "document_registry_summary": detail.document_registry_summary,
@@ -240,6 +253,10 @@ def build_nightly_session_summary(
                 "latest_judge_decision_bridge_summary": _latest_judge_decision_bridge_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_decision_summary": _latest_replan_auto_decision_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_routing_policy_summary": _latest_replan_auto_routing_policy_summary(snapshot.team_dir, detail.project_alias),
+                "latest_replan_auto_routing_policy": action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+                    snapshot.team_dir,
+                    project_alias=detail.project_alias,
+                ),
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
                     snapshot.team_dir,

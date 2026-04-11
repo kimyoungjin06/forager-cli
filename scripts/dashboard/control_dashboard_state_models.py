@@ -225,9 +225,11 @@ class TaskDetailDTO:
     background_run_worker_result_actions: str = ""
     background_run_worker_result_cautions: str = ""
     background_run_worker_result_evidence_refs: str = ""
+    background_run_worker_update_stub_status: str = ""
     background_run_worker_update_stub_summary: str = ""
     background_run_worker_update_stub_targets: str = ""
     background_run_worker_update_proposal_summary: str = ""
+    background_run_worker_update_proposal_ids: List[str] = field(default_factory=list)
     background_run_worker_update_operator_summary: str = ""
     background_run_model_plan_summary: str = ""
     background_run_model_judge_binding_summary: str = ""
@@ -319,9 +321,11 @@ class RuntimeDetailDTO:
     active_task_background_run_worker_result_actions: str
     active_task_background_run_worker_result_cautions: str
     active_task_background_run_worker_result_evidence_refs: str
+    active_task_background_run_worker_update_stub_status: str
     active_task_background_run_worker_update_stub_summary: str
     active_task_background_run_worker_update_stub_targets: str
     active_task_background_run_worker_update_proposal_summary: str
+    active_task_background_run_worker_update_proposal_ids: List[str]
     active_task_background_run_worker_update_operator_summary: str
     active_task_background_run_model_plan_summary: str
     active_task_background_run_model_judge_binding_summary: str

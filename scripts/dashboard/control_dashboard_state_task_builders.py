@@ -43,6 +43,7 @@ from control_dashboard_state_common import (
     _task_rerun_summary,
     _runtime_path,
     _worker_update_proposal_accept_button,
+    _worker_update_preview_button,
 )
 from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
 
@@ -351,6 +352,22 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 policy=latest_replan_auto_routing_policy,
             ),
         )
+        safe_action_buttons = _append_unique_action_button(
+            safe_action_buttons,
+            _worker_update_preview_button(
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
+                update_stub={
+                    "status": task.get("background_run_worker_update_stub_status"),
+                    "summary_line": task.get("background_run_worker_update_stub_summary"),
+                    "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _worker_update_proposal_accept_button(
@@ -467,6 +484,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 if str(item).strip()
             )
             or "-",
+            background_run_worker_update_stub_status=(
+                str(task.get("background_run_worker_update_stub_status", "")).strip() or "-"
+            ),
             background_run_worker_update_stub_summary=(
                 str(task.get("background_run_worker_update_stub_summary", "")).strip() or "-"
             ),
@@ -482,6 +502,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             background_run_worker_update_proposal_summary=(
                 str(task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
             ),
+            background_run_worker_update_proposal_ids=[
+                str(item).strip()
+                for item in (task.get("background_run_worker_update_proposal_ids") or [])
+                if str(item).strip()
+            ],
             background_run_worker_update_operator_summary=_worker_update_operator_summary(task),
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"

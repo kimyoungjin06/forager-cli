@@ -11,6 +11,7 @@ import aoe_tg_action_audit as operator_audit
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
 import aoe_tg_todo_state as todo_state
+import aoe_tg_worker_task_contract as worker_task_contract
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_orch_task_handlers import (
     _OFFDESK_JUDGE_SYSTEM,
@@ -81,6 +82,23 @@ def _latest_task_for_runtime(entry: Dict[str, Any]) -> Dict[str, Any]:
             latest.setdefault("request_id", str(request_id).strip())
             break
     return latest
+
+
+def _resolve_task_entry(*, manager_state: Dict[str, Any], task_ref: str) -> tuple[str, Dict[str, Any], str, Dict[str, Any]]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    target = str(task_ref or "").strip()
+    if not target:
+        raise RuntimeError("task not found: -")
+    for key, entry in projects.items():
+        if not isinstance(entry, dict):
+            continue
+        task = gateway_task_state.get_task_record(entry, target)
+        if not isinstance(task, dict):
+            continue
+        request_id = gateway_task_state.resolve_task_request_id(entry, target)
+        if request_id:
+            return str(key), entry, request_id, task
+    raise RuntimeError(f"task not found: {target}")
 
 
 def _save_manager_state(config: DashboardAppConfig, manager_state: Dict[str, Any]) -> None:
@@ -231,6 +249,134 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
             "latest_judge_decision": judge_decision,
         },
         status=200 if ok else 409,
+    )
+
+
+def _execute_worker_update_preview_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    task_ref = str(payload.get("task_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    try:
+        key, entry, request_id, task = _resolve_task_entry(manager_state=manager_state, task_ref=task_ref)
+    except RuntimeError as exc:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": "/control/tasks",
+                "remediation": "refresh the task list and retry the preview with an existing task ref",
+                "outcome": {
+                    "kind": "worker_update_preview",
+                    "status": "blocked",
+                    "reason_code": "task_missing",
+                    "detail": str(exc),
+                },
+            },
+            status=404,
+        )
+    alias = _project_alias(entry, key)
+    label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    update_stub = worker_task_contract.sanitize_worker_task_update_stub(
+        {
+            "status": task.get("background_run_worker_update_stub_status"),
+            "summary_line": task.get("background_run_worker_update_stub_summary"),
+            "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        }
+    )
+    proposal_ids = [
+        str(item).strip()
+        for item in (task.get("background_run_worker_update_proposal_ids") or [])
+        if str(item).strip()
+    ]
+    proposal_summary = worker_task_contract.summarize_worker_update_proposal_summary(update_stub, proposal_ids)
+    operator_summary = worker_task_contract.summarize_worker_update_operator_summary(update_stub, proposal_ids)
+    if not update_stub or str(update_stub.get("status", "")).strip().lower() in {"", "-", "none"}:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": f"/task {label}",
+                "remediation": "run a bounded worker task first or inspect the current execution rails before previewing an artifact update",
+                "outcome": {
+                    "kind": "worker_update_preview",
+                    "status": "blocked",
+                    "reason_code": "worker_update_missing",
+                    "detail": "worker update stub missing",
+                },
+                "task": {
+                    "request_id": request_id,
+                    "label": label,
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+                "preview": {
+                    "kind": "worker_update_preview",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+            },
+            status=409,
+        )
+    next_step = f"/todo {alias} accept {proposal_ids[0]}" if proposal_ids else f"/task {label}"
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": False,
+            "status": "preview",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "safe",
+            "source_command": str(spec.get("command", "")).strip() or "-",
+            "payload": payload,
+            "next_step": next_step,
+            "remediation": "inspect the proposed target artifacts and cautions before accepting the worker proposal or mutating any runtime todo",
+            "outcome": {
+                "kind": "worker_update_preview",
+                "status": "preview",
+                "reason_code": "ready",
+                "detail": operator_summary or "-",
+            },
+            "task": {
+                "request_id": request_id,
+                "label": label,
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+            "preview": {
+                "kind": "worker_update_preview",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+                "task_contract_summary": str(task.get("background_run_task_contract_summary", "")).strip() or "-",
+                "worker_result_summary": str(task.get("background_run_worker_result_summary", "")).strip() or "-",
+                "update_stub_summary": str(update_stub.get("summary_line", "")).strip() or "-",
+                "operator_summary": operator_summary or "-",
+                "proposal_summary": proposal_summary or "-",
+                "proposal_ids": proposal_ids,
+                "target_artifacts": list(update_stub.get("target_artifacts") or []),
+                "actions": list(update_stub.get("actions") or []),
+                "cautions": list(update_stub.get("cautions") or []),
+                "evidence_refs": list(update_stub.get("evidence_refs") or []),
+            },
+        },
+        status=200,
     )
 
 
