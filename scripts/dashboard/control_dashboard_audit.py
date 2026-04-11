@@ -59,6 +59,12 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Follow-up Preview | {status}"
     if path == "/control/actions/task/followup-execute":
         return f"Follow-up Execute | {status}"
+    if path == "/control/actions/runtime/judge":
+        return f"Offdesk Judge | {status}"
+    if path == "/control/actions/runtime/todo-accept":
+        return f"Accept Proposal | {status}"
+    if path == "/control/actions/runtime/todo-reject":
+        return f"Reject Proposal | {status}"
     if path == "/control/actions/runtime/sync-preview":
         return f"Sync Preview | {status}"
     if path == "/control/actions/runtime/background-queue-clean":

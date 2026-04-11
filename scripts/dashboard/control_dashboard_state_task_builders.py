@@ -32,6 +32,7 @@ from control_dashboard_state_common import (
     _compose_task_quality,
     _completion_contract_for_preset,
     _detail_path,
+    _replan_manual_route_action_button,
     _replan_auto_route_action_button,
     _task_action_buttons,
     _task_command_contract,
@@ -41,6 +42,7 @@ from control_dashboard_state_common import (
     _task_rate_limit_summary,
     _task_rerun_summary,
     _runtime_path,
+    _worker_update_proposal_accept_button,
 )
 from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
 
@@ -297,6 +299,14 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 root_team_dir,
                 project_alias=alias,
             )
+            latest_replan_auto_route_status_summary = action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
+                root_team_dir,
+                project_alias=alias,
+            )
+            latest_replan_auto_operator_summary = action_audit.load_latest_replan_auto_operator_summary_for_runtime(
+                root_team_dir,
+                project_alias=alias,
+            )
             latest_replan_auto_route = action_audit.load_latest_action_audit_for_runtime_kind(
                 root_team_dir,
                 project_alias=alias,
@@ -307,14 +317,6 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     headline=str(latest_replan_auto_route.get("headline", "")).strip() or "Replan Auto Route",
                     next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
                     detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
-                )
-                latest_replan_auto_route_status_summary = action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
-                    root_team_dir,
-                    project_alias=alias,
-                )
-                latest_replan_auto_operator_summary = action_audit.load_latest_replan_auto_operator_summary_for_runtime(
-                    root_team_dir,
-                    project_alias=alias,
                 )
         action_contract = _task_command_contract(
             project_alias=alias,
@@ -338,6 +340,22 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 label=task_view.task_display_label(task, fallback_request_id=rid),
                 request_id=rid,
                 policy=latest_replan_auto_routing_policy,
+            ),
+        )
+        safe_action_buttons = _append_unique_action_button(
+            safe_action_buttons,
+            _replan_manual_route_action_button(
+                project_alias=alias,
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
+                policy=latest_replan_auto_routing_policy,
+            ),
+        )
+        phase2_action_buttons = _append_unique_action_button(
+            phase2_action_buttons,
+            _worker_update_proposal_accept_button(
+                project_alias=alias,
+                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
         backend_summary = _compose_backend_summary(

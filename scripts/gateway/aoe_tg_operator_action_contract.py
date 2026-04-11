@@ -135,7 +135,14 @@ def classify_operator_command(command: str) -> Dict[str, str]:
             note = "runtime mutation candidate"
     elif head == "/todo":
         scope = "runtime"
-        if third == "syncback" and fourth == "preview":
+        action = second
+        if action.startswith("o") and action[1:].isdigit():
+            action = third
+        if action in {"accept", "promote", "reject", "drop"}:
+            bucket = "phase2"
+            mutation = "runtime_mutation"
+            note = "proposal inbox mutation candidate"
+        elif third == "syncback" and fourth == "preview":
             note = "read-only canonical preview"
         elif third == "syncback" and fourth == "apply":
             bucket = "phase2"
@@ -278,6 +285,53 @@ def http_action_spec(command: str) -> Dict[str, Any] | None:
             },
             "note": "attempt explicit follow-up execution using a followup brief instead of the preview surface",
         }
+
+    if head == "/orch" and second == "judge" and len(tokens) >= 3:
+        return {
+            "command": raw,
+            "mode": "safe",
+            "method": "POST",
+            "path": "/control/actions/runtime/judge",
+            "payload": {
+                "project_ref": tokens[2],
+            },
+            "note": "run the bound off-desk judge for the runtime using the latest task context",
+        }
+
+    if head == "/todo":
+        token_offset = 0
+        project_ref = ""
+        action = second
+        if second and second.upper().startswith("O") and second[1:].isdigit():
+            project_ref = tokens[1]
+            token_offset = 1
+            action = tokens[2].lower() if len(tokens) >= 3 else ""
+        proposal_token = tokens[2 + token_offset] if len(tokens) >= 3 + token_offset else ""
+        if action in {"accept", "promote"} and project_ref and proposal_token:
+            return {
+                "command": raw,
+                "mode": "phase2",
+                "method": "POST",
+                "path": "/control/actions/runtime/todo-accept",
+                "payload": {
+                    "project_ref": project_ref,
+                    "proposal_ref": proposal_token,
+                },
+                "note": "promote a worker or follow-up proposal into the runtime todo queue",
+            }
+        if action in {"reject", "drop"} and project_ref and proposal_token:
+            return {
+                "command": raw,
+                "mode": "phase2",
+                "method": "POST",
+                "path": "/control/actions/runtime/todo-reject",
+                "payload": {
+                    "project_ref": project_ref,
+                    "proposal_ref": proposal_token,
+                    "reason": " ".join(tokens[3 + token_offset :]).strip(),
+                },
+                "note": "reject a worker or follow-up proposal while preserving the audit trail",
+            }
 
     if head == "/sync" and second == "preview" and len(tokens) >= 3:
         return {

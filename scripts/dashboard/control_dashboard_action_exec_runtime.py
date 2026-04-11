@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Runtime-scoped dashboard mutation and invoke helpers."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Tuple
+
+import aoe_tg_action_audit as operator_audit
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
+import aoe_tg_model_provider_adapter as model_provider_adapter
+import aoe_tg_todo_state as todo_state
+from aoe_tg_action_audit import append_action_audit_row
+from aoe_tg_orch_task_handlers import (
+    _OFFDESK_JUDGE_SYSTEM,
+    _offdesk_judge_prompt,
+    _project_alias,
+    _runtime_action_link,
+)
+import aoe_tg_runtime_read as runtime_read
+import aoe_tg_task_state as gateway_task_state
+
+from control_dashboard_action_exec_shared import (
+    _DASHBOARD_CHAT_ID,
+    _load_gateway_main_module,
+    _load_dashboard_manager_state,
+    _json,
+)
+from control_dashboard_common import DashboardAppConfig
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def _resolve_runtime_entry(*, manager_state: Dict[str, Any], project_ref: str) -> tuple[str, Dict[str, Any]]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    target = str(project_ref or "").strip()
+    upper = target.upper()
+    for key, entry in projects.items():
+        if not isinstance(entry, dict):
+            continue
+        if target in {
+            str(key).strip(),
+            str(entry.get("name", "")).strip(),
+            str(entry.get("project_alias", "")).strip(),
+            str(entry.get("display_name", "")).strip(),
+        } or upper in {
+            str(key).strip().upper(),
+            str(entry.get("name", "")).strip().upper(),
+            str(entry.get("project_alias", "")).strip().upper(),
+            str(entry.get("display_name", "")).strip().upper(),
+        }:
+            return str(key), entry
+    raise RuntimeError(f"runtime not found: {project_ref or '-'}")
+
+
+def _latest_task_for_runtime(entry: Dict[str, Any]) -> Dict[str, Any]:
+    tasks = gateway_task_state.ensure_project_tasks(entry)
+    if not tasks:
+        return {}
+    latest: Dict[str, Any] = {}
+    latest_at = ""
+    for request_id, task in tasks.items():
+        if not isinstance(task, dict):
+            continue
+        status = runtime_read.normalize_task_status(task.get("status", "pending"))
+        if status == "completed":
+            continue
+        updated_at = str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip()
+        if updated_at >= latest_at:
+            latest_at = updated_at
+            latest = task
+            latest.setdefault("request_id", str(request_id).strip())
+    if latest:
+        return latest
+    for request_id, task in tasks.items():
+        if isinstance(task, dict):
+            latest = task
+            latest.setdefault("request_id", str(request_id).strip())
+            break
+    return latest
+
+
+def _save_manager_state(config: DashboardAppConfig, manager_state: Dict[str, Any]) -> None:
+    gateway_main = _load_gateway_main_module()
+    gateway_main.save_manager_state(config.manager_state_file, manager_state)
+
+
+def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    project_ref = str(payload.get("project_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
+    alias = _project_alias(entry, key)
+    team_dir_raw = str(entry.get("team_dir", "")).strip()
+    if not team_dir_raw:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or f"/orch judge {alias}",
+                "payload": payload,
+                "next_step": f"/orch status {alias}",
+                "remediation": "restore the runtime team_dir before invoking off-desk judge again",
+                "outcome": {
+                    "kind": "offdesk_judge",
+                    "status": "blocked",
+                    "reason_code": "team_dir_missing",
+                    "detail": "team_dir missing",
+                },
+                "preview": {
+                    "kind": "runtime_judge",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                },
+            },
+            status=409,
+        )
+    team_dir = Path(team_dir_raw).expanduser().resolve()
+    latest_task = _latest_task_for_runtime(entry)
+    if not latest_task:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or f"/orch judge {alias}",
+                "payload": payload,
+                "next_step": f"/orch status {alias}",
+                "remediation": "create or recover a task before invoking off-desk judge again",
+                "outcome": {
+                    "kind": "offdesk_judge",
+                    "status": "blocked",
+                    "reason_code": "no_task_available",
+                    "detail": "no task available for judge review",
+                },
+                "preview": {
+                    "kind": "runtime_judge",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                },
+            },
+            status=409,
+        )
+    binding = model_endpoint_adapter.resolve_task_judge_binding(
+        team_dir,
+        entry=entry,
+        task=latest_task,
+        pack_profile_override="review",
+    )
+    result = model_provider_adapter.invoke_task_judge_stub(
+        team_dir,
+        entry=entry,
+        task=latest_task,
+        prompt=_offdesk_judge_prompt(entry, latest_task, team_dir),
+        system=_OFFDESK_JUDGE_SYSTEM,
+        pack_profile_override="review",
+        timeout_sec=120.0,
+    )
+    ok = bool(result.get("ok"))
+    executed = bool(result.get("executed"))
+    summary = str(result.get("summary", "-")).strip() or "-"
+    response_text = str(result.get("response_text", "")).strip()
+    reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
+    judge_decision = operator_audit.normalize_offdesk_judge_decision(response_text)
+    audit_team_dir = Path(str(config.team_dir or team_dir)).expanduser().resolve()
+    append_action_audit_row(
+        audit_team_dir,
+        headline=f"Offdesk Judge | {'executed' if ok else 'blocked'}",
+        status="executed" if ok else "blocked",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed" if ok else "blocked",
+        outcome_reason_code=reason_code,
+        outcome_detail=summary,
+        next_step=f"/offdesk review {alias}",
+        remediation="inspect the judge response together with execution brief, followup brief, and runtime status before acting",
+        source_command=f"/orch judge {alias}",
+        link_label="runtime detail",
+        link_href=_runtime_action_link(alias),
+        at=_now_iso(),
+        extra={
+            "response_text": response_text,
+            "decision_snapshot": judge_decision,
+        }
+        if response_text or judge_decision
+        else None,
+    )
+    return _json(
+        {
+            "ok": ok,
+            "implemented": True,
+            "executed": executed,
+            "status": "executed" if ok else "blocked",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "safe",
+            "source_command": str(spec.get("command", "")).strip() or f"/orch judge {alias}",
+            "payload": payload,
+            "binding": str(binding.get("summary", "")).strip() or "-",
+            "summary": summary,
+            "response": response_text or "-",
+            "next_step": f"/offdesk review {alias}",
+            "remediation": "inspect the judge response together with execution brief, followup brief, and runtime status before acting",
+            "outcome": {
+                "kind": "offdesk_judge",
+                "status": "executed" if ok else "blocked",
+                "reason_code": reason_code,
+                "detail": summary,
+            },
+            "task": {
+                "request_id": str(latest_task.get("request_id", "")).strip() or "-",
+                "label": str(latest_task.get("short_id", "")).strip() or str(latest_task.get("alias", "")).strip() or "-",
+                "detail_path": f"/control/tasks/by-request/{str(latest_task.get('request_id', '')).strip()}",
+            },
+            "preview": {
+                "kind": "runtime_judge",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+            },
+            "latest_judge_decision": judge_decision,
+        },
+        status=200 if ok else 409,
+    )
+
+
+def _execute_todo_proposal_action(
+    spec: Dict[str, object],
+    *,
+    config: DashboardAppConfig,
+    reject: bool = False,
+) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    project_ref = str(payload.get("project_ref", "")).strip()
+    proposal_ref = str(payload.get("proposal_ref", "")).strip()
+    reason = str(payload.get("reason", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
+    alias = _project_alias(entry, key)
+    proposals, _seq = todo_state.ensure_todo_proposal_store(entry)
+    proposal = todo_state.find_proposal_by_ref(proposals, proposal_ref)
+    if proposal is None:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": f"/todo {alias} proposals",
+                "remediation": "refresh the proposal inbox and re-run the action with an open proposal id",
+                "outcome": {
+                    "kind": "todo_proposal_reject" if reject else "todo_proposal_accept",
+                    "status": "blocked",
+                    "reason_code": "proposal_missing",
+                    "detail": f"proposal not found: {proposal_ref or '-'}",
+                },
+                "preview": {
+                    "kind": "todo_proposal",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                },
+            },
+            status=404,
+        )
+    if todo_state.normalize_proposal_status(proposal.get("status")) != "open":
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": f"/todo {alias} proposals",
+                "remediation": "pick an open proposal or inspect the existing todo queue before applying another worker update",
+                "outcome": {
+                    "kind": "todo_proposal_reject" if reject else "todo_proposal_accept",
+                    "status": "blocked",
+                    "reason_code": "proposal_not_open",
+                    "detail": f"proposal is not open: {str(proposal.get('id', '')).strip() or proposal_ref or '-'}",
+                },
+                "preview": {
+                    "kind": "todo_proposal",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                },
+            },
+            status=409,
+        )
+    now = _now_iso()
+    if reject:
+        result = todo_state.reject_todo_proposal(
+            entry=entry,
+            proposal=proposal,
+            actor=f"dashboard:{_DASHBOARD_CHAT_ID}",
+            now=now,
+            reason=reason,
+        )
+        outcome_kind = "todo_proposal_reject"
+        next_step = f"/todo {alias} proposals"
+        remediation = "inspect remaining open proposals before rejecting another worker suggestion"
+    else:
+        result = todo_state.accept_todo_proposal(
+            entry=entry,
+            proposal=proposal,
+            actor=f"dashboard:{_DASHBOARD_CHAT_ID}",
+            now=now,
+        )
+        outcome_kind = "todo_proposal_accept"
+        next_step = f"/todo {alias}"
+        remediation = "inspect the promoted todo row and syncback posture before applying another worker proposal"
+    _save_manager_state(config, manager_state)
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": True,
+            "status": "executed",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "phase2",
+            "source_command": str(spec.get("command", "")).strip() or "-",
+            "payload": payload,
+            "next_step": next_step,
+            "remediation": remediation,
+            "outcome": {
+                "kind": outcome_kind,
+                "status": "executed",
+                "reason_code": "completed",
+                "detail": str(result.get("summary", "")).strip() or "-",
+            },
+            "proposal": {
+                "proposal_id": str(result.get("proposal_id", "")).strip() or str(proposal.get("id", "")).strip() or "-",
+                "summary": str(result.get("summary", "")).strip() or str(proposal.get("summary", "")).strip() or "-",
+                "created_new": bool(result.get("created_new", False)),
+                "todo_id": str(result.get("todo_id", "")).strip() or "-",
+                "reason": str(result.get("reason", "")).strip() or "-",
+            },
+            "preview": {
+                "kind": "todo_proposal",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+            },
+        },
+        status=200,
+    )

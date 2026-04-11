@@ -13,7 +13,9 @@ from control_dashboard_action_exec import (
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
     _execute_followup_action,
+    _execute_runtime_judge_action,
     _execute_retry_action,
+    _execute_todo_proposal_action,
 )
 from control_dashboard_audit import _with_action_audit
 from control_dashboard_common import (
@@ -74,6 +76,31 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         spec = operator_action_contract.http_action_spec(command)
         if spec is None:
             raise ValueError("unsupported followup execute action contract")
+        return spec
+
+    if path == "/control/actions/runtime/judge":
+        project_ref = str(payload.get("project_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        spec = operator_action_contract.http_action_spec(f"/orch judge {project_ref}")
+        if spec is None:
+            raise ValueError("unsupported runtime judge action contract")
+        return spec
+
+    if path in {"/control/actions/runtime/todo-accept", "/control/actions/runtime/todo-reject"}:
+        project_ref = str(payload.get("project_ref", "")).strip()
+        proposal_ref = str(payload.get("proposal_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        if not proposal_ref:
+            raise ValueError("proposal_ref is required")
+        reason = str(payload.get("reason", "")).strip()
+        command = f"/todo {project_ref} {'reject' if path.endswith('reject') else 'accept'} {proposal_ref}"
+        if reason and path.endswith("reject"):
+            command += f" {reason}"
+        spec = operator_action_contract.http_action_spec(command)
+        if spec is None:
+            raise ValueError("unsupported todo proposal action contract")
         return spec
 
     if path == "/control/actions/runtime/sync-preview":
@@ -248,6 +275,15 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/runtime/background-queue-clean":
         return _with_action_audit(_execute_background_queue_clean_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/judge":
+        return _with_action_audit(_execute_runtime_judge_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/todo-accept":
+        return _with_action_audit(_execute_todo_proposal_action(spec, config=config, reject=False), config=config)
+
+    if path == "/control/actions/runtime/todo-reject":
+        return _with_action_audit(_execute_todo_proposal_action(spec, config=config, reject=True), config=config)
 
     if path in {"/control/actions/task/retry", "/control/actions/task/replan"}:
         return _with_action_audit(_execute_retry_action(spec, config=config), config=config)

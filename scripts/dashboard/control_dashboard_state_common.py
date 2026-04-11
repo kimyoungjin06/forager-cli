@@ -266,6 +266,14 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
     if path == "/control/actions/task/followup-execute":
         lane_ids = [str(item).strip() for item in (payload.get("lane_ids") or []) if str(item).strip()]
         return "Follow-up Execute" if not lane_ids else f"Follow-up Execute ({','.join(lane_ids)})"
+    if path == "/control/actions/runtime/judge":
+        return "Run Offdesk Judge"
+    if path == "/control/actions/runtime/todo-accept":
+        proposal_ref = str(payload.get("proposal_ref", "")).strip()
+        return f"Accept Proposal ({proposal_ref})" if proposal_ref else "Accept Proposal"
+    if path == "/control/actions/runtime/todo-reject":
+        proposal_ref = str(payload.get("proposal_ref", "")).strip()
+        return f"Reject Proposal ({proposal_ref})" if proposal_ref else "Reject Proposal"
     if path == "/control/actions/runtime/sync-preview":
         window = str(payload.get("window", "")).strip()
         return f"Sync Preview ({window})" if window else "Sync Preview"
@@ -309,14 +317,20 @@ def _build_action_buttons(commands: Iterable[str]) -> List[ActionButtonDTO]:
 def _append_unique_action_button(buttons: List[ActionButtonDTO], button: ActionButtonDTO | None) -> List[ActionButtonDTO]:
     if not isinstance(button, ActionButtonDTO):
         return list(buttons)
-    existing = {
-        (str(row.path).strip(), str(row.payload_json).strip())
-        for row in buttons
-        if isinstance(row, ActionButtonDTO)
-    }
     key = (str(button.path).strip(), str(button.payload_json).strip())
-    if key in existing:
-        return list(buttons)
+    replaced = False
+    out: List[ActionButtonDTO] = []
+    for row in buttons:
+        if not isinstance(row, ActionButtonDTO):
+            continue
+        row_key = (str(row.path).strip(), str(row.payload_json).strip())
+        if row_key == key:
+            out.append(button)
+            replaced = True
+            continue
+        out.append(row)
+    if replaced:
+        return out
     return [*buttons, button]
 
 
@@ -358,6 +372,73 @@ def _replan_auto_route_action_button(
             ensure_ascii=False,
             separators=(",", ":"),
         ),
+    )
+
+
+def _replan_manual_route_action_button(
+    *,
+    project_alias: str,
+    label: str,
+    request_id: str,
+    policy: Dict[str, Any],
+) -> ActionButtonDTO | None:
+    row = policy if isinstance(policy, dict) else {}
+    if str(row.get("status", "")).strip() != "manual_ready":
+        return None
+    suggested_action = str(row.get("suggested_action", "")).strip()
+    suggested_next_step = str(row.get("suggested_next_step", "")).strip()
+    confidence = str(row.get("confidence", "")).strip() or "-"
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    next_parts = suggested_next_step.split()
+    next_ref = next_parts[1].strip() if len(next_parts) >= 2 else ""
+    if suggested_action == "followup" and suggested_next_step.startswith("/followup "):
+        payload_task_ref = next_ref or task_ref
+        if not payload_task_ref or payload_task_ref == "-":
+            return None
+        return ActionButtonDTO(
+            label="Apply Judge Manual Step",
+            command=suggested_next_step,
+            method="POST",
+            path="/control/actions/task/followup",
+            mode="safe",
+            note=f"judge-backed followup handoff | confidence={confidence} | next={suggested_next_step}",
+            payload_json=json.dumps({"task_ref": payload_task_ref, "lane_ids": []}, ensure_ascii=False, separators=(",", ":")),
+        )
+    if suggested_action in {"manual_review", "review", "judge"} and suggested_next_step.startswith("/orch judge "):
+        payload_project_ref = next_ref or project_alias
+        if not payload_project_ref:
+            return None
+        return ActionButtonDTO(
+            label="Apply Judge Manual Step",
+            command=suggested_next_step,
+            method="POST",
+            path="/control/actions/runtime/judge",
+            mode="safe",
+            note=f"judge-backed manual review | confidence={confidence} | next={suggested_next_step}",
+            payload_json=json.dumps({"project_ref": payload_project_ref}, ensure_ascii=False, separators=(",", ":")),
+        )
+    return None
+
+
+def _worker_update_proposal_accept_button(
+    *,
+    project_alias: str,
+    proposal_ids: Iterable[str],
+) -> ActionButtonDTO | None:
+    alias = str(project_alias or "").strip()
+    if not alias:
+        return None
+    first = next((str(item).strip() for item in proposal_ids if str(item).strip()), "")
+    if not first:
+        return None
+    return ActionButtonDTO(
+        label="Accept Worker Proposal",
+        command=f"/todo {alias} accept {first}",
+        method="POST",
+        path="/control/actions/runtime/todo-accept",
+        mode="phase2",
+        note=f"promote worker update proposal into runtime todo queue | proposal={first}",
+        payload_json=json.dumps({"project_ref": alias, "proposal_ref": first}, ensure_ascii=False, separators=(",", ":")),
     )
 
 

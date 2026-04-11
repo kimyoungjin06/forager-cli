@@ -35,6 +35,7 @@ from control_dashboard_state_common import (
     _detail_path,
     _provider_repeat_counts,
     _recovery_control_action_buttons,
+    _replan_manual_route_action_button,
     _replan_auto_route_action_button,
     _runtime_action_buttons,
     _runtime_command_contract,
@@ -44,6 +45,7 @@ from control_dashboard_state_common import (
     _task_command_contract,
     _task_followup_summary,
     _task_rerun_summary,
+    _worker_update_proposal_accept_button,
 )
 from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
 
@@ -283,6 +285,22 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 label=str(row.get("active_task_label", "")).strip(),
                 request_id=active_request_id,
                 policy=latest_replan_auto_routing_policy,
+            ),
+        )
+        runtime_safe_action_buttons = _append_unique_action_button(
+            runtime_safe_action_buttons,
+            _replan_manual_route_action_button(
+                project_alias=alias,
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                policy=latest_replan_auto_routing_policy,
+            ),
+        )
+        runtime_phase2_action_buttons = _append_unique_action_button(
+            runtime_phase2_action_buttons,
+            _worker_update_proposal_accept_button(
+                project_alias=alias,
+                proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
             ),
         )
         cards.append(
@@ -757,6 +775,22 @@ def _build_runtime_detail(
             policy=latest_replan_auto_routing_policy,
         ),
     )
+    runtime_safe_action_buttons = _append_unique_action_button(
+        runtime_safe_action_buttons,
+        _replan_manual_route_action_button(
+            project_alias=target_alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=latest_replan_auto_routing_policy,
+        ),
+    )
+    runtime_phase2_action_buttons = _append_unique_action_button(
+        runtime_phase2_action_buttons,
+        _worker_update_proposal_accept_button(
+            project_alias=target_alias,
+            proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+        ),
+    )
     active_task_safe_action_buttons, active_task_phase2_action_buttons = _task_action_buttons(
         label=str(row.get("active_task_label", "")).strip(),
         request_id=active_request_id,
@@ -769,6 +803,22 @@ def _build_runtime_detail(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
             policy=latest_replan_auto_routing_policy,
+        ),
+    )
+    active_task_safe_action_buttons = _append_unique_action_button(
+        active_task_safe_action_buttons,
+        _replan_manual_route_action_button(
+            project_alias=target_alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            policy=latest_replan_auto_routing_policy,
+        ),
+    )
+    active_task_phase2_action_buttons = _append_unique_action_button(
+        active_task_phase2_action_buttons,
+        _worker_update_proposal_accept_button(
+            project_alias=target_alias,
+            proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
         ),
     )
     return RuntimeDetailDTO(

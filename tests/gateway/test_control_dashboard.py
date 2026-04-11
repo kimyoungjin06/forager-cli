@@ -25,6 +25,7 @@ from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
 import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
+import control_dashboard_action_exec_runtime as runtime_exec  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
 import aoe_tg_document_registry as document_registry  # noqa: E402
@@ -2588,7 +2589,7 @@ def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> 
         for btn in runtime_detail.active_task_phase2_action_buttons
     )
     assert runtime_detail.latest_replan_auto_route_summary == "-"
-    assert runtime_detail.latest_replan_auto_route_status_summary == "-"
+    assert runtime_detail.latest_replan_auto_route_status_summary == "ready=/retry T-001 | waiting_for_apply"
     assert task_detail is not None
     assert any(
         btn.label == "Apply Judge Auto-Route"
@@ -2597,7 +2598,169 @@ def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> 
         for btn in task_detail.phase2_action_buttons
     )
     assert task_detail.latest_replan_auto_route_summary == "-"
-    assert task_detail.latest_replan_auto_route_status_summary == "-"
+    assert task_detail.latest_replan_auto_route_status_summary == "ready=/retry T-001 | waiting_for_apply"
+
+
+def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | target=reports/summary.md"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    state["projects"]["alpha"]["todo_proposals"] = [
+        {
+            "id": "PROP-001",
+            "summary": "review worker artifact update for T-001: reports/summary.md",
+            "priority": "P2",
+            "kind": "handoff",
+            "status": "open",
+            "source_request_id": "REQ-1",
+            "created_by": "worker",
+            "created_at": "2026-04-10T10:05:00+09:00",
+            "updated_at": "2026-04-10T10:05:00+09:00",
+        }
+    ]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:06:00+09:00",
+        extra={
+            "response_text": json.dumps(
+                {
+                    "verdict": "hold",
+                    "confidence": "medium",
+                    "reasoning": "needs operator handoff",
+                    "next_step": "/followup T-001",
+                    "caution": "manual wording still required",
+                }
+            )
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan | blocked",
+        status="blocked",
+        outcome_kind="replan",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked replan",
+        next_step="/followup T-001",
+        remediation="judge decision reuse: action=followup next=/followup T-001",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:07:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "hold",
+                "confidence": "medium",
+                "recommended_action": "followup",
+                "candidate_next_step": "/followup T-001",
+                "applied": True,
+                "applied_next_step": "/followup T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            },
+            "replan_auto_decision": {
+                "source": "latest_offdesk_judge",
+                "current_action": "replan",
+                "suggested_action": "followup",
+                "suggested_next_step": "/followup T-001",
+                "decision_mode": "promoted_next_step",
+                "bridge_applied": True,
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "confidence": "medium",
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "manual_ready",
+                "current_action": "replan",
+                "suggested_action": "followup",
+                "suggested_next_step": "/followup T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    expected_manual_payload = '{"task_ref":"T-001","lane_ids":[]}'
+    expected_proposal_payload = '{"project_ref":"O2","proposal_ref":"PROP-001"}'
+    assert any(
+        btn.label == "Apply Judge Manual Step"
+        and btn.path == "/control/actions/task/followup"
+        and btn.payload_json == expected_manual_payload
+        for btn in runtime_card.runtime_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Accept Worker Proposal"
+        and btn.path == "/control/actions/runtime/todo-accept"
+        and btn.payload_json == expected_proposal_payload
+        for btn in runtime_card.runtime_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Apply Judge Manual Step"
+        and btn.path == "/control/actions/task/followup"
+        and btn.payload_json == expected_manual_payload
+        for btn in runtime_detail.active_task_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Accept Worker Proposal"
+        and btn.path == "/control/actions/runtime/todo-accept"
+        and btn.payload_json == expected_proposal_payload
+        for btn in runtime_detail.active_task_phase2_action_buttons
+    )
+    assert task_detail is not None
+    assert any(
+        btn.label == "Apply Judge Manual Step"
+        and btn.path == "/control/actions/task/followup"
+        and btn.payload_json == expected_manual_payload
+        for btn in task_detail.safe_action_buttons
+    )
+    assert any(
+        btn.label == "Accept Worker Proposal"
+        and btn.path == "/control/actions/runtime/todo-accept"
+        and btn.payload_json == expected_proposal_payload
+        for btn in task_detail.phase2_action_buttons
+    )
 
 
 def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_path: Path) -> None:
@@ -2673,6 +2836,111 @@ def test_runtime_and_task_detail_surface_latest_replan_auto_route_summary(tmp_pa
     assert task_detail.latest_replan_auto_route_status_summary == (
         "applied=/retry T-001 lane L1 | at=2026-04-10T10:08:00+09:00"
     )
+
+
+def test_control_dashboard_post_runtime_todo_accept_route_promotes_worker_proposal(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["todo_proposals"] = [
+        {
+            "id": "PROP-001",
+            "summary": "review worker artifact update for T-001: reports/summary.md",
+            "priority": "P2",
+            "kind": "handoff",
+            "status": "open",
+            "source_request_id": "REQ-1",
+            "created_by": "worker",
+            "created_at": "2026-04-10T10:05:00+09:00",
+            "updated_at": "2026-04-10T10:05:00+09:00",
+        }
+    ]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/todo-accept",
+        body=json.dumps({"project_ref": "O2", "proposal_ref": "PROP-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/todo O2 accept PROP-001"
+    assert payload["proposal"]["proposal_id"] == "PROP-001"
+    assert payload["proposal"]["todo_id"] == "TODO-002"
+    assert payload["proposal"]["created_new"] is True
+    assert payload["next_step"] == "/todo O2"
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    proposal = updated["projects"]["alpha"]["todo_proposals"][0]
+    assert proposal["status"] == "accepted"
+    assert proposal["accepted_todo_id"] == "TODO-002"
+    todos = updated["projects"]["alpha"]["todos"]
+    assert any(row["id"] == "TODO-002" and row["summary"] == "review worker artifact update for T-001: reports/summary.md" for row in todos)
+
+
+def test_control_dashboard_post_runtime_judge_route_executes_bound_review(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    monkeypatch.setattr(
+        runtime_exec.model_endpoint_adapter,
+        "resolve_task_judge_binding",
+        lambda *args, **kwargs: {"summary": "judge=codex_cli-gpt-5-4:gpt-5.4"},
+    )
+    monkeypatch.setattr(
+        runtime_exec.model_provider_adapter,
+        "invoke_task_judge_stub",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "executed": True,
+            "summary": "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed",
+            "response_text": json.dumps(
+                {
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "reasoning": "brief executable",
+                    "next_step": "/retry T-001",
+                }
+            ),
+            "reason_code": "completed",
+        },
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/judge",
+        body=json.dumps({"project_ref": "O2"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/orch judge O2"
+    assert payload["binding"] == "judge=codex_cli-gpt-5-4:gpt-5.4"
+    assert payload["latest_judge_decision"]["verdict"] == "continue"
+    row = action_audit.load_latest_action_audit_for_runtime_kind(team_dir, project_alias="O2", outcome_kind="offdesk_judge")
+    assert row["headline"] == "Offdesk Judge | executed"
+    assert row["outcome_detail"] == "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed"
 
 
 def test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief(tmp_path: Path) -> None:
