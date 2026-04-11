@@ -43,6 +43,8 @@ from control_dashboard_state_common import (
     _task_rerun_summary,
     _runtime_path,
     _worker_apply_proposal_button,
+    _worker_apply_preview_button,
+    _worker_apply_proposal_accept_button,
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
@@ -356,6 +358,22 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             safe_action_buttons = _append_unique_action_button(safe_action_buttons, manual_route_button)
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
+            _worker_apply_preview_button(
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
+                update_stub={
+                    "status": task.get("background_run_worker_update_stub_status"),
+                    "summary_line": task.get("background_run_worker_update_stub_summary"),
+                    "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        safe_action_buttons = _append_unique_action_button(
+            safe_action_buttons,
             _worker_update_preview_button(
                 label=task_view.task_display_label(task, fallback_request_id=rid),
                 request_id=rid,
@@ -391,6 +409,14 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             _worker_update_proposal_accept_button(
                 project_alias=alias,
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        phase2_action_buttons = _append_unique_action_button(
+            phase2_action_buttons,
+            _worker_apply_proposal_accept_button(
+                project_alias=alias,
+                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+                proposal_summary=task.get("background_run_worker_update_proposal_summary"),
             ),
         )
         backend_summary = _compose_backend_summary(

@@ -46,6 +46,8 @@ from control_dashboard_state_common import (
     _task_followup_summary,
     _task_rerun_summary,
     _worker_apply_proposal_button,
+    _worker_apply_preview_button,
+    _worker_apply_proposal_accept_button,
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
@@ -301,6 +303,22 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             runtime_safe_action_buttons = _append_unique_action_button(runtime_safe_action_buttons, runtime_manual_route_button)
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
+            _worker_apply_preview_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                update_stub={
+                    "status": (active_task or {}).get("background_run_worker_update_stub_status"),
+                    "summary_line": (active_task or {}).get("background_run_worker_update_stub_summary"),
+                    "target_artifacts": (active_task or {}).get("background_run_worker_update_stub_targets"),
+                    "actions": (active_task or {}).get("background_run_worker_result_actions"),
+                    "cautions": (active_task or {}).get("background_run_worker_result_cautions"),
+                    "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
+                },
+                proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        runtime_safe_action_buttons = _append_unique_action_button(
+            runtime_safe_action_buttons,
             _worker_update_preview_button(
                 label=str(row.get("active_task_label", "")).strip(),
                 request_id=active_request_id,
@@ -336,6 +354,14 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             _worker_update_proposal_accept_button(
                 project_alias=alias,
                 proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        runtime_phase2_action_buttons = _append_unique_action_button(
+            runtime_phase2_action_buttons,
+            _worker_apply_proposal_accept_button(
+                project_alias=alias,
+                proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+                proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
             ),
         )
         cards.append(
@@ -852,6 +878,22 @@ def _build_runtime_detail(
         active_task_safe_action_buttons = _append_unique_action_button(active_task_safe_action_buttons, active_task_manual_route_button)
     active_task_safe_action_buttons = _append_unique_action_button(
         active_task_safe_action_buttons,
+        _worker_apply_preview_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            update_stub={
+                "status": (active_task or {}).get("background_run_worker_update_stub_status"),
+                "summary_line": (active_task or {}).get("background_run_worker_update_stub_summary"),
+                "target_artifacts": (active_task or {}).get("background_run_worker_update_stub_targets"),
+                "actions": (active_task or {}).get("background_run_worker_result_actions"),
+                "cautions": (active_task or {}).get("background_run_worker_result_cautions"),
+                "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
+            },
+            proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+        ),
+    )
+    active_task_safe_action_buttons = _append_unique_action_button(
+        active_task_safe_action_buttons,
         _worker_update_preview_button(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
@@ -887,6 +929,14 @@ def _build_runtime_detail(
         _worker_update_proposal_accept_button(
             project_alias=target_alias,
             proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+        ),
+    )
+    active_task_phase2_action_buttons = _append_unique_action_button(
+        active_task_phase2_action_buttons,
+        _worker_apply_proposal_accept_button(
+            project_alias=target_alias,
+            proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+            proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
         ),
     )
     return RuntimeDetailDTO(

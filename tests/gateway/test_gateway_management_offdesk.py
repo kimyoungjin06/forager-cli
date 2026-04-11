@@ -2150,6 +2150,21 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
         "todo_proposals": [],
         "last_sync_at": "2026-03-10T20:00:00+0900",
         "last_sync_mode": "scenario",
+        "tasks": {
+            "req-research": {
+                "request_id": "req-research",
+                "short_id": "T-501",
+                "label": "T-501",
+                "status": "running",
+                "updated_at": "2026-04-09T18:07:00+09:00",
+                "created_at": "2026-04-09T17:55:00+09:00",
+                "background_run_worker_update_stub_status": "ready",
+                "background_run_worker_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+                "background_run_worker_update_stub_targets": ["reports/summary.md"],
+                "background_run_worker_update_proposal_summary": "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md",
+                "background_run_worker_update_proposal_ids": ["PROP-001"],
+            }
+        },
     }
 
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review O5")
@@ -2160,6 +2175,8 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-501 | auto=yes" in text
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | auto=yes" in text
     assert "auto_route: ready+applied=/retry T-501 | at=2026-04-09T18:06:00+09:00 | apply=dashboard:Apply Judge Auto-Route | api:auto_route_apply=true" in text
+    assert "worker_update: status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
+    assert "worker_apply: status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
     assert "first: /retry T-501 |" in text
 
 

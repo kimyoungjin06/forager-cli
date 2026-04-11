@@ -61,6 +61,8 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Follow-up Execute | {status}"
     if path == "/control/actions/task/worker-update-preview":
         return f"Worker Update Preview | {status}"
+    if path == "/control/actions/task/worker-apply-preview":
+        return f"Worker Apply Preview | {status}"
     if path == "/control/actions/task/worker-apply-propose":
         return f"Worker Apply Proposal | {status}"
     if path == "/control/actions/runtime/judge":

@@ -542,6 +542,12 @@ def _handle_offdesk_command(
             auto_route_note = str(row.get("replan_auto_route_ready_note", "")).strip() or "-"
             if auto_route_action and auto_route_operator_summary in {"", "-"}:
                 lines.append(f"  replan_auto_route_ready: {auto_route_action} | {auto_route_note}")
+            worker_update_summary = str(row.get("active_task_worker_update_summary", "")).strip() or "-"
+            worker_apply_summary = str(row.get("active_task_worker_apply_summary", "")).strip() or "-"
+            if worker_update_summary not in {"", "-"}:
+                lines.append("  worker_update: " + worker_update_summary)
+            if worker_apply_summary not in {"", "-"}:
+                lines.append("  worker_apply: " + worker_apply_summary[:240])
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:
                 lines.append(

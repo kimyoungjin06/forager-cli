@@ -8,6 +8,7 @@ from control_dashboard_action_exec_auto import _execute_auto_recover_action
 from control_dashboard_action_exec_runtime import (
     _execute_runtime_judge_action,
     _execute_todo_proposal_action,
+    _execute_worker_apply_preview_action,
     _execute_worker_apply_propose_action,
     _execute_worker_update_preview_action,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "_execute_auto_recover_action",
     "_execute_runtime_judge_action",
     "_execute_todo_proposal_action",
+    "_execute_worker_apply_preview_action",
     "_execute_worker_apply_propose_action",
     "_execute_worker_update_preview_action",
     "_execute_followup_action",

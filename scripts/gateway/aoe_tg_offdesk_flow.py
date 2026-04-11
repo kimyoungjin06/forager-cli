@@ -56,6 +56,7 @@ from aoe_tg_todo_policy import (
     proposal_confidence,
 )
 from aoe_tg_todo_state import preview_syncback_plan, sorted_open_proposals
+import aoe_tg_worker_task_contract as worker_task_contract
 
 
 _SLOT_RUNNER_TARGETS = list(EXECUTOR_SLOT_RUNNER_TARGETS)
@@ -412,6 +413,17 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "background_run_runner_target": str(best_task.get("background_run_runner_target", "")).strip(),
         "background_run_external_phase": str(best_task.get("background_run_external_phase", "")).strip(),
         "background_run_external_note": str(best_task.get("background_run_external_note", "")).strip(),
+        "background_run_task_contract_summary": str(best_task.get("background_run_task_contract_summary", "")).strip(),
+        "background_run_worker_result_status": str(best_task.get("background_run_worker_result_status", "")).strip(),
+        "background_run_worker_result_summary": str(best_task.get("background_run_worker_result_summary", "")).strip(),
+        "background_run_worker_result_actions": list(best_task.get("background_run_worker_result_actions") or []),
+        "background_run_worker_result_cautions": list(best_task.get("background_run_worker_result_cautions") or []),
+        "background_run_worker_result_evidence_refs": list(best_task.get("background_run_worker_result_evidence_refs") or []),
+        "background_run_worker_update_stub_status": str(best_task.get("background_run_worker_update_stub_status", "")).strip(),
+        "background_run_worker_update_stub_summary": str(best_task.get("background_run_worker_update_stub_summary", "")).strip(),
+        "background_run_worker_update_stub_targets": list(best_task.get("background_run_worker_update_stub_targets") or []),
+        "background_run_worker_update_proposal_summary": str(best_task.get("background_run_worker_update_proposal_summary", "")).strip(),
+        "background_run_worker_update_proposal_ids": list(best_task.get("background_run_worker_update_proposal_ids") or []),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -1250,6 +1262,19 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                     review_ids=",".join(manual_review) if manual_review else "-",
                 )
             )
+        worker_update_summary = worker_task_contract.summarize_worker_update_operator_summary(
+            {
+                "status": latest_task.get("background_run_worker_update_stub_status"),
+                "summary_line": latest_task.get("background_run_worker_update_stub_summary"),
+                "target_artifacts": latest_task.get("background_run_worker_update_stub_targets"),
+            },
+            latest_task.get("background_run_worker_update_proposal_ids") or [],
+        )
+        worker_apply_summary = str(latest_task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
+        if worker_update_summary not in {"", "-"}:
+            lines.append("  worker_update: " + worker_update_summary)
+        if worker_apply_summary not in {"", "-"}:
+            lines.append("  worker_apply: " + worker_apply_summary[:240])
         if task_background_runner in {"github_runner", "remote_worker"} and (
             task_background_external_phase or task_background_external_note
         ):
@@ -1380,6 +1405,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "replan_auto_route_ready_action": replan_auto_route_ready_action,
         "replan_auto_route_ready_note": replan_auto_route_ready_note,
         "replan_auto_route_operator_summary": replan_auto_route_operator_summary,
+        "active_task_worker_update_summary": worker_update_summary,
+        "active_task_worker_apply_summary": worker_apply_summary,
         "notes": list(notes),
     }
 
