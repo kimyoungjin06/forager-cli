@@ -645,6 +645,19 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     ]
     if background_worker_result_refs:
         lines.append("background_run_worker_refs: " + ", ".join(background_worker_result_refs[:6])[:240])
+    background_worker_update_stub = str(task.get("background_run_worker_update_stub_summary", "")).strip()
+    if background_worker_update_stub:
+        lines.append("background_run_worker_update_stub: " + background_worker_update_stub[:240])
+    background_worker_update_targets = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_update_stub_targets") if isinstance(task.get("background_run_worker_update_stub_targets"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_update_targets:
+        lines.append("background_run_worker_targets: " + ", ".join(background_worker_update_targets[:6])[:240])
     background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
     if background_judge_binding:
         lines.append("background_run_model_judge: " + background_judge_binding[:240])

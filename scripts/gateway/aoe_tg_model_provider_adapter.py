@@ -661,6 +661,14 @@ def invoke_background_ticket_worker(
             result["task_result_actions"] = list(task_result.get("actions") or [])
             result["task_result_cautions"] = list(task_result.get("cautions") or [])
             result["task_result_evidence_refs"] = list(task_result.get("evidence_refs") or [])
+            update_stub = worker_task_contract.derive_worker_task_update_stub(
+                launch_spec.get("provider_task_contract_json"),
+                task_result,
+            )
+            if update_stub:
+                result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
+                result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"
+                result["task_update_stub_targets"] = list(update_stub.get("target_artifacts") or [])
     return result
 
 

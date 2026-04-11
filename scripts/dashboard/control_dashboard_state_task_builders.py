@@ -437,6 +437,18 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 if str(item).strip()
             )
             or "-",
+            background_run_worker_update_stub_summary=(
+                str(task.get("background_run_worker_update_stub_summary", "")).strip() or "-"
+            ),
+            background_run_worker_update_stub_targets=", ".join(
+                str(item).strip()
+                for item in (
+                    (task.get("background_run_worker_update_stub_targets") if isinstance(task.get("background_run_worker_update_stub_targets"), list) else [])
+                    or []
+                )
+                if str(item).strip()
+            )
+            or "-",
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"
             ),

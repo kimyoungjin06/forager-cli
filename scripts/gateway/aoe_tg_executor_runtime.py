@@ -161,6 +161,13 @@ def dispatch_claimed_background_ticket_via_adapter(
                 for item in (provider_invoke_result.get("task_result_evidence_refs") or [])
                 if str(item).strip()
             ]
+            task_update_stub_status = str(provider_invoke_result.get("task_update_stub_status", "")).strip()
+            task_update_stub_summary = str(provider_invoke_result.get("task_update_stub_summary", "")).strip()
+            task_update_stub_targets = [
+                str(item).strip()
+                for item in (provider_invoke_result.get("task_update_stub_targets") or [])
+                if str(item).strip()
+            ]
             completed_runtime_summary = (
                 f"provider_invoke_completed | route={route_id} | endpoint={endpoint_id} | model={model_name}"
             )[:240]
@@ -168,6 +175,8 @@ def dispatch_claimed_background_ticket_via_adapter(
                 completed_runtime_summary = f"{completed_runtime_summary} | {contract_summary}"[:240]
             if task_result_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_result_summary}"[:240]
+            if task_update_stub_summary:
+                completed_runtime_summary = f"{completed_runtime_summary} | {task_update_stub_summary}"[:240]
             bundle_parts = [
                 "status=completed",
                 "outcome=provider_invoke_ok",
@@ -183,10 +192,15 @@ def dispatch_claimed_background_ticket_via_adapter(
                 bundle_parts.append(f"response={response_text[:80]}")
             if task_result_summary:
                 bundle_parts.append(task_result_summary[:80])
+            if task_update_stub_status:
+                bundle_parts.append(f"update={task_update_stub_status[:48]}")
             completed_bundle = " | ".join(bundle_parts)[:240]
             for ref in task_result_evidence_refs:
                 if ref and ref not in completed_artifacts:
                     completed_artifacts.append(ref)
+            for target in task_update_stub_targets:
+                if target and target not in completed_artifacts:
+                    completed_artifacts.append(target)
         completed = advance_background_run_ticket(
             queue_path,
             token,
@@ -199,6 +213,9 @@ def dispatch_claimed_background_ticket_via_adapter(
             worker_result_actions=list(provider_invoke_result.get("task_result_actions") or []),
             worker_result_cautions=list(provider_invoke_result.get("task_result_cautions") or []),
             worker_result_evidence_refs=list(provider_invoke_result.get("task_result_evidence_refs") or []),
+            worker_update_stub_status=str(provider_invoke_result.get("task_update_stub_status", "")).strip(),
+            worker_update_stub_summary=str(provider_invoke_result.get("task_update_stub_summary", "")).strip(),
+            worker_update_stub_targets=list(provider_invoke_result.get("task_update_stub_targets") or []),
             evidence_bundle=completed_bundle or "status=completed | outcome=dispatch_flow_returned",
             evidence_artifacts=completed_artifacts,
         )

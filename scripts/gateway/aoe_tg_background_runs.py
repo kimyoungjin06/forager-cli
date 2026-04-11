@@ -584,6 +584,9 @@ def advance_background_run_ticket(
     worker_result_actions: List[Any] | None = None,
     worker_result_cautions: List[Any] | None = None,
     worker_result_evidence_refs: List[Any] | None = None,
+    worker_update_stub_status: str = "",
+    worker_update_stub_summary: str = "",
+    worker_update_stub_targets: List[Any] | None = None,
     evidence_bundle: str = "",
     evidence_artifacts: List[Any] | None = None,
 ) -> Dict[str, Any]:
@@ -620,6 +623,12 @@ def advance_background_run_ticket(
         updated["worker_result_cautions"] = list(worker_result_cautions or [])
     if worker_result_evidence_refs is not None:
         updated["worker_result_evidence_refs"] = list(worker_result_evidence_refs or [])
+    if str(worker_update_stub_status or "").strip():
+        updated["worker_update_stub_status"] = str(worker_update_stub_status or "").strip()
+    if str(worker_update_stub_summary or "").strip():
+        updated["worker_update_stub_summary"] = str(worker_update_stub_summary or "").strip()
+    if worker_update_stub_targets is not None:
+        updated["worker_update_stub_targets"] = list(worker_update_stub_targets or [])
     if str(evidence_bundle or "").strip():
         updated["evidence_bundle"] = str(evidence_bundle or "").strip()
     if evidence_artifacts is not None:

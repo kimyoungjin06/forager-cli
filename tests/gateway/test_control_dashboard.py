@@ -755,6 +755,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
     task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -826,6 +828,9 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "background_worker_cautions" in text
     assert "keep review lane open" in text
     assert "background_worker_refs" in text
+    assert "background_worker_update_stub" in text
+    assert "status=ready | targets=reports/summary.md | actions=1 | refs=1" in text
+    assert "background_worker_targets" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "control_intent_action" in text
@@ -908,6 +913,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
     task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -976,6 +983,9 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "background_worker_cautions" in text
     assert "keep review lane open" in text
     assert "background_worker_refs" in text
+    assert "background_worker_update_stub" in text
+    assert "status=ready | targets=reports/summary.md | actions=1 | refs=1" in text
+    assert "background_worker_targets" in text
     assert "evidence_bundle" in text
     assert "awaiting_review" in text
     assert "analysis-followup" in text

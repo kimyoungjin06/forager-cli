@@ -198,6 +198,9 @@ def test_executor_runtime_dispatches_provider_invoke_local_background_ticket(mon
             "task_result_actions": ["update reports/summary.md"],
             "task_result_cautions": ["keep review lane open"],
             "task_result_evidence_refs": ["reports/summary.md"],
+            "task_update_stub_status": "ready",
+            "task_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+            "task_update_stub_targets": ["reports/summary.md"],
         },
     )
 
@@ -226,6 +229,9 @@ def test_executor_runtime_dispatches_provider_invoke_local_background_ticket(mon
     assert updates[1]["worker_result_status"] == "ready"
     assert updates[1]["worker_result_summary"] == "status=ready | queue summary drafted | actions=1 | refs=1"
     assert updates[1]["worker_result_evidence_refs"] == ["reports/summary.md"]
+    assert updates[1]["worker_update_stub_status"] == "ready"
+    assert updates[1]["worker_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert updates[1]["worker_update_stub_targets"] == ["reports/summary.md"]
     assert updates[1]["evidence_artifacts"] == ["reports/summary.md"]
     assert not errors
 

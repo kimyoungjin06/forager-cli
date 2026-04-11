@@ -901,6 +901,18 @@ def _build_runtime_detail(
             if str(item).strip()
         )
         or "-",
+        active_task_background_run_worker_update_stub_summary=(
+            str((active_task or {}).get("background_run_worker_update_stub_summary", "")).strip() or "-"
+        ),
+        active_task_background_run_worker_update_stub_targets=", ".join(
+            str(item).strip()
+            for item in (
+                (((active_task or {}).get("background_run_worker_update_stub_targets")) if isinstance((active_task or {}).get("background_run_worker_update_stub_targets"), list) else [])
+                or []
+            )
+            if str(item).strip()
+        )
+        or "-",
         active_task_background_run_model_plan_summary=(
             str((active_task or {}).get("background_run_model_plan_summary", "")).strip() or "-"
         ),

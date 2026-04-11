@@ -1473,6 +1473,8 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
             "background_run_worker_result_actions": ["update docs/RUNBOOK.md"],
             "background_run_worker_result_cautions": ["keep review lane open"],
             "background_run_worker_result_evidence_refs": ["docs/RUNBOOK.md"],
+            "background_run_worker_update_stub_summary": "status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1",
+            "background_run_worker_update_stub_targets": ["docs/RUNBOOK.md"],
         },
     )
 
@@ -1480,6 +1482,8 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
     assert "context_pack_docs: docs/RUNBOOK.md, docs/REQUEST_CONTRACT_SPEC.md" in summary
     assert "background_run_worker_result: status=ready | worker summary drafted | actions=1 | refs=1" in summary
     assert "background_run_worker_actions: update docs/RUNBOOK.md" in summary
+    assert "background_run_worker_update_stub: status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1" in summary
+    assert "background_run_worker_targets: docs/RUNBOOK.md" in summary
 
 
 def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_policy(tmp_path: Path) -> None:

@@ -405,6 +405,9 @@ def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypa
             "task_result_actions": ["update reports/summary.md"],
             "task_result_cautions": ["keep review lane open"],
             "task_result_evidence_refs": ["reports/summary.md"],
+            "task_update_stub_status": "ready",
+            "task_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+            "task_update_stub_targets": ["reports/summary.md"],
         },
     )
     monkeypatch.setattr(
@@ -477,6 +480,7 @@ def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypa
     assert "- task: T-001" in text
     assert "task=T-001 | pack=offdesk_execute | brief=executable | docs=1" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
+    assert "status=ready | targets=reports/summary.md | actions=1 | refs=1" in text
     assert "TASK_WORKER_OK" in text
     buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
     assert "/orch bgw-task O2" in buttons
@@ -489,6 +493,9 @@ def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypa
     assert rows[0]["worker_result_status"] == "ready"
     assert rows[0]["worker_result_summary"] == "status=ready | worker summary drafted | actions=1 | refs=1"
     assert rows[0]["worker_result_evidence_refs"] == ["reports/summary.md"]
+    assert rows[0]["worker_update_stub_status"] == "ready"
+    assert rows[0]["worker_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert rows[0]["worker_update_stub_targets"] == ["reports/summary.md"]
     audit_file = team_dir / "dashboard" / "action-history.jsonl"
     audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert audit_rows[-1]["source_command"] == "/orch bgw-task O2"
@@ -7393,6 +7400,9 @@ def test_background_run_queue_drain_executes_provider_invoke_without_registry(
             "task_result_actions": ["update reports/summary.md"],
             "task_result_cautions": ["keep review lane open"],
             "task_result_evidence_refs": ["reports/summary.md"],
+            "task_update_stub_status": "ready",
+            "task_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+            "task_update_stub_targets": ["reports/summary.md"],
         },
     )
 
@@ -7413,6 +7423,9 @@ def test_background_run_queue_drain_executes_provider_invoke_without_registry(
     assert rows["BGT-PROVIDER-QUEUE-001"]["worker_result_status"] == "ready"
     assert rows["BGT-PROVIDER-QUEUE-001"]["worker_result_summary"] == "status=ready | queue summary drafted | actions=1 | refs=1"
     assert rows["BGT-PROVIDER-QUEUE-001"]["worker_result_evidence_refs"] == ["reports/summary.md"]
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_update_stub_status"] == "ready"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_update_stub_targets"] == ["reports/summary.md"]
     assert rows["BGT-PROVIDER-QUEUE-001"]["evidence_artifacts"] == ["reports/summary.md"]
 
 

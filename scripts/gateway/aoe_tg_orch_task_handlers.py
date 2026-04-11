@@ -1750,6 +1750,7 @@ def handle_orch_task_command(
             final_runtime = str(final_ticket.get("runtime_summary", "-")).strip() or "-"
             final_evidence = str(final_ticket.get("evidence_bundle", "-")).strip() or "-"
             final_worker_result = str(final_ticket.get("worker_result_summary", "-")).strip() or "-"
+            final_worker_update_stub = str(final_ticket.get("worker_update_stub_summary", "-")).strip() or "-"
             append_action_audit_row(
                 team_dir,
                 headline="Background Worker Task Invoke | executed",
@@ -1776,6 +1777,7 @@ def handle_orch_task_command(
                 f"- status: {final_status}\n"
                 f"- runtime_summary: {final_runtime}\n"
                 f"- worker_result: {final_worker_result}\n"
+                f"- update_stub: {final_worker_update_stub}\n"
                 f"- response: {response_hint or '-'}\n"
                 "next:\n"
                 f"- /orch status {alias}",

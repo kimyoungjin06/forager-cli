@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional
 
 from aoe_tg_context_pack import load_context_pack
@@ -12,6 +13,7 @@ from aoe_tg_context_pack import load_context_pack
 
 WORKER_TASK_CONTRACT_VERSION = "2026-04-10.v1"
 WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
+WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_SYSTEM = (
     "You are the bounded background worker. Return strict JSON with keys: "
     "status, summary, actions, cautions, evidence_refs. Keep every field concise."
@@ -74,6 +76,8 @@ def sanitize_worker_task_contract(raw: Any) -> Dict[str, Any]:
         "reentry_rails_summary": _trim(source.get("reentry_rails_summary"), 320) or "-",
         "constraints": _uniq(source.get("constraints"), limit=6, text_limit=200),
         "doc_paths": _uniq(source.get("doc_paths"), limit=6, text_limit=200),
+        "required_outputs": _uniq(source.get("required_outputs"), limit=8, text_limit=160),
+        "artifact_targets": _uniq(source.get("artifact_targets"), limit=8, text_limit=160),
         "known_failures": _uniq(source.get("known_failures"), limit=4, text_limit=200),
         "unresolved_questions": _uniq(source.get("unresolved_questions"), limit=4, text_limit=200),
     }
@@ -181,6 +185,17 @@ def build_worker_task_contract(
                 for row in (pack.get("relevant_docs") or [])
                 if isinstance(row, dict) and _trim(row.get("path"), 200)
             ],
+            "required_outputs": [
+                _trim(row, 160)
+                for row in (task_data.get("request_contract_required_outputs") or [])
+                if _trim(row, 160)
+            ],
+            "artifact_targets": [
+                _trim(((task_data.get("request_contract_artifact_contracts") or {}).get(alias) or {}).get("path"), 160)
+                or _trim(alias, 160)
+                for alias in (task_data.get("request_contract_required_outputs") or [])
+                if _trim(alias, 160)
+            ],
             "known_failures": list(pack.get("known_failures") or []),
             "unresolved_questions": list(pack.get("unresolved_questions") or []),
         }
@@ -208,6 +223,8 @@ def render_worker_task_prompt(contract: Any) -> Dict[str, str]:
         "reentry_rails_summary": _trim(row.get("reentry_rails_summary"), 320) or "-",
         "constraints": list(row.get("constraints") or []),
         "doc_paths": list(row.get("doc_paths") or []),
+        "required_outputs": list(row.get("required_outputs") or []),
+        "artifact_targets": list(row.get("artifact_targets") or []),
         "known_failures": list(row.get("known_failures") or []),
         "unresolved_questions": list(row.get("unresolved_questions") or []),
     }
@@ -222,3 +239,72 @@ def render_worker_task_prompt(contract: Any) -> Dict[str, str]:
         "prompt": prompt,
         "summary": _trim(row.get("summary"), 320) or _summary(row),
     }
+
+
+def _infer_action_paths(actions: List[str]) -> List[str]:
+    inferred: List[str] = []
+    pattern = re.compile(r"\b(?:update|write|create|edit)\s+([A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+|[A-Za-z0-9_./-]+)", re.IGNORECASE)
+    for action in actions:
+        text = _trim(action, 240)
+        if not text:
+            continue
+        match = pattern.search(text)
+        if not match:
+            continue
+        token = _trim(match.group(1), 160)
+        if token and token not in inferred:
+            inferred.append(token)
+    return inferred[:6]
+
+
+def _update_stub_summary(row: Dict[str, Any]) -> str:
+    status = _trim(row.get("status"), 48) or "-"
+    targets = list(row.get("target_artifacts") or [])
+    actions = list(row.get("actions") or [])
+    refs = list(row.get("evidence_refs") or [])
+    target_text = ",".join(targets[:2]) if targets else "-"
+    parts = [f"status={status}", f"targets={target_text}"]
+    if actions:
+        parts.append(f"actions={len(actions)}")
+    if refs:
+        parts.append(f"refs={len(refs)}")
+    return " | ".join(parts)[:320]
+
+
+def sanitize_worker_task_update_stub(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_UPDATE_STUB_VERSION,
+        "status": _trim(source.get("status"), 48) or "-",
+        "target_artifacts": _uniq(source.get("target_artifacts"), limit=8, text_limit=160),
+        "actions": _uniq(source.get("actions"), limit=4, text_limit=160),
+        "cautions": _uniq(source.get("cautions"), limit=4, text_limit=160),
+        "evidence_refs": _uniq(source.get("evidence_refs"), limit=8, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320) or _update_stub_summary(row)
+    return row
+
+
+def derive_worker_task_update_stub(contract: Any, result: Any) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not result_row:
+        return {}
+    actions = list(result_row.get("actions") or [])
+    cautions = list(result_row.get("cautions") or [])
+    refs = list(result_row.get("evidence_refs") or [])
+    targets = []
+    for token in list(contract_row.get("artifact_targets") or []) + _infer_action_paths(actions) + refs:
+        clean = _trim(token, 160)
+        if clean and clean not in targets:
+            targets.append(clean)
+    status = "ready" if (targets or actions or refs) else "none"
+    return sanitize_worker_task_update_stub(
+        {
+            "status": status,
+            "target_artifacts": targets,
+            "actions": actions,
+            "cautions": cautions,
+            "evidence_refs": refs,
+        }
+    )

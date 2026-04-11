@@ -650,6 +650,8 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
             "objective": "Ship a bounded worker summary.",
             "execution_brief_status": "executable",
             "execution_brief_summary": "do=summary",
+            "required_outputs": ["summary_report"],
+            "artifact_targets": ["reports/summary.md"],
             "constraints": ["run_lock=test_only"],
             "doc_paths": ["docs/RUNBOOK.md"],
         }
@@ -699,3 +701,6 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
     assert result["task_result_actions"] == ["update reports/summary.md"]
     assert result["task_result_cautions"] == ["keep review lane open"]
     assert result["task_result_evidence_refs"] == ["reports/summary.md"]
+    assert result["task_update_stub_status"] == "ready"
+    assert result["task_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert result["task_update_stub_targets"] == ["reports/summary.md"]
