@@ -1565,6 +1565,9 @@ def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_po
                 "project_key": "alpha",
                 "task_short_id": "T-410",
             },
+            "background_run_worker_syncback_summary": (
+                "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:13:00+09:00"
+            ),
         },
     )
 
@@ -1578,6 +1581,10 @@ def test_task_lifecycle_summary_includes_judge_bridge_and_replan_auto_routing_po
     )
     assert (
         "auto_route_status: ready+applied=/retry T-410 | at=2026-04-10T09:12:00+09:00"
+        in summary
+    )
+    assert (
+        "background_run_worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:13:00+09:00"
         in summary
     )
 

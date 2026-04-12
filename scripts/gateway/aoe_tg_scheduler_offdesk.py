@@ -532,6 +532,8 @@ def _handle_offdesk_command(
             auto_route_operator_summary = str(row.get("replan_auto_route_operator_summary", "")).strip() or "-"
             if auto_route_operator_summary not in {"", "-"}:
                 lines.append("  auto_route: " + auto_route_operator_summary)
+                if auto_route_operator_summary.startswith("manual_review="):
+                    lines.append("  manual_review_ready: " + auto_route_operator_summary)
             elif latest_replan_auto_route_status_summary not in {"", "-"}:
                 lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
             else:
@@ -545,12 +547,15 @@ def _handle_offdesk_command(
             worker_update_summary = str(row.get("active_task_worker_update_summary", "")).strip() or "-"
             worker_apply_summary = str(row.get("active_task_worker_apply_summary", "")).strip() or "-"
             worker_apply_accept_summary = str(row.get("active_task_worker_apply_accept_summary", "")).strip() or "-"
+            worker_syncback_summary = str(row.get("active_task_worker_syncback_summary", "")).strip() or "-"
             if worker_update_summary not in {"", "-"}:
                 lines.append("  worker_update: " + worker_update_summary)
             if worker_apply_summary not in {"", "-"}:
                 lines.append("  worker_apply: " + worker_apply_summary[:240])
             if worker_apply_accept_summary not in {"", "-"}:
                 lines.append("  worker_apply_accept: " + worker_apply_accept_summary[:240])
+            if worker_syncback_summary not in {"", "-"}:
+                lines.append("  worker_syncback: " + worker_syncback_summary[:240])
             proposal_triage = row.get("proposal_triage") if isinstance(row.get("proposal_triage"), dict) else {}
             if int(proposal_triage.get("open_count", 0) or 0) > 0:
                 lines.append(

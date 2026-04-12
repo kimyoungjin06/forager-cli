@@ -2563,6 +2563,11 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
             "updated_at": "2026-04-10T10:06:00+09:00",
         }
     ]
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
+    task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
+    task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
     manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -2606,10 +2611,17 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
     assert apply_payload["outcome"]["kind"] == "runtime_syncback_apply"
     assert apply_payload["result"]["line_count"] >= 1
     assert "completed" == apply_payload["outcome"]["reason_code"]
+    assert apply_payload["worker_syncback"].startswith("state=applied | todo=TODO-002 | path=TODO.md |")
     canonical_text = (project_root / "TODO.md").read_text(encoding="utf-8")
     assert "apply worker artifact update for T-001: reports/summary.md" in canonical_text
     assert preview_payload["preview"]["project_alias"] == "O2"
     assert preview_payload["preview"]["target_path"].endswith("TODO.md")
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_worker_syncback_status"] == "applied"
+    assert updated_task["background_run_worker_syncback_summary"].startswith(
+        "state=applied | todo=TODO-002 | path=TODO.md |"
+    )
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:
@@ -3438,6 +3450,11 @@ def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(
     task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
     task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
     task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
+    task["background_run_worker_syncback_status"] = "applied"
+    task["background_run_worker_syncback_summary"] = (
+        "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T10:07:00+09:00"
+    )
+    task["background_run_worker_syncback_at"] = "2026-04-10T10:07:00+09:00"
     task.pop("background_run_worker_update_proposal_summary", None)
     task.pop("background_run_worker_update_proposal_ids", None)
     manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -3463,46 +3480,14 @@ def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
 
     assert runtime_card.active_task_background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
+    assert runtime_card.active_task_background_run_worker_syncback_summary.startswith("state=applied | todo=TODO-002 | path=TODO.md")
     assert runtime_detail.active_task_background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
+    assert runtime_detail.active_task_background_run_worker_syncback_summary.startswith(
+        "state=applied | todo=TODO-002 | path=TODO.md"
+    )
     assert task_detail is not None
     assert task_detail.background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
-    expected_syncback_payload = '{"project_ref":"O2"}'
-    assert any(
-        btn.label == "Preview Accepted Syncback"
-        and btn.path == "/control/actions/runtime/syncback-preview"
-        and btn.payload_json == expected_syncback_payload
-        for btn in runtime_card.runtime_safe_action_buttons
-    )
-    assert any(
-        btn.label == "Apply Accepted Syncback"
-        and btn.path == "/control/actions/runtime/syncback-apply"
-        and btn.payload_json == expected_syncback_payload
-        for btn in runtime_card.runtime_phase2_action_buttons
-    )
-    assert any(
-        btn.label == "Preview Accepted Syncback"
-        and btn.path == "/control/actions/runtime/syncback-preview"
-        and btn.payload_json == expected_syncback_payload
-        for btn in runtime_detail.active_task_safe_action_buttons
-    )
-    assert any(
-        btn.label == "Apply Accepted Syncback"
-        and btn.path == "/control/actions/runtime/syncback-apply"
-        and btn.payload_json == expected_syncback_payload
-        for btn in runtime_detail.active_task_phase2_action_buttons
-    )
-    assert any(
-        btn.label == "Preview Accepted Syncback"
-        and btn.path == "/control/actions/runtime/syncback-preview"
-        and btn.payload_json == expected_syncback_payload
-        for btn in task_detail.safe_action_buttons
-    )
-    assert any(
-        btn.label == "Apply Accepted Syncback"
-        and btn.path == "/control/actions/runtime/syncback-apply"
-        and btn.payload_json == expected_syncback_payload
-        for btn in task_detail.phase2_action_buttons
-    )
+    assert task_detail.background_run_worker_syncback_summary.startswith("state=applied | todo=TODO-002 | path=TODO.md")
 
     blocked_labels = {"Preview Artifact Apply", "Propose Artifact Apply", "Accept Artifact Apply"}
     assert not any(btn.label in blocked_labels for btn in runtime_card.runtime_safe_action_buttons)
@@ -3511,6 +3496,13 @@ def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(
     assert not any(btn.label in blocked_labels for btn in runtime_detail.active_task_phase2_action_buttons)
     assert not any(btn.label in blocked_labels for btn in task_detail.safe_action_buttons)
     assert not any(btn.label in blocked_labels for btn in task_detail.phase2_action_buttons)
+    syncback_labels = {"Preview Accepted Syncback", "Apply Accepted Syncback"}
+    assert not any(btn.label in syncback_labels for btn in runtime_card.runtime_safe_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in runtime_card.runtime_phase2_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in runtime_detail.active_task_safe_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in task_detail.safe_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in task_detail.phase2_action_buttons)
 
 
 def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> None:

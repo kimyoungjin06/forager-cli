@@ -2164,6 +2164,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
                 "background_run_worker_update_proposal_summary": "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md",
                 "background_run_worker_update_proposal_ids": ["PROP-001"],
                 "background_run_worker_apply_accept_summary": "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00",
+                "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T18:09:00+09:00",
             }
         },
     }
@@ -2179,7 +2180,76 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "worker_update: status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
     assert "worker_apply: status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
     assert "worker_apply_accept: state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00" in text
+    assert "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T18:09:00+09:00" in text
     assert "first: /retry T-501 |" in text
+
+
+def test_offdesk_review_surfaces_manual_review_ready_copy(tmp_path: Path) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / "Research"
+    team_dir = project_root / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] draft memo\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T18:05:00+09:00",
+                "headline": "Replan | blocked",
+                "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "planning critic blocked retry",
+                "next_step": "/orch judge O5",
+                "remediation": "judge decision reuse: action=manual_review next=/orch judge O5",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+                "replan_auto_routing_policy": {
+                    "source": "latest_offdesk_judge",
+                    "status": "manual_ready",
+                    "current_action": "replan",
+                    "suggested_action": "manual_review",
+                    "suggested_next_step": "/orch judge O5",
+                    "decision_mode": "judge_manual_review",
+                    "supports_auto_decision": True,
+                    "can_auto_apply": False,
+                    "requires_operator_confirmation": True,
+                    "confidence": "medium",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["research"] = {
+        "name": "research",
+        "display_name": "Research",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "draft memo", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "tasks": {
+            "req-research": {
+                "request_id": "req-research",
+                "short_id": "T-501",
+                "label": "T-501",
+                "status": "blocked",
+                "updated_at": "2026-04-09T18:07:00+09:00",
+                "created_at": "2026-04-09T17:55:00+09:00",
+            }
+        },
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review O5")
+
+    assert "auto_route: manual_review=/orch judge O5 | waiting_for_operator" in text
+    assert "manual_review_ready: manual_review=/orch judge O5 | waiting_for_operator" in text
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:

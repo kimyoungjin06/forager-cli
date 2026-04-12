@@ -600,6 +600,13 @@ def summarize_replan_auto_operator_status(
     if ready_status == "ready" and ready_next not in {"", "-"}:
         return f"ready={ready_next} | waiting_for_apply"
     if ready_status == "manual_ready" and ready_next not in {"", "-"}:
+        suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
+        if suggested_action in {"manual_review", "review", "judge"}:
+            return f"manual_review={ready_next} | waiting_for_operator"
+        if suggested_action == "followup_execute":
+            return f"manual_execute={ready_next} | waiting_for_operator"
+        if suggested_action == "followup":
+            return f"manual_followup={ready_next} | waiting_for_operator"
         return f"manual={ready_next} | waiting_for_operator"
     if applied_next not in {"", "-"}:
         return f"applied={applied_next} | at={applied_at}"

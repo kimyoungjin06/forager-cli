@@ -109,6 +109,10 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
             getattr(task, "background_run_worker_update_proposal_ids", []) or []
         ),
         "background_run_worker_apply_accept_summary": getattr(task, "background_run_worker_apply_accept_summary", ""),
+        "background_run_worker_apply_accept_at": getattr(task, "background_run_worker_apply_accept_at", ""),
+        "background_run_worker_syncback_status": getattr(task, "background_run_worker_syncback_status", ""),
+        "background_run_worker_syncback_summary": getattr(task, "background_run_worker_syncback_summary", ""),
+        "background_run_worker_syncback_at": getattr(task, "background_run_worker_syncback_at", ""),
         "observatory": {
             "headline": task.observatory_headline,
             "first_focus": task.observatory_first_focus,
@@ -248,6 +252,18 @@ def build_nightly_session_summary(
                 ),
                 "active_task_background_run_worker_apply_accept_summary": getattr(
                     detail, "active_task_background_run_worker_apply_accept_summary", ""
+                ),
+                "active_task_background_run_worker_apply_accept_at": getattr(
+                    detail, "active_task_background_run_worker_apply_accept_at", ""
+                ),
+                "active_task_background_run_worker_syncback_status": getattr(
+                    detail, "active_task_background_run_worker_syncback_status", ""
+                ),
+                "active_task_background_run_worker_syncback_summary": getattr(
+                    detail, "active_task_background_run_worker_syncback_summary", ""
+                ),
+                "active_task_background_run_worker_syncback_at": getattr(
+                    detail, "active_task_background_run_worker_syncback_at", ""
                 ),
                 "active_task_background_run_model_plan_summary": detail.active_task_background_run_model_plan_summary,
                 "workspace_summary": detail.workspace_summary,
@@ -396,6 +412,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
                 f"- worker_apply_accept: {runtime.get('active_task_background_run_worker_apply_accept_summary', '-')}",
+                f"- worker_syncback: {runtime.get('active_task_background_run_worker_syncback_summary', '-')}",
                 f"- run_lock: {runtime.get('run_lock_mode', '-')}",
                 f"- run_lock_note: {runtime.get('run_lock_note', '-')}",
                 f"- background_slots: active={runtime.get('background_slot_active', 0)} limit={runtime.get('background_slot_limit', 1)}",

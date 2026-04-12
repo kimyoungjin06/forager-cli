@@ -250,6 +250,62 @@ def _syncback_preview_payload(*, alias: str, plan: Dict[str, Any]) -> Dict[str, 
     }
 
 
+def _summarize_worker_syncback_apply(
+    *,
+    todo_id: str,
+    path: str,
+    line_count: int,
+    append_count: int,
+    done_count: int,
+    reopen_count: int,
+    blocked_count: int,
+    applied_at: str,
+) -> str:
+    path_token = Path(path).name if str(path).strip() else "-"
+    todo_token = str(todo_id or "").strip() or "-"
+    return (
+        "state=applied | todo={todo} | path={path} | lines={lines} | "
+        "done={done} reopen={reopen} append={append} blocked={blocked} | at={at}"
+    ).format(
+        todo=todo_token,
+        path=path_token,
+        lines=max(0, int(line_count or 0)),
+        done=max(0, int(done_count or 0)),
+        reopen=max(0, int(reopen_count or 0)),
+        append=max(0, int(append_count or 0)),
+        blocked=max(0, int(blocked_count or 0)),
+        at=str(applied_at or "").strip() or "-",
+    )
+
+
+def _persist_worker_syncback_apply_state(
+    *,
+    task: Dict[str, Any],
+    result: Dict[str, Any],
+    preview: Dict[str, Any],
+    applied_at: str,
+) -> None:
+    summary = _summarize_worker_syncback_apply(
+        todo_id=str(task.get("background_run_worker_apply_accept_todo_id", "")).strip(),
+        path=str(result.get("path", "")).strip(),
+        line_count=int(result.get("line_count", 0) or 0),
+        append_count=int(preview.get("append_count", 0) or 0),
+        done_count=int(preview.get("done_count", 0) or 0),
+        reopen_count=int(preview.get("reopen_count", 0) or 0),
+        blocked_count=int(preview.get("blocked_count", 0) or 0),
+        applied_at=applied_at,
+    )
+    task["background_run_worker_syncback_status"] = "applied"
+    task["background_run_worker_syncback_summary"] = summary
+    task["background_run_worker_syncback_at"] = applied_at
+    task["updated_at"] = applied_at
+    task.setdefault("result", {})
+    if isinstance(task.get("result"), dict):
+        task["result"]["background_run_worker_syncback_status"] = "applied"
+        task["result"]["background_run_worker_syncback_summary"] = summary
+        task["result"]["background_run_worker_syncback_at"] = applied_at
+
+
 def _execute_runtime_syncback_preview_action(
     spec: Dict[str, object],
     *,
@@ -333,6 +389,7 @@ def _execute_runtime_syncback_apply_action(
     _paths, manager_state = _load_dashboard_manager_state(config)
     key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
     alias = _project_alias(entry, key)
+    latest_task = _latest_task_for_runtime(entry)
     try:
         plan = todo_state.preview_syncback_plan(entry)
     except RuntimeError as exc:
@@ -365,6 +422,15 @@ def _execute_runtime_syncback_apply_action(
         )
     result = todo_state.apply_syncback_plan(plan)
     preview = _syncback_preview_payload(alias=alias, plan=plan)
+    applied_at = _now_iso()
+    if isinstance(latest_task, dict) and str(latest_task.get("background_run_worker_apply_accept_status", "")).strip() == "applied":
+        _persist_worker_syncback_apply_state(
+            task=latest_task,
+            result=result,
+            preview=preview,
+            applied_at=applied_at,
+        )
+        _save_manager_state(config, manager_state)
     return _json(
         {
             "ok": True,
@@ -398,6 +464,9 @@ def _execute_runtime_syncback_apply_action(
                 "path": str(result.get("path", "")).strip() or "-",
                 "line_count": int(result.get("line_count", 0) or 0),
             },
+            "worker_syncback": (
+                str((latest_task or {}).get("background_run_worker_syncback_summary", "")).strip() or "-"
+            ),
         },
         status=200,
     )

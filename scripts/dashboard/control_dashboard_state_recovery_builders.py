@@ -41,6 +41,25 @@ def _worker_apply_applied(row: Dict[str, Any], key: str) -> bool:
     return str(row.get(key, "")).strip() == "applied"
 
 
+def _worker_syncback_applied(
+    row: Dict[str, Any],
+    *,
+    status_key: str,
+    summary_key: str,
+    sync_at_key: str,
+    accept_at_key: str,
+) -> bool:
+    status = str(row.get(status_key, "")).strip()
+    summary = str(row.get(summary_key, "")).strip()
+    if status != "applied" and summary in {"", "-"}:
+        return False
+    sync_at = str(row.get(sync_at_key, "")).strip()
+    accept_at = str(row.get(accept_at_key, "")).strip()
+    if sync_at and accept_at:
+        return sync_at >= accept_at
+    return True
+
+
 def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: str) -> List[RecoveryTaskDTO]:
     built: List[RecoveryTaskDTO] = []
     for row in rows:
@@ -70,6 +89,13 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
             phase2_commands=list(action_contract.get("phase2") or []),
         )
         worker_apply_applied = _worker_apply_applied(row, "background_run_worker_apply_accept_status")
+        worker_syncback_applied = _worker_syncback_applied(
+            row,
+            status_key="background_run_worker_syncback_status",
+            summary_key="background_run_worker_syncback_summary",
+            sync_at_key="background_run_worker_syncback_at",
+            accept_at_key="background_run_worker_apply_accept_at",
+        )
         if not worker_apply_applied:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
@@ -84,7 +110,7 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                     proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        else:
+        elif not worker_syncback_applied:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=project_alias),
@@ -134,7 +160,7 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                     proposal_summary=row.get("background_run_worker_update_proposal_summary"),
                 ),
             )
-        else:
+        elif not worker_syncback_applied:
             phase2_action_buttons = _append_unique_action_button(
                 phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=project_alias),
@@ -233,6 +259,13 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
         else:
             runtime_safe_action_buttons = _append_unique_action_button(runtime_safe_action_buttons, runtime_manual_route_button)
         runtime_worker_apply_applied = _worker_apply_applied(row, "active_task_background_run_worker_apply_accept_status")
+        runtime_worker_syncback_applied = _worker_syncback_applied(
+            row,
+            status_key="active_task_background_run_worker_syncback_status",
+            summary_key="active_task_background_run_worker_syncback_summary",
+            sync_at_key="active_task_background_run_worker_syncback_at",
+            accept_at_key="active_task_background_run_worker_apply_accept_at",
+        )
         if not runtime_worker_apply_applied:
             runtime_safe_action_buttons = _append_unique_action_button(
                 runtime_safe_action_buttons,
@@ -247,7 +280,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        else:
+        elif not runtime_worker_syncback_applied:
             runtime_safe_action_buttons = _append_unique_action_button(
                 runtime_safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
@@ -297,7 +330,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
                 ),
             )
-        else:
+        elif not runtime_worker_syncback_applied:
             runtime_phase2_action_buttons = _append_unique_action_button(
                 runtime_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
@@ -332,7 +365,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        else:
+        elif not runtime_worker_syncback_applied:
             active_task_safe_action_buttons = _append_unique_action_button(
                 active_task_safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
@@ -382,7 +415,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
                 ),
             )
-        else:
+        elif not runtime_worker_syncback_applied:
             active_task_phase2_action_buttons = _append_unique_action_button(
                 active_task_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
@@ -433,6 +466,9 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 ),
                 active_task_background_run_worker_apply_accept_summary=(
                     str(row.get("active_task_background_run_worker_apply_accept_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_worker_syncback_summary=(
+                    str(row.get("active_task_background_run_worker_syncback_summary", "")).strip() or "-"
                 ),
                 active_task_background_run_model_plan_summary=str(row.get("active_task_background_run_model_plan_summary", "")).strip() or "-",
                 workspace_summary=str(row.get("workspace_summary", "")).strip() or "-",

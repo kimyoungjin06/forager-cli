@@ -425,6 +425,7 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "background_run_worker_update_proposal_summary": str(best_task.get("background_run_worker_update_proposal_summary", "")).strip(),
         "background_run_worker_update_proposal_ids": list(best_task.get("background_run_worker_update_proposal_ids") or []),
         "background_run_worker_apply_accept_summary": str(best_task.get("background_run_worker_apply_accept_summary", "")).strip(),
+        "background_run_worker_syncback_summary": str(best_task.get("background_run_worker_syncback_summary", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -834,6 +835,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         replan_auto_route_operator_summary = (
             f"{base_status} | apply=dashboard:Apply Judge Auto-Route | api:auto_route_apply=true"
         )
+    elif latest_replan_auto_route_status_summary.startswith("manual_"):
+        replan_auto_route_operator_summary = latest_replan_auto_route_status_summary
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -1273,12 +1276,15 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         )
         worker_apply_summary = str(latest_task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
         worker_apply_accept_summary = str(latest_task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
+        worker_syncback_summary = str(latest_task.get("background_run_worker_syncback_summary", "")).strip() or "-"
         if worker_update_summary not in {"", "-"}:
             lines.append("  worker_update: " + worker_update_summary)
         if worker_apply_summary not in {"", "-"}:
             lines.append("  worker_apply: " + worker_apply_summary[:240])
         if worker_apply_accept_summary not in {"", "-"}:
             lines.append("  worker_apply_accept: " + worker_apply_accept_summary[:240])
+        if worker_syncback_summary not in {"", "-"}:
+            lines.append("  worker_syncback: " + worker_syncback_summary[:240])
         if task_background_runner in {"github_runner", "remote_worker"} and (
             task_background_external_phase or task_background_external_note
         ):
@@ -1320,6 +1326,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
     if replan_auto_route_operator_summary != "-":
         lines.append("  auto_route: " + replan_auto_route_operator_summary)
+        if replan_auto_route_operator_summary.startswith("manual_review="):
+            lines.append("  manual_review_ready: " + replan_auto_route_operator_summary)
     elif latest_replan_auto_route_status_summary != "-":
         lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
     else:
@@ -1412,6 +1420,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "active_task_worker_update_summary": worker_update_summary,
         "active_task_worker_apply_summary": worker_apply_summary,
         "active_task_worker_apply_accept_summary": worker_apply_accept_summary,
+        "active_task_worker_syncback_summary": worker_syncback_summary,
         "notes": list(notes),
     }
 

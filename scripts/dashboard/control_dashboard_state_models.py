@@ -111,6 +111,7 @@ class RuntimeCardDTO:
     active_task_background_run_worker_update_operator_summary: str
     active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_worker_apply_accept_summary: str
+    active_task_background_run_worker_syncback_summary: str
     active_task_background_run_model_plan_summary: str
     workspace_summary: str
     document_registry_summary: str
@@ -233,6 +234,7 @@ class TaskDetailDTO:
     background_run_worker_update_proposal_ids: List[str] = field(default_factory=list)
     background_run_worker_update_operator_summary: str = ""
     background_run_worker_apply_accept_summary: str = ""
+    background_run_worker_syncback_summary: str = ""
     background_run_model_plan_summary: str = ""
     background_run_model_judge_binding_summary: str = ""
     background_run_model_judge_probe_summary: str = ""
@@ -330,6 +332,7 @@ class RuntimeDetailDTO:
     active_task_background_run_worker_update_proposal_ids: List[str]
     active_task_background_run_worker_update_operator_summary: str
     active_task_background_run_worker_apply_accept_summary: str
+    active_task_background_run_worker_syncback_summary: str
     active_task_background_run_model_plan_summary: str
     active_task_background_run_model_judge_binding_summary: str
     active_task_background_run_model_judge_probe_summary: str
@@ -453,6 +456,7 @@ class RecoveryRuntimeDTO:
     active_task_background_run_worker_update_operator_summary: str
     active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_worker_apply_accept_summary: str
+    active_task_background_run_worker_syncback_summary: str
     active_task_background_run_model_plan_summary: str
     workspace_summary: str
     document_registry_summary: str

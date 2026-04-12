@@ -68,6 +68,20 @@ def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
 
 
+def _worker_syncback_summary(task: Dict[str, Any]) -> str:
+    return str(task.get("background_run_worker_syncback_summary", "")).strip() or "-"
+
+
+def _worker_syncback_applied(task: Dict[str, Any]) -> bool:
+    if str(task.get("background_run_worker_syncback_status", "")).strip() != "applied":
+        return False
+    sync_at = str(task.get("background_run_worker_syncback_at", "")).strip()
+    accept_at = str(task.get("background_run_worker_apply_accept_at", "")).strip()
+    if sync_at and accept_at:
+        return sync_at >= accept_at
+    return True
+
+
 def _selected_slot_runner(entry: Dict[str, Any], task: Dict[str, Any]) -> str:
     task_runner = str(task.get("background_run_runner_target", "")).strip().lower()
     if task_runner in background_runs.SLOT_RUNNER_TARGETS:
@@ -363,6 +377,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         else:
             safe_action_buttons = _append_unique_action_button(safe_action_buttons, manual_route_button)
         worker_apply_applied = str(task.get("background_run_worker_apply_accept_status", "")).strip() == "applied"
+        worker_syncback_applied = _worker_syncback_applied(task)
         if not worker_apply_applied:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
@@ -380,7 +395,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        else:
+        elif not worker_syncback_applied:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
@@ -436,7 +451,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     proposal_summary=task.get("background_run_worker_update_proposal_summary"),
                 ),
             )
-        else:
+        elif not worker_syncback_applied:
             phase2_action_buttons = _append_unique_action_button(
                 phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
@@ -575,6 +590,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             ],
             background_run_worker_update_operator_summary=_worker_update_operator_summary(task),
             background_run_worker_apply_accept_summary=_worker_apply_accept_summary(task),
+            background_run_worker_syncback_summary=_worker_syncback_summary(task),
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"
             ),

@@ -23,6 +23,14 @@ from test_control_dashboard import _build_runtime  # noqa: E402
 def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_syncback_status"] = "applied"
+    task["background_run_worker_syncback_summary"] = (
+        "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T11:07:00+09:00"
+    )
+    task["background_run_worker_syncback_at"] = "2026-04-09T11:07:00+09:00"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Offdesk Judge",
@@ -181,6 +189,9 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["latest_replan_auto_routing_policy_summary"] == "status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"
+    assert runtimes[0]["active_task_background_run_worker_syncback_summary"].startswith(
+        "state=applied | todo=TODO-002 | path=TODO.md"
+    )
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -195,6 +206,14 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
 def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_syncback_status"] = "applied"
+    task["background_run_worker_syncback_summary"] = (
+        "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T11:07:00+09:00"
+    )
+    task["background_run_worker_syncback_at"] = "2026-04-09T11:07:00+09:00"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     output_dir = tmp_path / "summary-out"
     assert action_audit.append_action_audit_row(
         team_dir,
@@ -326,6 +345,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in markdown
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in markdown
     assert "auto_route_status: ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in markdown
+    assert "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T11:07:00+09:00" in markdown
     assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown
     assert "background_slots: active=0 limit=1" in markdown
