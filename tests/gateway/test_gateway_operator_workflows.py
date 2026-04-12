@@ -1584,6 +1584,21 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
         link_href="/control/runtimes/O2",
         at="2026-04-10T09:18:00+09:00",
     )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Syncback Apply | executed",
+        status="executed",
+        outcome_kind="runtime_syncback_apply",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0",
+        next_step="/sync preview O2 24h",
+        remediation="-",
+        source_command="/todo O2 syncback apply",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:19:00+09:00",
+    )
     state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
@@ -1675,6 +1690,10 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00"
+        in text
+    )
+    assert (
+        "canonical_writeback: Syncback Apply | executed | state=executed | next=/sync preview O2 24h | at=2026-04-10T09:19:00+09:00 | path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0"
         in text
     )
 

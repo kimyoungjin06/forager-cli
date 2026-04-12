@@ -2089,6 +2089,22 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
         + "\n"
         + json.dumps(
             {
+                "at": "2026-04-09T18:09:00+09:00",
+                "headline": "Syncback Apply | executed",
+                "status": "executed",
+                "outcome_kind": "runtime_syncback_apply",
+                "outcome_status": "executed",
+                "outcome_reason_code": "completed",
+                "outcome_detail": "path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0",
+                "next_step": "/sync preview O5 24h",
+                "remediation": "verify canonical TODO drift is cleared before applying another accepted artifact syncback",
+                "source_command": "/todo O5 syncback apply",
+                "link_href": "/control/runtimes/O5",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "at": "2026-04-09T18:05:00+09:00",
                 "headline": "Retry | blocked",
                 "status": "blocked",
@@ -2181,6 +2197,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "worker_apply: status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
     assert "worker_apply_accept: state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00" in text
     assert "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T18:09:00+09:00" in text
+    assert "canonical_writeback: Syncback Apply | executed | state=executed | next=/sync preview O5 24h | at=2026-04-09T18:09:00+09:00 | path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0" in text
     assert "first: /retry T-501 |" in text
 
 

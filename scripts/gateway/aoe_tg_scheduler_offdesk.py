@@ -530,10 +530,14 @@ def _handle_offdesk_command(
             latest_replan_auto_route_summary = str(row.get("latest_replan_auto_route_summary", "")).strip() or "-"
             latest_replan_auto_route_status_summary = str(row.get("latest_replan_auto_route_status_summary", "")).strip() or "-"
             auto_route_operator_summary = str(row.get("replan_auto_route_operator_summary", "")).strip() or "-"
+            manual_step_summary = str(row.get("latest_manual_step_summary", "")).strip() or "-"
+            canonical_writeback_summary = str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"
             if auto_route_operator_summary not in {"", "-"}:
                 lines.append("  auto_route: " + auto_route_operator_summary)
                 if auto_route_operator_summary.startswith("manual_review="):
                     lines.append("  manual_review_ready: " + auto_route_operator_summary)
+            if manual_step_summary not in {"", "-"}:
+                lines.append("  manual_step: " + manual_step_summary)
             elif latest_replan_auto_route_status_summary not in {"", "-"}:
                 lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
             else:
@@ -541,6 +545,8 @@ def _handle_offdesk_command(
                     lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
                 if latest_replan_auto_route_summary not in {"", "-"}:
                     lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+            if canonical_writeback_summary not in {"", "-"}:
+                lines.append("  canonical_writeback: " + canonical_writeback_summary[:240])
             auto_route_note = str(row.get("replan_auto_route_ready_note", "")).strip() or "-"
             if auto_route_action and auto_route_operator_summary in {"", "-"}:
                 lines.append(f"  replan_auto_route_ready: {auto_route_action} | {auto_route_note}")

@@ -487,6 +487,10 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     or str(row.get("latest_replan_auto_route_status_summary", "")).strip()
                     or "-"
                 ),
+                latest_manual_step_summary=str(row.get("latest_manual_step_summary", "")).strip() or "-",
+                latest_canonical_writeback_summary=(
+                    str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"
+                ),
                 run_lock_mode=str(row.get("run_lock_mode", "")).strip() or "-",
                 run_lock_note=str(row.get("run_lock_note", "")).strip() or "-",
                 background_slot_limit=int(row.get("background_slot_limit", 1) or 1),

@@ -282,6 +282,14 @@ def build_nightly_session_summary(
                     snapshot.team_dir,
                     project_alias=detail.project_alias,
                 ),
+                "latest_manual_step_summary": action_audit.load_latest_manual_step_summary_for_runtime(
+                    snapshot.team_dir,
+                    project_alias=detail.project_alias,
+                ),
+                "latest_canonical_writeback_summary": action_audit.load_latest_canonical_writeback_summary_for_runtime(
+                    snapshot.team_dir,
+                    project_alias=detail.project_alias,
+                ),
                 "run_lock_mode": detail.run_lock_mode,
                 "run_lock_note": detail.run_lock_note,
                 "background_slot_limit": detail.background_slot_limit,
@@ -411,6 +419,8 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
+                f"- manual_step: {runtime.get('latest_manual_step_summary', '-')}",
+                f"- canonical_writeback: {runtime.get('latest_canonical_writeback_summary', '-')}",
                 f"- worker_apply_accept: {runtime.get('active_task_background_run_worker_apply_accept_summary', '-')}",
                 f"- worker_syncback: {runtime.get('active_task_background_run_worker_syncback_summary', '-')}",
                 f"- run_lock: {runtime.get('run_lock_mode', '-')}",

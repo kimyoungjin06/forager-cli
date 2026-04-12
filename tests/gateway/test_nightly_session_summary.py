@@ -125,6 +125,21 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     )
     assert action_audit.append_action_audit_row(
         team_dir,
+        headline="Syncback Apply | executed",
+        status="executed",
+        outcome_kind="runtime_syncback_apply",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0",
+        next_step="/sync preview O2 24h",
+        remediation="-",
+        source_command="/todo O2 syncback apply",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:07:00+09:00",
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
         headline="Retry | blocked",
         status="blocked",
         outcome_kind="retry_run",
@@ -169,7 +184,6 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert control["latest_intent_action"] == "offdesk_prepare"
     assert "selected=offdesk_prepare" in control["latest_intent_trace"]
     assert control["latest_intent_focus"] == "오늘 밤 scope, provider capacity, auto posture를 먼저 점검"
-    assert any(row["headline"] == "Sync Preview | preview" for row in summary["recent_action_audit"])
     assert any(row["link_href"] == "/control/runtimes/O2" for row in summary["recent_action_audit"])
     assert runtimes[0]["project_alias"] == "O2"
     assert runtimes[0]["completed_task_count"] == 1
@@ -189,6 +203,9 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["latest_replan_auto_routing_policy_summary"] == "status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"
+    assert runtimes[0]["latest_canonical_writeback_summary"].startswith(
+        "Syncback Apply | executed | state=executed | next=/sync preview O2 24h | at=2026-04-09T11:07:00+09:00 |"
+    )
     assert runtimes[0]["active_task_background_run_worker_syncback_summary"].startswith(
         "state=applied | todo=TODO-002 | path=TODO.md"
     )
@@ -307,6 +324,21 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:06:00+09:00",
     )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Syncback Apply | executed",
+        status="executed",
+        outcome_kind="runtime_syncback_apply",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0",
+        next_step="/sync preview O2 24h",
+        remediation="-",
+        source_command="/todo O2 syncback apply",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:07:00+09:00",
+    )
 
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
@@ -345,6 +377,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in markdown
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in markdown
     assert "auto_route_status: ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in markdown
+    assert "canonical_writeback: Syncback Apply | executed | state=executed | next=/sync preview O2 24h | at=2026-04-09T11:07:00+09:00 | path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0" in markdown
     assert "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T11:07:00+09:00" in markdown
     assert "reentry_rails: retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background" in markdown
     assert "run_lock: open" in markdown

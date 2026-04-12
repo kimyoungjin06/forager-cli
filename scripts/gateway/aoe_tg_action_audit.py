@@ -657,6 +657,59 @@ def load_latest_replan_auto_operator_summary_for_runtime(
     return summarize_replan_auto_operator_summary(policy=policy, route_row=row)
 
 
+def summarize_latest_manual_step(policy: Any) -> str:
+    normalized_policy = normalize_replan_auto_routing_policy(policy)
+    if str(normalized_policy.get("status", "")).strip().lower() != "manual_ready":
+        return "-"
+    next_step = str(normalized_policy.get("suggested_next_step", "")).strip() or "-"
+    suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
+    confidence = str(normalized_policy.get("confidence", "")).strip() or "-"
+    if suggested_action in {"manual_review", "review", "judge"}:
+        return f"manual_review={next_step} | confidence={confidence} | waiting_for_operator"
+    if suggested_action == "followup_execute":
+        return f"manual_execute={next_step} | confidence={confidence} | waiting_for_operator"
+    if suggested_action == "followup":
+        return f"manual_followup={next_step} | confidence={confidence} | waiting_for_operator"
+    return f"manual={next_step} | confidence={confidence} | waiting_for_operator"
+
+
+def load_latest_manual_step_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    policy = load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=project_alias)
+    return summarize_latest_manual_step(policy)
+
+
+def summarize_latest_canonical_writeback(row: Any) -> str:
+    if not isinstance(row, dict) or not row:
+        return "-"
+    headline = str(row.get("headline", "")).strip() or "Canonical Writeback"
+    state = str(row.get("status", "")).strip() or "-"
+    next_step = str(row.get("next_step", "")).strip() or "-"
+    detail = str(row.get("outcome_detail", "")).strip() or "-"
+    at = str(row.get("at", "")).strip() or "-"
+    return f"{headline} | state={state} | next={next_step} | at={at} | {detail}"
+
+
+def load_latest_canonical_writeback_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    row = load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=project_alias,
+        outcome_kind="runtime_syncback_apply",
+    )
+    if not row:
+        return "-"
+    enriched = dict(row)
+    enriched["at"] = str(row.get("at", "")).strip() or "-"
+    return summarize_latest_canonical_writeback(enriched)
+
+
 def load_latest_model_ping_audit_for_runtime(
     team_dir: Any,
     *,

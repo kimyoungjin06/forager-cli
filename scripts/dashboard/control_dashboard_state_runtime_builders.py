@@ -158,6 +158,20 @@ def _latest_replan_auto_route_summary(team_dir: Path, *, project_alias: str) -> 
     )
 
 
+def _latest_manual_step_summary(team_dir: Path, *, project_alias: str) -> str:
+    return action_audit.load_latest_manual_step_summary_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+    )
+
+
+def _latest_canonical_writeback_summary(team_dir: Path, *, project_alias: str) -> str:
+    return action_audit.load_latest_canonical_writeback_summary_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+    )
+
+
 def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str, Any], *, root_team_dir: Path) -> List[RuntimeCardDTO]:
     reports = _runtime_reports(manager_state, provider_state)
 
@@ -277,6 +291,14 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                         root_team_dir,
                         project_alias=str(entry.get("project_alias", "")).strip(),
                     )
+                )
+                latest_manual_step_summary = _latest_manual_step_summary(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
+                )
+                latest_canonical_writeback_summary = _latest_canonical_writeback_summary(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
                 )
                 latest_replan_auto_routing_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
                     root_team_dir,
@@ -534,6 +556,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_replan_auto_route_summary=latest_replan_auto_route_summary,
                 latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
                 latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
+                latest_manual_step_summary=latest_manual_step_summary,
+                latest_canonical_writeback_summary=latest_canonical_writeback_summary,
                 run_lock_mode=run_lock_mode,
                 run_lock_note=run_lock_note,
                 background_slot_limit=background_slot_limit,
@@ -775,6 +799,22 @@ def _build_runtime_detail(
     )
     latest_replan_auto_operator_summary = (
         action_audit.load_latest_replan_auto_operator_summary_for_runtime(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
+    latest_manual_step_summary = (
+        _latest_manual_step_summary(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
+    latest_canonical_writeback_summary = (
+        _latest_canonical_writeback_summary(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
         )
@@ -1195,6 +1235,8 @@ def _build_runtime_detail(
         latest_replan_auto_route_summary=latest_replan_auto_route_summary,
         latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
         latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
+        latest_manual_step_summary=latest_manual_step_summary,
+        latest_canonical_writeback_summary=latest_canonical_writeback_summary,
         run_lock_mode=run_lock_mode,
         run_lock_note=run_lock_note,
         background_slot_limit=background_slot_limit,
