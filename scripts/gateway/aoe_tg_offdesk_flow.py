@@ -107,6 +107,17 @@ def compact_reason(raw: Any, limit: int = 120) -> str:
     return text
 
 
+def _manual_step_ready_label(summary: str) -> str:
+    token = str(summary or "").strip()
+    if token.startswith("manual_review="):
+        return "manual_review_ready"
+    if token.startswith("manual_execute="):
+        return "manual_execute_ready"
+    if token.startswith("manual_followup="):
+        return "manual_followup_ready"
+    return "manual_step_ready"
+
+
 def _preset_operator_hint(phase1_preset: str, phase2_preset: str) -> str:
     preset = str(phase2_preset or phase1_preset or "").strip().lower()
     if preset == "writer":
@@ -826,14 +837,18 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         if team_dir is not None
         else {}
     )
+    manual_step_action = ""
     replan_auto_route_ready_action = ""
     replan_auto_route_ready_note = ""
     replan_auto_route_operator_summary = "-"
     if isinstance(latest_replan_auto_routing_policy, dict):
+        policy_status = str(latest_replan_auto_routing_policy.get("status", "")).strip()
         suggested_action = str(latest_replan_auto_routing_policy.get("suggested_action", "")).strip()
         suggested_next_step = str(latest_replan_auto_routing_policy.get("suggested_next_step", "")).strip()
+        if policy_status == "manual_ready" and suggested_next_step.startswith("/"):
+            manual_step_action = suggested_next_step
         if (
-            str(latest_replan_auto_routing_policy.get("status", "")).strip() == "ready"
+            policy_status == "ready"
             and bool(latest_replan_auto_routing_policy.get("can_auto_apply", False))
             and suggested_action == "retry"
             and suggested_next_step.startswith("/")
@@ -1109,7 +1124,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     lines = [
         f"- {alias} {display} [{status}]",
         f"  attention: {attention_summary}",
-        f"  first: {priority_action.get('action', '-')} | {priority_action.get('reason', '-')}",
+        f"  first: {manual_step_action or replan_auto_route_ready_action or priority_action.get('action', '-')} | {priority_action.get('reason', '-')}",
         f"  runtime: {runtime_label}",
         f"  canonical: {canonical_rel if canonical_exists else 'missing TODO.md'}",
         f"  scenario_include: {include_display}",
@@ -1338,8 +1353,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
     if replan_auto_route_operator_summary != "-":
         lines.append("  auto_route: " + replan_auto_route_operator_summary)
-        if replan_auto_route_operator_summary.startswith("manual_review="):
-            lines.append("  manual_review_ready: " + replan_auto_route_operator_summary)
+        if replan_auto_route_operator_summary.startswith("manual_"):
+            lines.append(f"  {_manual_step_ready_label(replan_auto_route_operator_summary)}: " + replan_auto_route_operator_summary)
     if latest_manual_step_summary not in {"", "-"}:
         lines.append("  manual_step: " + latest_manual_step_summary)
     elif latest_replan_auto_route_status_summary != "-":
@@ -1432,6 +1447,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "latest_replan_auto_route_status_summary": latest_replan_auto_route_status_summary,
         "latest_manual_step_summary": latest_manual_step_summary,
         "latest_canonical_writeback_summary": latest_canonical_writeback_summary,
+        "manual_step_action": manual_step_action,
         "replan_auto_route_ready_action": replan_auto_route_ready_action,
         "replan_auto_route_ready_note": replan_auto_route_ready_note,
         "replan_auto_route_operator_summary": replan_auto_route_operator_summary,
@@ -1511,6 +1527,9 @@ def offdesk_review_reply_markup(
         secondary: List[Dict[str, str]] = []
         tertiary: List[Dict[str, str]] = []
         auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
+        manual_step_action = str(row.get("manual_step_action", "")).strip()
+        if manual_step_action:
+            primary.append({"text": manual_step_action})
         if auto_route_action:
             primary.append({"text": auto_route_action})
         priority_action = str(row.get("priority_action", "")).strip()
@@ -1600,6 +1619,9 @@ def offdesk_prepare_reply_markup(
         primary: List[Dict[str, str]] = []
         secondary: List[Dict[str, str]] = []
         tertiary: List[Dict[str, str]] = []
+        manual_step_action = str(row.get("manual_step_action", "")).strip()
+        if manual_step_action:
+            primary.append({"text": manual_step_action})
         priority_action = str(row.get("priority_action", "")).strip()
         if priority_action:
             primary.append({"text": priority_action})

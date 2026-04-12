@@ -451,6 +451,9 @@ def _handle_offdesk_command(
             display = str(row.get("display", "")).strip() or alias
             actions: List[str] = []
             auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
+            manual_step_action = str(row.get("manual_step_action", "")).strip()
+            if manual_step_action:
+                actions.append(manual_step_action)
             if auto_route_action:
                 actions.append(auto_route_action)
             first_action = str(row.get("priority_action", "")).strip()
@@ -486,7 +489,7 @@ def _handle_offdesk_command(
             lines.append(f"- {alias} {display} [{row.get('status', '-')}]")
             lines.append(f"  attention: {str(row.get('attention_summary', '-')).strip() or '-'}")
             first_reason = str(row.get("priority_reason", "")).strip() or "-"
-            first_display_action = auto_route_action or first_action or "-"
+            first_display_action = manual_step_action or auto_route_action or first_action or "-"
             lines.append(f"  first: {first_display_action} | {first_reason}")
             active_degraded_by = [str(x).strip() for x in (row.get("active_task_degraded_by") or []) if str(x).strip()]
             if active_rate_limit:
@@ -534,8 +537,15 @@ def _handle_offdesk_command(
             canonical_writeback_summary = str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"
             if auto_route_operator_summary not in {"", "-"}:
                 lines.append("  auto_route: " + auto_route_operator_summary)
-                if auto_route_operator_summary.startswith("manual_review="):
-                    lines.append("  manual_review_ready: " + auto_route_operator_summary)
+                if auto_route_operator_summary.startswith("manual_"):
+                    ready_label = "manual_step_ready"
+                    if auto_route_operator_summary.startswith("manual_review="):
+                        ready_label = "manual_review_ready"
+                    elif auto_route_operator_summary.startswith("manual_execute="):
+                        ready_label = "manual_execute_ready"
+                    elif auto_route_operator_summary.startswith("manual_followup="):
+                        ready_label = "manual_followup_ready"
+                    lines.append(f"  {ready_label}: " + auto_route_operator_summary)
             if manual_step_summary not in {"", "-"}:
                 lines.append("  manual_step: " + manual_step_summary)
             elif latest_replan_auto_route_status_summary not in {"", "-"}:

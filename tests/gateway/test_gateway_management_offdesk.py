@@ -2269,6 +2269,83 @@ def test_offdesk_review_surfaces_manual_review_ready_copy(tmp_path: Path) -> Non
     assert "manual_review_ready: manual_review=/orch judge O5 | waiting_for_operator" in text
 
 
+def test_offdesk_review_surfaces_manual_execute_ready_copy_and_action(tmp_path: Path) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / "ResearchExec"
+    team_dir = project_root / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] execute memo patch\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T18:05:00+09:00",
+                "headline": "Replan | blocked",
+                "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "planning critic blocked retry",
+                "next_step": "/followup-exec T-501 lane L2",
+                "remediation": "judge decision reuse: action=followup_execute next=/followup-exec T-501 lane L2",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+                "replan_auto_routing_policy": {
+                    "source": "latest_offdesk_judge",
+                    "status": "manual_ready",
+                    "current_action": "replan",
+                    "suggested_action": "followup_execute",
+                    "suggested_next_step": "/followup-exec T-501 lane L2",
+                    "decision_mode": "judge_manual_execute",
+                    "supports_auto_decision": True,
+                    "can_auto_apply": False,
+                    "requires_operator_confirmation": True,
+                    "confidence": "medium",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["research_exec"] = {
+        "name": "research_exec",
+        "display_name": "ResearchExec",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "execute memo patch", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "tasks": {
+            "req-research-exec": {
+                "request_id": "req-research-exec",
+                "short_id": "T-501",
+                "label": "T-501",
+                "status": "blocked",
+                "updated_at": "2026-04-09T18:07:00+09:00",
+                "created_at": "2026-04-09T17:55:00+09:00",
+            }
+        },
+    }
+
+    body, markup = _call_management_status_with_markup(
+        tmp_path=tmp_path,
+        manager_state=state,
+        cmd="offdesk",
+        rest="review O5",
+    )
+
+    assert "auto_route: manual_execute=/followup-exec T-501 lane L2 | waiting_for_operator" in body
+    assert "manual_execute_ready: manual_execute=/followup-exec T-501 lane L2 | waiting_for_operator" in body
+    assert "first: /followup-exec T-501 lane L2 |" in body
+    buttons = _button_texts(markup)
+    assert "/followup-exec T-501 lane L2" in buttons
+    assert buttons.index("/followup-exec T-501 lane L2") < buttons.index("/orch judge O5")
+
+
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
     state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
     project_root = tmp_path / "LaneProject"
