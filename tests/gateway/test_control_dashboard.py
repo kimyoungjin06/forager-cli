@@ -2788,7 +2788,7 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
     expected_preview_payload = '{"task_ref":"T-001"}'
     expected_proposal_payload = '{"project_ref":"O2","proposal_ref":"PROP-001"}'
     assert any(
-        btn.label == "Apply Judge Manual Step"
+        btn.label == "Apply Judge Followup"
         and btn.path == "/control/actions/task/followup"
         and btn.payload_json == expected_manual_payload
         for btn in runtime_card.runtime_safe_action_buttons
@@ -2806,7 +2806,7 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         for btn in runtime_card.runtime_phase2_action_buttons
     )
     assert any(
-        btn.label == "Apply Judge Manual Step"
+        btn.label == "Apply Judge Followup"
         and btn.path == "/control/actions/task/followup"
         and btn.payload_json == expected_manual_payload
         for btn in runtime_detail.active_task_safe_action_buttons
@@ -2825,7 +2825,7 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
     )
     assert task_detail is not None
     assert any(
-        btn.label == "Apply Judge Manual Step"
+        btn.label == "Apply Judge Followup"
         and btn.path == "/control/actions/task/followup"
         and btn.payload_json == expected_manual_payload
         for btn in task_detail.safe_action_buttons
@@ -2861,7 +2861,7 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         port=8765,
     )
     recovery_text = dashboard_app.build_dashboard_response("/control/recovery", config)[2].decode("utf-8")
-    assert "Apply Judge Manual Step" in recovery_text
+    assert "Apply Judge Followup" in recovery_text
     assert "Preview Worker Update" in recovery_text
     assert "Accept Worker Proposal" in recovery_text
 
@@ -2950,7 +2950,7 @@ def test_dashboard_surfaces_manual_ready_followup_execute_and_worker_apply_butto
     expected_manual_payload = '{"task_ref":"T-001","lane_ids":["L2"]}'
     expected_apply_payload = '{"task_ref":"T-001"}'
     assert any(
-        btn.label == "Apply Judge Manual Step"
+        btn.label == "Apply Judge Execute Step"
         and btn.path == "/control/actions/task/followup-execute"
         and btn.payload_json == expected_manual_payload
         for btn in runtime_card.runtime_phase2_action_buttons
@@ -2968,7 +2968,7 @@ def test_dashboard_surfaces_manual_ready_followup_execute_and_worker_apply_butto
         for btn in runtime_card.runtime_phase2_action_buttons
     )
     assert any(
-        btn.label == "Apply Judge Manual Step"
+        btn.label == "Apply Judge Execute Step"
         and btn.path == "/control/actions/task/followup-execute"
         and btn.payload_json == expected_manual_payload
         for btn in runtime_detail.active_task_phase2_action_buttons
@@ -2987,7 +2987,7 @@ def test_dashboard_surfaces_manual_ready_followup_execute_and_worker_apply_butto
     )
     assert task_detail is not None
     assert any(
-        btn.label == "Apply Judge Manual Step"
+        btn.label == "Apply Judge Execute Step"
         and btn.path == "/control/actions/task/followup-execute"
         and btn.payload_json == expected_manual_payload
         for btn in task_detail.phase2_action_buttons
@@ -3274,6 +3274,71 @@ def test_control_dashboard_post_task_worker_apply_preview_route_returns_preview(
     assert payload["preview"]["target_artifacts"] == ["reports/summary.md"]
 
 
+def test_control_dashboard_post_task_worker_apply_accept_route_promotes_apply_proposal(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update reports/summary.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    state["projects"]["alpha"]["todo_proposals"] = [
+        {
+            "id": "PROP-001",
+            "summary": "apply worker artifact update for T-001: reports/summary.md",
+            "priority": "P2",
+            "kind": "handoff",
+            "status": "open",
+            "source_request_id": "REQ-1",
+            "created_by": "worker",
+            "created_at": "2026-04-10T10:05:00+09:00",
+            "updated_at": "2026-04-10T10:05:00+09:00",
+        }
+    ]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-accept",
+        body=json.dumps({"task_ref": "T-001", "proposal_ref": "PROP-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/task T-001 | worker-apply-accept PROP-001"
+    assert payload["outcome"]["kind"] == "worker_apply_accept"
+    assert payload["proposal"]["proposal_id"] == "PROP-001"
+    assert payload["proposal"]["todo_id"] == "TODO-002"
+    assert payload["next_step"] == "/todo O2"
+    assert payload["preview"]["proposal_summary"] == "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    assert payload["preview"]["target_artifacts"] == ["reports/summary.md"]
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    proposal = updated["projects"]["alpha"]["todo_proposals"][0]
+    assert proposal["status"] == "accepted"
+    assert proposal["accepted_todo_id"] == "TODO-002"
+    todos = updated["projects"]["alpha"]["todos"]
+    assert any(row["id"] == "TODO-002" and row["summary"] == "apply worker artifact update for T-001: reports/summary.md" for row in todos)
+
+
 def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -3313,7 +3378,7 @@ def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> N
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
 
     expected_apply_payload = '{"task_ref":"T-001"}'
-    expected_accept_payload = '{"project_ref":"O2","proposal_ref":"PROP-001"}'
+    expected_accept_payload = '{"task_ref":"T-001","proposal_ref":"PROP-001"}'
     assert any(
         btn.label == "Preview Artifact Apply"
         and btn.path == "/control/actions/task/worker-apply-preview"
@@ -3322,7 +3387,7 @@ def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> N
     )
     assert any(
         btn.label == "Accept Artifact Apply"
-        and btn.path == "/control/actions/runtime/todo-accept"
+        and btn.path == "/control/actions/task/worker-apply-accept"
         and btn.payload_json == expected_accept_payload
         for btn in runtime_card.runtime_phase2_action_buttons
     )
@@ -3334,7 +3399,7 @@ def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> N
     )
     assert any(
         btn.label == "Accept Artifact Apply"
-        and btn.path == "/control/actions/runtime/todo-accept"
+        and btn.path == "/control/actions/task/worker-apply-accept"
         and btn.payload_json == expected_accept_payload
         for btn in runtime_detail.active_task_phase2_action_buttons
     )

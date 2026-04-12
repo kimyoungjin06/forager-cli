@@ -729,6 +729,192 @@ def _execute_worker_apply_preview_action(spec: Dict[str, object], *, config: Das
     )
 
 
+def _execute_worker_apply_accept_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    task_ref = str(payload.get("task_ref", "")).strip()
+    proposal_ref = str(payload.get("proposal_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    try:
+        key, entry, request_id, task = _resolve_task_entry(manager_state=manager_state, task_ref=task_ref)
+    except RuntimeError as exc:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": "/control/tasks",
+                "remediation": "refresh the task list and retry artifact apply with an existing task ref",
+                "outcome": {
+                    "kind": "worker_apply_accept",
+                    "status": "blocked",
+                    "reason_code": "task_missing",
+                    "detail": str(exc),
+                },
+            },
+            status=404,
+        )
+    alias = _project_alias(entry, key)
+    label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    update_stub = _worker_update_stub_for_task(task)
+    preview_payload = _worker_apply_preview_payload(
+        alias=alias,
+        request_id=request_id,
+        label=label,
+        task=task,
+        update_stub=update_stub,
+        proposal_ids=[str(item).strip() for item in (task.get("background_run_worker_update_proposal_ids") or []) if str(item).strip()],
+    )
+    proposals, _seq = todo_state.ensure_todo_proposal_store(entry)
+    proposal = todo_state.find_proposal_by_ref(proposals, proposal_ref)
+    if proposal is None:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": f"/task {label} | worker-apply-preview",
+                "remediation": "refresh the artifact-apply preview and retry with an open proposal id",
+                "outcome": {
+                    "kind": "worker_apply_accept",
+                    "status": "blocked",
+                    "reason_code": "proposal_missing",
+                    "detail": f"proposal not found: {proposal_ref or '-'}",
+                },
+                "task": {
+                    "request_id": request_id,
+                    "label": label,
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+            },
+            status=404,
+        )
+    proposal_summary = str(proposal.get("summary", "")).strip()
+    task_apply_summary = str(task.get("background_run_worker_update_proposal_summary", "")).strip()
+    if "apply worker artifact update" not in proposal_summary.lower() and "apply_proposals=" not in task_apply_summary:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": f"/todo {alias} proposals",
+                "remediation": "pick an artifact-apply proposal or re-run worker apply propose before accepting it",
+                "outcome": {
+                    "kind": "worker_apply_accept",
+                    "status": "blocked",
+                    "reason_code": "proposal_not_apply",
+                    "detail": proposal_summary or "-",
+                },
+                "task": {
+                    "request_id": request_id,
+                    "label": label,
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+            },
+            status=409,
+        )
+    if todo_state.normalize_proposal_status(proposal.get("status")) != "open":
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": f"/todo {alias} proposals",
+                "remediation": "pick an open artifact-apply proposal before accepting it",
+                "outcome": {
+                    "kind": "worker_apply_accept",
+                    "status": "blocked",
+                    "reason_code": "proposal_not_open",
+                    "detail": f"proposal is not open: {str(proposal.get('id', '')).strip() or proposal_ref or '-'}",
+                },
+                "task": {
+                    "request_id": request_id,
+                    "label": label,
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+            },
+            status=409,
+        )
+    result = todo_state.accept_todo_proposal(
+        entry=entry,
+        proposal=proposal,
+        actor=f"dashboard:{_DASHBOARD_CHAT_ID}",
+        now=_now_iso(),
+    )
+    _save_manager_state(config, manager_state)
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": True,
+            "status": "executed",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "phase2",
+            "source_command": str(spec.get("command", "")).strip() or "-",
+            "payload": payload,
+            "next_step": f"/todo {alias}",
+            "remediation": "inspect the promoted artifact-apply todo row and syncback posture before applying another worker artifact update",
+            "outcome": {
+                "kind": "worker_apply_accept",
+                "status": "executed",
+                "reason_code": "completed",
+                "detail": str(result.get("summary", "")).strip() or proposal_summary or "-",
+            },
+            "task": {
+                "request_id": request_id,
+                "label": label,
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+            "proposal": {
+                "proposal_id": str(result.get("proposal_id", "")).strip() or str(proposal.get("id", "")).strip() or "-",
+                "summary": str(result.get("summary", "")).strip() or proposal_summary or "-",
+                "created_new": bool(result.get("created_new", False)),
+                "todo_id": str(result.get("todo_id", "")).strip() or "-",
+                "reason": str(result.get("reason", "")).strip() or "-",
+            },
+            "preview": {
+                "kind": "worker_apply_accept",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+                "task_contract_summary": str(preview_payload.get("task_contract_summary", "")).strip() or "-",
+                "worker_result_summary": str(preview_payload.get("worker_result_summary", "")).strip() or "-",
+                "update_stub_summary": str(preview_payload.get("update_stub_summary", "")).strip() or "-",
+                "proposal_summary": str(preview_payload.get("proposal_summary", "")).strip() or "-",
+                "target_artifacts": list(preview_payload.get("target_artifacts") or []),
+                "actions": list(preview_payload.get("actions") or []),
+                "cautions": list(preview_payload.get("cautions") or []),
+                "evidence_refs": list(preview_payload.get("evidence_refs") or []),
+            },
+        },
+        status=200,
+    )
+
+
 def _execute_todo_proposal_action(
     spec: Dict[str, object],
     *,

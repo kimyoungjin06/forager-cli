@@ -16,6 +16,7 @@ from control_dashboard_action_exec import (
     _execute_runtime_judge_action,
     _execute_retry_action,
     _execute_todo_proposal_action,
+    _execute_worker_apply_accept_action,
     _execute_worker_apply_preview_action,
     _execute_worker_apply_propose_action,
     _execute_worker_update_preview_action,
@@ -118,6 +119,22 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
             "command": f"/task {task_ref} | worker-apply-propose",
             "note": "promote the bounded worker update into an apply-oriented proposal",
             "payload": {"task_ref": task_ref},
+        }
+
+    if path == "/control/actions/task/worker-apply-accept":
+        task_ref = str(payload.get("task_ref", "")).strip()
+        proposal_ref = str(payload.get("proposal_ref", "")).strip()
+        if not task_ref:
+            raise ValueError("task_ref is required")
+        if not proposal_ref:
+            raise ValueError("proposal_ref is required")
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "phase2",
+            "command": f"/task {task_ref} | worker-apply-accept {proposal_ref}",
+            "note": "accept the artifact-apply proposal into the runtime todo queue",
+            "payload": {"task_ref": task_ref, "proposal_ref": proposal_ref},
         }
 
     if path == "/control/actions/runtime/judge":
@@ -320,6 +337,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/task/worker-apply-propose":
         return _with_action_audit(_execute_worker_apply_propose_action(spec, config=config), config=config)
+
+    if path == "/control/actions/task/worker-apply-accept":
+        return _with_action_audit(_execute_worker_apply_accept_action(spec, config=config), config=config)
 
     if path == "/control/actions/runtime/sync-preview":
         return _with_action_audit(_preview_sync_action(spec, config=config), config=config)

@@ -359,6 +359,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         runtime_phase2_action_buttons = _append_unique_action_button(
             runtime_phase2_action_buttons,
             _worker_apply_proposal_accept_button(
+                label=str((active_task or {}).get("short_id", "")).strip() or str((active_task or {}).get("alias", "")).strip(),
+                request_id=str((active_task or {}).get("request_id", "")).strip(),
                 project_alias=alias,
                 proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
                 proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
@@ -934,6 +936,8 @@ def _build_runtime_detail(
     active_task_phase2_action_buttons = _append_unique_action_button(
         active_task_phase2_action_buttons,
         _worker_apply_proposal_accept_button(
+            label=str((active_task or {}).get("short_id", "")).strip() or str((active_task or {}).get("alias", "")).strip(),
+            request_id=str((active_task or {}).get("request_id", "")).strip(),
             project_alias=target_alias,
             proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
             proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),

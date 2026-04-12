@@ -112,6 +112,8 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _worker_apply_proposal_accept_button(
+                label=label,
+                request_id=str(request_id or ""),
                 project_alias=project_alias,
                 proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
                 proposal_summary=row.get("background_run_worker_update_proposal_summary"),
@@ -259,6 +261,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
         runtime_phase2_action_buttons = _append_unique_action_button(
             runtime_phase2_action_buttons,
             _worker_apply_proposal_accept_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
                 project_alias=alias,
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
@@ -329,6 +333,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
         active_task_phase2_action_buttons = _append_unique_action_button(
             active_task_phase2_action_buttons,
             _worker_apply_proposal_accept_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
                 project_alias=alias,
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),

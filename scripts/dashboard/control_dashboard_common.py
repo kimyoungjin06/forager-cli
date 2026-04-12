@@ -22,6 +22,7 @@ ACTION_PATHS = {
     "/control/actions/task/worker-update-preview",
     "/control/actions/task/worker-apply-preview",
     "/control/actions/task/worker-apply-propose",
+    "/control/actions/task/worker-apply-accept",
     "/control/actions/runtime/judge",
     "/control/actions/runtime/todo-accept",
     "/control/actions/runtime/todo-reject",

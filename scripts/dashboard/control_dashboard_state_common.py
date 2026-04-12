@@ -273,6 +273,9 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
         return "Preview Artifact Apply"
     if path == "/control/actions/task/worker-apply-propose":
         return "Propose Artifact Apply"
+    if path == "/control/actions/task/worker-apply-accept":
+        proposal_ref = str(payload.get("proposal_ref", "")).strip()
+        return f"Accept Artifact Apply ({proposal_ref})" if proposal_ref else "Accept Artifact Apply"
     if path == "/control/actions/runtime/judge":
         return "Run Offdesk Judge"
     if path == "/control/actions/runtime/todo-accept":
@@ -410,13 +413,18 @@ def _replan_manual_route_action_button(
             return None
     else:
         return None
+    label = {
+        "/control/actions/task/followup": "Apply Judge Followup",
+        "/control/actions/task/followup-execute": "Apply Judge Execute Step",
+        "/control/actions/runtime/judge": "Run Judge Manual Review",
+    }.get(path, "Apply Judge Manual Step")
     note_prefix = {
         "/control/actions/task/followup": "judge-backed followup handoff",
         "/control/actions/task/followup-execute": "judge-backed followup execute",
         "/control/actions/runtime/judge": "judge-backed manual review",
     }.get(path, "judge-backed manual step")
     return ActionButtonDTO(
-        label="Apply Judge Manual Step",
+        label=label,
         command=suggested_next_step,
         method=str(spec.get("method", "POST")).strip() or "POST",
         path=path,
@@ -451,6 +459,8 @@ def _worker_update_proposal_accept_button(
 
 def _worker_apply_proposal_accept_button(
     *,
+    label: str,
+    request_id: str,
     project_alias: str,
     proposal_ids: Iterable[str],
     proposal_summary: Any = None,
@@ -464,14 +474,17 @@ def _worker_apply_proposal_accept_button(
     first = next((str(item).strip() for item in proposal_ids if str(item).strip()), "")
     if not first:
         return None
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if not task_ref or task_ref == "-":
+        return None
     return ActionButtonDTO(
         label="Accept Artifact Apply",
-        command=f"/todo {alias} accept {first}",
+        command=f"/task {task_ref} | worker-apply-accept {first}",
         method="POST",
-        path="/control/actions/runtime/todo-accept",
+        path="/control/actions/task/worker-apply-accept",
         mode="phase2",
-        note=f"promote artifact-apply proposal into runtime todo queue | proposal={first}",
-        payload_json=json.dumps({"project_ref": alias, "proposal_ref": first}, ensure_ascii=False, separators=(",", ":")),
+        note=f"accept artifact-apply proposal into runtime todo queue | proposal={first}",
+        payload_json=json.dumps({"task_ref": task_ref, "proposal_ref": first}, ensure_ascii=False, separators=(",", ":")),
     )
 
 

@@ -414,6 +414,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _worker_apply_proposal_accept_button(
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
                 project_alias=alias,
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
                 proposal_summary=task.get("background_run_worker_update_proposal_summary"),

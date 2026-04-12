@@ -65,6 +65,8 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Worker Apply Preview | {status}"
     if path == "/control/actions/task/worker-apply-propose":
         return f"Worker Apply Proposal | {status}"
+    if path == "/control/actions/task/worker-apply-accept":
+        return f"Artifact Apply Accept | {status}"
     if path == "/control/actions/runtime/judge":
         return f"Offdesk Judge | {status}"
     if path == "/control/actions/runtime/todo-accept":
