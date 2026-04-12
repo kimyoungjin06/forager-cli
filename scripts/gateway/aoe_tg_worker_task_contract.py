@@ -517,3 +517,26 @@ def summarize_worker_artifact_apply_proposal_summary(update_stub: Any, proposal_
     if target_text and target_text != "-":
         parts.append(f"targets={target_text}")
     return " | ".join(parts)[:320] if parts else "-"
+
+
+def summarize_worker_artifact_apply_accept_summary(
+    *,
+    proposal_id: Any,
+    todo_id: Any,
+    target_artifacts: Any,
+    accepted_at: Any,
+) -> str:
+    proposal_token = _trim(proposal_id, 32)
+    todo_token = _trim(todo_id, 32)
+    accepted_token = _trim(accepted_at, 64)
+    targets = _uniq(target_artifacts, limit=4, text_limit=160)
+    parts = ["state=applied"]
+    if todo_token:
+        parts.append(f"todo={todo_token}")
+    if proposal_token:
+        parts.append(f"proposal={proposal_token}")
+    if targets:
+        parts.append(f"targets={','.join(targets[:2])}")
+    if accepted_token:
+        parts.append(f"at={accepted_token}")
+    return " | ".join(parts)[:320]

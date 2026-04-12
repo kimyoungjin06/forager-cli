@@ -62,6 +62,10 @@ def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
     )
 
 
+def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
+    return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
+
+
 def _selected_slot_runner(entry: Dict[str, Any], task: Dict[str, Any]) -> str:
     task_runner = str(task.get("background_run_runner_target", "")).strip().lower()
     if task_runner in background_runs.SLOT_RUNNER_TARGETS:
@@ -356,22 +360,24 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             phase2_action_buttons = _append_unique_action_button(phase2_action_buttons, manual_route_button)
         else:
             safe_action_buttons = _append_unique_action_button(safe_action_buttons, manual_route_button)
-        safe_action_buttons = _append_unique_action_button(
-            safe_action_buttons,
-            _worker_apply_preview_button(
-                label=task_view.task_display_label(task, fallback_request_id=rid),
-                request_id=rid,
-                update_stub={
-                    "status": task.get("background_run_worker_update_stub_status"),
-                    "summary_line": task.get("background_run_worker_update_stub_summary"),
-                    "target_artifacts": task.get("background_run_worker_update_stub_targets"),
-                    "actions": task.get("background_run_worker_result_actions"),
-                    "cautions": task.get("background_run_worker_result_cautions"),
-                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
-                },
-                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        worker_apply_applied = str(task.get("background_run_worker_apply_accept_status", "")).strip() == "applied"
+        if not worker_apply_applied:
+            safe_action_buttons = _append_unique_action_button(
+                safe_action_buttons,
+                _worker_apply_preview_button(
+                    label=task_view.task_display_label(task, fallback_request_id=rid),
+                    request_id=rid,
+                    update_stub={
+                        "status": task.get("background_run_worker_update_stub_status"),
+                        "summary_line": task.get("background_run_worker_update_stub_summary"),
+                        "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+                        "actions": task.get("background_run_worker_result_actions"),
+                        "cautions": task.get("background_run_worker_result_cautions"),
+                        "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                    },
+                    proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(
@@ -388,22 +394,23 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-        phase2_action_buttons = _append_unique_action_button(
-            phase2_action_buttons,
-            _worker_apply_proposal_button(
-                label=task_view.task_display_label(task, fallback_request_id=rid),
-                request_id=rid,
-                update_stub={
-                    "status": task.get("background_run_worker_update_stub_status"),
-                    "summary_line": task.get("background_run_worker_update_stub_summary"),
-                    "target_artifacts": task.get("background_run_worker_update_stub_targets"),
-                    "actions": task.get("background_run_worker_result_actions"),
-                    "cautions": task.get("background_run_worker_result_cautions"),
-                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
-                },
-                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        if not worker_apply_applied:
+            phase2_action_buttons = _append_unique_action_button(
+                phase2_action_buttons,
+                _worker_apply_proposal_button(
+                    label=task_view.task_display_label(task, fallback_request_id=rid),
+                    request_id=rid,
+                    update_stub={
+                        "status": task.get("background_run_worker_update_stub_status"),
+                        "summary_line": task.get("background_run_worker_update_stub_summary"),
+                        "target_artifacts": task.get("background_run_worker_update_stub_targets"),
+                        "actions": task.get("background_run_worker_result_actions"),
+                        "cautions": task.get("background_run_worker_result_cautions"),
+                        "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                    },
+                    proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _worker_update_proposal_accept_button(
@@ -411,16 +418,17 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-        phase2_action_buttons = _append_unique_action_button(
-            phase2_action_buttons,
-            _worker_apply_proposal_accept_button(
-                label=task_view.task_display_label(task, fallback_request_id=rid),
-                request_id=rid,
-                project_alias=alias,
-                proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
-                proposal_summary=task.get("background_run_worker_update_proposal_summary"),
-            ),
-        )
+        if not worker_apply_applied:
+            phase2_action_buttons = _append_unique_action_button(
+                phase2_action_buttons,
+                _worker_apply_proposal_accept_button(
+                    label=task_view.task_display_label(task, fallback_request_id=rid),
+                    request_id=rid,
+                    project_alias=alias,
+                    proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+                    proposal_summary=task.get("background_run_worker_update_proposal_summary"),
+                ),
+            )
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),
             str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
@@ -554,6 +562,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 if str(item).strip()
             ],
             background_run_worker_update_operator_summary=_worker_update_operator_summary(task),
+            background_run_worker_apply_accept_summary=_worker_apply_accept_summary(task),
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"
             ),

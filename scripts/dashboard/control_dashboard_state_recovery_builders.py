@@ -35,6 +35,10 @@ from control_dashboard_state_io import FileFreshnessDTO
 from control_dashboard_state_models import RecoveryRuntimeDTO, RecoverySummaryDTO, RecoveryTaskDTO
 
 
+def _worker_apply_applied(row: Dict[str, Any], key: str) -> bool:
+    return str(row.get(key, "")).strip() == "applied"
+
+
 def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: str) -> List[RecoveryTaskDTO]:
     built: List[RecoveryTaskDTO] = []
     for row in rows:
@@ -63,19 +67,21 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
             request_id=request_id,
             phase2_commands=list(action_contract.get("phase2") or []),
         )
-        safe_action_buttons = _append_unique_action_button(
-            safe_action_buttons,
-            _worker_apply_preview_button(
-                label=label,
-                request_id=request_id,
-                update_stub={
-                    "status": row.get("background_run_worker_update_stub_status"),
-                    "summary_line": row.get("background_run_worker_update_stub_summary"),
-                    "target_artifacts": str(row.get("background_run_worker_update_stub_targets", "")).split(","),
-                },
-                proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        worker_apply_applied = _worker_apply_applied(row, "background_run_worker_apply_accept_status")
+        if not worker_apply_applied:
+            safe_action_buttons = _append_unique_action_button(
+                safe_action_buttons,
+                _worker_apply_preview_button(
+                    label=label,
+                    request_id=request_id,
+                    update_stub={
+                        "status": row.get("background_run_worker_update_stub_status"),
+                        "summary_line": row.get("background_run_worker_update_stub_summary"),
+                        "target_artifacts": str(row.get("background_run_worker_update_stub_targets", "")).split(","),
+                    },
+                    proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(
@@ -89,19 +95,20 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-        phase2_action_buttons = _append_unique_action_button(
-            phase2_action_buttons,
-            _worker_apply_proposal_button(
-                label=label,
-                request_id=request_id,
-                update_stub={
-                    "status": row.get("background_run_worker_update_stub_status"),
-                    "summary_line": row.get("background_run_worker_update_stub_summary"),
-                    "target_artifacts": str(row.get("background_run_worker_update_stub_targets", "")).split(","),
-                },
-                proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        if not worker_apply_applied:
+            phase2_action_buttons = _append_unique_action_button(
+                phase2_action_buttons,
+                _worker_apply_proposal_button(
+                    label=label,
+                    request_id=request_id,
+                    update_stub={
+                        "status": row.get("background_run_worker_update_stub_status"),
+                        "summary_line": row.get("background_run_worker_update_stub_summary"),
+                        "target_artifacts": str(row.get("background_run_worker_update_stub_targets", "")).split(","),
+                    },
+                    proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _worker_update_proposal_accept_button(
@@ -109,16 +116,17 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-        phase2_action_buttons = _append_unique_action_button(
-            phase2_action_buttons,
-            _worker_apply_proposal_accept_button(
-                label=label,
-                request_id=str(request_id or ""),
-                project_alias=project_alias,
-                proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
-                proposal_summary=row.get("background_run_worker_update_proposal_summary"),
-            ),
-        )
+        if not worker_apply_applied:
+            phase2_action_buttons = _append_unique_action_button(
+                phase2_action_buttons,
+                _worker_apply_proposal_accept_button(
+                    label=label,
+                    request_id=str(request_id or ""),
+                    project_alias=project_alias,
+                    proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
+                    proposal_summary=row.get("background_run_worker_update_proposal_summary"),
+                ),
+            )
         built.append(
             RecoveryTaskDTO(
                 request_id=request_id,
@@ -212,19 +220,21 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             runtime_phase2_action_buttons = _append_unique_action_button(runtime_phase2_action_buttons, runtime_manual_route_button)
         else:
             runtime_safe_action_buttons = _append_unique_action_button(runtime_safe_action_buttons, runtime_manual_route_button)
-        runtime_safe_action_buttons = _append_unique_action_button(
-            runtime_safe_action_buttons,
-            _worker_apply_preview_button(
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                update_stub={
-                    "status": row.get("active_task_background_run_worker_update_stub_status"),
-                    "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
-                    "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
-                },
-                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        runtime_worker_apply_applied = _worker_apply_applied(row, "active_task_background_run_worker_apply_accept_status")
+        if not runtime_worker_apply_applied:
+            runtime_safe_action_buttons = _append_unique_action_button(
+                runtime_safe_action_buttons,
+                _worker_apply_preview_button(
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    update_stub={
+                        "status": row.get("active_task_background_run_worker_update_stub_status"),
+                        "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
+                        "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
+                    },
+                    proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
@@ -238,19 +248,20 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
             ),
         )
-        runtime_phase2_action_buttons = _append_unique_action_button(
-            runtime_phase2_action_buttons,
-            _worker_apply_proposal_button(
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                update_stub={
-                    "status": row.get("active_task_background_run_worker_update_stub_status"),
-                    "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
-                    "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
-                },
-                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        if not runtime_worker_apply_applied:
+            runtime_phase2_action_buttons = _append_unique_action_button(
+                runtime_phase2_action_buttons,
+                _worker_apply_proposal_button(
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    update_stub={
+                        "status": row.get("active_task_background_run_worker_update_stub_status"),
+                        "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
+                        "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
+                    },
+                    proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         runtime_phase2_action_buttons = _append_unique_action_button(
             runtime_phase2_action_buttons,
             _worker_update_proposal_accept_button(
@@ -258,16 +269,17 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
             ),
         )
-        runtime_phase2_action_buttons = _append_unique_action_button(
-            runtime_phase2_action_buttons,
-            _worker_apply_proposal_accept_button(
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                project_alias=alias,
-                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
-                proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
-            ),
-        )
+        if not runtime_worker_apply_applied:
+            runtime_phase2_action_buttons = _append_unique_action_button(
+                runtime_phase2_action_buttons,
+                _worker_apply_proposal_accept_button(
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    project_alias=alias,
+                    proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+                    proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
+                ),
+            )
         active_task_safe_action_buttons, active_task_phase2_action_buttons = _task_action_buttons(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
@@ -284,19 +296,20 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             active_task_phase2_action_buttons = _append_unique_action_button(active_task_phase2_action_buttons, active_task_manual_route_button)
         else:
             active_task_safe_action_buttons = _append_unique_action_button(active_task_safe_action_buttons, active_task_manual_route_button)
-        active_task_safe_action_buttons = _append_unique_action_button(
-            active_task_safe_action_buttons,
-            _worker_apply_preview_button(
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                update_stub={
-                    "status": row.get("active_task_background_run_worker_update_stub_status"),
-                    "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
-                    "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
-                },
-                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        if not runtime_worker_apply_applied:
+            active_task_safe_action_buttons = _append_unique_action_button(
+                active_task_safe_action_buttons,
+                _worker_apply_preview_button(
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    update_stub={
+                        "status": row.get("active_task_background_run_worker_update_stub_status"),
+                        "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
+                        "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
+                    },
+                    proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
             _worker_update_preview_button(
@@ -310,19 +323,20 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
             ),
         )
-        active_task_phase2_action_buttons = _append_unique_action_button(
-            active_task_phase2_action_buttons,
-            _worker_apply_proposal_button(
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                update_stub={
-                    "status": row.get("active_task_background_run_worker_update_stub_status"),
-                    "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
-                    "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
-                },
-                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
-            ),
-        )
+        if not runtime_worker_apply_applied:
+            active_task_phase2_action_buttons = _append_unique_action_button(
+                active_task_phase2_action_buttons,
+                _worker_apply_proposal_button(
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    update_stub={
+                        "status": row.get("active_task_background_run_worker_update_stub_status"),
+                        "summary_line": row.get("active_task_background_run_worker_update_stub_summary"),
+                        "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
+                    },
+                    proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+                ),
+            )
         active_task_phase2_action_buttons = _append_unique_action_button(
             active_task_phase2_action_buttons,
             _worker_update_proposal_accept_button(
@@ -330,16 +344,17 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
             ),
         )
-        active_task_phase2_action_buttons = _append_unique_action_button(
-            active_task_phase2_action_buttons,
-            _worker_apply_proposal_accept_button(
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                project_alias=alias,
-                proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
-                proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
-            ),
-        )
+        if not runtime_worker_apply_applied:
+            active_task_phase2_action_buttons = _append_unique_action_button(
+                active_task_phase2_action_buttons,
+                _worker_apply_proposal_accept_button(
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    project_alias=alias,
+                    proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+                    proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
+                ),
+            )
         built.append(
             RecoveryRuntimeDTO(
                 project_key=str(row.get("project_key", "")).strip() or alias,
@@ -383,6 +398,9 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 ),
                 active_task_background_run_worker_update_proposal_summary=(
                     str(row.get("active_task_background_run_worker_update_proposal_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_worker_apply_accept_summary=(
+                    str(row.get("active_task_background_run_worker_apply_accept_summary", "")).strip() or "-"
                 ),
                 active_task_background_run_model_plan_summary=str(row.get("active_task_background_run_model_plan_summary", "")).strip() or "-",
                 workspace_summary=str(row.get("workspace_summary", "")).strip() or "-",

@@ -424,6 +424,7 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "background_run_worker_update_stub_targets": list(best_task.get("background_run_worker_update_stub_targets") or []),
         "background_run_worker_update_proposal_summary": str(best_task.get("background_run_worker_update_proposal_summary", "")).strip(),
         "background_run_worker_update_proposal_ids": list(best_task.get("background_run_worker_update_proposal_ids") or []),
+        "background_run_worker_apply_accept_summary": str(best_task.get("background_run_worker_apply_accept_summary", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -1271,10 +1272,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             latest_task.get("background_run_worker_update_proposal_ids") or [],
         )
         worker_apply_summary = str(latest_task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
+        worker_apply_accept_summary = str(latest_task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
         if worker_update_summary not in {"", "-"}:
             lines.append("  worker_update: " + worker_update_summary)
         if worker_apply_summary not in {"", "-"}:
             lines.append("  worker_apply: " + worker_apply_summary[:240])
+        if worker_apply_accept_summary not in {"", "-"}:
+            lines.append("  worker_apply_accept: " + worker_apply_accept_summary[:240])
         if task_background_runner in {"github_runner", "remote_worker"} and (
             task_background_external_phase or task_background_external_note
         ):
@@ -1407,6 +1411,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "replan_auto_route_operator_summary": replan_auto_route_operator_summary,
         "active_task_worker_update_summary": worker_update_summary,
         "active_task_worker_apply_summary": worker_apply_summary,
+        "active_task_worker_apply_accept_summary": worker_apply_accept_summary,
         "notes": list(notes),
     }
 

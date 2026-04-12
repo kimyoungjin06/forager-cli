@@ -150,7 +150,12 @@ def _worker_apply_preview_payload(
     contract_seed = _worker_contract_seed_for_task(request_id=request_id, label=label, task=task, update_stub=update_stub)
     proposal_payloads = worker_task_contract.derive_worker_artifact_apply_todo_proposals(contract_seed, update_stub)
     proposal_summary = worker_task_contract.summarize_worker_artifact_apply_proposal_summary(update_stub, proposal_ids)
-    next_step = f"/todo {alias} accept {proposal_ids[0]}" if proposal_ids else f"/task {label} | worker-apply-propose"
+    accepted_todo_id = str(task.get("background_run_worker_apply_accept_todo_id", "")).strip()
+    next_step = (
+        f"/todo {alias} accept {proposal_ids[0]}"
+        if proposal_ids
+        else (f"/todo {alias}" if accepted_todo_id else f"/task {label} | worker-apply-propose")
+    )
     return {
         "task_contract_summary": str(task.get("background_run_task_contract_summary", "")).strip() or "-",
         "worker_result_summary": str(task.get("background_run_worker_result_summary", "")).strip() or "-",
@@ -164,6 +169,65 @@ def _worker_apply_preview_payload(
         "evidence_refs": list(update_stub.get("evidence_refs") or []),
         "next_step": next_step,
     }
+
+
+def _persist_worker_apply_accept_state(
+    *,
+    entry: Dict[str, Any],
+    task: Dict[str, Any],
+    request_id: str,
+    update_stub: Dict[str, Any],
+    preview_payload: Dict[str, Any],
+    result: Dict[str, Any],
+    accepted_at: str,
+) -> None:
+    proposals_store, _proposal_seq = todo_state.ensure_todo_proposal_store(entry)
+    open_apply_proposal_ids: list[str] = []
+    for proposal_id in worker_task_contract.match_worker_update_proposal_ids(
+        proposals_store,
+        request_id=request_id,
+        proposal_payloads=preview_payload.get("proposal_payloads") or [],
+    ):
+        proposal = todo_state.find_proposal_by_ref(proposals_store, proposal_id)
+        if not isinstance(proposal, dict):
+            continue
+        if todo_state.normalize_proposal_status(proposal.get("status", "open")) != "open":
+            continue
+        token = str(proposal_id).strip()
+        if token and token not in open_apply_proposal_ids:
+            open_apply_proposal_ids.append(token)
+    proposal_summary = worker_task_contract.summarize_worker_artifact_apply_proposal_summary(update_stub, open_apply_proposal_ids)
+    apply_accept_summary = worker_task_contract.summarize_worker_artifact_apply_accept_summary(
+        proposal_id=result.get("proposal_id"),
+        todo_id=result.get("todo_id"),
+        target_artifacts=preview_payload.get("target_artifacts") or [],
+        accepted_at=accepted_at,
+    )
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_summary"] = apply_accept_summary
+    task["background_run_worker_apply_accept_proposal_id"] = str(result.get("proposal_id", "")).strip()
+    task["background_run_worker_apply_accept_todo_id"] = str(result.get("todo_id", "")).strip()
+    task["background_run_worker_apply_accept_at"] = accepted_at
+    if open_apply_proposal_ids:
+        task["background_run_worker_update_proposal_summary"] = proposal_summary
+        task["background_run_worker_update_proposal_ids"] = list(open_apply_proposal_ids)
+    else:
+        task.pop("background_run_worker_update_proposal_summary", None)
+        task.pop("background_run_worker_update_proposal_ids", None)
+    task["updated_at"] = accepted_at
+    task.setdefault("result", {})
+    if isinstance(task.get("result"), dict):
+        task["result"]["background_run_worker_apply_accept_status"] = "applied"
+        task["result"]["background_run_worker_apply_accept_summary"] = apply_accept_summary
+        task["result"]["background_run_worker_apply_accept_proposal_id"] = str(result.get("proposal_id", "")).strip()
+        task["result"]["background_run_worker_apply_accept_todo_id"] = str(result.get("todo_id", "")).strip()
+        task["result"]["background_run_worker_apply_accept_at"] = accepted_at
+        if open_apply_proposal_ids:
+            task["result"]["background_run_worker_update_proposal_summary"] = proposal_summary
+            task["result"]["background_run_worker_update_proposal_ids"] = list(open_apply_proposal_ids)
+        else:
+            task["result"].pop("background_run_worker_update_proposal_summary", None)
+            task["result"].pop("background_run_worker_update_proposal_ids", None)
 
 
 def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
@@ -858,11 +922,21 @@ def _execute_worker_apply_accept_action(spec: Dict[str, object], *, config: Dash
             },
             status=409,
         )
+    accepted_at = _now_iso()
     result = todo_state.accept_todo_proposal(
         entry=entry,
         proposal=proposal,
         actor=f"dashboard:{_DASHBOARD_CHAT_ID}",
-        now=_now_iso(),
+        now=accepted_at,
+    )
+    _persist_worker_apply_accept_state(
+        entry=entry,
+        task=task,
+        request_id=request_id,
+        update_stub=update_stub,
+        preview_payload=preview_payload,
+        result=result,
+        accepted_at=accepted_at,
     )
     _save_manager_state(config, manager_state)
     return _json(

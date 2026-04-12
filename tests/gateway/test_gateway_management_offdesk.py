@@ -2163,6 +2163,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
                 "background_run_worker_update_stub_targets": ["reports/summary.md"],
                 "background_run_worker_update_proposal_summary": "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md",
                 "background_run_worker_update_proposal_ids": ["PROP-001"],
+                "background_run_worker_apply_accept_summary": "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00",
             }
         },
     }
@@ -2177,6 +2178,7 @@ def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
     assert "auto_route: ready+applied=/retry T-501 | at=2026-04-09T18:06:00+09:00 | apply=dashboard:Apply Judge Auto-Route | api:auto_route_apply=true" in text
     assert "worker_update: status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
     assert "worker_apply: status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
+    assert "worker_apply_accept: state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00" in text
     assert "first: /retry T-501 |" in text
 
 

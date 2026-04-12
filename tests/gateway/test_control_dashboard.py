@@ -3337,6 +3337,68 @@ def test_control_dashboard_post_task_worker_apply_accept_route_promotes_apply_pr
     assert proposal["accepted_todo_id"] == "TODO-002"
     todos = updated["projects"]["alpha"]["todos"]
     assert any(row["id"] == "TODO-002" and row["summary"] == "apply worker artifact update for T-001: reports/summary.md" for row in todos)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_worker_apply_accept_status"] == "applied"
+    assert updated_task["background_run_worker_apply_accept_todo_id"] == "TODO-002"
+    assert updated_task["background_run_worker_apply_accept_proposal_id"] == "PROP-001"
+    assert "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=" in (
+        updated_task["background_run_worker_apply_accept_summary"]
+    )
+    assert not updated_task.get("background_run_worker_update_proposal_ids")
+    assert not updated_task.get("background_run_worker_update_proposal_summary")
+
+
+def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_summary"] = (
+        "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-10T10:06:00+09:00"
+    )
+    task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
+    task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
+    task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
+    task.pop("background_run_worker_update_proposal_summary", None)
+    task.pop("background_run_worker_update_proposal_ids", None)
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        request_id="REQ-1",
+    )
+
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+
+    assert runtime_card.active_task_background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
+    assert runtime_detail.active_task_background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
+    assert task_detail is not None
+    assert task_detail.background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
+
+    blocked_labels = {"Preview Artifact Apply", "Propose Artifact Apply", "Accept Artifact Apply"}
+    assert not any(btn.label in blocked_labels for btn in runtime_card.runtime_safe_action_buttons)
+    assert not any(btn.label in blocked_labels for btn in runtime_card.runtime_phase2_action_buttons)
+    assert not any(btn.label in blocked_labels for btn in runtime_detail.active_task_safe_action_buttons)
+    assert not any(btn.label in blocked_labels for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert not any(btn.label in blocked_labels for btn in task_detail.safe_action_buttons)
+    assert not any(btn.label in blocked_labels for btn in task_detail.phase2_action_buttons)
 
 
 def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> None:
