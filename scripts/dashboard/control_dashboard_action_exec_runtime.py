@@ -230,6 +230,179 @@ def _persist_worker_apply_accept_state(
             task["result"].pop("background_run_worker_update_proposal_ids", None)
 
 
+def _syncback_preview_payload(*, alias: str, plan: Dict[str, Any]) -> Dict[str, Any]:
+    updates = []
+    for idx, new_line in list(plan.get("updates") or [])[:4]:
+        updates.append(f"L{int(idx) + 1}: {str(new_line).strip()[:180]}")
+    append_lines = [str(line).strip()[:180] for line in list(plan.get("append_lines") or [])[:4] if str(line).strip()]
+    return {
+        "kind": "runtime_syncback_preview",
+        "project_alias": alias,
+        "target_path": str(plan.get("path", "")).strip() or "-",
+        "done_count": int(plan.get("done_count", 0) or 0),
+        "reopen_count": int(plan.get("reopen_count", 0) or 0),
+        "append_count": int(plan.get("append_count", 0) or 0),
+        "blocked_count": int(plan.get("blocked_count", 0) or 0),
+        "updates": updates,
+        "append_lines": append_lines,
+        "next_step": f"/todo {alias} syncback apply",
+        "runtime_path": _runtime_action_link(alias),
+    }
+
+
+def _execute_runtime_syncback_preview_action(
+    spec: Dict[str, object],
+    *,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    project_ref = str(payload.get("project_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
+    alias = _project_alias(entry, key)
+    try:
+        plan = todo_state.preview_syncback_plan(entry)
+    except RuntimeError as exc:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback preview",
+                "payload": payload,
+                "next_step": f"/todo {alias}",
+                "remediation": "restore canonical TODO.md before previewing accepted artifact syncback",
+                "outcome": {
+                    "kind": "runtime_syncback_preview",
+                    "status": "blocked",
+                    "reason_code": "syncback_preview_failed",
+                    "detail": str(exc).strip() or "-",
+                },
+                "preview": {
+                    "kind": "runtime_syncback_preview",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                },
+            },
+            status=409,
+        )
+    preview = _syncback_preview_payload(alias=alias, plan=plan)
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": True,
+            "status": "preview",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "safe",
+            "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback preview",
+            "payload": payload,
+            "next_step": preview["next_step"],
+            "remediation": "inspect the canonical TODO diff before applying accepted artifact syncback",
+            "outcome": {
+                "kind": "runtime_syncback_preview",
+                "status": "preview",
+                "reason_code": "ready",
+                "detail": (
+                    "done={done} reopen={reopen} append={append} blocked={blocked}".format(
+                        done=preview["done_count"],
+                        reopen=preview["reopen_count"],
+                        append=preview["append_count"],
+                        blocked=preview["blocked_count"],
+                    )
+                ),
+            },
+            "preview": preview,
+        },
+        status=200,
+    )
+
+
+def _execute_runtime_syncback_apply_action(
+    spec: Dict[str, object],
+    *,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    project_ref = str(payload.get("project_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
+    alias = _project_alias(entry, key)
+    try:
+        plan = todo_state.preview_syncback_plan(entry)
+    except RuntimeError as exc:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "phase2",
+                "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback apply",
+                "payload": payload,
+                "next_step": f"/todo {alias} syncback preview",
+                "remediation": "inspect canonical TODO syncback preview before applying writeback again",
+                "outcome": {
+                    "kind": "runtime_syncback_apply",
+                    "status": "blocked",
+                    "reason_code": "syncback_preview_failed",
+                    "detail": str(exc).strip() or "-",
+                },
+                "preview": {
+                    "kind": "runtime_syncback_preview",
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                },
+            },
+            status=409,
+        )
+    result = todo_state.apply_syncback_plan(plan)
+    preview = _syncback_preview_payload(alias=alias, plan=plan)
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": True,
+            "status": "executed",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "phase2",
+            "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback apply",
+            "payload": payload,
+            "next_step": f"/sync preview {alias} 24h",
+            "remediation": "verify canonical TODO drift is cleared before applying another accepted artifact syncback",
+            "outcome": {
+                "kind": "runtime_syncback_apply",
+                "status": "executed",
+                "reason_code": "completed",
+                "detail": (
+                    "path={path} lines={lines} done={done} reopen={reopen} append={append} blocked={blocked}".format(
+                        path=str(result.get("path", "")).strip() or "-",
+                        lines=int(result.get("line_count", 0) or 0),
+                        done=preview["done_count"],
+                        reopen=preview["reopen_count"],
+                        append=preview["append_count"],
+                        blocked=preview["blocked_count"],
+                    )
+                ),
+            },
+            "preview": preview,
+            "result": {
+                "path": str(result.get("path", "")).strip() or "-",
+                "line_count": int(result.get("line_count", 0) or 0),
+            },
+        },
+        status=200,
+    )
+
+
 def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
     project_ref = str(payload.get("project_ref", "")).strip()

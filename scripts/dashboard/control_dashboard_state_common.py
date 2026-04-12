@@ -287,6 +287,10 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
     if path == "/control/actions/runtime/sync-preview":
         window = str(payload.get("window", "")).strip()
         return f"Sync Preview ({window})" if window else "Sync Preview"
+    if path == "/control/actions/runtime/syncback-preview":
+        return "Preview Accepted Syncback"
+    if path == "/control/actions/runtime/syncback-apply":
+        return "Apply Accepted Syncback"
     if path == "/control/actions/runtime/background-queue-clean":
         return "Background Queue Cleanup"
     if path == "/control/actions/control/auto-recover":
@@ -591,6 +595,44 @@ def _worker_apply_proposal_button(
         mode="phase2",
         note=note,
         payload_json=json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _worker_apply_syncback_preview_button(*, project_alias: str) -> ActionButtonDTO | None:
+    alias = str(project_alias or "").strip().upper()
+    if not alias:
+        return None
+    spec = operator_action_contract.http_action_spec(f"/todo {alias} syncback preview")
+    if not isinstance(spec, dict):
+        return None
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    return ActionButtonDTO(
+        label="Preview Accepted Syncback",
+        command=str(spec.get("command", "")).strip() or f"/todo {alias} syncback preview",
+        method=str(spec.get("method", "POST")).strip() or "POST",
+        path=str(spec.get("path", "")).strip() or "/control/actions/runtime/syncback-preview",
+        mode=str(spec.get("mode", "safe")).strip() or "safe",
+        note="inspect the canonical TODO writeback plan for the accepted artifact apply",
+        payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _worker_apply_syncback_apply_button(*, project_alias: str) -> ActionButtonDTO | None:
+    alias = str(project_alias or "").strip().upper()
+    if not alias:
+        return None
+    spec = operator_action_contract.http_action_spec(f"/todo {alias} syncback apply")
+    if not isinstance(spec, dict):
+        return None
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    return ActionButtonDTO(
+        label="Apply Accepted Syncback",
+        command=str(spec.get("command", "")).strip() or f"/todo {alias} syncback apply",
+        method=str(spec.get("method", "POST")).strip() or "POST",
+        path=str(spec.get("path", "")).strip() or "/control/actions/runtime/syncback-apply",
+        mode=str(spec.get("mode", "phase2")).strip() or "phase2",
+        note="write the accepted artifact apply back into canonical TODO.md",
+        payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
     )
 
 

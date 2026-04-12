@@ -28,6 +28,8 @@ from control_dashboard_state_common import (
     _worker_apply_proposal_button,
     _worker_apply_preview_button,
     _worker_apply_proposal_accept_button,
+    _worker_apply_syncback_apply_button,
+    _worker_apply_syncback_preview_button,
     _worker_update_preview_button,
     _worker_update_proposal_accept_button,
 )
@@ -82,6 +84,11 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                     proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
+        else:
+            safe_action_buttons = _append_unique_action_button(
+                safe_action_buttons,
+                _worker_apply_syncback_preview_button(project_alias=project_alias),
+            )
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(
@@ -126,6 +133,11 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                     proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
                     proposal_summary=row.get("background_run_worker_update_proposal_summary"),
                 ),
+            )
+        else:
+            phase2_action_buttons = _append_unique_action_button(
+                phase2_action_buttons,
+                _worker_apply_syncback_apply_button(project_alias=project_alias),
             )
         built.append(
             RecoveryTaskDTO(
@@ -235,6 +247,11 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 ),
             )
+        else:
+            runtime_safe_action_buttons = _append_unique_action_button(
+                runtime_safe_action_buttons,
+                _worker_apply_syncback_preview_button(project_alias=alias),
+            )
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
@@ -280,6 +297,11 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
                 ),
             )
+        else:
+            runtime_phase2_action_buttons = _append_unique_action_button(
+                runtime_phase2_action_buttons,
+                _worker_apply_syncback_apply_button(project_alias=alias),
+            )
         active_task_safe_action_buttons, active_task_phase2_action_buttons = _task_action_buttons(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
@@ -309,6 +331,11 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     },
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 ),
+            )
+        else:
+            active_task_safe_action_buttons = _append_unique_action_button(
+                active_task_safe_action_buttons,
+                _worker_apply_syncback_preview_button(project_alias=alias),
             )
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
@@ -354,6 +381,11 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                     proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
                 ),
+            )
+        else:
+            active_task_phase2_action_buttons = _append_unique_action_button(
+                active_task_phase2_action_buttons,
+                _worker_apply_syncback_apply_button(project_alias=alias),
             )
         built.append(
             RecoveryRuntimeDTO(

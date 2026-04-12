@@ -75,6 +75,10 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Reject Proposal | {status}"
     if path == "/control/actions/runtime/sync-preview":
         return f"Sync Preview | {status}"
+    if path == "/control/actions/runtime/syncback-preview":
+        return f"Syncback Preview | {status}"
+    if path == "/control/actions/runtime/syncback-apply":
+        return f"Syncback Apply | {status}"
     if path == "/control/actions/runtime/background-queue-clean":
         return f"Background Queue Cleanup | {status}"
     if path == "/control/actions/task/retry":

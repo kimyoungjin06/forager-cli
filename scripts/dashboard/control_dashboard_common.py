@@ -27,6 +27,8 @@ ACTION_PATHS = {
     "/control/actions/runtime/todo-accept",
     "/control/actions/runtime/todo-reject",
     "/control/actions/runtime/sync-preview",
+    "/control/actions/runtime/syncback-preview",
+    "/control/actions/runtime/syncback-apply",
     "/control/actions/runtime/background-queue-clean",
     "/control/actions/control/auto-recover",
 }

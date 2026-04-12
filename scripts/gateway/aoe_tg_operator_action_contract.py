@@ -227,6 +227,7 @@ def http_action_spec(command: str) -> Dict[str, Any] | None:
     head = tokens[0].lower()
     second = tokens[1].lower() if len(tokens) > 1 else ""
     third = tokens[2] if len(tokens) > 2 else ""
+    fourth = tokens[3].lower() if len(tokens) > 3 else ""
 
     lane_ids: List[str] = []
     if "lane" in [token.lower() for token in tokens]:
@@ -345,6 +346,39 @@ def http_action_spec(command: str) -> Dict[str, Any] | None:
             },
             "note": "inspect sync sources without mutating runtime state",
         }
+
+    if head == "/todo":
+        project_ref = ""
+        action = second
+        offset = 0
+        if second.startswith("o") and second[1:].isdigit():
+            project_ref = second.upper()
+            action = third
+            offset = 1
+        if action == "syncback":
+            syncback_mode = fourth if offset else third
+            if syncback_mode == "preview" and project_ref:
+                return {
+                    "command": raw,
+                    "mode": "safe",
+                    "method": "POST",
+                    "path": "/control/actions/runtime/syncback-preview",
+                    "payload": {
+                        "project_ref": project_ref,
+                    },
+                    "note": "inspect canonical TODO syncback before mutating TODO.md",
+                }
+            if syncback_mode == "apply" and project_ref:
+                return {
+                    "command": raw,
+                    "mode": "phase2",
+                    "method": "POST",
+                    "path": "/control/actions/runtime/syncback-apply",
+                    "payload": {
+                        "project_ref": project_ref,
+                    },
+                    "note": "apply accepted runtime todo drift back into canonical TODO.md",
+                }
 
     if head == "/orch" and second == "bgq-clean" and len(tokens) >= 3:
         return {

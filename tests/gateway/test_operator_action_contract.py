@@ -157,6 +157,24 @@ def test_http_action_spec_maps_sync_preview_to_safe_runtime_contract() -> None:
     assert row["payload"] == {"project_ref": "O2", "window": "24h"}
 
 
+def test_http_action_spec_maps_syncback_preview_to_safe_runtime_contract() -> None:
+    row = mod.http_action_spec("/todo O2 syncback preview")
+
+    assert row is not None
+    assert row["mode"] == "safe"
+    assert row["path"] == "/control/actions/runtime/syncback-preview"
+    assert row["payload"] == {"project_ref": "O2"}
+
+
+def test_http_action_spec_maps_syncback_apply_to_phase2_runtime_contract() -> None:
+    row = mod.http_action_spec("/todo O2 syncback apply")
+
+    assert row is not None
+    assert row["mode"] == "phase2"
+    assert row["path"] == "/control/actions/runtime/syncback-apply"
+    assert row["payload"] == {"project_ref": "O2"}
+
+
 def test_http_action_spec_maps_bgq_clean_to_phase2_runtime_contract() -> None:
     row = mod.http_action_spec("/orch bgq-clean O2")
 

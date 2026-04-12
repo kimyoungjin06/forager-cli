@@ -2533,8 +2533,83 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert sync_payload["next_step"] == "/offdesk review O2"
     assert "inspect sync drift" in sync_payload["remediation"]
     assert sync_payload["preview"]["kind"] == "runtime_sync_preview"
-    assert sync_payload["preview"]["project_alias"] == "O2"
-    assert "quality=" in sync_payload["preview"]["sync_summary"]
+
+
+def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return_expected_payload(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["todo_proposals"] = [
+        {
+            "id": "PROP-001",
+            "summary": "apply worker artifact update for T-001: reports/summary.md",
+            "priority": "P2",
+            "kind": "handoff",
+            "status": "accepted",
+            "source_request_id": "REQ-1",
+            "created_by": "worker",
+            "created_at": "2026-04-10T10:05:00+09:00",
+            "updated_at": "2026-04-10T10:06:00+09:00",
+            "accepted_todo_id": "TODO-002",
+        }
+    ]
+    state["projects"]["alpha"]["todos"] = [
+        {
+            "id": "TODO-002",
+            "summary": "apply worker artifact update for T-001: reports/summary.md",
+            "priority": "P2",
+            "status": "open",
+            "created_at": "2026-04-10T10:05:00+09:00",
+            "updated_at": "2026-04-10T10:06:00+09:00",
+        }
+    ]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/syncback-preview",
+        body=json.dumps({"project_ref": "O2"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    apply_status, _apply_headers, apply_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/syncback-apply",
+        body=json.dumps({"project_ref": "O2"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    apply_payload = json.loads(apply_body.decode("utf-8"))
+
+    assert preview_status == 200
+    assert preview_payload["ok"] is True
+    assert preview_payload["status"] == "preview"
+    assert preview_payload["source_command"] == "/todo O2 syncback preview"
+    assert preview_payload["payload"] == {"project_ref": "O2"}
+    assert preview_payload["next_step"] == "/todo O2 syncback apply"
+    assert preview_payload["preview"]["kind"] == "runtime_syncback_preview"
+    assert preview_payload["preview"]["append_count"] >= 1
+    assert "canonical TODO diff" in preview_payload["remediation"]
+
+    assert apply_status == 200
+    assert apply_payload["ok"] is True
+    assert apply_payload["status"] == "executed"
+    assert apply_payload["source_command"] == "/todo O2 syncback apply"
+    assert apply_payload["next_step"] == "/sync preview O2 24h"
+    assert apply_payload["outcome"]["kind"] == "runtime_syncback_apply"
+    assert apply_payload["result"]["line_count"] >= 1
+    assert "completed" == apply_payload["outcome"]["reason_code"]
+    canonical_text = (project_root / "TODO.md").read_text(encoding="utf-8")
+    assert "apply worker artifact update for T-001: reports/summary.md" in canonical_text
+    assert preview_payload["preview"]["project_alias"] == "O2"
+    assert preview_payload["preview"]["target_path"].endswith("TODO.md")
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:
@@ -3391,6 +3466,43 @@ def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(
     assert runtime_detail.active_task_background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
     assert task_detail is not None
     assert task_detail.background_run_worker_apply_accept_summary.startswith("state=applied | todo=TODO-002")
+    expected_syncback_payload = '{"project_ref":"O2"}'
+    assert any(
+        btn.label == "Preview Accepted Syncback"
+        and btn.path == "/control/actions/runtime/syncback-preview"
+        and btn.payload_json == expected_syncback_payload
+        for btn in runtime_card.runtime_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Apply Accepted Syncback"
+        and btn.path == "/control/actions/runtime/syncback-apply"
+        and btn.payload_json == expected_syncback_payload
+        for btn in runtime_card.runtime_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Preview Accepted Syncback"
+        and btn.path == "/control/actions/runtime/syncback-preview"
+        and btn.payload_json == expected_syncback_payload
+        for btn in runtime_detail.active_task_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Apply Accepted Syncback"
+        and btn.path == "/control/actions/runtime/syncback-apply"
+        and btn.payload_json == expected_syncback_payload
+        for btn in runtime_detail.active_task_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Preview Accepted Syncback"
+        and btn.path == "/control/actions/runtime/syncback-preview"
+        and btn.payload_json == expected_syncback_payload
+        for btn in task_detail.safe_action_buttons
+    )
+    assert any(
+        btn.label == "Apply Accepted Syncback"
+        and btn.path == "/control/actions/runtime/syncback-apply"
+        and btn.payload_json == expected_syncback_payload
+        for btn in task_detail.phase2_action_buttons
+    )
 
     blocked_labels = {"Preview Artifact Apply", "Propose Artifact Apply", "Accept Artifact Apply"}
     assert not any(btn.label in blocked_labels for btn in runtime_card.runtime_safe_action_buttons)

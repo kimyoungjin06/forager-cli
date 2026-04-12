@@ -48,6 +48,8 @@ from control_dashboard_state_common import (
     _worker_apply_proposal_button,
     _worker_apply_preview_button,
     _worker_apply_proposal_accept_button,
+    _worker_apply_syncback_apply_button,
+    _worker_apply_syncback_preview_button,
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
@@ -323,6 +325,11 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
+        else:
+            runtime_safe_action_buttons = _append_unique_action_button(
+                runtime_safe_action_buttons,
+                _worker_apply_syncback_preview_button(project_alias=alias),
+            )
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
@@ -373,6 +380,11 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
                     proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
                 ),
+            )
+        else:
+            runtime_phase2_action_buttons = _append_unique_action_button(
+                runtime_phase2_action_buttons,
+                _worker_apply_syncback_apply_button(project_alias=alias),
             )
         cards.append(
             RuntimeCardDTO(
@@ -905,6 +917,11 @@ def _build_runtime_detail(
                 proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
             ),
         )
+    else:
+        active_task_safe_action_buttons = _append_unique_action_button(
+            active_task_safe_action_buttons,
+            _worker_apply_syncback_preview_button(project_alias=target_alias),
+        )
     active_task_safe_action_buttons = _append_unique_action_button(
         active_task_safe_action_buttons,
         _worker_update_preview_button(
@@ -955,6 +972,11 @@ def _build_runtime_detail(
                 proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
                 proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
             ),
+        )
+    else:
+        active_task_phase2_action_buttons = _append_unique_action_button(
+            active_task_phase2_action_buttons,
+            _worker_apply_syncback_apply_button(project_alias=target_alias),
         )
     return RuntimeDetailDTO(
         project_key=key,

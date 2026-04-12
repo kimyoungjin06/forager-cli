@@ -14,6 +14,8 @@ from control_dashboard_action_exec import (
     _execute_background_queue_clean_action,
     _execute_followup_action,
     _execute_runtime_judge_action,
+    _execute_runtime_syncback_apply_action,
+    _execute_runtime_syncback_preview_action,
     _execute_retry_action,
     _execute_todo_proposal_action,
     _execute_worker_apply_accept_action,
@@ -170,6 +172,24 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         spec = operator_action_contract.http_action_spec(f"/sync preview {project_ref} {window}")
         if spec is None:
             raise ValueError("unsupported sync preview action contract")
+        return spec
+
+    if path == "/control/actions/runtime/syncback-preview":
+        project_ref = str(payload.get("project_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        spec = operator_action_contract.http_action_spec(f"/todo {project_ref} syncback preview")
+        if spec is None:
+            raise ValueError("unsupported syncback preview action contract")
+        return spec
+
+    if path == "/control/actions/runtime/syncback-apply":
+        project_ref = str(payload.get("project_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        spec = operator_action_contract.http_action_spec(f"/todo {project_ref} syncback apply")
+        if spec is None:
+            raise ValueError("unsupported syncback apply action contract")
         return spec
 
     if path == "/control/actions/runtime/background-queue-clean":
@@ -343,6 +363,12 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/runtime/sync-preview":
         return _with_action_audit(_preview_sync_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/syncback-preview":
+        return _with_action_audit(_execute_runtime_syncback_preview_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/syncback-apply":
+        return _with_action_audit(_execute_runtime_syncback_apply_action(spec, config=config), config=config)
 
     if path == "/control/actions/runtime/background-queue-clean":
         return _with_action_audit(_execute_background_queue_clean_action(spec, config=config), config=config)

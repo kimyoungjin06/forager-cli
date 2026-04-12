@@ -45,6 +45,8 @@ from control_dashboard_state_common import (
     _worker_apply_proposal_button,
     _worker_apply_preview_button,
     _worker_apply_proposal_accept_button,
+    _worker_apply_syncback_apply_button,
+    _worker_apply_syncback_preview_button,
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
@@ -378,6 +380,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
+        else:
+            safe_action_buttons = _append_unique_action_button(
+                safe_action_buttons,
+                _worker_apply_syncback_preview_button(project_alias=alias),
+            )
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(
@@ -428,6 +435,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
                     proposal_summary=task.get("background_run_worker_update_proposal_summary"),
                 ),
+            )
+        else:
+            phase2_action_buttons = _append_unique_action_button(
+                phase2_action_buttons,
+                _worker_apply_syncback_apply_button(project_alias=alias),
             )
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),

@@ -7,6 +7,8 @@ from control_dashboard_action_exec_background import _execute_background_queue_c
 from control_dashboard_action_exec_auto import _execute_auto_recover_action
 from control_dashboard_action_exec_runtime import (
     _execute_runtime_judge_action,
+    _execute_runtime_syncback_apply_action,
+    _execute_runtime_syncback_preview_action,
     _execute_todo_proposal_action,
     _execute_worker_apply_accept_action,
     _execute_worker_apply_preview_action,
@@ -25,6 +27,8 @@ __all__ = [
     "_execute_background_queue_clean_action",
     "_execute_auto_recover_action",
     "_execute_runtime_judge_action",
+    "_execute_runtime_syncback_apply_action",
+    "_execute_runtime_syncback_preview_action",
     "_execute_todo_proposal_action",
     "_execute_worker_apply_accept_action",
     "_execute_worker_apply_preview_action",
