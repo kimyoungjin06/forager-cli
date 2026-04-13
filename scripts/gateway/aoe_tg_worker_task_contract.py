@@ -14,6 +14,7 @@ from aoe_tg_context_pack import load_context_pack
 WORKER_TASK_CONTRACT_VERSION = "2026-04-10.v1"
 WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
 WORKER_TASK_MODULE_GATE_VERSION = "2026-04-13.v1"
+WORKER_TASK_MODULE_PROFILE_VERSION = "2026-04-13.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -494,6 +495,121 @@ def derive_worker_task_module_gate(
 
 def summarize_worker_task_module_gate(raw: Any) -> str:
     row = sanitize_worker_task_module_gate(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def sanitize_worker_task_module_profile(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_PROFILE_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "profile_kind": _trim(source.get("profile_kind"), 96) or "-",
+        "state": _trim(source.get("state"), 64) or "-",
+        "focus_summary": _trim(source.get("focus_summary"), 240) or "-",
+        "counts_summary": _trim(source.get("counts_summary"), 240) or "-",
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["profile_kind"] not in {"", "-"}:
+            parts.append(row["profile_kind"])
+        parts.append(f"state={row['state']}")
+        if row["focus_summary"] not in {"", "-"}:
+            parts.append(row["focus_summary"])
+        if row["counts_summary"] not in {"", "-"}:
+            parts.append(row["counts_summary"])
+        row["summary_line"] = " | ".join(parts)[:320]
+    return row
+
+
+def derive_worker_task_module_profile(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    gate_row = (
+        sanitize_worker_task_module_gate(gate)
+        if isinstance(gate, dict)
+        else derive_worker_task_module_gate(contract_row, result_row, update_stub=stub)
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    actions = list(result_row.get("actions") or [])
+    cautions = list(result_row.get("cautions") or [])
+    refs = list(result_row.get("evidence_refs") or [])
+    targets = list((stub or {}).get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
+    state = _trim(gate_row.get("state"), 64) or "-"
+
+    if module_kind == "analysis":
+        findings = max(len(actions), 1 if _trim(result_row.get("summary"), 240) not in {"", "-"} else 0)
+        evidence = len(refs)
+        gaps = max(0, findings - evidence)
+        return sanitize_worker_task_module_profile(
+            {
+                "module_kind": module_kind,
+                "profile_kind": "analysis_findings_profile",
+                "state": state,
+                "focus_summary": f"findings={findings} | evidence={evidence} | gaps={gaps}",
+                "counts_summary": f"targets={len(targets)} | cautions={len(cautions)}",
+            }
+        )
+
+    if module_kind == "writing":
+        docs = max(len([token for token in targets if _trim(token, 160)]), 1 if actions else 0)
+        quality = "open" if state == "quality_open" else "ready"
+        if state == "handoff_ready":
+            handoff = "ready"
+        elif state == "draft_ready":
+            handoff = "draft"
+        else:
+            handoff = "review"
+        return sanitize_worker_task_module_profile(
+            {
+                "module_kind": module_kind,
+                "profile_kind": "writing_handoff_profile",
+                "state": state,
+                "focus_summary": f"docs={docs} | handoff={handoff} | quality={quality}",
+                "counts_summary": f"refs={len(refs)} | cautions={len(cautions)}",
+            }
+        )
+
+    if module_kind == "package":
+        artifacts = max(len([token for token in targets if _trim(token, 160)]), 1 if actions else 0)
+        verification = len(refs)
+        integrity = "ready" if state == "integrity_ready" else "open"
+        return sanitize_worker_task_module_profile(
+            {
+                "module_kind": module_kind,
+                "profile_kind": "package_verification_profile",
+                "state": state,
+                "focus_summary": f"artifacts={artifacts} | verification={verification} | integrity={integrity}",
+                "counts_summary": f"targets={len(targets)} | cautions={len(cautions)}",
+            }
+        )
+
+    return sanitize_worker_task_module_profile(
+        {
+            "module_kind": module_kind,
+            "profile_kind": "general_result_profile",
+            "state": state,
+            "focus_summary": f"actions={len(actions)} | refs={len(refs)} | cautions={len(cautions)}",
+            "counts_summary": f"targets={len(targets)}",
+        }
+    )
+
+
+def summarize_worker_task_module_profile(raw: Any) -> str:
+    row = sanitize_worker_task_module_profile(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 

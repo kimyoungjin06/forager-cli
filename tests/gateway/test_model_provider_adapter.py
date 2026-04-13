@@ -703,6 +703,10 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
     assert result["task_result_summary"] == "status=ready | worker summary drafted | actions=1 | cautions=1 | refs=1"
     assert result["task_gate_status"] == "quality_open"
     assert result["task_gate_summary"] == "state=quality_open | docs=1 | refs=1 | repeat=quality_gate_open"
+    assert result["task_profile_status"] == "quality_open"
+    assert result["task_profile_summary"] == (
+        "writing_handoff_profile | state=quality_open | docs=1 | handoff=review | quality=open | refs=1 | cautions=1"
+    )
     assert result["task_result_actions"] == ["update reports/summary.md"]
     assert result["task_result_cautions"] == ["keep review lane open"]
     assert result["task_result_evidence_refs"] == ["reports/summary.md"]

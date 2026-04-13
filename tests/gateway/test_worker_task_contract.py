@@ -210,6 +210,20 @@ def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
 
     assert gate["state"] == "findings_stable"
     assert gate["summary_line"] == "state=findings_stable | findings=1 | refs=1 | stop=findings_stable"
+    profile = worker_task_contract.derive_worker_task_module_profile(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+        gate=gate,
+    )
+    assert profile["summary_line"] == (
+        "analysis_findings_profile | state=findings_stable | findings=1 | evidence=1 | gaps=0 | targets=2 | cautions=1"
+    )
 
 
 def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:
@@ -235,6 +249,20 @@ def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> Non
 
     assert gate["state"] == "quality_open"
     assert gate["summary_line"] == "state=quality_open | docs=1 | refs=1 | repeat=quality_gate_open"
+    profile = worker_task_contract.derive_worker_task_module_profile(
+        contract,
+        {
+            "status": "ready",
+            "summary": "draft prepared",
+            "actions": ["update docs/handoff/final_handoff.md"],
+            "cautions": ["quality review still open"],
+            "evidence_refs": ["docs/handoff/final_handoff.md"],
+        },
+        gate=gate,
+    )
+    assert profile["summary_line"] == (
+        "writing_handoff_profile | state=quality_open | docs=1 | handoff=review | quality=open | refs=1 | cautions=1"
+    )
 
 
 def test_package_module_gate_surfaces_artifact_check_open_without_verification_refs() -> None:
@@ -260,3 +288,17 @@ def test_package_module_gate_surfaces_artifact_check_open_without_verification_r
 
     assert gate["state"] == "artifact_check_open"
     assert gate["summary_line"] == "state=artifact_check_open | artifacts=1 | refs=0 | repeat=artifact_check_open"
+    profile = worker_task_contract.derive_worker_task_module_profile(
+        contract,
+        {
+            "status": "ready",
+            "summary": "package built",
+            "actions": ["update dist/release_bundle.zip"],
+            "cautions": [],
+            "evidence_refs": [],
+        },
+        gate=gate,
+    )
+    assert profile["summary_line"] == (
+        "package_verification_profile | state=artifact_check_open | artifacts=1 | verification=0 | integrity=open | targets=1 | cautions=0"
+    )

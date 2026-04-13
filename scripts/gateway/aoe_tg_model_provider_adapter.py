@@ -673,6 +673,15 @@ def invoke_background_ticket_worker(
             if gate:
                 result["task_gate_status"] = _trim(gate.get("state"), 64) or "-"
                 result["task_gate_summary"] = _trim(gate.get("summary_line"), 320) or "-"
+            profile = worker_task_contract.derive_worker_task_module_profile(
+                launch_spec.get("provider_task_contract_json"),
+                task_result,
+                update_stub=update_stub,
+                gate=gate,
+            )
+            if profile:
+                result["task_profile_status"] = _trim(profile.get("state"), 64) or "-"
+                result["task_profile_summary"] = _trim(profile.get("summary_line"), 320) or "-"
             if update_stub:
                 result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
                 result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"

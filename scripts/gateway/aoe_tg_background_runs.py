@@ -583,6 +583,8 @@ def advance_background_run_ticket(
     worker_result_summary: str = "",
     worker_gate_status: str = "",
     worker_gate_summary: str = "",
+    worker_profile_status: str = "",
+    worker_profile_summary: str = "",
     worker_result_actions: List[Any] | None = None,
     worker_result_cautions: List[Any] | None = None,
     worker_result_evidence_refs: List[Any] | None = None,
@@ -623,6 +625,10 @@ def advance_background_run_ticket(
         updated["worker_gate_status"] = str(worker_gate_status or "").strip()
     if str(worker_gate_summary or "").strip():
         updated["worker_gate_summary"] = str(worker_gate_summary or "").strip()
+    if str(worker_profile_status or "").strip():
+        updated["worker_profile_status"] = str(worker_profile_status or "").strip()
+    if str(worker_profile_summary or "").strip():
+        updated["worker_profile_summary"] = str(worker_profile_summary or "").strip()
     if worker_result_actions is not None:
         updated["worker_result_actions"] = list(worker_result_actions or [])
     if worker_result_cautions is not None:
