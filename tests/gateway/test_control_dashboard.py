@@ -2779,14 +2779,21 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
         "Syncback Apply | executed | state=executed | next=/sync preview O2 24h |"
     )
     assert updated_task["background_run_canonical_mutation_status"] == "executed"
-    assert updated_task["background_run_canonical_mutation_summary"].startswith("path=TODO.md | lines=")
+    assert updated_task["background_run_canonical_mutation_kind"] == "todo_syncback"
+    assert updated_task["background_run_canonical_mutation_profile"] == "append_only"
+    assert updated_task["background_run_canonical_mutation_path"] == "TODO.md"
+    assert updated_task["background_run_canonical_mutation_summary"].startswith(
+        "todo_syncback:append_only | path=TODO.md | lines="
+    )
     _snapshot2, runtime_details, _state2 = dashboard_state.load_dashboard_runtime_details(
         control_root=control_root,
         team_dir=team_dir,
         manager_state_file=manager_state_file,
     )
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
-    assert runtime_detail.latest_canonical_mutation_summary.startswith("path=TODO.md | lines=")
+    assert runtime_detail.latest_canonical_mutation_summary.startswith(
+        "todo_syncback:append_only | path=TODO.md | lines="
+    )
     assert runtime_detail.latest_canonical_writeback_summary.startswith(
         "Syncback Apply | executed | state=executed | next=/sync preview O2 24h |"
     )

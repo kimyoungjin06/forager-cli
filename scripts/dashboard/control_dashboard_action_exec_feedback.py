@@ -60,11 +60,23 @@ def summarize_canonical_mutation(
     append_count: int,
     blocked_count: int,
 ) -> str:
+    mutation = classify_canonical_mutation(
+        path=path,
+        line_count=line_count,
+        done_count=done_count,
+        reopen_count=reopen_count,
+        append_count=append_count,
+        blocked_count=blocked_count,
+    )
+    kind = str(mutation.get("kind", "")).strip() or "-"
+    profile = str(mutation.get("profile", "")).strip() or "-"
     path_token = Path(str(path or "").strip()).name if str(path or "").strip() else "-"
     return (
-        "path={path} | lines={lines} | done={done} reopen={reopen} append={append} blocked={blocked} | "
+        "{kind}:{profile} | path={path} | lines={lines} | done={done} reopen={reopen} append={append} blocked={blocked} | "
         "state={state} | at={at}"
     ).format(
+        kind=kind,
+        profile=profile,
         path=path_token,
         lines=max(0, int(line_count or 0)),
         done=max(0, int(done_count or 0)),
@@ -74,6 +86,64 @@ def summarize_canonical_mutation(
         state=str(state or "").strip() or "-",
         at=str(at or "").strip() or "-",
     )
+
+
+def classify_canonical_mutation(
+    *,
+    path: str,
+    line_count: int,
+    done_count: int,
+    reopen_count: int,
+    append_count: int,
+    blocked_count: int,
+) -> Dict[str, Any]:
+    path_token = Path(str(path or "").strip()).name
+    path_upper = path_token.upper()
+    if path_upper in {"TODO", "TODO.MD", "TODO.TXT"} or path_upper.startswith("TODO."):
+        kind = "todo_syncback"
+    elif path_token.lower().endswith(".md"):
+        kind = "markdown_syncback"
+    else:
+        kind = "artifact_syncback"
+    counts = {
+        "done": max(0, int(done_count or 0)),
+        "reopen": max(0, int(reopen_count or 0)),
+        "append": max(0, int(append_count or 0)),
+        "blocked": max(0, int(blocked_count or 0)),
+    }
+    positive = [name for name, value in counts.items() if value > 0]
+    if not positive:
+        profile = "line_only" if max(0, int(line_count or 0)) > 0 else "noop"
+    elif positive == ["done"]:
+        profile = "done_only"
+    elif positive == ["reopen"]:
+        profile = "reopen_only"
+    elif positive == ["append"]:
+        profile = "append_only"
+    elif positive == ["blocked"]:
+        profile = "blocked_only"
+    elif positive == ["append", "done"] or positive == ["done", "append"]:
+        profile = "append_done"
+    elif positive == ["append", "reopen"] or positive == ["reopen", "append"]:
+        profile = "append_reopen"
+    elif positive == ["done", "reopen"] or positive == ["reopen", "done"]:
+        profile = "done_reopen"
+    elif positive == ["append", "blocked"] or positive == ["blocked", "append"]:
+        profile = "append_blocked"
+    elif positive == ["done", "blocked"] or positive == ["blocked", "done"]:
+        profile = "done_blocked"
+    else:
+        profile = "mixed"
+    return {
+        "kind": kind,
+        "profile": profile,
+        "path": path_token or "-",
+        "line_count": max(0, int(line_count or 0)),
+        "done_count": counts["done"],
+        "reopen_count": counts["reopen"],
+        "append_count": counts["append"],
+        "blocked_count": counts["blocked"],
+    }
 
 
 def persist_canonical_writeback_state(
@@ -112,12 +182,23 @@ def persist_canonical_writeback_state(
         append_count=append_count,
         blocked_count=blocked_count,
     )
+    mutation = classify_canonical_mutation(
+        path=path,
+        line_count=line_count,
+        done_count=done_count,
+        reopen_count=reopen_count,
+        append_count=append_count,
+        blocked_count=blocked_count,
+    )
     task["background_run_canonical_writeback_status"] = str(state or "").strip() or "-"
     task["background_run_canonical_writeback_summary"] = summary
     task["background_run_canonical_writeback_at"] = str(at or "").strip() or "-"
     task["background_run_canonical_mutation_status"] = str(state or "").strip() or "-"
     task["background_run_canonical_mutation_summary"] = mutation_summary
     task["background_run_canonical_mutation_at"] = str(at or "").strip() or "-"
+    task["background_run_canonical_mutation_kind"] = str(mutation.get("kind", "")).strip() or "-"
+    task["background_run_canonical_mutation_profile"] = str(mutation.get("profile", "")).strip() or "-"
+    task["background_run_canonical_mutation_path"] = str(mutation.get("path", "")).strip() or "-"
     task.setdefault("result", {})
     if isinstance(task.get("result"), dict):
         task["result"]["background_run_canonical_writeback_status"] = str(state or "").strip() or "-"
@@ -126,6 +207,9 @@ def persist_canonical_writeback_state(
         task["result"]["background_run_canonical_mutation_status"] = str(state or "").strip() or "-"
         task["result"]["background_run_canonical_mutation_summary"] = mutation_summary
         task["result"]["background_run_canonical_mutation_at"] = str(at or "").strip() or "-"
+        task["result"]["background_run_canonical_mutation_kind"] = str(mutation.get("kind", "")).strip() or "-"
+        task["result"]["background_run_canonical_mutation_profile"] = str(mutation.get("profile", "")).strip() or "-"
+        task["result"]["background_run_canonical_mutation_path"] = str(mutation.get("path", "")).strip() or "-"
     return summary
 
 

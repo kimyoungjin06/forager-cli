@@ -78,6 +78,64 @@ def _parse_json_object_from_text(text: Any) -> Dict[str, Any]:
     return {}
 
 
+def _classify_canonical_mutation_from_counts(
+    *,
+    path: str,
+    line_count: int,
+    done_count: int,
+    reopen_count: int,
+    append_count: int,
+    blocked_count: int,
+) -> Dict[str, Any]:
+    path_token = Path(str(path or "").strip()).name
+    path_upper = path_token.upper()
+    if path_upper in {"TODO", "TODO.MD", "TODO.TXT"} or path_upper.startswith("TODO."):
+        kind = "todo_syncback"
+    elif path_token.lower().endswith(".md"):
+        kind = "markdown_syncback"
+    else:
+        kind = "artifact_syncback"
+    counts = {
+        "done": max(0, int(done_count or 0)),
+        "reopen": max(0, int(reopen_count or 0)),
+        "append": max(0, int(append_count or 0)),
+        "blocked": max(0, int(blocked_count or 0)),
+    }
+    positive = [name for name, value in counts.items() if value > 0]
+    if not positive:
+        profile = "line_only" if max(0, int(line_count or 0)) > 0 else "noop"
+    elif positive == ["done"]:
+        profile = "done_only"
+    elif positive == ["reopen"]:
+        profile = "reopen_only"
+    elif positive == ["append"]:
+        profile = "append_only"
+    elif positive == ["blocked"]:
+        profile = "blocked_only"
+    elif positive == ["append", "done"] or positive == ["done", "append"]:
+        profile = "append_done"
+    elif positive == ["append", "reopen"] or positive == ["reopen", "append"]:
+        profile = "append_reopen"
+    elif positive == ["done", "reopen"] or positive == ["reopen", "done"]:
+        profile = "done_reopen"
+    elif positive == ["append", "blocked"] or positive == ["blocked", "append"]:
+        profile = "append_blocked"
+    elif positive == ["done", "blocked"] or positive == ["blocked", "done"]:
+        profile = "done_blocked"
+    else:
+        profile = "mixed"
+    return {
+        "kind": kind,
+        "profile": profile,
+        "path": path_token or "-",
+        "line_count": max(0, int(line_count or 0)),
+        "done_count": counts["done"],
+        "reopen_count": counts["reopen"],
+        "append_count": counts["append"],
+        "blocked_count": counts["blocked"],
+    }
+
+
 def _judge_recommended_action(next_step: str, verdict: str) -> str:
     step = str(next_step or "").strip().lower()
     if step.startswith("/replan "):
@@ -731,15 +789,31 @@ def summarize_latest_canonical_mutation(row: Any) -> str:
     )
     if not match:
         return "-"
+    path = str(match.group("path") or "").strip()
+    lines = int(match.group("lines") or 0)
+    done = int(match.group("done") or 0)
+    reopen = int(match.group("reopen") or 0)
+    append = int(match.group("append") or 0)
+    blocked = int(match.group("blocked") or 0)
+    mutation = _classify_canonical_mutation_from_counts(
+        path=path,
+        line_count=lines,
+        done_count=done,
+        reopen_count=reopen,
+        append_count=append,
+        blocked_count=blocked,
+    )
     return (
-        "path={path} | lines={lines} | done={done} reopen={reopen} append={append} blocked={blocked} | state={state} | at={at}"
+        "{kind}:{profile} | path={path} | lines={lines} | done={done} reopen={reopen} append={append} blocked={blocked} | state={state} | at={at}"
     ).format(
-        path=match.group("path"),
-        lines=match.group("lines"),
-        done=match.group("done"),
-        reopen=match.group("reopen"),
-        append=match.group("append"),
-        blocked=match.group("blocked"),
+        kind=str(mutation.get("kind", "")).strip() or "-",
+        profile=str(mutation.get("profile", "")).strip() or "-",
+        path=str(mutation.get("path", "")).strip() or "-",
+        lines=lines,
+        done=done,
+        reopen=reopen,
+        append=append,
+        blocked=blocked,
         state=state,
         at=at,
     )
