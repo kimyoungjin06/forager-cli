@@ -185,3 +185,78 @@ def test_package_module_apply_proposals_escalate_to_p1_handoff() -> None:
     assert proposals[0]["kind"] == "handoff"
     assert proposals[0]["priority"] == "P1"
     assert str(proposals[0]["summary"]).startswith("apply package artifact for T-PKG-2")
+
+
+def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-AN-3",
+            "contract_preset": "analysis",
+            "objective": "Investigate provider regressions and collect evidence.",
+            "artifact_targets": ["docs/analysis/provider_regressions.md"],
+        }
+    )
+
+    gate = worker_task_contract.derive_worker_task_module_gate(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+    )
+
+    assert gate["state"] == "findings_stable"
+    assert gate["summary_line"] == "state=findings_stable | findings=1 | refs=1 | stop=findings_stable"
+
+
+def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-WR-3",
+            "contract_preset": "writer",
+            "objective": "Draft the final operator handoff.",
+            "artifact_targets": ["docs/handoff/final_handoff.md"],
+        }
+    )
+
+    gate = worker_task_contract.derive_worker_task_module_gate(
+        contract,
+        {
+            "status": "ready",
+            "summary": "draft prepared",
+            "actions": ["update docs/handoff/final_handoff.md"],
+            "cautions": ["quality review still open"],
+            "evidence_refs": ["docs/handoff/final_handoff.md"],
+        },
+    )
+
+    assert gate["state"] == "quality_open"
+    assert gate["summary_line"] == "state=quality_open | docs=1 | refs=1 | repeat=quality_gate_open"
+
+
+def test_package_module_gate_surfaces_artifact_check_open_without_verification_refs() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-PKG-3",
+            "contract_preset": "build",
+            "objective": "Prepare the release package and verify artifacts.",
+            "artifact_targets": ["dist/release_bundle.zip"],
+        }
+    )
+
+    gate = worker_task_contract.derive_worker_task_module_gate(
+        contract,
+        {
+            "status": "ready",
+            "summary": "package built",
+            "actions": ["update dist/release_bundle.zip"],
+            "cautions": [],
+            "evidence_refs": [],
+        },
+    )
+
+    assert gate["state"] == "artifact_check_open"
+    assert gate["summary_line"] == "state=artifact_check_open | artifacts=1 | refs=0 | repeat=artifact_check_open"

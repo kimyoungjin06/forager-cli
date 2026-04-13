@@ -758,6 +758,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
         "analysis | policy=findings_evidence_gate | result=findings+evidence | "
         "apply=advisory_review | loop=evidence_review"
     )
+    task["background_run_worker_gate_summary"] = "state=findings_stable | findings=1 | refs=1 | stop=findings_stable"
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -834,6 +835,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "analysis | analysis/review signals" in text
     assert "background_worker_policy" in text
     assert "policy=findings_evidence_gate | result=findings+evidence" in text
+    assert "background_worker_gate" in text
+    assert "state=findings_stable | findings=1 | refs=1 | stop=findings_stable" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
@@ -931,6 +934,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
         "analysis | policy=findings_evidence_gate | result=findings+evidence | "
         "apply=advisory_review | loop=evidence_review"
     )
+    task["background_run_worker_gate_summary"] = "state=findings_stable | findings=1 | refs=1 | stop=findings_stable"
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1004,6 +1008,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "analysis | analysis/review signals" in text
     assert "background_worker_policy" in text
     assert "policy=findings_evidence_gate | result=findings+evidence" in text
+    assert "background_worker_gate" in text
+    assert "state=findings_stable | findings=1 | refs=1 | stop=findings_stable" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text

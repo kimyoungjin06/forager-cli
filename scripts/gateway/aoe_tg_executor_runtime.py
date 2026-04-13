@@ -146,6 +146,8 @@ def dispatch_claimed_background_ticket_via_adapter(
             contract_summary = str(provider_invoke_result.get("task_contract_summary", "")).strip()
             task_result_status = str(provider_invoke_result.get("task_result_status", "")).strip()
             task_result_summary = str(provider_invoke_result.get("task_result_summary", "")).strip()
+            task_gate_status = str(provider_invoke_result.get("task_gate_status", "")).strip()
+            task_gate_summary = str(provider_invoke_result.get("task_gate_summary", "")).strip()
             task_result_actions = [
                 str(item).strip()
                 for item in (provider_invoke_result.get("task_result_actions") or [])
@@ -175,6 +177,8 @@ def dispatch_claimed_background_ticket_via_adapter(
                 completed_runtime_summary = f"{completed_runtime_summary} | {contract_summary}"[:240]
             if task_result_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_result_summary}"[:240]
+            if task_gate_summary:
+                completed_runtime_summary = f"{completed_runtime_summary} | {task_gate_summary}"[:240]
             if task_update_stub_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_update_stub_summary}"[:240]
             bundle_parts = [
@@ -188,6 +192,8 @@ def dispatch_claimed_background_ticket_via_adapter(
                 bundle_parts.append(contract_summary[:80])
             if task_result_status:
                 bundle_parts.append(f"worker={task_result_status[:48]}")
+            if task_gate_status:
+                bundle_parts.append(f"gate={task_gate_status[:48]}")
             if response_text:
                 bundle_parts.append(f"response={response_text[:80]}")
             if task_result_summary:
@@ -210,6 +216,8 @@ def dispatch_claimed_background_ticket_via_adapter(
             runtime_summary=completed_runtime_summary,
             worker_result_status=str(provider_invoke_result.get("task_result_status", "")).strip(),
             worker_result_summary=str(provider_invoke_result.get("task_result_summary", "")).strip(),
+            worker_gate_status=str(provider_invoke_result.get("task_gate_status", "")).strip(),
+            worker_gate_summary=str(provider_invoke_result.get("task_gate_summary", "")).strip(),
             worker_result_actions=list(provider_invoke_result.get("task_result_actions") or []),
             worker_result_cautions=list(provider_invoke_result.get("task_result_cautions") or []),
             worker_result_evidence_refs=list(provider_invoke_result.get("task_result_evidence_refs") or []),

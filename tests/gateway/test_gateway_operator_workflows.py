@@ -1619,6 +1619,7 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                     "package | policy=artifact_integrity_gate | result=artifact+verification | "
                     "apply=strict_syncback | loop=build_verify"
                 ),
+                "background_run_worker_gate_summary": "state=integrity_ready | artifacts=1 | refs=1 | stop=syncback_clean",
                 "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
             }
         },
@@ -1700,6 +1701,10 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "worker_policy: package | policy=artifact_integrity_gate | result=artifact+verification"
+        in text
+    )
+    assert (
+        "worker_gate: state=integrity_ready | artifacts=1 | refs=1 | stop=syncback_clean"
         in text
     )
     assert (

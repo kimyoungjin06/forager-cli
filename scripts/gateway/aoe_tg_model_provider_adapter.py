@@ -665,6 +665,14 @@ def invoke_background_ticket_worker(
                 launch_spec.get("provider_task_contract_json"),
                 task_result,
             )
+            gate = worker_task_contract.derive_worker_task_module_gate(
+                launch_spec.get("provider_task_contract_json"),
+                task_result,
+                update_stub=update_stub,
+            )
+            if gate:
+                result["task_gate_status"] = _trim(gate.get("state"), 64) or "-"
+                result["task_gate_summary"] = _trim(gate.get("summary_line"), 320) or "-"
             if update_stub:
                 result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
                 result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"

@@ -13,6 +13,7 @@ from aoe_tg_context_pack import load_context_pack
 
 WORKER_TASK_CONTRACT_VERSION = "2026-04-10.v1"
 WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
+WORKER_TASK_MODULE_GATE_VERSION = "2026-04-13.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -331,6 +332,16 @@ def _result_summary(result: Dict[str, Any]) -> str:
     return " | ".join(parts)[:320]
 
 
+def _join_text(values: Any) -> str:
+    rows = values if isinstance(values, list) else []
+    return " ".join(str(item).strip().lower() for item in rows if str(item).strip())
+
+
+def _readyish_status(status: str) -> bool:
+    token = _trim(status, 48).lower()
+    return token in {"ready", "done", "complete", "completed", "ok", "success", "stable"}
+
+
 def sanitize_worker_task_result(raw: Any) -> Dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
     result = {
@@ -358,6 +369,132 @@ def load_worker_task_result(raw: Any) -> Dict[str, Any]:
     if not isinstance(parsed, dict):
         return {}
     return sanitize_worker_task_result(parsed)
+
+
+def sanitize_worker_task_module_gate(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_GATE_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "gate": _trim(source.get("gate"), 96) or "-",
+        "state": _trim(source.get("state"), 64) or "-",
+        "focus_summary": _trim(source.get("focus_summary"), 240) or "-",
+        "repeat_hint": _trim(source.get("repeat_hint"), 96) or "-",
+        "stop_hint": _trim(source.get("stop_hint"), 96) or "-",
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = [f"state={row['state']}"]
+        if row["focus_summary"] not in {"", "-"}:
+            parts.append(row["focus_summary"])
+        if row["repeat_hint"] not in {"", "-"}:
+            parts.append(f"repeat={row['repeat_hint']}")
+        elif row["stop_hint"] not in {"", "-"}:
+            parts.append(f"stop={row['stop_hint']}")
+        row["summary_line"] = " | ".join(parts)[:320]
+    return row
+
+
+def derive_worker_task_module_gate(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    policy = _trim(contract_row.get("module_policy"), 96) or resolve_worker_module_policy(contract_row).get("policy", "-")
+    actions = list(result_row.get("actions") or [])
+    cautions = list(result_row.get("cautions") or [])
+    refs = list(result_row.get("evidence_refs") or [])
+    targets = list((stub or {}).get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
+    caution_text = _join_text(cautions)
+    readyish = _readyish_status(str(result_row.get("status", "")))
+
+    if module_kind == "analysis":
+        findings_count = max(len(actions), 1 if _trim(result_row.get("summary"), 240) not in {"", "-"} else 0)
+        refs_count = len(refs)
+        evidence_open = refs_count == 0 or any(
+            token in caution_text for token in ("evidence", "missing", "gap", "unclear", "unsourced")
+        )
+        state = "evidence_open" if evidence_open else ("findings_stable" if readyish else "review_needed")
+        repeat_hint = "evidence_missing" if state == "evidence_open" else "-"
+        stop_hint = "findings_stable" if state == "findings_stable" else "-"
+        focus_summary = f"findings={findings_count} | refs={refs_count}"
+    elif module_kind == "writing":
+        doc_count = max(
+            len([token for token in targets if _trim(token, 160)]),
+            1 if actions or _trim(result_row.get("summary"), 240) not in {"", "-"} else 0,
+        )
+        refs_count = len(refs)
+        quality_open = any(
+            token in caution_text
+            for token in ("quality", "tone", "style", "placeholder", "review", "copyedit", "polish")
+        )
+        if quality_open:
+            state = "quality_open"
+        elif readyish and doc_count > 0 and refs_count > 0:
+            state = "handoff_ready"
+        elif doc_count > 0:
+            state = "draft_ready"
+        else:
+            state = "writing_review"
+        repeat_hint = "quality_gate_open" if state == "quality_open" else "-"
+        stop_hint = "handoff_ready" if state == "handoff_ready" else "-"
+        focus_summary = f"docs={doc_count} | refs={refs_count}"
+    elif module_kind == "package":
+        artifact_count = max(
+            len([token for token in targets if _trim(token, 160)]),
+            1 if actions or _trim(result_row.get("summary"), 240) not in {"", "-"} else 0,
+        )
+        refs_count = len(refs)
+        integrity_open = refs_count == 0 or any(
+            token in caution_text
+            for token in ("verify", "verification", "integrity", "mismatch", "missing", "fail", "checksum")
+        )
+        if integrity_open:
+            state = "artifact_check_open"
+        elif readyish and artifact_count > 0 and refs_count > 0:
+            state = "integrity_ready"
+        elif artifact_count > 0:
+            state = "package_ready"
+        else:
+            state = "package_review"
+        repeat_hint = "artifact_check_open" if state == "artifact_check_open" else "-"
+        stop_hint = "syncback_clean" if state == "integrity_ready" else "-"
+        focus_summary = f"artifacts={artifact_count} | refs={refs_count}"
+    else:
+        action_count = len(actions)
+        refs_count = len(refs)
+        caution_count = len(cautions)
+        state = "summary_ready" if readyish and caution_count == 0 else "review_open"
+        repeat_hint = "operator_requests_retry" if state == "review_open" else "-"
+        stop_hint = "summary_ready" if state == "summary_ready" else "-"
+        focus_summary = f"actions={action_count} | refs={refs_count}"
+
+    return sanitize_worker_task_module_gate(
+        {
+            "module_kind": module_kind,
+            "gate": policy,
+            "state": state,
+            "focus_summary": focus_summary,
+            "repeat_hint": repeat_hint,
+            "stop_hint": stop_hint,
+        }
+    )
+
+
+def summarize_worker_task_module_gate(raw: Any) -> str:
+    row = sanitize_worker_task_module_gate(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
 
 
 def build_worker_task_contract(

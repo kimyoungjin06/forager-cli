@@ -228,6 +228,7 @@ class TaskDetailDTO:
     background_run_task_contract_summary: str = ""
     background_run_task_contract_module_summary: str = ""
     background_run_task_contract_policy_summary: str = ""
+    background_run_worker_gate_summary: str = ""
     background_run_worker_result_summary: str = ""
     background_run_worker_result_actions: str = ""
     background_run_worker_result_cautions: str = ""
@@ -331,6 +332,7 @@ class RuntimeDetailDTO:
     active_task_background_run_task_contract_summary: str
     active_task_background_run_task_contract_module_summary: str
     active_task_background_run_task_contract_policy_summary: str
+    active_task_background_run_worker_gate_summary: str
     active_task_background_run_worker_result_summary: str
     active_task_background_run_worker_result_actions: str
     active_task_background_run_worker_result_cautions: str

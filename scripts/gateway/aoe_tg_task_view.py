@@ -17,7 +17,7 @@ from aoe_tg_operator_summary import task_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
-from aoe_tg_worker_task_contract import resolve_worker_module_policy
+from aoe_tg_worker_task_contract import derive_worker_task_module_gate, resolve_worker_module_policy
 from aoe_tg_team_observatory import (
     observatory_lane_lines,
     observatory_task_line,
@@ -626,6 +626,26 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
         ).strip()
     if background_task_contract_policy_summary and background_task_contract_policy_summary != "-":
         lines.append("background_run_worker_policy: " + background_task_contract_policy_summary[:240])
+    background_worker_gate = str(task.get("background_run_worker_gate_summary", "")).strip()
+    if not background_worker_gate and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_gate = str(
+            derive_worker_task_module_gate(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_gate:
+        lines.append("background_run_worker_gate: " + background_worker_gate[:240])
     background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
     if background_worker_result:
         lines.append("background_run_worker_result: " + background_worker_result[:240])
