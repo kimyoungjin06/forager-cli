@@ -16,6 +16,7 @@ WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
+WORKER_MODULE_KINDS = ("analysis", "writing", "package", "general")
 WORKER_TASK_SYSTEM = (
     "You are the bounded background worker. Return strict JSON with keys: "
     "status, summary, actions, cautions, evidence_refs. Keep every field concise."
@@ -49,6 +50,7 @@ def _task_label(task: Dict[str, Any]) -> str:
 
 def _summary(contract: Dict[str, Any]) -> str:
     parts = [
+        f"module={_trim(contract.get('module_kind'), 48) or '-'}",
         f"task={_trim(contract.get('task_label'), 64) or '-'}",
         f"pack={_trim(contract.get('pack_profile'), 64) or '-'}",
         f"brief={_trim(contract.get('execution_brief_status'), 48) or '-'}",
@@ -57,8 +59,104 @@ def _summary(contract: Dict[str, Any]) -> str:
     return " | ".join(parts)[:320]
 
 
+def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
+    low = str(text or "").strip().lower()
+    return any(token in low for token in tokens)
+
+
+def _module_from_source(source: Dict[str, Any]) -> Dict[str, str]:
+    explicit = _trim(source.get("module_kind"), 48).lower()
+    if explicit in WORKER_MODULE_KINDS:
+        reason = _trim(source.get("module_reason"), 240) or "explicit"
+        return {
+            "kind": explicit,
+            "reason": reason,
+            "summary": f"{explicit} | {reason}"[:240],
+        }
+    preset = _trim(
+        source.get("contract_preset")
+        or source.get("request_contract_preset")
+        or source.get("phase2_team_preset")
+        or source.get("phase1_role_preset"),
+        48,
+    ).lower()
+    objective = _trim(source.get("objective"), 320)
+    outputs = " ".join(_uniq(source.get("required_outputs"), limit=12, text_limit=120))
+    targets = " ".join(_uniq(source.get("artifact_targets"), limit=12, text_limit=160))
+    docs = " ".join(_uniq(source.get("doc_paths"), limit=12, text_limit=160))
+    constraints = " ".join(_uniq(source.get("constraints"), limit=12, text_limit=120))
+    haystack = " ".join(part for part in (objective, outputs, targets, docs, constraints, preset) if part).lower()
+    package_tokens = (
+        "package",
+        "packaging",
+        "bundle",
+        "archive",
+        "release",
+        "artifact apply",
+        "artifact update",
+        "dist/",
+        "wheel",
+        "sdist",
+        ".tar",
+        ".zip",
+        "installer",
+    )
+    writing_tokens = (
+        "write",
+        "writer",
+        "writing",
+        "document",
+        "docs/",
+        "report",
+        "summary",
+        "runbook",
+        "handoff",
+        "readme",
+        "spec",
+        "draft",
+        "reviewer_note",
+    )
+    analysis_tokens = (
+        "analy",
+        "research",
+        "investig",
+        "compare",
+        "benchmark",
+        "scope",
+        "audit",
+        "finding",
+        "inventory",
+        "diagnostic",
+        "evidence",
+    )
+    if _contains_any(haystack, package_tokens):
+        return {
+            "kind": "package",
+            "reason": "artifact/package signals",
+            "summary": "package | artifact/package signals",
+        }
+    if preset in {"analysis", "review", "data"} or _contains_any(haystack, analysis_tokens):
+        return {
+            "kind": "analysis",
+            "reason": "analysis/review signals",
+            "summary": "analysis | analysis/review signals",
+        }
+    if preset == "writer" or _contains_any(haystack, writing_tokens):
+        return {
+            "kind": "writing",
+            "reason": "writer/doc signals",
+            "summary": "writing | writer/doc signals",
+        }
+    return {
+        "kind": "general",
+        "reason": "general task",
+        "summary": "general | fallback",
+    }
+
+
 def sanitize_worker_task_contract(raw: Any) -> Dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
+    module = _module_from_source(source)
     contract = {
         "version": _trim(source.get("version"), 48) or WORKER_TASK_CONTRACT_VERSION,
         "request_id": _trim(source.get("request_id"), 96),
@@ -68,6 +166,10 @@ def sanitize_worker_task_contract(raw: Any) -> Dict[str, Any]:
         "project_label": _trim(source.get("project_label"), 96),
         "status": _trim(source.get("status"), 48) or "-",
         "tf_phase": _trim(source.get("tf_phase"), 48) or "-",
+        "contract_preset": _trim(source.get("contract_preset"), 48) or "-",
+        "module_kind": str(module.get("kind", "")).strip() or "general",
+        "module_reason": str(module.get("reason", "")).strip() or "-",
+        "module_summary": str(module.get("summary", "")).strip() or "-",
         "pack_profile": _trim(source.get("pack_profile"), 64) or "offdesk_execute",
         "objective": _trim(source.get("objective"), 320) or "-",
         "execution_brief_status": _trim(source.get("execution_brief_status"), 48) or "-",
@@ -173,6 +275,12 @@ def build_worker_task_contract(
             "project_label": _trim(entry_data.get("display_name") or entry_data.get("name"), 96),
             "status": _trim(task_data.get("status"), 48),
             "tf_phase": _trim(task_data.get("tf_phase"), 48),
+            "contract_preset": _trim(
+                task_data.get("request_contract_preset")
+                or task_data.get("phase2_team_preset")
+                or task_data.get("phase1_role_preset"),
+                48,
+            ),
             "pack_profile": pack_profile,
             "objective": _trim(pack.get("objective") or task_data.get("prompt") or task_data.get("alias"), 320),
             "execution_brief_status": _trim(task_data.get("execution_brief_status"), 48),
@@ -215,6 +323,10 @@ def render_worker_task_prompt(contract: Any) -> Dict[str, str]:
         "request_id": _trim(row.get("request_id"), 96) or "-",
         "status": _trim(row.get("status"), 48) or "-",
         "tf_phase": _trim(row.get("tf_phase"), 48) or "-",
+        "contract_preset": _trim(row.get("contract_preset"), 48) or "-",
+        "module_kind": _trim(row.get("module_kind"), 48) or "-",
+        "module_reason": _trim(row.get("module_reason"), 240) or "-",
+        "module_summary": _trim(row.get("module_summary"), 240) or "-",
         "pack_profile": _trim(row.get("pack_profile"), 64) or "-",
         "objective": _trim(row.get("objective"), 320) or "-",
         "execution_brief_status": _trim(row.get("execution_brief_status"), 48) or "-",
@@ -260,12 +372,16 @@ def _infer_action_paths(actions: List[str]) -> List[str]:
 
 
 def _update_stub_summary(row: Dict[str, Any]) -> str:
+    module_kind = _trim(row.get("module_kind"), 48) or "-"
     status = _trim(row.get("status"), 48) or "-"
     targets = list(row.get("target_artifacts") or [])
     actions = list(row.get("actions") or [])
     refs = list(row.get("evidence_refs") or [])
     target_text = ",".join(targets[:2]) if targets else "-"
-    parts = [f"status={status}", f"targets={target_text}"]
+    parts: List[str] = []
+    if module_kind not in {"", "-", "general"}:
+        parts.append(f"module={module_kind}")
+    parts.extend([f"status={status}", f"targets={target_text}"])
     if actions:
         parts.append(f"actions={len(actions)}")
     if refs:
@@ -277,6 +393,8 @@ def sanitize_worker_task_update_stub(raw: Any) -> Dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
     row = {
         "version": _trim(source.get("version"), 48) or WORKER_TASK_UPDATE_STUB_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48) or "-",
+        "module_summary": _trim(source.get("module_summary"), 240) or "-",
         "status": _trim(source.get("status"), 48) or "-",
         "target_artifacts": _uniq(source.get("target_artifacts"), limit=8, text_limit=160),
         "actions": _uniq(source.get("actions"), limit=4, text_limit=160),
@@ -303,6 +421,8 @@ def derive_worker_task_update_stub(contract: Any, result: Any) -> Dict[str, Any]
     status = "ready" if (targets or actions or refs) else "none"
     return sanitize_worker_task_update_stub(
         {
+            "module_kind": contract_row.get("module_kind"),
+            "module_summary": contract_row.get("module_summary"),
             "status": status,
             "target_artifacts": targets,
             "actions": actions,
@@ -481,6 +601,9 @@ def summarize_worker_update_proposal_summary(update_stub: Any, proposal_ids: Any
     target_text = ",".join(list(stub.get("target_artifacts") or [])[:2]) if stub else "-"
     parts = []
     status = _trim((stub or {}).get("status"), 48) or "-"
+    module_kind = _trim((stub or {}).get("module_kind"), 48) or "-"
+    if module_kind not in {"", "-", "general"}:
+        parts.append(f"module={module_kind}")
     if status != "-":
         parts.append(f"status={status}")
     if ids:
@@ -509,6 +632,9 @@ def summarize_worker_artifact_apply_proposal_summary(update_stub: Any, proposal_
     target_text = ",".join(list(stub.get("target_artifacts") or [])[:2]) if stub else "-"
     parts = []
     status = _trim((stub or {}).get("status"), 48) or "-"
+    module_kind = _trim((stub or {}).get("module_kind"), 48) or "-"
+    if module_kind not in {"", "-", "general"}:
+        parts.append(f"module={module_kind}")
     if status != "-":
         parts.append(f"status={status}")
     if ids:

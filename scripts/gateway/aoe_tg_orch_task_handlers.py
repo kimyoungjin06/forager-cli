@@ -1837,6 +1837,8 @@ def handle_orch_task_command(
                 task_contract_json=json.dumps(contract, ensure_ascii=False),
                 task_contract_summary=str(contract.get("summary", "")).strip(),
                 task_contract_profile=str(contract.get("pack_profile", "")).strip(),
+                task_contract_module=str(contract.get("module_kind", "")).strip(),
+                task_contract_module_summary=str(contract.get("module_summary", "")).strip(),
                 timeout_sec=45,
             )
             ticket = build_background_run_ticket(

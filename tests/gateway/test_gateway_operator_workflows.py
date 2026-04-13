@@ -490,7 +490,7 @@ def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypa
     assert len(rows) == 1
     assert rows[0]["status"] == "completed"
     assert rows[0]["launch_spec"]["provider_task_contract_profile"] == "offdesk_execute"
-    assert rows[0]["launch_spec"]["provider_task_contract_summary"].startswith("task=T-001")
+    assert rows[0]["launch_spec"]["provider_task_contract_summary"].startswith("module=")
     assert rows[0]["worker_result_status"] == "ready"
     assert rows[0]["worker_result_summary"] == "status=ready | worker summary drafted | actions=1 | refs=1"
     assert rows[0]["worker_result_evidence_refs"] == ["reports/summary.md"]

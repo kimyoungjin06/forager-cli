@@ -671,6 +671,7 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
         assert url == "http://172.16.0.37:11434/api/generate"
         assert payload["model"] == "qwen3-coder:30b"
         assert "Ship a bounded worker summary." in payload["prompt"]
+        assert "\"module_kind\": \"writing\"" in payload["prompt"]
         assert "\"doc_paths\": [" in payload["prompt"]
         assert payload["system"] == worker_task_contract.WORKER_TASK_SYSTEM
         assert timeout_sec == 19.0
@@ -702,5 +703,8 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
     assert result["task_result_cautions"] == ["keep review lane open"]
     assert result["task_result_evidence_refs"] == ["reports/summary.md"]
     assert result["task_update_stub_status"] == "ready"
-    assert result["task_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert result["task_contract_summary"].startswith("module=writing | task=T-001 | pack=offdesk_execute")
+    assert result["task_update_stub_summary"] == (
+        "module=writing | status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    )
     assert result["task_update_stub_targets"] == ["reports/summary.md"]
