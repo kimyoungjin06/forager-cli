@@ -2531,6 +2531,94 @@ def test_control_dashboard_post_replan_route_reuses_executed_manual_followup_exe
     assert runtime_detail.latest_manual_step_summary == "manual_execute=/task T-001 | state=executed | reused"
 
 
+def test_control_dashboard_post_replan_route_reuses_canonical_writeback_feedback(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_syncback_status"] = "applied"
+    task["background_run_canonical_writeback_status"] = "executed"
+    task["background_run_canonical_writeback_next_step"] = "/sync preview O2 24h"
+    task["background_run_canonical_writeback_summary"] = (
+        "Syncback Apply | executed | state=executed | next=/sync preview O2 24h | "
+        "at=2026-04-10T10:14:00+09:00 | path=TODO.md lines=8 done=0 reopen=0 append=1 blocked=0"
+    )
+    task["background_run_canonical_writeback_at"] = "2026-04-10T10:14:00+09:00"
+    task["background_run_canonical_mutation_status"] = "executed"
+    task["background_run_canonical_mutation_kind"] = "todo_syncback"
+    task["background_run_canonical_mutation_profile"] = "append_only"
+    task["background_run_canonical_mutation_path"] = "TODO.md"
+    task["background_run_canonical_mutation_summary"] = (
+        "todo_syncback:append_only | path=TODO.md | lines=8 | done=0 reopen=0 append=1 blocked=0 | "
+        "state=executed | at=2026-04-10T10:14:00+09:00"
+    )
+    task["background_run_canonical_mutation_at"] = "2026-04-10T10:14:00+09:00"
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:06:00+09:00",
+        extra={
+            "response_text": (
+                "{\"verdict\":\"hold\",\"confidence\":\"medium\",\"reasoning\":\"execution slice is safe\","
+                "\"recommended_action\":\"followup_execute\",\"next_step\":\"/followup-exec T-001 lane L2\","
+                "\"caution\":\"keep review lane manual\"}"
+            ),
+        },
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["next_step"] == "/sync preview O2 24h"
+    assert payload["replan_auto_decision"]["canonical_feedback_applied"] is True
+    assert payload["replan_auto_decision"]["canonical_feedback_kind"] == "todo_syncback"
+    assert payload["replan_auto_decision"]["canonical_feedback_profile"] == "append_only"
+    assert payload["replan_auto_decision"]["suggested_next_step"] == "/sync preview O2 24h"
+    assert payload["replan_auto_decision"]["decision_mode"] == "canonical_writeback_reuse"
+    assert payload["replan_auto_routing_policy"]["status"] == "mutation_progressed"
+    assert payload["replan_auto_routing_policy"]["requires_operator_confirmation"] is False
+    assert "canonical mutation reused" in payload["remediation"]
+    _snapshot, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    assert runtime_detail.latest_replan_auto_operator_summary == (
+        "mutation=/sync preview O2 24h | kind=todo_syncback:append_only | reused | reuse=canonical_writeback"
+    )
+
+
 def test_control_dashboard_post_replan_route_auto_routes_to_retry_when_confirmed(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -2775,6 +2863,7 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
         "state=applied | todo=TODO-002 | path=TODO.md |"
     )
     assert updated_task["background_run_canonical_writeback_status"] == "executed"
+    assert updated_task["background_run_canonical_writeback_next_step"] == "/sync preview O2 24h"
     assert updated_task["background_run_canonical_writeback_summary"].startswith(
         "Syncback Apply | executed | state=executed | next=/sync preview O2 24h |"
     )

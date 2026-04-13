@@ -193,6 +193,8 @@ def persist_canonical_writeback_state(
     task["background_run_canonical_writeback_status"] = str(state or "").strip() or "-"
     task["background_run_canonical_writeback_summary"] = summary
     task["background_run_canonical_writeback_at"] = str(at or "").strip() or "-"
+    task["background_run_canonical_writeback_next_step"] = str(next_step or "").strip() or "-"
+    task["background_run_canonical_writeback_path"] = str(mutation.get("path", "")).strip() or "-"
     task["background_run_canonical_mutation_status"] = str(state or "").strip() or "-"
     task["background_run_canonical_mutation_summary"] = mutation_summary
     task["background_run_canonical_mutation_at"] = str(at or "").strip() or "-"
@@ -204,6 +206,8 @@ def persist_canonical_writeback_state(
         task["result"]["background_run_canonical_writeback_status"] = str(state or "").strip() or "-"
         task["result"]["background_run_canonical_writeback_summary"] = summary
         task["result"]["background_run_canonical_writeback_at"] = str(at or "").strip() or "-"
+        task["result"]["background_run_canonical_writeback_next_step"] = str(next_step or "").strip() or "-"
+        task["result"]["background_run_canonical_writeback_path"] = str(mutation.get("path", "")).strip() or "-"
         task["result"]["background_run_canonical_mutation_status"] = str(state or "").strip() or "-"
         task["result"]["background_run_canonical_mutation_summary"] = mutation_summary
         task["result"]["background_run_canonical_mutation_at"] = str(at or "").strip() or "-"
@@ -211,6 +215,46 @@ def persist_canonical_writeback_state(
         task["result"]["background_run_canonical_mutation_profile"] = str(mutation.get("profile", "")).strip() or "-"
         task["result"]["background_run_canonical_mutation_path"] = str(mutation.get("path", "")).strip() or "-"
     return summary
+
+
+def derive_canonical_writeback_feedback(
+    task: Dict[str, Any],
+    *,
+    suggested_action: str,
+) -> Dict[str, Any]:
+    if not isinstance(task, dict) or not task:
+        return {}
+    action = str(suggested_action or "").strip().lower()
+    if action not in {"followup", "followup_execute"}:
+        return {}
+    writeback_status = str(task.get("background_run_canonical_writeback_status", "")).strip().lower()
+    mutation_status = str(task.get("background_run_canonical_mutation_status", "")).strip().lower()
+    syncback_status = str(task.get("background_run_worker_syncback_status", "")).strip().lower()
+    if writeback_status not in {"executed", "applied"}:
+        return {}
+    if mutation_status not in {"executed", "applied"}:
+        return {}
+    if syncback_status not in {"applied", "executed", ""}:
+        return {}
+    next_step = str(task.get("background_run_canonical_writeback_next_step", "")).strip() or "-"
+    summary = str(task.get("background_run_canonical_writeback_summary", "")).strip() or "-"
+    kind = str(task.get("background_run_canonical_mutation_kind", "")).strip() or "-"
+    profile = str(task.get("background_run_canonical_mutation_profile", "")).strip() or "-"
+    path = str(task.get("background_run_canonical_mutation_path", "")).strip() or "-"
+    at = str(task.get("background_run_canonical_writeback_at", "")).strip() or "-"
+    can_reuse_next_step = next_step.startswith("/")
+    return {
+        "status": writeback_status or "-",
+        "mutation_status": mutation_status or "-",
+        "syncback_status": syncback_status or "-",
+        "summary": summary,
+        "next_step": next_step,
+        "kind": kind,
+        "profile": profile,
+        "path": path,
+        "at": at,
+        "can_reuse_next_step": can_reuse_next_step,
+    }
 
 
 def summarize_manual_step_execution(

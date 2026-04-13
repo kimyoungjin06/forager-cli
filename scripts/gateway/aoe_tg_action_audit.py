@@ -250,6 +250,16 @@ def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
         "reasoning": str(row.get("reasoning", "")).strip() or "-",
         "caution": str(row.get("caution", "")).strip() or "-",
         "confidence": str(row.get("confidence", "")).strip() or "-",
+        "manual_feedback_state": str(row.get("manual_feedback_state", "")).strip() or "-",
+        "manual_feedback_summary": str(row.get("manual_feedback_summary", "")).strip() or "-",
+        "manual_feedback_next_step": str(row.get("manual_feedback_next_step", "")).strip() or "-",
+        "manual_feedback_applied": bool(row.get("manual_feedback_applied", False)),
+        "canonical_feedback_status": str(row.get("canonical_feedback_status", "")).strip() or "-",
+        "canonical_feedback_summary": str(row.get("canonical_feedback_summary", "")).strip() or "-",
+        "canonical_feedback_next_step": str(row.get("canonical_feedback_next_step", "")).strip() or "-",
+        "canonical_feedback_kind": str(row.get("canonical_feedback_kind", "")).strip() or "-",
+        "canonical_feedback_profile": str(row.get("canonical_feedback_profile", "")).strip() or "-",
+        "canonical_feedback_applied": bool(row.get("canonical_feedback_applied", False)),
     }
 
 
@@ -270,6 +280,12 @@ def summarize_replan_auto_decision(decision: Any) -> str:
         parts.append(f"next={next_step}")
     if decision_mode != "-":
         parts.append(f"mode={decision_mode}")
+    if bool(row.get("manual_feedback_applied", False)):
+        parts.append("reuse=manual_feedback")
+    elif bool(row.get("canonical_feedback_applied", False)):
+        kind = str(row.get("canonical_feedback_kind", "")).strip() or "-"
+        profile = str(row.get("canonical_feedback_profile", "")).strip() or "-"
+        parts.append(f"reuse={kind}:{profile}")
     if bool(row.get("can_auto_apply", False)):
         parts.append("auto=yes")
     return " | ".join(parts)
@@ -295,6 +311,11 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
         "manual_feedback_state": str(row.get("manual_feedback_state", "")).strip() or "-",
         "manual_feedback_summary": str(row.get("manual_feedback_summary", "")).strip() or "-",
         "manual_feedback_applied": bool(row.get("manual_feedback_applied", False)),
+        "canonical_feedback_status": str(row.get("canonical_feedback_status", "")).strip() or "-",
+        "canonical_feedback_summary": str(row.get("canonical_feedback_summary", "")).strip() or "-",
+        "canonical_feedback_kind": str(row.get("canonical_feedback_kind", "")).strip() or "-",
+        "canonical_feedback_profile": str(row.get("canonical_feedback_profile", "")).strip() or "-",
+        "canonical_feedback_applied": bool(row.get("canonical_feedback_applied", False)),
     }
 
 
@@ -671,6 +692,10 @@ def summarize_replan_auto_operator_status(
         if suggested_action == "followup":
             return f"manual_followup={ready_next} | state={feedback_state} | reused"
         return f"manual={ready_next} | state={feedback_state} | reused"
+    if ready_status == "mutation_progressed" and ready_next not in {"", "-"}:
+        kind = str(normalized_policy.get("canonical_feedback_kind", "")).strip() or "-"
+        profile = str(normalized_policy.get("canonical_feedback_profile", "")).strip() or "-"
+        return f"mutation={ready_next} | kind={kind}:{profile} | reused"
     if ready_status == "manual_ready" and ready_next not in {"", "-"}:
         suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
         if suggested_action in {"manual_review", "review", "judge"}:
@@ -708,6 +733,8 @@ def summarize_replan_auto_operator_summary(
         return f"{status_summary} | do={str(normalized_policy.get('suggested_next_step', '')).strip()}"
     if str(normalized_policy.get("status", "")).strip() == "manual_progressed":
         return f"{status_summary} | reuse=task_truth"
+    if str(normalized_policy.get("status", "")).strip() == "mutation_progressed":
+        return f"{status_summary} | reuse=canonical_writeback"
     return status_summary
 
 

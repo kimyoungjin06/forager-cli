@@ -45,6 +45,7 @@ from control_dashboard_action_exec_shared import (
     _missing_outcome_response,
 )
 from control_dashboard_action_exec_feedback import (
+    derive_canonical_writeback_feedback,
     derive_manual_step_feedback,
     persist_manual_step_execution_state,
 )
@@ -259,6 +260,20 @@ def _retry_blocked_remediation_with_manual_feedback(remediation: str, decision: 
     return f"{base}; {suffix}" if base else suffix
 
 
+def _retry_blocked_remediation_with_canonical_feedback(remediation: str, decision: Dict[str, Any]) -> str:
+    if not isinstance(decision, dict) or not bool(decision.get("canonical_feedback_applied", False)):
+        return remediation
+    kind = str(decision.get("canonical_feedback_kind", "")).strip() or "-"
+    profile = str(decision.get("canonical_feedback_profile", "")).strip() or "-"
+    next_step = str(decision.get("canonical_feedback_next_step", "")).strip() or "-"
+    summary = str(decision.get("canonical_feedback_summary", "")).strip() or "-"
+    suffix = f"canonical mutation reused: kind={kind}:{profile} next={next_step}"
+    if summary and summary != "-":
+        suffix = f"{suffix} | {summary}"
+    base = str(remediation or "").strip()
+    return f"{base}; {suffix}" if base else suffix
+
+
 def _append_blocked_retry_replan_audit(
     *,
     team_dir: Path,
@@ -330,11 +345,23 @@ def _replan_auto_decision_stub(
         suggested_next_step=suggested_next_step,
     )
     manual_feedback_applied = bool(manual_step_feedback.get("can_reuse_next_step", False))
+    canonical_writeback_feedback = derive_canonical_writeback_feedback(
+        source_task if isinstance(source_task, dict) else {},
+        suggested_action=suggested_action,
+    )
+    canonical_feedback_applied = bool(canonical_writeback_feedback.get("can_reuse_next_step", False))
     if manual_feedback_applied:
         suggested_next_step = str(manual_step_feedback.get("next_step", "")).strip() or suggested_next_step
+        canonical_feedback_applied = False
+    elif canonical_feedback_applied:
+        suggested_next_step = (
+            str(canonical_writeback_feedback.get("next_step", "")).strip() or suggested_next_step
+        )
     decision_mode = str(bridge.get("decision_mode", "")).strip() or ("judge_signal" if decision else "none")
     if manual_feedback_applied:
         decision_mode = "manual_feedback_reuse"
+    elif canonical_feedback_applied:
+        decision_mode = "canonical_writeback_reuse"
     return {
         "source": "latest_offdesk_judge",
         "current_action": "replan",
@@ -351,6 +378,12 @@ def _replan_auto_decision_stub(
         "manual_feedback_summary": str(manual_step_feedback.get("summary", "")).strip() or "-",
         "manual_feedback_next_step": str(manual_step_feedback.get("next_step", "")).strip() or "-",
         "manual_feedback_applied": manual_feedback_applied,
+        "canonical_feedback_status": str(canonical_writeback_feedback.get("status", "")).strip() or "-",
+        "canonical_feedback_summary": str(canonical_writeback_feedback.get("summary", "")).strip() or "-",
+        "canonical_feedback_next_step": str(canonical_writeback_feedback.get("next_step", "")).strip() or "-",
+        "canonical_feedback_kind": str(canonical_writeback_feedback.get("kind", "")).strip() or "-",
+        "canonical_feedback_profile": str(canonical_writeback_feedback.get("profile", "")).strip() or "-",
+        "canonical_feedback_applied": canonical_feedback_applied,
     }
 
 
@@ -371,6 +404,11 @@ def _replan_auto_routing_policy(
     manual_feedback_state = str(decision.get("manual_feedback_state", "")).strip() or "-"
     manual_feedback_summary = str(decision.get("manual_feedback_summary", "")).strip() or "-"
     manual_feedback_applied = bool(decision.get("manual_feedback_applied", False))
+    canonical_feedback_status = str(decision.get("canonical_feedback_status", "")).strip() or "-"
+    canonical_feedback_summary = str(decision.get("canonical_feedback_summary", "")).strip() or "-"
+    canonical_feedback_kind = str(decision.get("canonical_feedback_kind", "")).strip() or "-"
+    canonical_feedback_profile = str(decision.get("canonical_feedback_profile", "")).strip() or "-"
+    canonical_feedback_applied = bool(decision.get("canonical_feedback_applied", False))
     manual_ready = (
         supports_auto_decision
         and not can_auto_apply
@@ -379,6 +417,9 @@ def _replan_auto_routing_policy(
     )
     if manual_feedback_applied and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}:
         status = "manual_progressed"
+        requires_operator_confirmation = False
+    elif canonical_feedback_applied and suggested_action in {"followup", "followup_execute"}:
+        status = "mutation_progressed"
         requires_operator_confirmation = False
     else:
         status = "ready" if can_auto_apply else ("manual_ready" if manual_ready else ("observe_only" if supports_auto_decision else "unavailable"))
@@ -399,6 +440,11 @@ def _replan_auto_routing_policy(
         "manual_feedback_state": manual_feedback_state,
         "manual_feedback_summary": manual_feedback_summary,
         "manual_feedback_applied": manual_feedback_applied,
+        "canonical_feedback_status": canonical_feedback_status,
+        "canonical_feedback_summary": canonical_feedback_summary,
+        "canonical_feedback_kind": canonical_feedback_kind,
+        "canonical_feedback_profile": canonical_feedback_profile,
+        "canonical_feedback_applied": canonical_feedback_applied,
     }
 
 
@@ -976,13 +1022,14 @@ def _execute_retry_run_transition(
             source_command=source_command,
             replan_auto_decision=replan_auto_decision,
         )
-        if str(replan_auto_routing_policy.get("status", "")).strip() == "manual_progressed":
+        if str(replan_auto_routing_policy.get("status", "")).strip() in {"manual_progressed", "mutation_progressed"}:
             progressed_next_step = str(replan_auto_routing_policy.get("suggested_next_step", "")).strip()
             if progressed_next_step.startswith("/"):
                 next_step = progressed_next_step
         remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge)
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
         remediation = _retry_blocked_remediation_with_manual_feedback(remediation, replan_auto_decision)
+        remediation = _retry_blocked_remediation_with_canonical_feedback(remediation, replan_auto_decision)
         _append_blocked_retry_replan_audit(
             team_dir=paths.team_dir,
             entry=entry,
@@ -1264,7 +1311,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             source_command=str(spec.get("command", "-")),
             replan_auto_decision=replan_auto_decision,
         )
-        if str(replan_auto_routing_policy.get("status", "")).strip() == "manual_progressed":
+        if str(replan_auto_routing_policy.get("status", "")).strip() in {"manual_progressed", "mutation_progressed"}:
             progressed_next_step = str(replan_auto_routing_policy.get("suggested_next_step", "")).strip()
             if progressed_next_step.startswith("/"):
                 next_step = progressed_next_step
@@ -1274,6 +1321,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         )
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
         remediation = _retry_blocked_remediation_with_manual_feedback(remediation, replan_auto_decision)
+        remediation = _retry_blocked_remediation_with_canonical_feedback(remediation, replan_auto_decision)
         if (
             is_replan
             and _payload_bool(payload, "auto_route_apply")
