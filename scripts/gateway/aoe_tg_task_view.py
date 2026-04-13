@@ -673,6 +673,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_canonical_writeback = str(task.get("background_run_canonical_writeback_summary", "")).strip()
     if background_canonical_writeback:
         lines.append("background_run_canonical_writeback: " + background_canonical_writeback[:240])
+    background_canonical_mutation = str(task.get("background_run_canonical_mutation_summary", "")).strip()
+    if background_canonical_mutation:
+        lines.append("background_run_canonical_mutation: " + background_canonical_mutation[:240])
     background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
     if background_judge_binding:
         lines.append("background_run_model_judge: " + background_judge_binding[:240])

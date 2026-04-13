@@ -49,6 +49,33 @@ def summarize_canonical_writeback(
     )
 
 
+def summarize_canonical_mutation(
+    *,
+    state: str,
+    at: str,
+    path: str,
+    line_count: int,
+    done_count: int,
+    reopen_count: int,
+    append_count: int,
+    blocked_count: int,
+) -> str:
+    path_token = Path(str(path or "").strip()).name if str(path or "").strip() else "-"
+    return (
+        "path={path} | lines={lines} | done={done} reopen={reopen} append={append} blocked={blocked} | "
+        "state={state} | at={at}"
+    ).format(
+        path=path_token,
+        lines=max(0, int(line_count or 0)),
+        done=max(0, int(done_count or 0)),
+        reopen=max(0, int(reopen_count or 0)),
+        append=max(0, int(append_count or 0)),
+        blocked=max(0, int(blocked_count or 0)),
+        state=str(state or "").strip() or "-",
+        at=str(at or "").strip() or "-",
+    )
+
+
 def persist_canonical_writeback_state(
     task: Dict[str, Any],
     *,
@@ -75,14 +102,30 @@ def persist_canonical_writeback_state(
         append_count=append_count,
         blocked_count=blocked_count,
     )
+    mutation_summary = summarize_canonical_mutation(
+        state=state,
+        at=at,
+        path=path,
+        line_count=line_count,
+        done_count=done_count,
+        reopen_count=reopen_count,
+        append_count=append_count,
+        blocked_count=blocked_count,
+    )
     task["background_run_canonical_writeback_status"] = str(state or "").strip() or "-"
     task["background_run_canonical_writeback_summary"] = summary
     task["background_run_canonical_writeback_at"] = str(at or "").strip() or "-"
+    task["background_run_canonical_mutation_status"] = str(state or "").strip() or "-"
+    task["background_run_canonical_mutation_summary"] = mutation_summary
+    task["background_run_canonical_mutation_at"] = str(at or "").strip() or "-"
     task.setdefault("result", {})
     if isinstance(task.get("result"), dict):
         task["result"]["background_run_canonical_writeback_status"] = str(state or "").strip() or "-"
         task["result"]["background_run_canonical_writeback_summary"] = summary
         task["result"]["background_run_canonical_writeback_at"] = str(at or "").strip() or "-"
+        task["result"]["background_run_canonical_mutation_status"] = str(state or "").strip() or "-"
+        task["result"]["background_run_canonical_mutation_summary"] = mutation_summary
+        task["result"]["background_run_canonical_mutation_at"] = str(at or "").strip() or "-"
     return summary
 
 

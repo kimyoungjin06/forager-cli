@@ -127,6 +127,7 @@ class RuntimeCardDTO:
     latest_replan_auto_operator_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
+    latest_canonical_mutation_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -239,6 +240,7 @@ class TaskDetailDTO:
     background_run_worker_syncback_summary: str = ""
     background_run_manual_step_execution_summary: str = ""
     background_run_canonical_writeback_summary: str = ""
+    background_run_canonical_mutation_summary: str = ""
     background_run_model_plan_summary: str = ""
     background_run_model_judge_binding_summary: str = ""
     background_run_model_judge_probe_summary: str = ""
@@ -356,6 +358,7 @@ class RuntimeDetailDTO:
     latest_replan_auto_operator_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
+    latest_canonical_mutation_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int
@@ -478,6 +481,7 @@ class RecoveryRuntimeDTO:
     latest_replan_auto_operator_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
+    latest_canonical_mutation_summary: str
     run_lock_mode: str
     run_lock_note: str
     background_slot_limit: int

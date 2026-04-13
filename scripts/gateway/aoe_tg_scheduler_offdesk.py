@@ -534,17 +534,18 @@ def _handle_offdesk_command(
             latest_replan_auto_route_status_summary = str(row.get("latest_replan_auto_route_status_summary", "")).strip() or "-"
             auto_route_operator_summary = str(row.get("replan_auto_route_operator_summary", "")).strip() or "-"
             manual_step_summary = str(row.get("latest_manual_step_summary", "")).strip() or "-"
+            canonical_mutation_summary = str(row.get("latest_canonical_mutation_summary", "")).strip() or "-"
             canonical_writeback_summary = str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"
             if auto_route_operator_summary not in {"", "-"}:
                 lines.append("  auto_route: " + auto_route_operator_summary)
                 if auto_route_operator_summary.startswith("manual_"):
                     ready_label = "manual_step_ready"
                     if auto_route_operator_summary.startswith("manual_review="):
-                        ready_label = "manual_review_ready"
+                        ready_label = "manual_review_progressed" if "| reused" in auto_route_operator_summary else "manual_review_ready"
                     elif auto_route_operator_summary.startswith("manual_execute="):
-                        ready_label = "manual_execute_ready"
+                        ready_label = "manual_execute_progressed" if "| reused" in auto_route_operator_summary else "manual_execute_ready"
                     elif auto_route_operator_summary.startswith("manual_followup="):
-                        ready_label = "manual_followup_ready"
+                        ready_label = "manual_followup_progressed" if "| reused" in auto_route_operator_summary else "manual_followup_ready"
                     lines.append(f"  {ready_label}: " + auto_route_operator_summary)
             if manual_step_summary not in {"", "-"}:
                 lines.append("  manual_step: " + manual_step_summary)
@@ -555,6 +556,8 @@ def _handle_offdesk_command(
                     lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
                 if latest_replan_auto_route_summary not in {"", "-"}:
                     lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+            if canonical_mutation_summary not in {"", "-"}:
+                lines.append("  canonical_mutation: " + canonical_mutation_summary[:240])
             if canonical_writeback_summary not in {"", "-"}:
                 lines.append("  canonical_writeback: " + canonical_writeback_summary[:240])
             auto_route_note = str(row.get("replan_auto_route_ready_note", "")).strip() or "-"

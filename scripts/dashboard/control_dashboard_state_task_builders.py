@@ -80,6 +80,10 @@ def _canonical_writeback_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_canonical_writeback_summary", "")).strip() or "-"
 
 
+def _canonical_mutation_summary(task: Dict[str, Any]) -> str:
+    return str(task.get("background_run_canonical_mutation_summary", "")).strip() or "-"
+
+
 def _worker_syncback_applied(task: Dict[str, Any]) -> bool:
     if str(task.get("background_run_worker_syncback_status", "")).strip() != "applied":
         return False
@@ -601,6 +605,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             background_run_worker_syncback_summary=_worker_syncback_summary(task),
             background_run_manual_step_execution_summary=_manual_step_execution_summary(task),
             background_run_canonical_writeback_summary=_canonical_writeback_summary(task),
+            background_run_canonical_mutation_summary=_canonical_mutation_summary(task),
             background_run_model_plan_summary=(
                 str(task.get("background_run_model_plan_summary", "")).strip() or "-"
             ),

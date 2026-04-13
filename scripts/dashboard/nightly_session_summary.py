@@ -286,6 +286,10 @@ def build_nightly_session_summary(
                     snapshot.team_dir,
                     project_alias=detail.project_alias,
                 ),
+                "latest_canonical_mutation_summary": action_audit.load_latest_canonical_mutation_summary_for_runtime(
+                    snapshot.team_dir,
+                    project_alias=detail.project_alias,
+                ),
                 "latest_canonical_writeback_summary": action_audit.load_latest_canonical_writeback_summary_for_runtime(
                     snapshot.team_dir,
                     project_alias=detail.project_alias,
@@ -420,6 +424,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
                 f"- manual_step: {runtime.get('latest_manual_step_summary', '-')}",
+                f"- canonical_mutation: {runtime.get('latest_canonical_mutation_summary', '-')}",
                 f"- canonical_writeback: {runtime.get('latest_canonical_writeback_summary', '-')}",
                 f"- worker_apply_accept: {runtime.get('active_task_background_run_worker_apply_accept_summary', '-')}",
                 f"- worker_syncback: {runtime.get('active_task_background_run_worker_syncback_summary', '-')}",

@@ -14,6 +14,7 @@ import aoe_tg_model_provider_adapter as model_provider_adapter
 import aoe_tg_worker_task_contract as worker_task_contract
 from aoe_tg_action_audit import (
     append_action_audit_row,
+    load_latest_canonical_mutation_summary_for_runtime,
     load_latest_canonical_writeback_summary_for_runtime,
     load_latest_judge_decision_bridge_summary_for_runtime,
     load_latest_manual_step_summary_for_runtime,
@@ -1162,6 +1163,7 @@ def handle_orch_task_command(
         replan_auto_route_status_line = ""
         manual_step_line = ""
         canonical_writeback_line = ""
+        canonical_mutation_line = ""
         worker_apply_accept_line = ""
         worker_syncback_line = ""
         escalation_binding_line = ""
@@ -1216,6 +1218,10 @@ def handle_orch_task_command(
                     team_dir,
                     project_alias=alias,
                 )
+                latest_canonical_mutation_summary = load_latest_canonical_mutation_summary_for_runtime(
+                    team_dir,
+                    project_alias=alias,
+                )
                 if latest_judge_decision_bridge_summary not in {"", "-"}:
                     judge_bridge_line = (
                         f"latest_judge_decision_bridge: {latest_judge_decision_bridge_summary}\n"
@@ -1234,11 +1240,15 @@ def handle_orch_task_command(
                     canonical_writeback_line = (
                         f"canonical_writeback: {latest_canonical_writeback_summary[:240]}\n"
                     )
+                if latest_canonical_mutation_summary not in {"", "-"}:
+                    canonical_mutation_line = (
+                        f"canonical_mutation: {latest_canonical_mutation_summary[:240]}\n"
+                    )
                 latest_task = _latest_task_for_model_status(entry)
                 latest_manual_step_execution_summary = str(
                     (latest_task or {}).get("background_run_manual_step_execution_summary", "")
                 ).strip()
-                if latest_manual_step_execution_summary not in {"", "-"}:
+                if latest_manual_step_execution_summary not in {"", "-"} and latest_manual_step_summary in {"", "-"}:
                     latest_manual_step_summary = latest_manual_step_execution_summary
                 latest_worker_apply_accept_summary = str(
                     (latest_task or {}).get("background_run_worker_apply_accept_summary", "")
@@ -1259,6 +1269,11 @@ def handle_orch_task_command(
                 ).strip()
                 if latest_canonical_writeback_task_summary not in {"", "-"}:
                     latest_canonical_writeback_summary = latest_canonical_writeback_task_summary
+                latest_canonical_mutation_task_summary = str(
+                    (latest_task or {}).get("background_run_canonical_mutation_summary", "")
+                ).strip()
+                if latest_canonical_mutation_task_summary not in {"", "-"}:
+                    latest_canonical_mutation_summary = latest_canonical_mutation_task_summary
                 manual_step_line = (
                     f"manual_step: {latest_manual_step_summary[:240]}\n"
                     if latest_manual_step_summary not in {"", "-"}
@@ -1267,6 +1282,11 @@ def handle_orch_task_command(
                 canonical_writeback_line = (
                     f"canonical_writeback: {latest_canonical_writeback_summary[:240]}\n"
                     if latest_canonical_writeback_summary not in {"", "-"}
+                    else ""
+                )
+                canonical_mutation_line = (
+                    f"canonical_mutation: {latest_canonical_mutation_summary[:240]}\n"
+                    if latest_canonical_mutation_summary not in {"", "-"}
                     else ""
                 )
                 escalation_binding_line, escalation_probe_line = _escalation_binding_lines(entry, team_dir)
@@ -1292,6 +1312,7 @@ def handle_orch_task_command(
             replan_auto_route_status_line = ""
             manual_step_line = ""
             canonical_writeback_line = ""
+            canonical_mutation_line = ""
             worker_apply_accept_line = ""
             worker_syncback_line = ""
             escalation_binding_line = ""
@@ -1356,7 +1377,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{replan_auto_route_status_line}{manual_step_line}{canonical_writeback_line}{worker_apply_accept_line}{worker_syncback_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{replan_auto_route_status_line}{manual_step_line}{canonical_writeback_line}{canonical_mutation_line}{worker_apply_accept_line}{worker_syncback_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

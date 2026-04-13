@@ -6,6 +6,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -647,6 +648,8 @@ def summarize_replan_auto_operator_summary(
         and str(normalized_policy.get("suggested_next_step", "")).strip().startswith("/")
     ):
         return f"{status_summary} | do={str(normalized_policy.get('suggested_next_step', '')).strip()}"
+    if str(normalized_policy.get("status", "")).strip() == "manual_progressed":
+        return f"{status_summary} | reuse=task_truth"
     return status_summary
 
 
@@ -716,6 +719,32 @@ def summarize_latest_canonical_writeback(row: Any) -> str:
     return f"{headline} | state={state} | next={next_step} | at={at} | {detail}"
 
 
+def summarize_latest_canonical_mutation(row: Any) -> str:
+    if not isinstance(row, dict) or not row:
+        return "-"
+    detail = str(row.get("outcome_detail", "")).strip()
+    state = str(row.get("status", "")).strip() or "-"
+    at = str(row.get("at", "")).strip() or "-"
+    match = re.search(
+        r"path=(?P<path>\S+)\s+lines=(?P<lines>\d+)\s+done=(?P<done>\d+)\s+reopen=(?P<reopen>\d+)\s+append=(?P<append>\d+)\s+blocked=(?P<blocked>\d+)",
+        detail,
+    )
+    if not match:
+        return "-"
+    return (
+        "path={path} | lines={lines} | done={done} reopen={reopen} append={append} blocked={blocked} | state={state} | at={at}"
+    ).format(
+        path=match.group("path"),
+        lines=match.group("lines"),
+        done=match.group("done"),
+        reopen=match.group("reopen"),
+        append=match.group("append"),
+        blocked=match.group("blocked"),
+        state=state,
+        at=at,
+    )
+
+
 def load_latest_canonical_writeback_summary_for_runtime(
     team_dir: Any,
     *,
@@ -731,6 +760,23 @@ def load_latest_canonical_writeback_summary_for_runtime(
     enriched = dict(row)
     enriched["at"] = str(row.get("at", "")).strip() or "-"
     return summarize_latest_canonical_writeback(enriched)
+
+
+def load_latest_canonical_mutation_summary_for_runtime(
+    team_dir: Any,
+    *,
+    project_alias: Any,
+) -> str:
+    row = load_latest_action_audit_for_runtime_kind(
+        team_dir,
+        project_alias=project_alias,
+        outcome_kind="runtime_syncback_apply",
+    )
+    if not row:
+        return "-"
+    enriched = dict(row)
+    enriched["at"] = str(row.get("at", "")).strip() or "-"
+    return summarize_latest_canonical_mutation(enriched)
 
 
 def load_latest_model_ping_audit_for_runtime(

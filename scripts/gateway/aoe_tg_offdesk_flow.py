@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
 from aoe_tg_action_audit import (
     load_latest_action_audit_for_runtime_kind,
+    load_latest_canonical_mutation_summary_for_runtime,
     load_latest_canonical_writeback_summary_for_runtime,
     load_latest_offdesk_judge_decision_summary_for_runtime,
     load_latest_judge_decision_bridge_summary_for_runtime,
@@ -109,6 +110,12 @@ def compact_reason(raw: Any, limit: int = 120) -> str:
 
 def _manual_step_ready_label(summary: str) -> str:
     token = str(summary or "").strip()
+    if token.startswith("manual_review=") and "| reused" in token:
+        return "manual_review_progressed"
+    if token.startswith("manual_execute=") and "| reused" in token:
+        return "manual_execute_progressed"
+    if token.startswith("manual_followup=") and "| reused" in token:
+        return "manual_followup_progressed"
     if token.startswith("manual_review="):
         return "manual_review_ready"
     if token.startswith("manual_execute="):
@@ -441,6 +448,7 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "background_run_worker_syncback_summary": str(best_task.get("background_run_worker_syncback_summary", "")).strip(),
         "background_run_manual_step_execution_summary": str(best_task.get("background_run_manual_step_execution_summary", "")).strip(),
         "background_run_canonical_writeback_summary": str(best_task.get("background_run_canonical_writeback_summary", "")).strip(),
+        "background_run_canonical_mutation_summary": str(best_task.get("background_run_canonical_mutation_summary", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -831,6 +839,11 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
     )
     latest_canonical_writeback_summary = (
         load_latest_canonical_writeback_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_canonical_mutation_summary = (
+        load_latest_canonical_mutation_summary_for_runtime(team_dir, project_alias=alias)
         if team_dir is not None
         else "-"
     )
@@ -1316,11 +1329,15 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             lines.append("  worker_syncback: " + worker_syncback_summary[:240])
         manual_step_execution_summary = str(latest_task.get("background_run_manual_step_execution_summary", "")).strip() or "-"
         if manual_step_execution_summary not in {"", "-"}:
-            latest_manual_step_summary = manual_step_execution_summary
             lines.append("  manual_step_result: " + manual_step_execution_summary[:240])
+            if latest_manual_step_summary in {"", "-"}:
+                latest_manual_step_summary = manual_step_execution_summary
         canonical_writeback_task_summary = str(latest_task.get("background_run_canonical_writeback_summary", "")).strip() or "-"
         if canonical_writeback_task_summary not in {"", "-"}:
             latest_canonical_writeback_summary = canonical_writeback_task_summary
+        canonical_mutation_task_summary = str(latest_task.get("background_run_canonical_mutation_summary", "")).strip() or "-"
+        if canonical_mutation_task_summary not in {"", "-"}:
+            latest_canonical_mutation_summary = canonical_mutation_task_summary
         if task_background_runner in {"github_runner", "remote_worker"} and (
             task_background_external_phase or task_background_external_note
         ):
@@ -1375,6 +1392,8 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
     if latest_canonical_writeback_summary not in {"", "-"}:
         lines.append("  canonical_writeback: " + latest_canonical_writeback_summary)
+    if latest_canonical_mutation_summary not in {"", "-"}:
+        lines.append("  canonical_mutation: " + latest_canonical_mutation_summary)
     if replan_auto_route_ready_action and replan_auto_route_operator_summary == "-":
         lines.append(
             "  replan_auto_route_ready: {action} | {note}".format(
@@ -1456,6 +1475,7 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "latest_replan_auto_route_status_summary": latest_replan_auto_route_status_summary,
         "latest_manual_step_summary": latest_manual_step_summary,
         "latest_canonical_writeback_summary": latest_canonical_writeback_summary,
+        "latest_canonical_mutation_summary": latest_canonical_mutation_summary,
         "manual_step_action": manual_step_action,
         "replan_auto_route_ready_action": replan_auto_route_ready_action,
         "replan_auto_route_ready_note": replan_auto_route_ready_note,
