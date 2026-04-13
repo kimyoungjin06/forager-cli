@@ -281,6 +281,8 @@ def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
         ("provider_task_contract_profile", 64),
         ("provider_task_contract_module", 48),
         ("provider_task_contract_module_summary", 240),
+        ("provider_task_contract_policy", 64),
+        ("provider_task_contract_policy_summary", 240),
         ("provider_timeout_sec", 16),
     ):
         token = _trim(raw.get(key, ""), limit)
@@ -720,6 +722,8 @@ def build_local_background_provider_task_launch_spec(
     task_contract_profile: str = "",
     task_contract_module: str = "",
     task_contract_module_summary: str = "",
+    task_contract_policy: str = "",
+    task_contract_policy_summary: str = "",
     timeout_sec: int | float | None = None,
 ) -> Dict[str, Any]:
     spec = build_background_launch_spec(
@@ -756,6 +760,12 @@ def build_local_background_provider_task_launch_spec(
     contract_module_summary = _trim(task_contract_module_summary, 240)
     if contract_module_summary:
         payload["provider_task_contract_module_summary"] = contract_module_summary
+    contract_policy = _trim(task_contract_policy, 64)
+    if contract_policy:
+        payload["provider_task_contract_policy"] = contract_policy
+    contract_policy_summary = _trim(task_contract_policy_summary, 240)
+    if contract_policy_summary:
+        payload["provider_task_contract_policy_summary"] = contract_policy_summary
     if timeout_sec is not None:
         payload["provider_timeout_sec"] = _trim(timeout_sec, 16)
     return normalize_background_launch_spec_snapshot(payload)
@@ -1368,6 +1378,8 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_task_contract_summary": launch_spec.get("provider_task_contract_summary", ""),
             "background_run_task_contract_module": launch_spec.get("provider_task_contract_module", ""),
             "background_run_task_contract_module_summary": launch_spec.get("provider_task_contract_module_summary", ""),
+            "background_run_task_contract_policy": launch_spec.get("provider_task_contract_policy", ""),
+            "background_run_task_contract_policy_summary": launch_spec.get("provider_task_contract_policy_summary", ""),
             "background_run_model_pack_profile": launch_spec.get("model_pack_profile", ""),
             "background_run_model_plan_summary": launch_spec.get("model_plan_summary", ""),
             "background_run_model_worker_route_id": launch_spec.get("model_worker_route_id", ""),

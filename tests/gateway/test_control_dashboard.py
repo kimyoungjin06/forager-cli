@@ -752,6 +752,12 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_task_contract_module"] = "analysis"
+    task["background_run_task_contract_module_summary"] = "analysis | analysis/review signals"
+    task["background_run_task_contract_policy_summary"] = (
+        "analysis | policy=findings_evidence_gate | result=findings+evidence | "
+        "apply=advisory_review | loop=evidence_review"
+    )
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -824,6 +830,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "gateway_dispatch | mode=in_process_callback" in text
     assert "background_task_contract" in text
     assert "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2" in text
+    assert "background_worker_module" in text
+    assert "analysis | analysis/review signals" in text
+    assert "background_worker_policy" in text
+    assert "policy=findings_evidence_gate | result=findings+evidence" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
@@ -915,6 +925,12 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_task_contract_module"] = "analysis"
+    task["background_run_task_contract_module_summary"] = "analysis | analysis/review signals"
+    task["background_run_task_contract_policy_summary"] = (
+        "analysis | policy=findings_evidence_gate | result=findings+evidence | "
+        "apply=advisory_review | loop=evidence_review"
+    )
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -984,6 +1000,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "gateway_dispatch | mode=in_process_callback" in text
     assert "background_task_contract" in text
     assert "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2" in text
+    assert "background_worker_module" in text
+    assert "analysis | analysis/review signals" in text
+    assert "background_worker_policy" in text
+    assert "policy=findings_evidence_gate | result=findings+evidence" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text

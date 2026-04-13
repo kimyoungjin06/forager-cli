@@ -1613,6 +1613,12 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                 "short_id": "T-001",
                 "status": "blocked",
                 "updated_at": "2026-04-10T09:10:00+09:00",
+                "background_run_task_contract_module": "package",
+                "background_run_task_contract_module_summary": "package | artifact/package signals",
+                "background_run_task_contract_policy_summary": (
+                    "package | policy=artifact_integrity_gate | result=artifact+verification | "
+                    "apply=strict_syncback | loop=build_verify"
+                ),
                 "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
             }
         },
@@ -1686,6 +1692,14 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "auto_route_status: ready+applied=/retry T-001 | at=2026-04-10T09:18:00+09:00"
+        in text
+    )
+    assert (
+        "worker_module: package | artifact/package signals"
+        in text
+    )
+    assert (
+        "worker_policy: package | policy=artifact_integrity_gate | result=artifact+verification"
         in text
     )
     assert (

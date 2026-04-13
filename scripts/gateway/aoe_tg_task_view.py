@@ -17,6 +17,7 @@ from aoe_tg_operator_summary import task_intent_summary
 from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
+from aoe_tg_worker_task_contract import resolve_worker_module_policy
 from aoe_tg_team_observatory import (
     observatory_lane_lines,
     observatory_task_line,
@@ -612,6 +613,19 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_task_contract = str(task.get("background_run_task_contract_summary", "")).strip()
     if background_task_contract:
         lines.append("background_run_task_contract: " + background_task_contract[:240])
+    background_task_contract_module_summary = str(task.get("background_run_task_contract_module_summary", "")).strip()
+    background_task_contract_module = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if not background_task_contract_module_summary and background_task_contract_module not in {"", "-", "general"}:
+        background_task_contract_module_summary = background_task_contract_module
+    if background_task_contract_module_summary:
+        lines.append("background_run_worker_module: " + background_task_contract_module_summary[:240])
+    background_task_contract_policy_summary = str(task.get("background_run_task_contract_policy_summary", "")).strip()
+    if not background_task_contract_policy_summary and background_task_contract_module not in {"", "-", "general"}:
+        background_task_contract_policy_summary = str(
+            resolve_worker_module_policy({"module_kind": background_task_contract_module}).get("summary", "")
+        ).strip()
+    if background_task_contract_policy_summary and background_task_contract_policy_summary != "-":
+        lines.append("background_run_worker_policy: " + background_task_contract_policy_summary[:240])
     background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
     if background_worker_result:
         lines.append("background_run_worker_result: " + background_worker_result[:240])

@@ -67,6 +67,29 @@ def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
     )
 
 
+def _worker_module_summary(task: Dict[str, Any]) -> str:
+    module_summary = str(task.get("background_run_task_contract_module_summary", "")).strip()
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_summary:
+        return module_summary
+    if module_kind in {"", "-", "general"}:
+        return "-"
+    return module_kind
+
+
+def _worker_policy_summary(task: Dict[str, Any]) -> str:
+    summary = str(task.get("background_run_task_contract_policy_summary", "")).strip()
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_kind in {"", "-", "general"}:
+        return "-"
+    if summary:
+        return summary
+    return (
+        str(worker_task_contract.resolve_worker_module_policy({"module_kind": module_kind}).get("summary", "")).strip()
+        or "-"
+    )
+
+
 def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
 
@@ -1205,6 +1228,8 @@ def _build_runtime_detail(
         active_task_background_run_task_contract_summary=(
             str((active_task or {}).get("background_run_task_contract_summary", "")).strip() or "-"
         ),
+        active_task_background_run_task_contract_module_summary=_worker_module_summary(active_task or {}),
+        active_task_background_run_task_contract_policy_summary=_worker_policy_summary(active_task or {}),
         active_task_background_run_worker_result_summary=(
             str((active_task or {}).get("background_run_worker_result_summary", "")).strip() or "-"
         ),

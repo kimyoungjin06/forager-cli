@@ -1473,6 +1473,12 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
             "background_run_worker_result_actions": ["update docs/RUNBOOK.md"],
             "background_run_worker_result_cautions": ["keep review lane open"],
             "background_run_worker_result_evidence_refs": ["docs/RUNBOOK.md"],
+            "background_run_task_contract_module": "writing",
+            "background_run_task_contract_module_summary": "writing | writer/doc signals",
+            "background_run_task_contract_policy_summary": (
+                "writing | policy=doc_quality_gate | result=draft+handoff | "
+                "apply=review_before_syncback | loop=draft_review"
+            ),
             "background_run_worker_update_stub_summary": "status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1",
             "background_run_worker_update_stub_targets": ["docs/RUNBOOK.md"],
             "background_run_worker_update_proposal_summary": "status=ready | proposals=1 | ids=PROP-001 | targets=docs/RUNBOOK.md",
@@ -1482,6 +1488,8 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
     assert "context_pack: profile=followup_preview" in summary
     assert "context_pack_docs: docs/RUNBOOK.md, docs/REQUEST_CONTRACT_SPEC.md" in summary
     assert "background_run_worker_result: status=ready | worker summary drafted | actions=1 | refs=1" in summary
+    assert "background_run_worker_module: writing | writer/doc signals" in summary
+    assert "background_run_worker_policy: writing | policy=doc_quality_gate" in summary
     assert "background_run_worker_actions: update docs/RUNBOOK.md" in summary
     assert "background_run_worker_update_stub: status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1" in summary
     assert "background_run_worker_targets: docs/RUNBOOK.md" in summary

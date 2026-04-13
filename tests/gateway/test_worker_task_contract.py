@@ -27,6 +27,10 @@ def test_sanitize_worker_task_contract_classifies_analysis_module() -> None:
 
     assert contract["module_kind"] == "analysis"
     assert contract["module_summary"] == "analysis | analysis/review signals"
+    assert contract["module_policy"] == "findings_evidence_gate"
+    assert contract["module_policy_summary"].startswith(
+        "analysis | policy=findings_evidence_gate | result=findings+evidence"
+    )
     assert contract["summary"].startswith("module=analysis | task=T-AN-1")
 
 
@@ -43,6 +47,10 @@ def test_sanitize_worker_task_contract_classifies_writing_module() -> None:
 
     assert contract["module_kind"] == "writing"
     assert contract["module_summary"] == "writing | writer/doc signals"
+    assert contract["module_policy"] == "doc_quality_gate"
+    assert contract["module_policy_summary"].startswith(
+        "writing | policy=doc_quality_gate | result=draft+handoff"
+    )
     assert contract["summary"].startswith("module=writing | task=T-WR-1")
 
 
@@ -69,8 +77,22 @@ def test_sanitize_worker_task_contract_classifies_package_module() -> None:
 
     assert contract["module_kind"] == "package"
     assert contract["module_summary"] == "package | artifact/package signals"
+    assert contract["module_policy"] == "artifact_integrity_gate"
+    assert contract["module_policy_summary"].startswith(
+        "package | policy=artifact_integrity_gate | result=artifact+verification"
+    )
     assert contract["summary"].startswith("module=package | task=T-PKG-1")
     assert update_stub["module_kind"] == "package"
     assert update_stub["summary_line"] == (
         "module=package | status=ready | targets=dist/release_bundle.zip | actions=1 | refs=1"
+    )
+
+
+def test_resolve_worker_module_policy_defaults_to_general() -> None:
+    policy = worker_task_contract.resolve_worker_module_policy({"module_kind": "unknown"})
+
+    assert policy["module_kind"] == "general"
+    assert policy["policy"] == "general_gate"
+    assert policy["summary"].startswith(
+        "general | policy=general_gate | result=summary+actions"
     )

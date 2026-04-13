@@ -1164,6 +1164,8 @@ def handle_orch_task_command(
         manual_step_line = ""
         canonical_writeback_line = ""
         canonical_mutation_line = ""
+        worker_module_line = ""
+        worker_policy_line = ""
         worker_apply_accept_line = ""
         worker_syncback_line = ""
         escalation_binding_line = ""
@@ -1253,6 +1255,27 @@ def handle_orch_task_command(
                 latest_worker_apply_accept_summary = str(
                     (latest_task or {}).get("background_run_worker_apply_accept_summary", "")
                 ).strip()
+                latest_worker_module_summary = str(
+                    (latest_task or {}).get("background_run_task_contract_module_summary", "")
+                ).strip()
+                latest_worker_module = str(
+                    (latest_task or {}).get("background_run_task_contract_module", "")
+                ).strip().lower()
+                if not latest_worker_module_summary and latest_worker_module not in {"", "-", "general"}:
+                    latest_worker_module_summary = latest_worker_module
+                latest_worker_policy_summary = str(
+                    (latest_task or {}).get("background_run_task_contract_policy_summary", "")
+                ).strip()
+                if not latest_worker_policy_summary and latest_worker_module not in {"", "-", "general"}:
+                    latest_worker_policy_summary = str(
+                        worker_task_contract.resolve_worker_module_policy(
+                            {"module_kind": latest_worker_module}
+                        ).get("summary", "")
+                    ).strip()
+                if latest_worker_module_summary not in {"", "-"}:
+                    worker_module_line = f"worker_module: {latest_worker_module_summary[:240]}\n"
+                if latest_worker_policy_summary not in {"", "-"}:
+                    worker_policy_line = f"worker_policy: {latest_worker_policy_summary[:240]}\n"
                 if latest_worker_apply_accept_summary not in {"", "-"}:
                     worker_apply_accept_line = (
                         f"worker_apply_accept: {latest_worker_apply_accept_summary[:240]}\n"
@@ -1313,6 +1336,8 @@ def handle_orch_task_command(
             manual_step_line = ""
             canonical_writeback_line = ""
             canonical_mutation_line = ""
+            worker_module_line = ""
+            worker_policy_line = ""
             worker_apply_accept_line = ""
             worker_syncback_line = ""
             escalation_binding_line = ""
@@ -1377,7 +1402,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{replan_auto_route_status_line}{manual_step_line}{canonical_writeback_line}{canonical_mutation_line}{worker_apply_accept_line}{worker_syncback_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{replan_auto_route_status_line}{manual_step_line}{canonical_writeback_line}{canonical_mutation_line}{worker_module_line}{worker_policy_line}{worker_apply_accept_line}{worker_syncback_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),
@@ -1839,6 +1864,8 @@ def handle_orch_task_command(
                 task_contract_profile=str(contract.get("pack_profile", "")).strip(),
                 task_contract_module=str(contract.get("module_kind", "")).strip(),
                 task_contract_module_summary=str(contract.get("module_summary", "")).strip(),
+                task_contract_policy=str(contract.get("module_policy", "")).strip(),
+                task_contract_policy_summary=str(contract.get("module_policy_summary", "")).strip(),
                 timeout_sec=45,
             )
             ticket = build_background_run_ticket(

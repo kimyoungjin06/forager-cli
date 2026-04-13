@@ -17,6 +17,32 @@ WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_MODULE_KINDS = ("analysis", "writing", "package", "general")
+WORKER_MODULE_POLICY_DEFAULTS = {
+    "analysis": {
+        "policy": "findings_evidence_gate",
+        "result_focus": "findings+evidence",
+        "apply_gate": "advisory_review",
+        "loop_mode": "evidence_review",
+    },
+    "writing": {
+        "policy": "doc_quality_gate",
+        "result_focus": "draft+handoff",
+        "apply_gate": "review_before_syncback",
+        "loop_mode": "draft_review",
+    },
+    "package": {
+        "policy": "artifact_integrity_gate",
+        "result_focus": "artifact+verification",
+        "apply_gate": "strict_syncback",
+        "loop_mode": "build_verify",
+    },
+    "general": {
+        "policy": "general_gate",
+        "result_focus": "summary+actions",
+        "apply_gate": "standard_review",
+        "loop_mode": "single_pass",
+    },
+}
 WORKER_TASK_SYSTEM = (
     "You are the bounded background worker. Return strict JSON with keys: "
     "status, summary, actions, cautions, evidence_refs. Keep every field concise."
@@ -57,6 +83,32 @@ def _summary(contract: Dict[str, Any]) -> str:
         f"docs={len(contract.get('doc_paths') or [])}",
     ]
     return " | ".join(parts)[:320]
+
+
+def resolve_worker_module_policy(raw: Any) -> Dict[str, str]:
+    source = raw if isinstance(raw, dict) else {}
+    module_kind = _trim(source.get("module_kind"), 48).lower()
+    if module_kind not in WORKER_MODULE_KINDS:
+        module_kind = "general"
+    defaults = dict(WORKER_MODULE_POLICY_DEFAULTS.get(module_kind) or WORKER_MODULE_POLICY_DEFAULTS["general"])
+    policy = _trim(source.get("module_policy"), 64) or str(defaults.get("policy", "")).strip() or "general_gate"
+    result_focus = _trim(source.get("module_result_focus"), 96) or str(defaults.get("result_focus", "")).strip() or "-"
+    apply_gate = _trim(source.get("module_apply_gate"), 96) or str(defaults.get("apply_gate", "")).strip() or "-"
+    loop_mode = _trim(source.get("module_loop_mode"), 64) or str(defaults.get("loop_mode", "")).strip() or "-"
+    summary = _trim(source.get("module_policy_summary"), 240)
+    if not summary:
+        summary = (
+            f"{module_kind} | policy={policy} | result={result_focus} | "
+            f"apply={apply_gate} | loop={loop_mode}"
+        )[:240]
+    return {
+        "module_kind": module_kind,
+        "policy": policy,
+        "result_focus": result_focus,
+        "apply_gate": apply_gate,
+        "loop_mode": loop_mode,
+        "summary": summary,
+    }
 
 
 def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
@@ -157,6 +209,12 @@ def _module_from_source(source: Dict[str, Any]) -> Dict[str, str]:
 def sanitize_worker_task_contract(raw: Any) -> Dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
     module = _module_from_source(source)
+    module_policy = resolve_worker_module_policy(
+        {
+            **source,
+            "module_kind": module.get("kind"),
+        }
+    )
     contract = {
         "version": _trim(source.get("version"), 48) or WORKER_TASK_CONTRACT_VERSION,
         "request_id": _trim(source.get("request_id"), 96),
@@ -170,6 +228,11 @@ def sanitize_worker_task_contract(raw: Any) -> Dict[str, Any]:
         "module_kind": str(module.get("kind", "")).strip() or "general",
         "module_reason": str(module.get("reason", "")).strip() or "-",
         "module_summary": str(module.get("summary", "")).strip() or "-",
+        "module_policy": str(module_policy.get("policy", "")).strip() or "general_gate",
+        "module_result_focus": str(module_policy.get("result_focus", "")).strip() or "-",
+        "module_apply_gate": str(module_policy.get("apply_gate", "")).strip() or "-",
+        "module_loop_mode": str(module_policy.get("loop_mode", "")).strip() or "-",
+        "module_policy_summary": str(module_policy.get("summary", "")).strip() or "-",
         "pack_profile": _trim(source.get("pack_profile"), 64) or "offdesk_execute",
         "objective": _trim(source.get("objective"), 320) or "-",
         "execution_brief_status": _trim(source.get("execution_brief_status"), 48) or "-",
@@ -327,6 +390,11 @@ def render_worker_task_prompt(contract: Any) -> Dict[str, str]:
         "module_kind": _trim(row.get("module_kind"), 48) or "-",
         "module_reason": _trim(row.get("module_reason"), 240) or "-",
         "module_summary": _trim(row.get("module_summary"), 240) or "-",
+        "module_policy": _trim(row.get("module_policy"), 64) or "-",
+        "module_result_focus": _trim(row.get("module_result_focus"), 96) or "-",
+        "module_apply_gate": _trim(row.get("module_apply_gate"), 96) or "-",
+        "module_loop_mode": _trim(row.get("module_loop_mode"), 64) or "-",
+        "module_policy_summary": _trim(row.get("module_policy_summary"), 240) or "-",
         "pack_profile": _trim(row.get("pack_profile"), 64) or "-",
         "objective": _trim(row.get("objective"), 320) or "-",
         "execution_brief_status": _trim(row.get("execution_brief_status"), 48) or "-",
@@ -395,6 +463,8 @@ def sanitize_worker_task_update_stub(raw: Any) -> Dict[str, Any]:
         "version": _trim(source.get("version"), 48) or WORKER_TASK_UPDATE_STUB_VERSION,
         "module_kind": _trim(source.get("module_kind"), 48) or "-",
         "module_summary": _trim(source.get("module_summary"), 240) or "-",
+        "module_policy": _trim(source.get("module_policy"), 64) or "-",
+        "module_policy_summary": _trim(source.get("module_policy_summary"), 240) or "-",
         "status": _trim(source.get("status"), 48) or "-",
         "target_artifacts": _uniq(source.get("target_artifacts"), limit=8, text_limit=160),
         "actions": _uniq(source.get("actions"), limit=4, text_limit=160),
@@ -423,6 +493,8 @@ def derive_worker_task_update_stub(contract: Any, result: Any) -> Dict[str, Any]
         {
             "module_kind": contract_row.get("module_kind"),
             "module_summary": contract_row.get("module_summary"),
+            "module_policy": contract_row.get("module_policy"),
+            "module_policy_summary": contract_row.get("module_policy_summary"),
             "status": status,
             "target_artifacts": targets,
             "actions": actions,
@@ -622,6 +694,27 @@ def summarize_worker_update_operator_summary(update_stub: Any, proposal_ids: Any
     if not stub:
         return "-"
     return _trim(stub.get("summary_line"), 320) or _update_stub_summary(stub)
+
+
+def summarize_worker_module_line(raw: Any) -> str:
+    source = raw if isinstance(raw, dict) else {}
+    module_kind = _trim(source.get("module_kind"), 48) or "-"
+    module_summary = _trim(source.get("module_summary"), 240) or "-"
+    module_policy_summary = _trim(source.get("module_policy_summary"), 240) or "-"
+    if module_kind in {"", "-", "general"} and module_policy_summary in {
+        "",
+        "-",
+        "general | policy=general_gate | result=summary+actions | apply=standard_review | loop=single_pass",
+    }:
+        return "-"
+    parts: List[str] = []
+    if module_kind not in {"", "-"}:
+        parts.append(module_kind)
+    if module_summary not in {"", "-"}:
+        parts.append(module_summary)
+    if module_policy_summary not in {"", "-"}:
+        parts.append(module_policy_summary)
+    return " | ".join(parts)[:320] or "-"
 
 
 def summarize_worker_artifact_apply_proposal_summary(update_stub: Any, proposal_ids: Any) -> str:
