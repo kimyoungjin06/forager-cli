@@ -673,6 +673,7 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
         assert "Ship a bounded worker summary." in payload["prompt"]
         assert "\"module_kind\": \"writing\"" in payload["prompt"]
         assert "\"module_policy\": \"doc_quality_gate\"" in payload["prompt"]
+        assert "\"module_repeat_when\": \"quality_gate_open\"" in payload["prompt"]
         assert "\"doc_paths\": [" in payload["prompt"]
         assert payload["system"] == worker_task_contract.WORKER_TASK_SYSTEM
         assert timeout_sec == 19.0

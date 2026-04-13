@@ -96,3 +96,92 @@ def test_resolve_worker_module_policy_defaults_to_general() -> None:
     assert policy["summary"].startswith(
         "general | policy=general_gate | result=summary+actions"
     )
+
+
+def test_analysis_module_review_proposals_preserve_generic_handoff_shape() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-AN-2",
+            "contract_preset": "analysis",
+            "objective": "Investigate performance drift and collect evidence.",
+            "artifact_targets": ["docs/analysis/perf_drift.md"],
+        }
+    )
+    update_stub = worker_task_contract.derive_worker_task_update_stub(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/perf_drift.md"],
+            "cautions": [],
+            "evidence_refs": ["logs/perf.csv"],
+        },
+    )
+
+    proposals = worker_task_contract.derive_worker_update_todo_proposals(contract, update_stub)
+
+    assert proposals
+    assert proposals[0]["kind"] == "handoff"
+    assert proposals[0]["priority"] == "P2"
+    assert str(proposals[0]["summary"]).startswith("review worker artifact update for T-AN-2")
+
+
+def test_writing_module_review_and_apply_proposals_split_followup_and_handoff() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-WR-2",
+            "contract_preset": "writer",
+            "objective": "Draft the operator handoff memo.",
+            "artifact_targets": ["docs/handoff/operator_handoff.md"],
+        }
+    )
+    update_stub = worker_task_contract.derive_worker_task_update_stub(
+        contract,
+        {
+            "status": "ready",
+            "summary": "draft prepared",
+            "actions": ["update docs/handoff/operator_handoff.md"],
+            "cautions": [],
+            "evidence_refs": ["docs/handoff/operator_handoff.md"],
+        },
+    )
+
+    review_proposals = worker_task_contract.derive_worker_update_todo_proposals(contract, update_stub)
+    apply_proposals = worker_task_contract.derive_worker_artifact_apply_todo_proposals(contract, update_stub)
+
+    assert review_proposals
+    assert review_proposals[0]["kind"] == "followup"
+    assert review_proposals[0]["priority"] == "P2"
+    assert str(review_proposals[0]["summary"]).startswith("review writing draft for T-WR-2")
+    assert apply_proposals
+    assert apply_proposals[0]["kind"] == "handoff"
+    assert apply_proposals[0]["priority"] == "P2"
+    assert str(apply_proposals[0]["summary"]).startswith("apply writing artifact update for T-WR-2")
+
+
+def test_package_module_apply_proposals_escalate_to_p1_handoff() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-PKG-2",
+            "contract_preset": "build",
+            "objective": "Build the release package.",
+            "artifact_targets": ["dist/release_bundle.zip"],
+        }
+    )
+    update_stub = worker_task_contract.derive_worker_task_update_stub(
+        contract,
+        {
+            "status": "ready",
+            "summary": "release package built",
+            "actions": ["update dist/release_bundle.zip"],
+            "cautions": [],
+            "evidence_refs": ["dist/release_bundle.zip"],
+        },
+    )
+
+    proposals = worker_task_contract.derive_worker_artifact_apply_todo_proposals(contract, update_stub)
+
+    assert proposals
+    assert proposals[0]["kind"] == "handoff"
+    assert proposals[0]["priority"] == "P1"
+    assert str(proposals[0]["summary"]).startswith("apply package artifact for T-PKG-2")

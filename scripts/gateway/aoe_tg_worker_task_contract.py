@@ -23,24 +23,48 @@ WORKER_MODULE_POLICY_DEFAULTS = {
         "result_focus": "findings+evidence",
         "apply_gate": "advisory_review",
         "loop_mode": "evidence_review",
+        "proposal_kind": "handoff",
+        "apply_kind": "handoff",
+        "proposal_priority": "P2",
+        "apply_priority": "P2",
+        "repeat_when": "evidence_missing",
+        "stop_when": "findings_stable",
     },
     "writing": {
         "policy": "doc_quality_gate",
         "result_focus": "draft+handoff",
         "apply_gate": "review_before_syncback",
         "loop_mode": "draft_review",
+        "proposal_kind": "followup",
+        "apply_kind": "handoff",
+        "proposal_priority": "P2",
+        "apply_priority": "P2",
+        "repeat_when": "quality_gate_open",
+        "stop_when": "handoff_ready",
     },
     "package": {
         "policy": "artifact_integrity_gate",
         "result_focus": "artifact+verification",
         "apply_gate": "strict_syncback",
         "loop_mode": "build_verify",
+        "proposal_kind": "handoff",
+        "apply_kind": "handoff",
+        "proposal_priority": "P1",
+        "apply_priority": "P1",
+        "repeat_when": "artifact_check_open",
+        "stop_when": "syncback_clean",
     },
     "general": {
         "policy": "general_gate",
         "result_focus": "summary+actions",
         "apply_gate": "standard_review",
         "loop_mode": "single_pass",
+        "proposal_kind": "followup",
+        "apply_kind": "followup",
+        "proposal_priority": "P2",
+        "apply_priority": "P2",
+        "repeat_when": "operator_requests_retry",
+        "stop_when": "summary_ready",
     },
 }
 WORKER_TASK_SYSTEM = (
@@ -95,6 +119,20 @@ def resolve_worker_module_policy(raw: Any) -> Dict[str, str]:
     result_focus = _trim(source.get("module_result_focus"), 96) or str(defaults.get("result_focus", "")).strip() or "-"
     apply_gate = _trim(source.get("module_apply_gate"), 96) or str(defaults.get("apply_gate", "")).strip() or "-"
     loop_mode = _trim(source.get("module_loop_mode"), 64) or str(defaults.get("loop_mode", "")).strip() or "-"
+    proposal_kind = _trim(source.get("module_proposal_kind"), 32).lower() or str(defaults.get("proposal_kind", "")).strip() or "followup"
+    if proposal_kind not in {"followup", "handoff", "risk", "debt"}:
+        proposal_kind = "followup"
+    apply_kind = _trim(source.get("module_apply_kind"), 32).lower() or str(defaults.get("apply_kind", "")).strip() or "followup"
+    if apply_kind not in {"followup", "handoff", "risk", "debt"}:
+        apply_kind = "followup"
+    proposal_priority = _trim(source.get("module_proposal_priority"), 8).upper() or str(defaults.get("proposal_priority", "")).strip() or "P2"
+    apply_priority = _trim(source.get("module_apply_priority"), 8).upper() or str(defaults.get("apply_priority", "")).strip() or "P2"
+    if proposal_priority not in {"P1", "P2", "P3"}:
+        proposal_priority = "P2"
+    if apply_priority not in {"P1", "P2", "P3"}:
+        apply_priority = "P2"
+    repeat_when = _trim(source.get("module_repeat_when"), 96) or str(defaults.get("repeat_when", "")).strip() or "-"
+    stop_when = _trim(source.get("module_stop_when"), 96) or str(defaults.get("stop_when", "")).strip() or "-"
     summary = _trim(source.get("module_policy_summary"), 240)
     if not summary:
         summary = (
@@ -107,6 +145,12 @@ def resolve_worker_module_policy(raw: Any) -> Dict[str, str]:
         "result_focus": result_focus,
         "apply_gate": apply_gate,
         "loop_mode": loop_mode,
+        "proposal_kind": proposal_kind,
+        "apply_kind": apply_kind,
+        "proposal_priority": proposal_priority,
+        "apply_priority": apply_priority,
+        "repeat_when": repeat_when,
+        "stop_when": stop_when,
         "summary": summary,
     }
 
@@ -232,6 +276,12 @@ def sanitize_worker_task_contract(raw: Any) -> Dict[str, Any]:
         "module_result_focus": str(module_policy.get("result_focus", "")).strip() or "-",
         "module_apply_gate": str(module_policy.get("apply_gate", "")).strip() or "-",
         "module_loop_mode": str(module_policy.get("loop_mode", "")).strip() or "-",
+        "module_proposal_kind": str(module_policy.get("proposal_kind", "")).strip() or "followup",
+        "module_apply_kind": str(module_policy.get("apply_kind", "")).strip() or "followup",
+        "module_proposal_priority": str(module_policy.get("proposal_priority", "")).strip() or "P2",
+        "module_apply_priority": str(module_policy.get("apply_priority", "")).strip() or "P2",
+        "module_repeat_when": str(module_policy.get("repeat_when", "")).strip() or "-",
+        "module_stop_when": str(module_policy.get("stop_when", "")).strip() or "-",
         "module_policy_summary": str(module_policy.get("summary", "")).strip() or "-",
         "pack_profile": _trim(source.get("pack_profile"), 64) or "offdesk_execute",
         "objective": _trim(source.get("objective"), 320) or "-",
@@ -394,6 +444,12 @@ def render_worker_task_prompt(contract: Any) -> Dict[str, str]:
         "module_result_focus": _trim(row.get("module_result_focus"), 96) or "-",
         "module_apply_gate": _trim(row.get("module_apply_gate"), 96) or "-",
         "module_loop_mode": _trim(row.get("module_loop_mode"), 64) or "-",
+        "module_proposal_kind": _trim(row.get("module_proposal_kind"), 32) or "-",
+        "module_apply_kind": _trim(row.get("module_apply_kind"), 32) or "-",
+        "module_proposal_priority": _trim(row.get("module_proposal_priority"), 8) or "-",
+        "module_apply_priority": _trim(row.get("module_apply_priority"), 8) or "-",
+        "module_repeat_when": _trim(row.get("module_repeat_when"), 96) or "-",
+        "module_stop_when": _trim(row.get("module_stop_when"), 96) or "-",
         "module_policy_summary": _trim(row.get("module_policy_summary"), 240) or "-",
         "pack_profile": _trim(row.get("pack_profile"), 64) or "-",
         "objective": _trim(row.get("objective"), 320) or "-",
@@ -508,13 +564,82 @@ def _proposal_key(text: Any) -> str:
     return " ".join(str(text or "").strip().split()).lower()[:240]
 
 
-def _proposal_priority(update_stub: Dict[str, Any]) -> str:
+def _priority_rank(token: Any) -> int:
+    raw = _trim(token, 8).upper()
+    return {"P1": 1, "P2": 2, "P3": 3}.get(raw, 9)
+
+
+def _priority_from_rank(rank: int) -> str:
+    return {1: "P1", 2: "P2", 3: "P3"}.get(int(rank or 0), "P2")
+
+
+def _module_priority_floor(module_kind: str, *, apply: bool = False) -> str:
+    defaults = dict(WORKER_MODULE_POLICY_DEFAULTS.get(module_kind) or WORKER_MODULE_POLICY_DEFAULTS["general"])
+    key = "apply_priority" if apply else "proposal_priority"
+    token = _trim(defaults.get(key), 8).upper()
+    return token if token in {"P1", "P2", "P3"} else "P2"
+
+
+def _module_proposal_kind(module_kind: str, *, apply: bool = False) -> str:
+    defaults = dict(WORKER_MODULE_POLICY_DEFAULTS.get(module_kind) or WORKER_MODULE_POLICY_DEFAULTS["general"])
+    key = "apply_kind" if apply else "proposal_kind"
+    token = _trim(defaults.get(key), 32).lower()
+    return token if token in {"followup", "handoff", "risk", "debt"} else "followup"
+
+
+def _module_proposal_confidence(module_kind: str, *, apply: bool = False) -> float:
+    table = {
+        ("analysis", False): 0.68,
+        ("analysis", True): 0.58,
+        ("writing", False): 0.74,
+        ("writing", True): 0.78,
+        ("package", False): 0.82,
+        ("package", True): 0.88,
+        ("general", False): 0.64,
+        ("general", True): 0.72,
+    }
+    return float(table.get((module_kind, bool(apply)), table[("general", bool(apply))]))
+
+
+def _proposal_priority(update_stub: Dict[str, Any], *, apply: bool = False) -> str:
+    module_kind = _trim(update_stub.get("module_kind"), 48).lower() or "general"
+    floor = _module_priority_floor(module_kind, apply=apply)
     caution_text = " ".join(str(item).strip().lower() for item in (update_stub.get("cautions") or []) if str(item).strip())
     if any(token in caution_text for token in ("risk", "blocked", "error", "fail", "manual")):
         return "P1"
-    if list(update_stub.get("target_artifacts") or []):
-        return "P2"
-    return "P3"
+    base = "P2" if list(update_stub.get("target_artifacts") or []) else "P3"
+    return _priority_from_rank(min(_priority_rank(base), _priority_rank(floor)))
+
+
+def _proposal_summary_for_module(
+    module_kind: str,
+    *,
+    task_label: str,
+    target: str = "",
+    action_head: str = "",
+    apply: bool = False,
+) -> str:
+    target_token = _trim(target, 160)
+    action_token = _trim(action_head, 160)
+    if apply:
+        if module_kind == "package":
+            return (f"apply package artifact for {task_label}: {target_token or action_token or 'artifact update'}")[:600]
+        if module_kind == "writing":
+            return (f"apply writing artifact update for {task_label}: {target_token or action_token or 'doc update'}")[:600]
+        if target_token:
+            return (f"apply worker artifact update for {task_label}: {target_token}")[:600]
+        if action_token:
+            return (f"apply worker follow-up update for {task_label}: {action_token}")[:600]
+        return (f"apply worker update for {task_label}")[:600]
+    if module_kind == "package":
+        return (f"review package output for {task_label}: {target_token or action_token or 'artifact verification'}")[:600]
+    if module_kind == "writing":
+        return (f"review writing draft for {task_label}: {target_token or action_token or 'draft update'}")[:600]
+    if target_token:
+        return (f"review worker artifact update for {task_label}: {target_token}")[:600]
+    if action_token:
+        return (f"review worker follow-up for {task_label}: {action_token}")[:600]
+    return (f"review worker update stub for {task_label}")[:600]
 
 
 def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List[Dict[str, Any]]:
@@ -526,8 +651,11 @@ def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List
     if status in {"", "-", "none"}:
         return []
     task_label = _trim(contract_row.get("task_label"), 96) or "task"
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
     reason = _trim(stub.get("summary_line"), 240) or _update_stub_summary(stub)
-    priority = _proposal_priority(stub)
+    priority = _proposal_priority({**stub, "module_kind": module_kind}, apply=False)
+    proposal_kind = _module_proposal_kind(module_kind, apply=False)
+    confidence = _module_proposal_confidence(module_kind, apply=False)
     targets = list(stub.get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
     actions = list(stub.get("actions") or [])
     proposals: List[Dict[str, Any]] = []
@@ -536,7 +664,7 @@ def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List
         clean = _trim(target, 160)
         if not clean:
             continue
-        summary = f"review worker artifact update for {task_label}: {clean}"[:600]
+        summary = _proposal_summary_for_module(module_kind, task_label=task_label, target=clean, apply=False)
         key = _proposal_key(summary)
         if key in seen:
             continue
@@ -546,9 +674,9 @@ def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List
                 "version": WORKER_TASK_PROPOSAL_STUB_VERSION,
                 "summary": summary,
                 "priority": priority,
-                "kind": "handoff",
+                "kind": proposal_kind,
                 "reason": reason,
-                "confidence": 0.72,
+                "confidence": confidence,
                 "created_by": "worker",
                 "source_file": clean,
                 "source_reason": "worker_update_stub",
@@ -556,19 +684,15 @@ def derive_worker_update_todo_proposals(contract: Any, update_stub: Any) -> List
         )
     if not proposals:
         action_head = _trim(actions[0] if actions else "", 160)
-        summary = (
-            f"review worker follow-up for {task_label}: {action_head}"[:600]
-            if action_head
-            else f"review worker update stub for {task_label}"[:600]
-        )
+        summary = _proposal_summary_for_module(module_kind, task_label=task_label, action_head=action_head, apply=False)
         proposals.append(
             {
                 "version": WORKER_TASK_PROPOSAL_STUB_VERSION,
                 "summary": summary,
                 "priority": priority,
-                "kind": "followup",
+                "kind": proposal_kind,
                 "reason": reason,
-                "confidence": 0.64,
+                "confidence": confidence,
                 "created_by": "worker",
                 "source_reason": "worker_update_stub",
             }
@@ -585,8 +709,11 @@ def derive_worker_artifact_apply_todo_proposals(contract: Any, update_stub: Any)
     if status in {"", "-", "none"}:
         return []
     task_label = _trim(contract_row.get("task_label"), 96) or "task"
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
     reason = _trim(stub.get("summary_line"), 240) or _update_stub_summary(stub)
-    priority = _proposal_priority(stub)
+    priority = _proposal_priority({**stub, "module_kind": module_kind}, apply=True)
+    proposal_kind = _module_proposal_kind(module_kind, apply=True)
+    confidence = _module_proposal_confidence(module_kind, apply=True)
     targets = list(stub.get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
     actions = list(stub.get("actions") or [])
     proposals: List[Dict[str, Any]] = []
@@ -595,7 +722,7 @@ def derive_worker_artifact_apply_todo_proposals(contract: Any, update_stub: Any)
         clean = _trim(target, 160)
         if not clean:
             continue
-        summary = f"apply worker artifact update for {task_label}: {clean}"[:600]
+        summary = _proposal_summary_for_module(module_kind, task_label=task_label, target=clean, apply=True)
         key = _proposal_key(summary)
         if key in seen:
             continue
@@ -605,9 +732,9 @@ def derive_worker_artifact_apply_todo_proposals(contract: Any, update_stub: Any)
                 "version": WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION,
                 "summary": summary,
                 "priority": priority,
-                "kind": "handoff",
+                "kind": proposal_kind,
                 "reason": reason,
-                "confidence": 0.8,
+                "confidence": confidence,
                 "created_by": "worker",
                 "source_file": clean,
                 "source_reason": "worker_artifact_apply",
@@ -615,19 +742,15 @@ def derive_worker_artifact_apply_todo_proposals(contract: Any, update_stub: Any)
         )
     if not proposals:
         action_head = _trim(actions[0] if actions else "", 160)
-        summary = (
-            f"apply worker follow-up update for {task_label}: {action_head}"[:600]
-            if action_head
-            else f"apply worker update for {task_label}"[:600]
-        )
+        summary = _proposal_summary_for_module(module_kind, task_label=task_label, action_head=action_head, apply=True)
         proposals.append(
             {
                 "version": WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION,
                 "summary": summary,
                 "priority": priority,
-                "kind": "followup",
+                "kind": proposal_kind,
                 "reason": reason,
-                "confidence": 0.72,
+                "confidence": confidence,
                 "created_by": "worker",
                 "source_reason": "worker_artifact_apply",
             }
