@@ -233,6 +233,9 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
         "reasoning": str(row.get("reasoning", "")).strip() or "-",
         "caution": str(row.get("caution", "")).strip() or "-",
         "confidence": str(row.get("confidence", "")).strip() or "-",
+        "manual_feedback_state": str(row.get("manual_feedback_state", "")).strip() or "-",
+        "manual_feedback_summary": str(row.get("manual_feedback_summary", "")).strip() or "-",
+        "manual_feedback_applied": bool(row.get("manual_feedback_applied", False)),
     }
 
 
@@ -599,6 +602,16 @@ def summarize_replan_auto_operator_status(
         return f"ready={ready_next} | applied={applied_next} | at={applied_at}"
     if ready_status == "ready" and ready_next not in {"", "-"}:
         return f"ready={ready_next} | waiting_for_apply"
+    if ready_status == "manual_progressed" and ready_next not in {"", "-"}:
+        feedback_state = str(normalized_policy.get("manual_feedback_state", "")).strip() or "-"
+        suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
+        if suggested_action in {"manual_review", "review", "judge"}:
+            return f"manual_review={ready_next} | state={feedback_state} | reused"
+        if suggested_action == "followup_execute":
+            return f"manual_execute={ready_next} | state={feedback_state} | reused"
+        if suggested_action == "followup":
+            return f"manual_followup={ready_next} | state={feedback_state} | reused"
+        return f"manual={ready_next} | state={feedback_state} | reused"
     if ready_status == "manual_ready" and ready_next not in {"", "-"}:
         suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
         if suggested_action in {"manual_review", "review", "judge"}:
@@ -659,11 +672,21 @@ def load_latest_replan_auto_operator_summary_for_runtime(
 
 def summarize_latest_manual_step(policy: Any) -> str:
     normalized_policy = normalize_replan_auto_routing_policy(policy)
-    if str(normalized_policy.get("status", "")).strip().lower() != "manual_ready":
+    policy_status = str(normalized_policy.get("status", "")).strip().lower()
+    if policy_status not in {"manual_ready", "manual_progressed"}:
         return "-"
     next_step = str(normalized_policy.get("suggested_next_step", "")).strip() or "-"
     suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
     confidence = str(normalized_policy.get("confidence", "")).strip() or "-"
+    if policy_status == "manual_progressed":
+        feedback_state = str(normalized_policy.get("manual_feedback_state", "")).strip() or "-"
+        if suggested_action in {"manual_review", "review", "judge"}:
+            return f"manual_review={next_step} | state={feedback_state} | reused"
+        if suggested_action == "followup_execute":
+            return f"manual_execute={next_step} | state={feedback_state} | reused"
+        if suggested_action == "followup":
+            return f"manual_followup={next_step} | state={feedback_state} | reused"
+        return f"manual={next_step} | state={feedback_state} | reused"
     if suggested_action in {"manual_review", "review", "judge"}:
         return f"manual_review={next_step} | confidence={confidence} | waiting_for_operator"
     if suggested_action == "followup_execute":

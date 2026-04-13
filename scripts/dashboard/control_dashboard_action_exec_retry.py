@@ -44,7 +44,10 @@ from control_dashboard_action_exec_shared import (
     _make_send_collector,
     _missing_outcome_response,
 )
-from control_dashboard_action_exec_feedback import persist_manual_step_execution_state
+from control_dashboard_action_exec_feedback import (
+    derive_manual_step_feedback,
+    persist_manual_step_execution_state,
+)
 from control_dashboard_common import DashboardAppConfig, _not_found_json
 
 _RETRY_BLOCKED_REMEDIATIONS = {
@@ -243,6 +246,19 @@ def _retry_blocked_remediation_with_judge_bridge(remediation: str, bridge: Dict[
     return f"{base}; {suffix}" if base else suffix
 
 
+def _retry_blocked_remediation_with_manual_feedback(remediation: str, decision: Dict[str, Any]) -> str:
+    if not isinstance(decision, dict) or not bool(decision.get("manual_feedback_applied", False)):
+        return remediation
+    state = str(decision.get("manual_feedback_state", "")).strip() or "-"
+    next_step = str(decision.get("manual_feedback_next_step", "")).strip() or "-"
+    summary = str(decision.get("manual_feedback_summary", "")).strip() or "-"
+    suffix = f"manual step reused: state={state} next={next_step}"
+    if summary and summary != "-":
+        suffix = f"{suffix} | {summary}"
+    base = str(remediation or "").strip()
+    return f"{base}; {suffix}" if base else suffix
+
+
 def _append_blocked_retry_replan_audit(
     *,
     team_dir: Path,
@@ -294,6 +310,7 @@ def _replan_auto_decision_stub(
     next_step: str,
     latest_judge_decision: Dict[str, str],
     latest_judge_decision_bridge: Dict[str, Any],
+    source_task: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     if _command_head(source_command) != "/replan":
         return {}
@@ -307,18 +324,33 @@ def _replan_auto_decision_stub(
         or str(next_step or "").strip()
         or "-"
     )
+    manual_step_feedback = derive_manual_step_feedback(
+        source_task if isinstance(source_task, dict) else {},
+        suggested_action=suggested_action,
+        suggested_next_step=suggested_next_step,
+    )
+    manual_feedback_applied = bool(manual_step_feedback.get("can_reuse_next_step", False))
+    if manual_feedback_applied:
+        suggested_next_step = str(manual_step_feedback.get("next_step", "")).strip() or suggested_next_step
+    decision_mode = str(bridge.get("decision_mode", "")).strip() or ("judge_signal" if decision else "none")
+    if manual_feedback_applied:
+        decision_mode = "manual_feedback_reuse"
     return {
         "source": "latest_offdesk_judge",
         "current_action": "replan",
         "suggested_action": suggested_action,
         "suggested_next_step": suggested_next_step,
-        "decision_mode": str(bridge.get("decision_mode", "")).strip() or ("judge_signal" if decision else "none"),
+        "decision_mode": decision_mode,
         "bridge_applied": bool(bridge.get("applied", False)),
         "supports_auto_decision": bool(bridge.get("supports_auto_decision", False)),
         "can_auto_apply": suggested_action in {"retry", "replan"} and suggested_next_step.startswith("/"),
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
+        "manual_feedback_state": str(manual_step_feedback.get("state", "")).strip() or "-",
+        "manual_feedback_summary": str(manual_step_feedback.get("summary", "")).strip() or "-",
+        "manual_feedback_next_step": str(manual_step_feedback.get("next_step", "")).strip() or "-",
+        "manual_feedback_applied": manual_feedback_applied,
     }
 
 
@@ -336,13 +368,21 @@ def _replan_auto_routing_policy(
     suggested_next_step = str(decision.get("suggested_next_step", "")).strip() or "-"
     supports_auto_decision = bool(decision.get("supports_auto_decision", False))
     can_auto_apply = bool(decision.get("can_auto_apply", False)) and suggested_next_step.startswith("/")
+    manual_feedback_state = str(decision.get("manual_feedback_state", "")).strip() or "-"
+    manual_feedback_summary = str(decision.get("manual_feedback_summary", "")).strip() or "-"
+    manual_feedback_applied = bool(decision.get("manual_feedback_applied", False))
     manual_ready = (
         supports_auto_decision
         and not can_auto_apply
         and suggested_next_step.startswith("/")
         and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}
     )
-    status = "ready" if can_auto_apply else ("manual_ready" if manual_ready else ("observe_only" if supports_auto_decision else "unavailable"))
+    if manual_feedback_applied and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}:
+        status = "manual_progressed"
+        requires_operator_confirmation = False
+    else:
+        status = "ready" if can_auto_apply else ("manual_ready" if manual_ready else ("observe_only" if supports_auto_decision else "unavailable"))
+        requires_operator_confirmation = can_auto_apply or manual_ready
     return {
         "source": str(decision.get("source", "")).strip() or "latest_offdesk_judge",
         "status": status,
@@ -352,10 +392,13 @@ def _replan_auto_routing_policy(
         "decision_mode": str(decision.get("decision_mode", "")).strip() or "none",
         "supports_auto_decision": supports_auto_decision,
         "can_auto_apply": can_auto_apply,
-        "requires_operator_confirmation": can_auto_apply or manual_ready,
+        "requires_operator_confirmation": requires_operator_confirmation,
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
+        "manual_feedback_state": manual_feedback_state,
+        "manual_feedback_summary": manual_feedback_summary,
+        "manual_feedback_applied": manual_feedback_applied,
     }
 
 
@@ -927,13 +970,19 @@ def _execute_retry_run_transition(
             next_step=next_step,
             latest_judge_decision=latest_judge_decision,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
+            source_task=source_task if isinstance(source_task, dict) else executed_task,
         )
         replan_auto_routing_policy = _replan_auto_routing_policy(
             source_command=source_command,
             replan_auto_decision=replan_auto_decision,
         )
+        if str(replan_auto_routing_policy.get("status", "")).strip() == "manual_progressed":
+            progressed_next_step = str(replan_auto_routing_policy.get("suggested_next_step", "")).strip()
+            if progressed_next_step.startswith("/"):
+                next_step = progressed_next_step
         remediation = _retry_blocked_remediation_with_latest_judge(remediation, latest_judge)
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
+        remediation = _retry_blocked_remediation_with_manual_feedback(remediation, replan_auto_decision)
         _append_blocked_retry_replan_audit(
             team_dir=paths.team_dir,
             entry=entry,
@@ -1141,6 +1190,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
     project_key = _find_task_project_key(manager_state, task_ref)
     if not project_key:
         return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"task not found: {task_ref}")
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    entry = projects.get(project_key) if isinstance(projects.get(project_key), dict) else {}
+    source_request_id = gateway_task_state.resolve_task_request_id(entry, task_ref) if isinstance(entry, dict) else ""
+    source_task = gateway_task_state.get_task_record(entry, source_request_id) if isinstance(entry, dict) and source_request_id else None
 
     messages: List[Dict[str, Any]] = []
     transition = retry_handlers.resolve_retry_replan_transition(
@@ -1181,10 +1234,8 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             status=500,
         )
 
-    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     if bool(transition.get("terminal")):
         blocked_contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
-        entry = projects.get(project_key) if isinstance(projects.get(project_key), dict) else {}
         latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if isinstance(entry, dict) else {}
         latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if isinstance(entry, dict) else {}
         error_code = (
@@ -1207,16 +1258,22 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             next_step=next_step,
             latest_judge_decision=latest_judge_decision,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
+            source_task=source_task if isinstance(source_task, dict) else {},
         )
         replan_auto_routing_policy = _replan_auto_routing_policy(
             source_command=str(spec.get("command", "-")),
             replan_auto_decision=replan_auto_decision,
         )
+        if str(replan_auto_routing_policy.get("status", "")).strip() == "manual_progressed":
+            progressed_next_step = str(replan_auto_routing_policy.get("suggested_next_step", "")).strip()
+            if progressed_next_step.startswith("/"):
+                next_step = progressed_next_step
         remediation = _retry_blocked_remediation_with_latest_judge(
             _retry_blocked_remediation([str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]),
             latest_judge,
         )
         remediation = _retry_blocked_remediation_with_judge_bridge(remediation, latest_judge_decision_bridge)
+        remediation = _retry_blocked_remediation_with_manual_feedback(remediation, replan_auto_decision)
         if (
             is_replan
             and _payload_bool(payload, "auto_route_apply")

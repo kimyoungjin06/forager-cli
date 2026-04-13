@@ -2385,6 +2385,138 @@ def test_control_dashboard_post_replan_route_surfaces_manual_ready_followup_exec
     assert payload["replan_auto_routing_policy"]["can_auto_apply"] is False
 
 
+def test_control_dashboard_post_replan_route_reuses_previewed_manual_followup_feedback(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_manual_step_execution_status"] = "preview"
+    task["background_run_manual_step_execution_kind"] = "manual_followup"
+    task["background_run_manual_step_execution_command"] = "/followup T-001"
+    task["background_run_manual_step_execution_next_step"] = "/task T-001"
+    task["background_run_manual_step_execution_summary"] = (
+        "manual_followup=/followup T-001 | state=preview | next=/task T-001 | at=2026-04-10T10:12:00+09:00"
+    )
+    task["background_run_manual_step_execution_at"] = "2026-04-10T10:12:00+09:00"
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:06:00+09:00",
+        extra={
+            "response_text": "{\"verdict\":\"hold\",\"confidence\":\"medium\",\"reasoning\":\"needs operator handoff\",\"next_step\":\"/followup T-001\",\"caution\":\"manual wording still required\"}",
+        },
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["next_step"] == "/task T-001"
+    assert payload["replan_auto_decision"]["manual_feedback_state"] == "preview"
+    assert payload["replan_auto_decision"]["manual_feedback_applied"] is True
+    assert payload["replan_auto_decision"]["suggested_next_step"] == "/task T-001"
+    assert payload["replan_auto_routing_policy"]["status"] == "manual_progressed"
+    assert payload["replan_auto_routing_policy"]["requires_operator_confirmation"] is False
+    assert "manual step reused" in payload["remediation"]
+
+
+def test_control_dashboard_post_replan_route_reuses_executed_manual_followup_execute_feedback(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_manual_step_execution_status"] = "executed"
+    task["background_run_manual_step_execution_kind"] = "manual_execute"
+    task["background_run_manual_step_execution_command"] = "/followup-exec T-001 lane L2"
+    task["background_run_manual_step_execution_next_step"] = "/task T-001"
+    task["background_run_manual_step_execution_summary"] = (
+        "manual_execute=/followup-exec T-001 lane L2 | state=executed | next=/task T-001 | at=2026-04-10T10:13:00+09:00"
+    )
+    task["background_run_manual_step_execution_at"] = "2026-04-10T10:13:00+09:00"
+    gw.save_manager_state(manager_state_file, state)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:06:00+09:00",
+        extra={
+            "response_text": (
+                "{\"verdict\":\"hold\",\"confidence\":\"medium\",\"reasoning\":\"execution slice is safe\","
+                "\"recommended_action\":\"followup_execute\",\"next_step\":\"/followup-exec T-001 lane L2\","
+                "\"caution\":\"keep review lane manual\"}"
+            ),
+        },
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["next_step"] == "/task T-001"
+    assert payload["replan_auto_decision"]["manual_feedback_state"] == "executed"
+    assert payload["replan_auto_decision"]["manual_feedback_applied"] is True
+    assert payload["replan_auto_decision"]["suggested_next_step"] == "/task T-001"
+    assert payload["replan_auto_routing_policy"]["status"] == "manual_progressed"
+    assert payload["replan_auto_routing_policy"]["requires_operator_confirmation"] is False
+    assert "manual step reused" in payload["remediation"]
+
+
 def test_control_dashboard_post_replan_route_auto_routes_to_retry_when_confirmed(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

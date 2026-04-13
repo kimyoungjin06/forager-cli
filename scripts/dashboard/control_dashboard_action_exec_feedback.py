@@ -7,6 +7,17 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+def _manual_kind_for_suggested_action(action: str) -> str:
+    token = str(action or "").strip().lower()
+    if token in {"manual_review", "review", "judge"}:
+        return "manual_review"
+    if token == "followup_execute":
+        return "manual_execute"
+    if token == "followup":
+        return "manual_followup"
+    return ""
+
+
 def summarize_canonical_writeback(
     *,
     headline: str = "Syncback Apply | executed",
@@ -130,3 +141,40 @@ def persist_manual_step_execution_state(
         task["result"]["background_run_manual_step_execution_summary"] = summary
         task["result"]["background_run_manual_step_execution_at"] = str(at or "").strip() or "-"
     return summary
+
+
+def derive_manual_step_feedback(
+    task: Dict[str, Any],
+    *,
+    suggested_action: str,
+    suggested_next_step: str,
+) -> Dict[str, Any]:
+    if not isinstance(task, dict) or not task:
+        return {}
+    expected_kind = _manual_kind_for_suggested_action(suggested_action)
+    if not expected_kind:
+        return {}
+    kind = str(task.get("background_run_manual_step_execution_kind", "")).strip().lower()
+    if kind != expected_kind:
+        return {}
+    state = str(task.get("background_run_manual_step_execution_status", "")).strip() or "-"
+    command = str(task.get("background_run_manual_step_execution_command", "")).strip() or "-"
+    next_step = str(task.get("background_run_manual_step_execution_next_step", "")).strip() or "-"
+    at = str(task.get("background_run_manual_step_execution_at", "")).strip() or "-"
+    summary = str(task.get("background_run_manual_step_execution_summary", "")).strip() or "-"
+    suggested_next = str(suggested_next_step or "").strip()
+    can_reuse_next_step = state in {"preview", "executed"} and next_step.startswith("/")
+    return {
+        "kind": expected_kind,
+        "state": state,
+        "command": command,
+        "next_step": next_step,
+        "at": at,
+        "summary": summary,
+        "matches_action": True,
+        "matches_next_step": bool(
+            suggested_next
+            and suggested_next in {command, next_step}
+        ),
+        "can_reuse_next_step": can_reuse_next_step,
+    }
