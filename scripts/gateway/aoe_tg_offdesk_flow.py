@@ -439,6 +439,8 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "background_run_worker_update_proposal_ids": list(best_task.get("background_run_worker_update_proposal_ids") or []),
         "background_run_worker_apply_accept_summary": str(best_task.get("background_run_worker_apply_accept_summary", "")).strip(),
         "background_run_worker_syncback_summary": str(best_task.get("background_run_worker_syncback_summary", "")).strip(),
+        "background_run_manual_step_execution_summary": str(best_task.get("background_run_manual_step_execution_summary", "")).strip(),
+        "background_run_canonical_writeback_summary": str(best_task.get("background_run_canonical_writeback_summary", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -1312,6 +1314,13 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             lines.append("  worker_apply_accept: " + worker_apply_accept_summary[:240])
         if worker_syncback_summary not in {"", "-"}:
             lines.append("  worker_syncback: " + worker_syncback_summary[:240])
+        manual_step_execution_summary = str(latest_task.get("background_run_manual_step_execution_summary", "")).strip() or "-"
+        if manual_step_execution_summary not in {"", "-"}:
+            latest_manual_step_summary = manual_step_execution_summary
+            lines.append("  manual_step_result: " + manual_step_execution_summary[:240])
+        canonical_writeback_task_summary = str(latest_task.get("background_run_canonical_writeback_summary", "")).strip() or "-"
+        if canonical_writeback_task_summary not in {"", "-"}:
+            latest_canonical_writeback_summary = canonical_writeback_task_summary
         if task_background_runner in {"github_runner", "remote_worker"} and (
             task_background_external_phase or task_background_external_note
         ):

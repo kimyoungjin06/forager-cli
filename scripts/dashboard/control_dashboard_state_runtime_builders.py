@@ -75,6 +75,14 @@ def _worker_syncback_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_syncback_summary", "")).strip() or "-"
 
 
+def _manual_step_execution_summary(task: Dict[str, Any]) -> str:
+    return str(task.get("background_run_manual_step_execution_summary", "")).strip() or "-"
+
+
+def _canonical_writeback_summary(task: Dict[str, Any]) -> str:
+    return str(task.get("background_run_canonical_writeback_summary", "")).strip() or "-"
+
+
 def _worker_syncback_applied(task: Dict[str, Any]) -> bool:
     if str(task.get("background_run_worker_syncback_status", "")).strip() != "applied":
         return False
@@ -158,14 +166,20 @@ def _latest_replan_auto_route_summary(team_dir: Path, *, project_alias: str) -> 
     )
 
 
-def _latest_manual_step_summary(team_dir: Path, *, project_alias: str) -> str:
+def _latest_manual_step_summary(team_dir: Path, *, project_alias: str, active_task: Dict[str, Any] | None = None) -> str:
+    task_summary = _manual_step_execution_summary(active_task or {})
+    if task_summary not in {"", "-"}:
+        return task_summary
     return action_audit.load_latest_manual_step_summary_for_runtime(
         team_dir,
         project_alias=project_alias,
     )
 
 
-def _latest_canonical_writeback_summary(team_dir: Path, *, project_alias: str) -> str:
+def _latest_canonical_writeback_summary(team_dir: Path, *, project_alias: str, active_task: Dict[str, Any] | None = None) -> str:
+    task_summary = _canonical_writeback_summary(active_task or {})
+    if task_summary not in {"", "-"}:
+        return task_summary
     return action_audit.load_latest_canonical_writeback_summary_for_runtime(
         team_dir,
         project_alias=project_alias,
@@ -295,10 +309,12 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_manual_step_summary = _latest_manual_step_summary(
                     root_team_dir,
                     project_alias=str(entry.get("project_alias", "")).strip(),
+                    active_task=active_task or {},
                 )
                 latest_canonical_writeback_summary = _latest_canonical_writeback_summary(
                     root_team_dir,
                     project_alias=str(entry.get("project_alias", "")).strip(),
+                    active_task=active_task or {},
                 )
                 latest_replan_auto_routing_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
                     root_team_dir,
@@ -809,6 +825,7 @@ def _build_runtime_detail(
         _latest_manual_step_summary(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
+            active_task=active_task or {},
         )
         if str(root_team_dir or "").strip()
         else "-"
@@ -817,6 +834,7 @@ def _build_runtime_detail(
         _latest_canonical_writeback_summary(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
+            active_task=active_task or {},
         )
         if str(root_team_dir or "").strip()
         else "-"

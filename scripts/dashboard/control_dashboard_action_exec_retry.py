@@ -44,6 +44,7 @@ from control_dashboard_action_exec_shared import (
     _make_send_collector,
     _missing_outcome_response,
 )
+from control_dashboard_action_exec_feedback import persist_manual_step_execution_state
 from control_dashboard_common import DashboardAppConfig, _not_found_json
 
 _RETRY_BLOCKED_REMEDIATIONS = {
@@ -1085,6 +1086,17 @@ def _execute_followup_run_transition(
         if not blocked
         else _retry_blocked_remediation_for_reason(reason_code, detail_note)
     )
+    if isinstance(source_task, dict):
+        persist_manual_step_execution_state(
+            source_task,
+            manual_kind="manual_execute",
+            source_command=source_command or "/followup-exec",
+            state="blocked" if blocked else "executed",
+            next_step=next_step,
+            at=_now_iso(),
+        )
+        gateway_main = _load_gateway_main_module()
+        gateway_main.save_manager_state(paths.manager_state_file, manager_state)
     return _json(
         {
             "ok": not blocked,

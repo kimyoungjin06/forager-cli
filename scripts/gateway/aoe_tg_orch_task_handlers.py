@@ -1235,6 +1235,11 @@ def handle_orch_task_command(
                         f"canonical_writeback: {latest_canonical_writeback_summary[:240]}\n"
                     )
                 latest_task = _latest_task_for_model_status(entry)
+                latest_manual_step_execution_summary = str(
+                    (latest_task or {}).get("background_run_manual_step_execution_summary", "")
+                ).strip()
+                if latest_manual_step_execution_summary not in {"", "-"}:
+                    latest_manual_step_summary = latest_manual_step_execution_summary
                 latest_worker_apply_accept_summary = str(
                     (latest_task or {}).get("background_run_worker_apply_accept_summary", "")
                 ).strip()
@@ -1249,6 +1254,21 @@ def handle_orch_task_command(
                     worker_syncback_line = (
                         f"worker_syncback: {latest_worker_syncback_summary[:240]}\n"
                     )
+                latest_canonical_writeback_task_summary = str(
+                    (latest_task or {}).get("background_run_canonical_writeback_summary", "")
+                ).strip()
+                if latest_canonical_writeback_task_summary not in {"", "-"}:
+                    latest_canonical_writeback_summary = latest_canonical_writeback_task_summary
+                manual_step_line = (
+                    f"manual_step: {latest_manual_step_summary[:240]}\n"
+                    if latest_manual_step_summary not in {"", "-"}
+                    else ""
+                )
+                canonical_writeback_line = (
+                    f"canonical_writeback: {latest_canonical_writeback_summary[:240]}\n"
+                    if latest_canonical_writeback_summary not in {"", "-"}
+                    else ""
+                )
                 escalation_binding_line, escalation_probe_line = _escalation_binding_lines(entry, team_dir)
                 workspace_line = (
                     f"workspace: {summarize_workspace_brief(team_dir, entry=entry, project_root=entry.get('project_root'))}\n"

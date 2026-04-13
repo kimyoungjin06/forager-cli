@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 from typing import Dict, Tuple
 from urllib.parse import urlparse
 
 import aoe_tg_operator_action_contract as operator_action_contract
+import aoe_tg_task_state as gateway_task_state
 
 from control_dashboard_action_exec import (
     _execute_auto_recover_action,
@@ -23,6 +25,8 @@ from control_dashboard_action_exec import (
     _execute_worker_apply_propose_action,
     _execute_worker_update_preview_action,
 )
+from control_dashboard_action_exec_feedback import persist_manual_step_execution_state
+from control_dashboard_action_exec_shared import _load_dashboard_manager_state, _load_gateway_main_module
 from control_dashboard_audit import _with_action_audit
 from control_dashboard_common import (
     ACTION_PATHS,
@@ -219,6 +223,7 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
 def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
     task_ref = str(payload.get("task_ref", "")).strip()
+    paths, manager_state = _load_dashboard_manager_state(config)
     detail = load_task_detail(
         control_root=config.control_root,
         team_dir=config.team_dir,
@@ -227,7 +232,18 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
     )
     if detail is None:
         return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"task not found: {task_ref}")
-    return _json(
+    project_key = ""
+    source_task = None
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    for key, entry in projects.items():
+        if not isinstance(entry, dict):
+            continue
+        task = gateway_task_state.get_task_record(entry, task_ref)
+        if isinstance(task, dict):
+            project_key = str(key)
+            source_task = task
+            break
+    response = _json(
         {
             "ok": True,
             "implemented": True,
@@ -255,6 +271,20 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
         },
         status=200,
     )
+    if isinstance(source_task, dict):
+        persist_manual_step_execution_state(
+            source_task,
+            manual_kind="manual_followup",
+            source_command=str(spec.get("command", "")).strip() or f"/followup {task_ref}",
+            state="preview",
+            next_step=(detail.command_hints[0] if detail.command_hints else f"/task {detail.label}"),
+            at=datetime.now().astimezone().replace(microsecond=0).isoformat(),
+        )
+        if project_key:
+            gateway_main = _load_gateway_main_module()
+            if gateway_main is not None:
+                gateway_main.save_manager_state(config.manager_state_file, manager_state)
+    return response
 
 
 

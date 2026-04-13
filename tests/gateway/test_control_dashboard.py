@@ -2523,6 +2523,12 @@ def test_control_dashboard_post_followup_and_sync_preview_routes_return_200_prev
     assert followup_payload["preview"]["request_id"] == "REQ-1"
     assert followup_payload["preview"]["detail_path"] == "/control/tasks/by-request/REQ-1"
     assert followup_payload["preview"]["runtime_path"] == "/control/runtimes/O2"
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_manual_step_execution_status"] == "preview"
+    assert updated_task["background_run_manual_step_execution_summary"].startswith(
+        "manual_followup=/followup T-001 lane R1 | state=preview | next=/task T-001 |"
+    )
 
     assert sync_status == 200
     assert sync_payload["ok"] is True
@@ -2621,6 +2627,10 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
     assert updated_task["background_run_worker_syncback_status"] == "applied"
     assert updated_task["background_run_worker_syncback_summary"].startswith(
         "state=applied | todo=TODO-002 | path=TODO.md |"
+    )
+    assert updated_task["background_run_canonical_writeback_status"] == "executed"
+    assert updated_task["background_run_canonical_writeback_summary"].startswith(
+        "Syncback Apply | executed | state=executed | next=/sync preview O2 24h |"
     )
     _snapshot2, runtime_details, _state2 = dashboard_state.load_dashboard_runtime_details(
         control_root=control_root,
@@ -3635,6 +3645,12 @@ def test_control_dashboard_post_runtime_judge_route_executes_bound_review(tmp_pa
     row = action_audit.load_latest_action_audit_for_runtime_kind(team_dir, project_alias="O2", outcome_kind="offdesk_judge")
     assert row["headline"] == "Offdesk Judge | executed"
     assert row["outcome_detail"] == "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed"
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_manual_step_execution_status"] == "executed"
+    assert updated_task["background_run_manual_step_execution_summary"].startswith(
+        "manual_review=/orch judge O2 | state=executed | next=/offdesk review O2 |"
+    )
 
 
 def test_control_dashboard_post_followup_execute_route_blocks_preview_only_brief(tmp_path: Path) -> None:
@@ -3734,6 +3750,12 @@ def test_control_dashboard_post_followup_execute_route_runs_partially_executable
     assert payload["transition"]["review_lane_ids"] == []
     assert payload["outcome"]["kind"] == "followup_execute"
     assert payload["next_step"] == "/task T-001"
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_manual_step_execution_status"] == "executed"
+    assert updated_task["background_run_manual_step_execution_summary"].startswith(
+        "manual_execute=/followup-exec T-001 lane L2 | state=executed | next=/task T-001 |"
+    )
 
 
 def test_control_dashboard_post_followup_execute_route_uses_local_tmux_background_when_preferred(tmp_path: Path, monkeypatch) -> None:

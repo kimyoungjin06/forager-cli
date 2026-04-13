@@ -28,6 +28,10 @@ from control_dashboard_action_exec_shared import (
     _load_dashboard_manager_state,
     _json,
 )
+from control_dashboard_action_exec_feedback import (
+    persist_canonical_writeback_state,
+    persist_manual_step_execution_state,
+)
 from control_dashboard_common import DashboardAppConfig
 
 
@@ -298,6 +302,19 @@ def _persist_worker_syncback_apply_state(
     task["background_run_worker_syncback_status"] = "applied"
     task["background_run_worker_syncback_summary"] = summary
     task["background_run_worker_syncback_at"] = applied_at
+    persist_canonical_writeback_state(
+        task,
+        headline="Syncback Apply | executed",
+        state="executed",
+        next_step=f"/sync preview {str(preview.get('project_alias', '')).strip() or '-'} 24h",
+        at=applied_at,
+        path=str(result.get("path", "")).strip(),
+        line_count=int(result.get("line_count", 0) or 0),
+        done_count=int(preview.get("done_count", 0) or 0),
+        reopen_count=int(preview.get("reopen_count", 0) or 0),
+        append_count=int(preview.get("append_count", 0) or 0),
+        blocked_count=int(preview.get("blocked_count", 0) or 0),
+    )
     task["updated_at"] = applied_at
     task.setdefault("result", {})
     if isinstance(task.get("result"), dict):
@@ -559,6 +576,7 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
     reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
     judge_decision = operator_audit.normalize_offdesk_judge_decision(response_text)
     audit_team_dir = Path(str(config.team_dir or team_dir)).expanduser().resolve()
+    recorded_at = _now_iso()
     append_action_audit_row(
         audit_team_dir,
         headline=f"Offdesk Judge | {'executed' if ok else 'blocked'}",
@@ -572,7 +590,7 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
         source_command=f"/orch judge {alias}",
         link_label="runtime detail",
         link_href=_runtime_action_link(alias),
-        at=_now_iso(),
+        at=recorded_at,
         extra={
             "response_text": response_text,
             "decision_snapshot": judge_decision,
@@ -580,6 +598,16 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
         if response_text or judge_decision
         else None,
     )
+    if isinstance(latest_task, dict):
+        persist_manual_step_execution_state(
+            latest_task,
+            manual_kind="manual_review",
+            source_command=str(spec.get("command", "")).strip() or f"/orch judge {alias}",
+            state="executed" if ok else "blocked",
+            next_step=f"/offdesk review {alias}",
+            at=recorded_at,
+        )
+        _save_manager_state(config, manager_state)
     return _json(
         {
             "ok": ok,

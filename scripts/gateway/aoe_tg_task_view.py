@@ -667,6 +667,12 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     background_worker_syncback = str(task.get("background_run_worker_syncback_summary", "")).strip()
     if background_worker_syncback:
         lines.append("background_run_worker_syncback: " + background_worker_syncback[:240])
+    background_manual_step_execution = str(task.get("background_run_manual_step_execution_summary", "")).strip()
+    if background_manual_step_execution:
+        lines.append("background_run_manual_step_execution: " + background_manual_step_execution[:240])
+    background_canonical_writeback = str(task.get("background_run_canonical_writeback_summary", "")).strip()
+    if background_canonical_writeback:
+        lines.append("background_run_canonical_writeback: " + background_canonical_writeback[:240])
     background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
     if background_judge_binding:
         lines.append("background_run_model_judge: " + background_judge_binding[:240])

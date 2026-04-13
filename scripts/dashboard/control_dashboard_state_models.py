@@ -237,6 +237,8 @@ class TaskDetailDTO:
     background_run_worker_update_operator_summary: str = ""
     background_run_worker_apply_accept_summary: str = ""
     background_run_worker_syncback_summary: str = ""
+    background_run_manual_step_execution_summary: str = ""
+    background_run_canonical_writeback_summary: str = ""
     background_run_model_plan_summary: str = ""
     background_run_model_judge_binding_summary: str = ""
     background_run_model_judge_probe_summary: str = ""
