@@ -18,6 +18,7 @@ WORKER_TASK_MODULE_PROFILE_VERSION = "2026-04-13.v1"
 WORKER_TASK_MODULE_CHECKLIST_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEMS_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEM_CLASSES_VERSION = "2026-04-14.v1"
+WORKER_TASK_MODULE_RECORDS_VERSION = "2026-04-14.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -986,6 +987,155 @@ def derive_worker_task_module_item_classes(
 
 def summarize_worker_task_module_item_classes(raw: Any) -> str:
     row = sanitize_worker_task_module_item_classes(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def sanitize_worker_task_module_records(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_RECORDS_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "records_kind": _trim(source.get("records_kind"), 96) or "-",
+        "records": _uniq(source.get("records"), limit=8, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["records_kind"] not in {"", "-"}:
+            parts.append(row["records_kind"])
+        parts.extend(list(row["records"])[:4])
+        row["summary_line"] = " | ".join(parts)[:320] if parts else "-"
+    return row
+
+
+def derive_worker_task_module_records(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+    checklist: Any = None,
+    items: Any = None,
+    item_classes: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    items_row = (
+        sanitize_worker_task_module_items(items)
+        if isinstance(items, dict)
+        else derive_worker_task_module_items(
+            contract_row,
+            result_row,
+            update_stub=stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+        )
+    )
+    item_classes_row = (
+        sanitize_worker_task_module_item_classes(item_classes)
+        if isinstance(item_classes, dict)
+        else derive_worker_task_module_item_classes(
+            contract_row,
+            result_row,
+            update_stub=stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+            items=items_row,
+        )
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    item_tokens = [str(item).strip() for item in list(items_row.get("items") or []) if str(item).strip()]
+    class_tokens = [str(item).strip() for item in list(item_classes_row.get("classes") or []) if str(item).strip()]
+    target_tokens = [str(item).strip() for item in list((stub or {}).get("target_artifacts") or []) if str(item).strip()]
+
+    def _first(prefix: str, fallback: str = "-") -> str:
+        for token in item_tokens:
+            if token.startswith(prefix):
+                return _trim(token.split(":", 1)[-1], 96) or fallback
+        return fallback
+
+    def _class_value(prefix: str, fallback: str = "-") -> str:
+        for token in class_tokens:
+            if token.startswith(prefix):
+                return _trim(token.split("=", 1)[-1], 96) or fallback
+        return fallback
+
+    if module_kind == "analysis":
+        records = [
+            f"finding_record={_first('finding:')}",
+            f"evidence_record={_first('evidence:')}",
+        ]
+        gap_value = _class_value("gap=", "0")
+        if gap_value not in {"0", "-", ""}:
+            records.append("gap_record=evidence_missing")
+        else:
+            records.append(f"caveat_record={_first('caveat:')}")
+        return sanitize_worker_task_module_records(
+            {
+                "module_kind": module_kind,
+                "records_kind": "analysis_records",
+                "records": records,
+            }
+        )
+
+    if module_kind == "writing":
+        records = [
+            f"doc_record={_first('doc:')}",
+            f"handoff_record={_class_value('handoff=')}",
+            f"quality_record={_class_value('quality=')}",
+        ]
+        return sanitize_worker_task_module_records(
+            {
+                "module_kind": module_kind,
+                "records_kind": "writing_records",
+                "records": records,
+            }
+        )
+
+    if module_kind == "package":
+        integrity = _class_value("integrity=", "open")
+        verification = _class_value("verification=", "0")
+        apply_state = "ready" if target_tokens else "pending"
+        syncback_state = "ready" if integrity == "ready" and target_tokens else "pending"
+        records = [
+            f"artifact_record={_first('artifact:')}",
+            f"verification_record={verification}",
+            f"apply_record={apply_state}",
+            f"syncback_record={syncback_state}",
+        ]
+        return sanitize_worker_task_module_records(
+            {
+                "module_kind": module_kind,
+                "records_kind": "package_records",
+                "records": records,
+            }
+        )
+
+    records = [
+        f"action_record={_first('action:')}",
+        f"ref_record={_first('ref:')}",
+    ]
+    return sanitize_worker_task_module_records(
+        {
+            "module_kind": module_kind,
+            "records_kind": "general_records",
+            "records": records,
+        }
+    )
+
+
+def summarize_worker_task_module_records(raw: Any) -> str:
+    row = sanitize_worker_task_module_records(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 

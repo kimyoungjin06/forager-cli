@@ -272,6 +272,64 @@ def _worker_item_classes(task: Dict[str, Any]) -> str:
     return ", ".join(rows[:6])[:320] if rows else "-"
 
 
+def _worker_records_summary(task: Dict[str, Any]) -> str:
+    summary = str(task.get("background_run_worker_records_summary", "")).strip()
+    if summary:
+        return summary
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_kind in {"", "-", "general"}:
+        return "-"
+    derived = worker_task_contract.derive_worker_task_module_records(
+        {
+            "module_kind": module_kind,
+            "module_policy": task.get("background_run_task_contract_policy"),
+            "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+        },
+        {
+            "status": task.get("background_run_worker_result_status"),
+            "summary": task.get("background_run_worker_result_summary"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        },
+        gate={
+            "state": task.get("background_run_worker_gate_status"),
+            "summary_line": _worker_gate_summary(task),
+        },
+        profile={
+            "state": task.get("background_run_worker_profile_status"),
+            "summary_line": _worker_profile_summary(task),
+        },
+        checklist={
+            "state": task.get("background_run_worker_checklist_status"),
+            "summary_line": _worker_checklist_summary(task),
+        },
+        items={
+            "module_kind": module_kind,
+            "items": (task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else []),
+            "summary_line": _worker_items_summary(task),
+        },
+        item_classes={
+            "module_kind": module_kind,
+            "classes": (task.get("background_run_worker_item_classes") if isinstance(task.get("background_run_worker_item_classes"), list) else []),
+            "summary_line": _worker_item_classes_summary(task),
+        },
+    )
+    return str(derived.get("summary_line", "")).strip() or "-"
+
+
+def _worker_records(task: Dict[str, Any]) -> str:
+    rows = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_records") if isinstance(task.get("background_run_worker_records"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    return ", ".join(rows[:6])[:320] if rows else "-"
+
+
 def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
 
@@ -764,6 +822,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             background_run_worker_items=_worker_items(task),
             background_run_worker_item_classes_summary=_worker_item_classes_summary(task),
             background_run_worker_item_classes=_worker_item_classes(task),
+            background_run_worker_records_summary=_worker_records_summary(task),
+            background_run_worker_records=_worker_records(task),
             background_run_worker_result_summary=(
                 str(task.get("background_run_worker_result_summary", "")).strip() or "-"
             ),

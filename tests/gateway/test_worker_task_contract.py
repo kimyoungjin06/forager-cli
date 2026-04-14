@@ -278,6 +278,29 @@ def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
         "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=1"
     )
     assert item_classes["classes"] == ["finding=1", "evidence=1", "gap=0", "caveat=1"]
+    records = worker_task_contract.derive_worker_task_module_records(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+    )
+    assert records["summary_line"] == (
+        "analysis_records | finding_record=update docs/analysis/provider_regressions.md | evidence_record=logs/provider_regressions.csv | caveat_record=keep review lane open"
+    )
+    assert records["records"] == [
+        "finding_record=update docs/analysis/provider_regressions.md",
+        "evidence_record=logs/provider_regressions.csv",
+        "caveat_record=keep review lane open",
+    ]
 
 
 def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:
@@ -371,6 +394,29 @@ def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> Non
         "writing_item_classes | doc=1 | handoff=review | quality=open"
     )
     assert item_classes["classes"] == ["doc=1", "handoff=review", "quality=open"]
+    records = worker_task_contract.derive_worker_task_module_records(
+        contract,
+        {
+            "status": "ready",
+            "summary": "draft prepared",
+            "actions": ["update docs/handoff/final_handoff.md"],
+            "cautions": ["quality review still open"],
+            "evidence_refs": ["docs/handoff/final_handoff.md"],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+    )
+    assert records["summary_line"] == (
+        "writing_records | doc_record=docs/handoff/final_handoff.md | handoff_record=review | quality_record=open"
+    )
+    assert records["records"] == [
+        "doc_record=docs/handoff/final_handoff.md",
+        "handoff_record=review",
+        "quality_record=open",
+    ]
 
 
 def test_package_module_gate_surfaces_artifact_check_open_without_verification_refs() -> None:
@@ -464,3 +510,27 @@ def test_package_module_gate_surfaces_artifact_check_open_without_verification_r
         "package_item_classes | artifact=1 | verification=0 | integrity=open"
     )
     assert item_classes["classes"] == ["artifact=1", "verification=0", "integrity=open"]
+    records = worker_task_contract.derive_worker_task_module_records(
+        contract,
+        {
+            "status": "ready",
+            "summary": "package built",
+            "actions": ["update dist/release_bundle.zip"],
+            "cautions": [],
+            "evidence_refs": [],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+    )
+    assert records["summary_line"] == (
+        "package_records | artifact_record=dist/release_bundle.zip | verification_record=0 | apply_record=ready | syncback_record=pending"
+    )
+    assert records["records"] == [
+        "artifact_record=dist/release_bundle.zip",
+        "verification_record=0",
+        "apply_record=ready",
+        "syncback_record=pending",
+    ]

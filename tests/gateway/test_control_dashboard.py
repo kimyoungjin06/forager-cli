@@ -781,6 +781,14 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
         "gap=0",
         "caveat=0",
     ]
+    task["background_run_worker_records_summary"] = (
+        "analysis_records | finding_record=update reports/summary.md | evidence_record=reports/summary.md | caveat_record=-"
+    )
+    task["background_run_worker_records"] = [
+        "finding_record=update reports/summary.md",
+        "evidence_record=reports/summary.md",
+        "caveat_record=-",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -871,6 +879,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=0" in text
     assert "background_worker_item_class_tokens" in text
     assert "finding=1, evidence=1, gap=0, caveat=0" in text
+    assert "background_worker_records" in text
+    assert "analysis_records | finding_record=update reports/summary.md | evidence_record=reports/summary.md | caveat_record=-" in text
+    assert "background_worker_record_tokens" in text
+    assert "finding_record=update reports/summary.md, evidence_record=reports/summary.md, caveat_record=-" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
@@ -991,6 +1003,14 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
         "gap=0",
         "caveat=0",
     ]
+    task["background_run_worker_records_summary"] = (
+        "analysis_records | finding_record=update reports/summary.md | evidence_record=reports/summary.md | caveat_record=-"
+    )
+    task["background_run_worker_records"] = [
+        "finding_record=update reports/summary.md",
+        "evidence_record=reports/summary.md",
+        "caveat_record=-",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1078,6 +1098,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=0" in text
     assert "background_worker_item_class_tokens" in text
     assert "finding=1, evidence=1, gap=0, caveat=0" in text
+    assert "background_worker_records" in text
+    assert "analysis_records | finding_record=update reports/summary.md | evidence_record=reports/summary.md | caveat_record=-" in text
+    assert "background_worker_record_tokens" in text
+    assert "finding_record=update reports/summary.md, evidence_record=reports/summary.md, caveat_record=-" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text

@@ -235,6 +235,8 @@ class TaskDetailDTO:
     background_run_worker_items: str = ""
     background_run_worker_item_classes_summary: str = ""
     background_run_worker_item_classes: str = ""
+    background_run_worker_records_summary: str = ""
+    background_run_worker_records: str = ""
     background_run_worker_result_summary: str = ""
     background_run_worker_result_actions: str = ""
     background_run_worker_result_cautions: str = ""
@@ -345,6 +347,8 @@ class RuntimeDetailDTO:
     active_task_background_run_worker_items: str
     active_task_background_run_worker_item_classes_summary: str
     active_task_background_run_worker_item_classes: str
+    active_task_background_run_worker_records_summary: str
+    active_task_background_run_worker_records: str
     active_task_background_run_worker_result_summary: str
     active_task_background_run_worker_result_actions: str
     active_task_background_run_worker_result_cautions: str
