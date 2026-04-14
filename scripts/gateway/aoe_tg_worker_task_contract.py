@@ -1395,10 +1395,19 @@ def derive_worker_task_module_preflight(
         verification_state = row_map.get("verification_row", {}).get("state", "") or "-"
         apply_state = row_map.get("apply_row", {}).get("state", "") or "-"
         syncback_state = row_map.get("syncback_row", {}).get("state", "") or "-"
-        apply_ready = worker_task_module_apply_ready(rows_row)
         syncback_ready = worker_task_module_syncback_ready_from_rows(rows_row)
-        state = "syncback_ready" if syncback_ready else ("apply_ready" if apply_ready else "artifact_open")
-        next_hint = "syncback_clean" if syncback_ready else ("prepare_syncback" if apply_ready else "artifact_check_open")
+        if verification_state != "ready":
+            state = "verification_pending"
+            next_hint = "verify_artifacts"
+        elif apply_state != "ready":
+            state = "apply_pending"
+            next_hint = "prepare_apply"
+        elif syncback_ready:
+            state = "syncback_ready"
+            next_hint = "syncback_clean"
+        else:
+            state = "syncback_pending"
+            next_hint = "prepare_syncback"
         return sanitize_worker_task_module_preflight(
             {
                 "module_kind": module_kind,
@@ -1540,12 +1549,22 @@ def derive_worker_task_module_preflight_rows(
         apply_state = row_map.get("apply_row", {}).get("state", "") or "-"
         syncback_state = row_map.get("syncback_row", {}).get("state", "") or "-"
         syncback_ready = preflight_state == "syncback_ready"
-        apply_ready = preflight_state in {"syncback_ready", "apply_ready"}
+        apply_ready = preflight_state in {"syncback_ready", "syncback_pending"}
         rows = [
-            _row("verification_ready", verification_state, "ready" if verification_state == "ready" else "blocked", note="verification"),
-            _row("apply_ready", apply_state, "ready" if apply_state == "ready" else "blocked", note="apply_gate"),
+            _row(
+                "verification_ready",
+                verification_state,
+                "ready" if verification_state == "ready" else "blocked",
+                note="verification" if verification_state == "ready" else "verify_artifacts",
+            ),
+            _row(
+                "apply_ready",
+                apply_state,
+                "ready" if apply_state == "ready" else "blocked",
+                note="apply_gate" if apply_state == "ready" else "prepare_apply",
+            ),
             _row("syncback_ready", syncback_state, "ready" if syncback_state == "ready" else "blocked", note=next_hint),
-            _row("package_ready", preflight_state, "ready" if syncback_ready or apply_ready else "blocked", note=next_hint),
+            _row("package_ready", preflight_state, "ready" if syncback_ready else "blocked", note=next_hint),
         ]
         return sanitize_worker_task_module_preflight_rows(
             {"module_kind": module_kind, "rows_kind": "package_preflight_rows", "rows": rows}

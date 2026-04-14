@@ -3306,13 +3306,13 @@ def test_control_dashboard_syncback_routes_prefer_package_record_rows_gate(tmp_p
     task["background_run_worker_preflight_rows_summary"] = (
         "package_preflight_rows | verification_ready=ready|state=ready|note=verification | "
         "apply_ready=ready|state=ready|note=apply_gate | syncback_ready=blocked|state=blocked|note=prepare_syncback | "
-        "package_ready=apply_ready|state=ready|note=prepare_syncback"
+        "package_ready=syncback_pending|state=blocked|note=prepare_syncback"
     )
     task["background_run_worker_preflight_rows"] = [
         "verification_ready=ready|state=ready|note=verification",
         "apply_ready=ready|state=ready|note=apply_gate",
         "syncback_ready=blocked|state=blocked|note=prepare_syncback",
-        "package_ready=apply_ready|state=ready|note=prepare_syncback",
+        "package_ready=syncback_pending|state=blocked|note=prepare_syncback",
     ]
     task["background_run_worker_apply_accept_status"] = "applied"
     task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
