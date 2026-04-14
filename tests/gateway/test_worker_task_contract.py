@@ -224,6 +224,21 @@ def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
     assert profile["summary_line"] == (
         "analysis_findings_profile | state=findings_stable | findings=1 | evidence=1 | gaps=0 | targets=2 | cautions=1"
     )
+    checklist = worker_task_contract.derive_worker_task_module_checklist(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+        gate=gate,
+        profile=profile,
+    )
+    assert checklist["summary_line"] == (
+        "analysis_checklist | state=findings_stable | findings=1,evidence=1,gaps=0 | next=validate_caveats"
+    )
 
 
 def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:
@@ -263,6 +278,21 @@ def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> Non
     assert profile["summary_line"] == (
         "writing_handoff_profile | state=quality_open | docs=1 | handoff=review | quality=open | refs=1 | cautions=1"
     )
+    checklist = worker_task_contract.derive_worker_task_module_checklist(
+        contract,
+        {
+            "status": "ready",
+            "summary": "draft prepared",
+            "actions": ["update docs/handoff/final_handoff.md"],
+            "cautions": ["quality review still open"],
+            "evidence_refs": ["docs/handoff/final_handoff.md"],
+        },
+        gate=gate,
+        profile=profile,
+    )
+    assert checklist["summary_line"] == (
+        "writing_checklist | state=quality_open | docs=1,handoff=review,quality=open | next=close_quality_gate"
+    )
 
 
 def test_package_module_gate_surfaces_artifact_check_open_without_verification_refs() -> None:
@@ -301,4 +331,19 @@ def test_package_module_gate_surfaces_artifact_check_open_without_verification_r
     )
     assert profile["summary_line"] == (
         "package_verification_profile | state=artifact_check_open | artifacts=1 | verification=0 | integrity=open | targets=1 | cautions=0"
+    )
+    checklist = worker_task_contract.derive_worker_task_module_checklist(
+        contract,
+        {
+            "status": "ready",
+            "summary": "package built",
+            "actions": ["update dist/release_bundle.zip"],
+            "cautions": [],
+            "evidence_refs": [],
+        },
+        gate=gate,
+        profile=profile,
+    )
+    assert checklist["summary_line"] == (
+        "package_checklist | state=artifact_check_open | artifacts=1,verification=0,integrity=open | next=verify_artifacts"
     )

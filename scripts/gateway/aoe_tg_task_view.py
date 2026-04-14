@@ -18,6 +18,7 @@ from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
 from aoe_tg_worker_task_contract import (
+    derive_worker_task_module_checklist,
     derive_worker_task_module_gate,
     derive_worker_task_module_profile,
     resolve_worker_module_policy,
@@ -671,6 +672,31 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
         ).strip()
     if background_worker_profile:
         lines.append("background_run_worker_profile: " + background_worker_profile[:240])
+    background_worker_checklist = str(task.get("background_run_worker_checklist_summary", "")).strip()
+    if not background_worker_checklist and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_checklist = str(
+            derive_worker_task_module_checklist(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_checklist:
+        lines.append("background_run_worker_checklist: " + background_worker_checklist[:240])
     background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
     if background_worker_result:
         lines.append("background_run_worker_result: " + background_worker_result[:240])

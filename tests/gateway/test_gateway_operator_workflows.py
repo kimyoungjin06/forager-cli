@@ -1623,6 +1623,9 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                 "background_run_worker_profile_summary": (
                     "package_verification_profile | state=integrity_ready | artifacts=1 | verification=1 | integrity=ready | targets=1 | cautions=0"
                 ),
+                "background_run_worker_checklist_summary": (
+                    "package_checklist | state=integrity_ready | artifacts=1,verification=1,integrity=ready | next=syncback_clean"
+                ),
                 "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
             }
         },
@@ -1712,6 +1715,10 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "worker_profile: package_verification_profile | state=integrity_ready | artifacts=1 | verification=1 | integrity=ready | targets=1 | cautions=0"
+        in text
+    )
+    assert (
+        "worker_checklist: package_checklist | state=integrity_ready | artifacts=1,verification=1,integrity=ready | next=syncback_clean"
         in text
     )
     assert (

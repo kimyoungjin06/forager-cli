@@ -15,6 +15,7 @@ WORKER_TASK_CONTRACT_VERSION = "2026-04-10.v1"
 WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
 WORKER_TASK_MODULE_GATE_VERSION = "2026-04-13.v1"
 WORKER_TASK_MODULE_PROFILE_VERSION = "2026-04-13.v1"
+WORKER_TASK_MODULE_CHECKLIST_VERSION = "2026-04-14.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -610,6 +611,148 @@ def derive_worker_task_module_profile(
 
 def summarize_worker_task_module_profile(raw: Any) -> str:
     row = sanitize_worker_task_module_profile(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def sanitize_worker_task_module_checklist(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_CHECKLIST_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "checklist_kind": _trim(source.get("checklist_kind"), 96) or "-",
+        "state": _trim(source.get("state"), 64) or "-",
+        "next_hint": _trim(source.get("next_hint"), 160) or "-",
+        "checkpoints": _uniq(source.get("checkpoints"), limit=6, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["checklist_kind"] not in {"", "-"}:
+            parts.append(row["checklist_kind"])
+        parts.append(f"state={row['state']}")
+        if row["checkpoints"]:
+            parts.append(",".join(list(row["checkpoints"])[:3]))
+        if row["next_hint"] not in {"", "-"}:
+            parts.append(f"next={row['next_hint']}")
+        row["summary_line"] = " | ".join(parts)[:320]
+    return row
+
+
+def derive_worker_task_module_checklist(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    gate_row = (
+        sanitize_worker_task_module_gate(gate)
+        if isinstance(gate, dict)
+        else derive_worker_task_module_gate(contract_row, result_row, update_stub=stub)
+    )
+    profile_row = (
+        sanitize_worker_task_module_profile(profile)
+        if isinstance(profile, dict)
+        else derive_worker_task_module_profile(contract_row, result_row, update_stub=stub, gate=gate_row)
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    state = _trim(gate_row.get("state"), 64) or "-"
+    actions = list(result_row.get("actions") or [])
+    refs = list(result_row.get("evidence_refs") or [])
+    cautions = list(result_row.get("cautions") or [])
+    targets = list((stub or {}).get("target_artifacts") or []) or list(contract_row.get("artifact_targets") or [])
+
+    if module_kind == "analysis":
+        findings = max(len(actions), 1 if _trim(result_row.get("summary"), 240) not in {"", "-"} else 0)
+        evidence = len(refs)
+        gaps = max(0, findings - evidence)
+        checkpoints = [
+            f"findings={findings}",
+            f"evidence={evidence}",
+            f"gaps={gaps}",
+        ]
+        next_hint = "fill_evidence_gaps" if gaps > 0 else "validate_caveats"
+        return sanitize_worker_task_module_checklist(
+            {
+                "module_kind": module_kind,
+                "checklist_kind": "analysis_checklist",
+                "state": state,
+                "checkpoints": checkpoints,
+                "next_hint": next_hint,
+            }
+        )
+
+    if module_kind == "writing":
+        docs = max(len([token for token in targets if _trim(token, 160)]), 1 if actions else 0)
+        handoff = "ready" if "handoff=ready" in str(profile_row.get("summary_line", "")) else (
+            "draft" if "handoff=draft" in str(profile_row.get("summary_line", "")) else "review"
+        )
+        quality = "open" if state == "quality_open" else "ready"
+        checkpoints = [
+            f"docs={docs}",
+            f"handoff={handoff}",
+            f"quality={quality}",
+        ]
+        next_hint = "close_quality_gate" if quality == "open" else "handoff_ready"
+        return sanitize_worker_task_module_checklist(
+            {
+                "module_kind": module_kind,
+                "checklist_kind": "writing_checklist",
+                "state": state,
+                "checkpoints": checkpoints,
+                "next_hint": next_hint,
+            }
+        )
+
+    if module_kind == "package":
+        artifacts = max(len([token for token in targets if _trim(token, 160)]), 1 if actions else 0)
+        verification = len(refs)
+        integrity = "ready" if state == "integrity_ready" else "open"
+        checkpoints = [
+            f"artifacts={artifacts}",
+            f"verification={verification}",
+            f"integrity={integrity}",
+        ]
+        next_hint = "verify_artifacts" if integrity == "open" else "syncback_clean"
+        return sanitize_worker_task_module_checklist(
+            {
+                "module_kind": module_kind,
+                "checklist_kind": "package_checklist",
+                "state": state,
+                "checkpoints": checkpoints,
+                "next_hint": next_hint,
+            }
+        )
+
+    checkpoints = [
+        f"actions={len(actions)}",
+        f"refs={len(refs)}",
+        f"cautions={len(cautions)}",
+    ]
+    next_hint = "operator_review"
+    return sanitize_worker_task_module_checklist(
+        {
+            "module_kind": module_kind,
+            "checklist_kind": "general_checklist",
+            "state": state,
+            "checkpoints": checkpoints,
+            "next_hint": next_hint,
+        }
+    )
+
+
+def summarize_worker_task_module_checklist(raw: Any) -> str:
+    row = sanitize_worker_task_module_checklist(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 

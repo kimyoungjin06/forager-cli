@@ -682,6 +682,16 @@ def invoke_background_ticket_worker(
             if profile:
                 result["task_profile_status"] = _trim(profile.get("state"), 64) or "-"
                 result["task_profile_summary"] = _trim(profile.get("summary_line"), 320) or "-"
+            checklist = worker_task_contract.derive_worker_task_module_checklist(
+                launch_spec.get("provider_task_contract_json"),
+                task_result,
+                update_stub=update_stub,
+                gate=gate,
+                profile=profile,
+            )
+            if checklist:
+                result["task_checklist_status"] = _trim(checklist.get("state"), 64) or "-"
+                result["task_checklist_summary"] = _trim(checklist.get("summary_line"), 320) or "-"
             if update_stub:
                 result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
                 result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"

@@ -762,6 +762,9 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["background_run_worker_profile_summary"] = (
         "analysis_findings_profile | state=findings_stable | findings=1 | evidence=1 | gaps=0 | targets=2 | cautions=1"
     )
+    task["background_run_worker_checklist_summary"] = (
+        "analysis_checklist | state=findings_stable | findings=1,evidence=1,gaps=0 | next=validate_caveats"
+    )
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -842,6 +845,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "state=findings_stable | findings=1 | refs=1 | stop=findings_stable" in text
     assert "background_worker_profile" in text
     assert "analysis_findings_profile | state=findings_stable | findings=1 | evidence=1 | gaps=0 | targets=2 | cautions=1" in text
+    assert "background_worker_checklist" in text
+    assert "analysis_checklist | state=findings_stable | findings=1,evidence=1,gaps=0 | next=validate_caveats" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
@@ -943,6 +948,9 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["background_run_worker_profile_summary"] = (
         "analysis_findings_profile | state=findings_stable | findings=1 | evidence=1 | gaps=0 | targets=2 | cautions=1"
     )
+    task["background_run_worker_checklist_summary"] = (
+        "analysis_checklist | state=findings_stable | findings=1,evidence=1,gaps=0 | next=validate_caveats"
+    )
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1020,6 +1028,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "state=findings_stable | findings=1 | refs=1 | stop=findings_stable" in text
     assert "background_worker_profile" in text
     assert "analysis_findings_profile | state=findings_stable | findings=1 | evidence=1 | gaps=0 | targets=2 | cautions=1" in text
+    assert "background_worker_checklist" in text
+    assert "analysis_checklist | state=findings_stable | findings=1,evidence=1,gaps=0 | next=validate_caveats" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
