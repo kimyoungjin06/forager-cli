@@ -231,7 +231,7 @@ def _worker_syncback_ready(
     record_tokens: List[str] = []
     if isinstance(raw_records, list):
         record_tokens = [str(item).strip() for item in raw_records if str(item).strip()]
-    elif isinstance(raw_records, str):
+    elif isinstance(raw_records, str) and str(raw_records).strip() not in {"", "-"}:
         record_tokens = [str(item).strip() for item in raw_records.split(",") if str(item).strip()]
     if record_tokens:
         return worker_task_contract.worker_task_module_syncback_ready(
@@ -271,7 +271,7 @@ def _worker_record_rows_payload(
     row_tokens: List[str] = []
     if isinstance(raw_rows, list):
         row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
-    elif isinstance(raw_rows, str):
+    elif isinstance(raw_rows, str) and str(raw_rows).strip() not in {"", "-"}:
         row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
     elif rows_summary not in {"", "-"}:
         row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
@@ -431,7 +431,7 @@ def _worker_preflight_rows_payload(
     row_tokens: List[str] = []
     if isinstance(raw_rows, list):
         row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
-    elif isinstance(raw_rows, str):
+    elif isinstance(raw_rows, str) and str(raw_rows).strip() not in {"", "-"}:
         row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
     elif rows_summary not in {"", "-"}:
         row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
@@ -769,6 +769,20 @@ def _worker_blocker_action_button(
     elif suggested_action == "followup_execute":
         command = f"/followup-exec {task_ref}"
         custom_label = "Resolve Writing Execute Blocker" if module_kind == "writing" else "Resolve Worker Execute Blocker"
+    elif suggested_action == "task_review":
+        payload_json = json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":"))
+        blocker_summary = str(blocker.get("summary_line", "")).strip()
+        remediation = str(blocker.get("remediation", "")).strip()
+        note = " | ".join(part for part in [blocker_summary, remediation] if part and part != "-")[:320]
+        return ActionButtonDTO(
+            label="Resolve Analysis Blocker" if module_kind == "analysis" else "Review Worker Blocker",
+            command=f"/task {task_ref} | analysis-review",
+            method="POST",
+            path="/control/actions/task/analysis-review",
+            mode="safe",
+            note=note,
+            payload_json=payload_json,
+        )
     elif suggested_action == "judge" and alias:
         command = f"/orch judge {alias}"
         custom_label = "Resolve Analysis Blocker" if module_kind == "analysis" else "Resolve Worker Blocker"

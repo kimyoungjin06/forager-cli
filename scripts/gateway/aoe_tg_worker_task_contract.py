@@ -1603,17 +1603,17 @@ def derive_worker_task_module_action_blocker(
         if _entry("evidence_ready").get("state") == "blocked":
             reason_code = "analysis_evidence_missing"
             next_hint = _entry("evidence_ready").get("note", "") or "attach_evidence"
-            suggested_action = "judge"
+            suggested_action = "task_review"
             remediation = "attach evidence and re-run analysis review before applying changes"
         elif _entry("gap_closed").get("state") == "blocked":
             reason_code = "analysis_gap_open"
             next_hint = _entry("gap_closed").get("note", "") or "validate_caveats"
-            suggested_action = "judge"
+            suggested_action = "task_review"
             remediation = "close open analysis gaps and validate caveats before applying changes"
         elif _entry("finding_ready").get("state") == "blocked":
             reason_code = "analysis_findings_open"
             next_hint = _entry("finding_ready").get("note", "") or "findings"
-            suggested_action = "judge"
+            suggested_action = "task_review"
             remediation = "stabilize findings before promoting analysis changes"
         else:
             reason_code = "analysis_review_not_ready"

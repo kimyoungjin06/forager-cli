@@ -962,7 +962,7 @@ def test_package_syncback_blocker_prefers_syncback_pending_reason() -> None:
     )
 
 
-def test_analysis_apply_blocker_prefers_judge_guidance() -> None:
+def test_analysis_apply_blocker_prefers_task_review_guidance() -> None:
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(
         {
             "module_kind": "analysis",
@@ -977,5 +977,5 @@ def test_analysis_apply_blocker_prefers_judge_guidance() -> None:
         mode="apply",
     )
     assert blocker["reason_code"] == "analysis_evidence_missing"
-    assert blocker["suggested_action"] == "judge"
+    assert blocker["suggested_action"] == "task_review"
     assert blocker["remediation"] == "attach evidence and re-run analysis review before applying changes"

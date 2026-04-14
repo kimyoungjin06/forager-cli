@@ -4407,7 +4407,7 @@ def test_dashboard_and_routes_derive_writing_blocker_rows_when_missing(tmp_path:
     assert "quality_ready=open|state=blocked" in preview_payload["worker_preflight_rows"]
 
 
-def test_dashboard_surfaces_analysis_blocker_judge_actions(tmp_path: Path) -> None:
+def test_dashboard_surfaces_analysis_blocker_review_actions(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
@@ -4446,25 +4446,25 @@ def test_dashboard_surfaces_analysis_blocker_judge_actions(tmp_path: Path) -> No
     )
     runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
-    expected_judge_payload = '{"project_ref":"O2"}'
+    expected_review_payload = '{"task_ref":"T-001"}'
 
     assert task_detail is not None
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/runtime/judge"
-        and btn.payload_json == expected_judge_payload
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == expected_review_payload
         for btn in runtime_card.runtime_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/runtime/judge"
-        and btn.payload_json == expected_judge_payload
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == expected_review_payload
         for btn in runtime_detail.active_task_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/runtime/judge"
-        and btn.payload_json == expected_judge_payload
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == expected_review_payload
         for btn in task_detail.safe_action_buttons
     )
 
@@ -4487,20 +4487,20 @@ def test_dashboard_surfaces_analysis_blocker_judge_actions(tmp_path: Path) -> No
     recovery_task = next(row for row in recovery_runtime.task_teams if row.request_id == "REQ-1")
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/runtime/judge"
-        and btn.payload_json == expected_judge_payload
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == expected_review_payload
         for btn in recovery_runtime.runtime_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/runtime/judge"
-        and btn.payload_json == expected_judge_payload
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == expected_review_payload
         for btn in recovery_runtime.active_task_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/runtime/judge"
-        and btn.payload_json == expected_judge_payload
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == expected_review_payload
         for btn in recovery_task.safe_action_buttons
     )
 
@@ -4520,8 +4520,23 @@ def test_dashboard_surfaces_analysis_blocker_judge_actions(tmp_path: Path) -> No
     preview_payload = json.loads(preview_body.decode("utf-8"))
     assert preview_status == 409
     assert preview_payload["outcome"]["reason_code"] == "analysis_evidence_missing"
-    assert preview_payload["next_step"] == "/orch judge O2"
-    assert preview_payload["worker_recommended_action"] == "judge"
+    assert preview_payload["next_step"] == "/task T-001"
+    assert preview_payload["worker_recommended_action"] == "task_review"
+
+    review_status, _review_headers, review_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/analysis-review",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    review_payload = json.loads(review_body.decode("utf-8"))
+    assert review_status == 200
+    assert review_payload["status"] == "preview"
+    assert review_payload["outcome"]["kind"] == "task_review"
+    assert review_payload["outcome"]["reason_code"] == "analysis_evidence_missing"
+    assert review_payload["next_step"] == "/task T-001"
+    assert review_payload["worker_recommended_action"] == "task_review"
+    assert "analysis_preflight_rows" in review_payload["worker_preflight_rows"]
 
 
 def test_dashboard_surfaces_writing_execute_blocker_actions(tmp_path: Path) -> None:

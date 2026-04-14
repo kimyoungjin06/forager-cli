@@ -101,7 +101,7 @@ def _worker_syncback_ready(task: Dict[str, Any]) -> bool:
     record_tokens = []
     if isinstance(raw_records, list):
         record_tokens = [str(item).strip() for item in raw_records if str(item).strip()]
-    elif isinstance(raw_records, str):
+    elif isinstance(raw_records, str) and str(raw_records).strip() not in {"", "-"}:
         record_tokens = [str(item).strip() for item in raw_records.split(",") if str(item).strip()]
     if record_tokens:
         return worker_task_contract.worker_task_module_syncback_ready(
@@ -130,7 +130,7 @@ def _worker_record_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     row_tokens: list[str] = []
     if isinstance(raw_rows, list):
         row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
-    elif isinstance(raw_rows, str):
+    elif isinstance(raw_rows, str) and str(raw_rows).strip() not in {"", "-"}:
         row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
     elif rows_summary not in {"", "-"}:
         row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
@@ -253,7 +253,7 @@ def _worker_preflight_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     row_tokens: list[str] = []
     if isinstance(raw_rows, list):
         row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
-    elif isinstance(raw_rows, str):
+    elif isinstance(raw_rows, str) and str(raw_rows).strip() not in {"", "-"}:
         row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
     if row_tokens or rows_summary not in {"", "-"}:
         return {
@@ -1049,6 +1049,95 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
             "latest_judge_decision": judge_decision,
         },
         status=200 if ok else 409,
+    )
+
+
+def _execute_analysis_review_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    task_ref = str(payload.get("task_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    try:
+        key, entry, request_id, task = _resolve_task_entry(manager_state=manager_state, task_ref=task_ref)
+    except RuntimeError as exc:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": "/control/tasks",
+                "remediation": "refresh the task list and retry the analysis review with an existing task ref",
+                "outcome": {
+                    "kind": "task_review",
+                    "status": "blocked",
+                    "reason_code": "task_missing",
+                    "detail": str(exc),
+                },
+            },
+            status=404,
+        )
+    alias = _project_alias(entry, key)
+    label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    record_rows_payload = _worker_record_rows_payload(task)
+    preflight_rows_payload = _worker_preflight_rows_payload(task)
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            **preflight_rows_payload,
+            "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+        },
+        mode="apply",
+    )
+    row_detail = str(record_rows_payload.get("summary_line", "")).strip() or "-"
+    preflight_detail = str(preflight_rows_payload.get("summary_line", "")).strip() or "-"
+    blocker_summary = str(blocker.get("summary_line", "")).strip() or preflight_detail
+    remediation = str(blocker.get("remediation", "")).strip() or "inspect the blocked analysis rows before promoting analysis changes"
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": False,
+            "status": "preview",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "safe",
+            "source_command": str(spec.get("command", "")).strip() or f"/task {label} | analysis-review",
+            "payload": payload,
+            "next_step": f"/task {label}",
+            "remediation": remediation,
+                "outcome": {
+                    "kind": "task_review",
+                "status": "preview",
+                "reason_code": str(blocker.get("reason_code", "")).strip() or "task_review",
+                "detail": blocker_summary,
+            },
+            "task": {
+                "request_id": request_id,
+                "label": label,
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+            "worker_record_rows": row_detail,
+            "worker_preflight_rows": preflight_detail,
+            "worker_blocker": blocker_summary,
+            "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
+            "worker_recommended_action": str(blocker.get("suggested_action", "")).strip().lower() or "task_review",
+            "preview": {
+                "kind": "task_review",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+                "worker_module": str(task.get("background_run_task_contract_module_summary", "")).strip() or "-",
+                "task_contract_summary": str(task.get("background_run_task_contract_summary", "")).strip() or "-",
+                "worker_gate": str(task.get("background_run_worker_gate_summary", "")).strip() or "-",
+                "worker_profile": str(task.get("background_run_worker_profile_summary", "")).strip() or "-",
+                "worker_checklist": str(task.get("background_run_worker_checklist_summary", "")).strip() or "-",
+            },
+        },
+        status=200,
     )
 
 
