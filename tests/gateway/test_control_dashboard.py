@@ -4167,6 +4167,10 @@ def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_p
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["background_run_task_contract_module"] = "writing"
     task["background_run_task_contract_module_summary"] = "writing | writer/doc signals"
+    task["followup_brief_status"] = "preview_only"
+    task["followup_brief_summary"] = "preview_only | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
     task["background_run_worker_update_stub_status"] = "ready"
     task["background_run_worker_update_stub_summary"] = "status=ready | targets=docs/handoff/final_handoff.md | actions=1 | refs=1"
     task["background_run_worker_update_stub_targets"] = ["docs/handoff/final_handoff.md"]
@@ -4200,7 +4204,7 @@ def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_p
     runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
     apply_labels = {"Preview Artifact Apply", "Propose Artifact Apply", "Accept Artifact Apply"}
-    expected_followup_payload = '{"task_ref":"T-001","lane_ids":[]}'
+    expected_followup_payload = '{"task_ref":"T-001","lane_ids":["R1"]}'
 
     assert task_detail is not None
     assert not any(btn.label in apply_labels for btn in runtime_card.runtime_safe_action_buttons)
@@ -4289,14 +4293,15 @@ def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_p
 
     assert preview_status == 409
     assert preview_payload["outcome"]["reason_code"] == "writing_quality_open"
-    assert preview_payload["next_step"] == "/followup T-001"
+    assert preview_payload["next_step"] == "/followup T-001 lane R1"
     assert preview_payload["remediation"] == "close the document quality gate before applying writing changes"
     assert "writing_record_rows" in preview_payload["worker_record_rows"]
     assert "writing_apply_blocker | reason=writing_quality_open" in preview_payload["worker_blocker"]
     assert preview_payload["worker_recommended_action"] == "followup"
+    assert preview_payload["worker_recommended_lane_ids"] == ["R1"]
     assert propose_status == 409
     assert propose_payload["outcome"]["reason_code"] == "writing_quality_open"
-    assert propose_payload["next_step"] == "/followup T-001"
+    assert propose_payload["next_step"] == "/followup T-001 lane R1"
     assert "quality_row=open|state=open" in propose_payload["worker_record_rows"]
     assert "quality_ready=open|state=blocked" in propose_payload["worker_preflight_rows"]
 
@@ -4308,6 +4313,9 @@ def test_dashboard_and_routes_derive_writing_blocker_rows_when_missing(tmp_path:
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["background_run_task_contract_module"] = "writing"
     task["background_run_task_contract_module_summary"] = "writing | writer/doc signals"
+    task["followup_brief_summary"] = "preview_only | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
     task["background_run_worker_update_stub_status"] = "ready"
     task["background_run_worker_update_stub_summary"] = "status=ready | targets=docs/handoff/final_handoff.md | actions=1 | refs=1"
     task["background_run_worker_update_stub_targets"] = ["docs/handoff/final_handoff.md"]
@@ -4316,7 +4324,7 @@ def test_dashboard_and_routes_derive_writing_blocker_rows_when_missing(tmp_path:
     task["background_run_worker_result_actions"] = ["refresh final handoff"]
     task["background_run_worker_result_cautions"] = ["quality polish needed before handoff"]
     task["background_run_worker_result_evidence_refs"] = ["docs/style-guide.md"]
-    task["followup_brief_status"] = "draft"
+    task["followup_brief_status"] = "preview_only"
     task.pop("background_run_worker_gate_status", None)
     task.pop("background_run_worker_gate_summary", None)
     task.pop("background_run_worker_profile_status", None)
@@ -4355,7 +4363,7 @@ def test_dashboard_and_routes_derive_writing_blocker_rows_when_missing(tmp_path:
     runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
     apply_labels = {"Preview Artifact Apply", "Propose Artifact Apply", "Accept Artifact Apply"}
-    expected_followup_payload = '{"task_ref":"T-001","lane_ids":[]}'
+    expected_followup_payload = '{"task_ref":"T-001","lane_ids":["R1"]}'
 
     assert task_detail is not None
     assert not any(btn.label in apply_labels for btn in runtime_card.runtime_safe_action_buttons)
@@ -4400,8 +4408,9 @@ def test_dashboard_and_routes_derive_writing_blocker_rows_when_missing(tmp_path:
 
     assert preview_status == 409
     assert preview_payload["outcome"]["reason_code"] == "writing_quality_open"
-    assert preview_payload["next_step"] == "/followup T-001"
+    assert preview_payload["next_step"] == "/followup T-001 lane R1"
     assert preview_payload["worker_recommended_action"] == "followup"
+    assert preview_payload["worker_recommended_lane_ids"] == ["R1"]
     assert "writing_record_rows" in preview_payload["worker_record_rows"]
     assert "quality_row=open|state=open" in preview_payload["worker_record_rows"]
     assert "quality_ready=open|state=blocked" in preview_payload["worker_preflight_rows"]
@@ -4548,6 +4557,8 @@ def test_dashboard_surfaces_writing_execute_blocker_actions(tmp_path: Path) -> N
     task["background_run_task_contract_module_summary"] = "writing | writer/doc signals"
     task["followup_brief_status"] = "partially_executable"
     task["followup_brief_summary"] = "partially_executable | execution=L2 | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
     task["background_run_worker_update_stub_status"] = "ready"
     task["background_run_worker_update_stub_summary"] = "status=ready | targets=docs/handoff/final_handoff.md | actions=1 | refs=1"
     task["background_run_worker_update_stub_targets"] = ["docs/handoff/final_handoff.md"]
@@ -4580,7 +4591,7 @@ def test_dashboard_surfaces_writing_execute_blocker_actions(tmp_path: Path) -> N
     )
     runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
-    expected_execute_payload = '{"task_ref":"T-001","lane_ids":[]}'
+    expected_execute_payload = '{"task_ref":"T-001","lane_ids":["L2"]}'
 
     assert task_detail is not None
     assert any(
@@ -4618,8 +4629,9 @@ def test_dashboard_surfaces_writing_execute_blocker_actions(tmp_path: Path) -> N
     preview_payload = json.loads(preview_body.decode("utf-8"))
     assert preview_status == 409
     assert preview_payload["outcome"]["reason_code"] == "writing_quality_open"
-    assert preview_payload["next_step"] == "/followup-exec T-001"
+    assert preview_payload["next_step"] == "/followup-exec T-001 lane L2"
     assert preview_payload["worker_recommended_action"] == "followup_execute"
+    assert preview_payload["worker_recommended_lane_ids"] == ["L2"]
     assert preview_payload["remediation"] == "execute the writing follow-up and close the document quality gate before applying changes"
 
 

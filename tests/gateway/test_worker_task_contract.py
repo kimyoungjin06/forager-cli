@@ -929,11 +929,14 @@ def test_writing_apply_blocker_prefers_quality_open_reason() -> None:
                 "quality_ready=open|state=blocked|note=quality_gate",
                 "writing_ready=handoff_open|state=blocked|note=close_quality_gate",
             ],
+            "followup_brief_review_lane_ids": ["R1"],
+            "followup_brief_execution_lane_ids": ["L2"],
         },
         mode="apply",
     )
     assert blocker["reason_code"] == "writing_quality_open"
     assert blocker["suggested_action"] == "followup"
+    assert blocker["suggested_lane_ids"] == ["R1"]
     assert blocker["remediation"] == "close the document quality gate before applying writing changes"
     assert blocker["summary_line"] == (
         "writing_apply_blocker | reason=writing_quality_open | blocked=handoff_ready,quality_ready,writing_ready | next=quality_gate"
@@ -952,11 +955,14 @@ def test_writing_apply_blocker_prefers_followup_execute_when_brief_executable() 
                 "writing_ready=handoff_open|state=blocked|note=close_quality_gate",
             ],
             "followup_brief_status": "partially_executable",
+            "followup_brief_review_lane_ids": ["R1"],
+            "followup_brief_execution_lane_ids": ["L2"],
         },
         mode="apply",
     )
     assert blocker["reason_code"] == "writing_quality_open"
     assert blocker["suggested_action"] == "followup_execute"
+    assert blocker["suggested_lane_ids"] == ["L2"]
     assert blocker["remediation"] == "execute the writing follow-up and close the document quality gate before applying changes"
 
 

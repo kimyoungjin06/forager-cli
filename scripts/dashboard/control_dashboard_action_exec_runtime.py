@@ -39,6 +39,14 @@ def _now_iso() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
 
+def _worker_blocker_lane_ids(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()][:4]
+    if isinstance(value, str) and str(value).strip() not in {"", "-"}:
+        return [token.strip() for token in str(value).split(",") if token.strip()][:4]
+    return []
+
+
 def _resolve_runtime_entry(*, manager_state: Dict[str, Any], project_ref: str) -> tuple[str, Dict[str, Any]]:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     target = str(project_ref or "").strip()
@@ -351,6 +359,8 @@ def _worker_apply_not_ready_response(
         {
             **preflight_rows_payload,
             "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+            "followup_brief_execution_lane_ids": _worker_blocker_lane_ids(task.get("followup_brief_execution_lane_ids")),
+            "followup_brief_review_lane_ids": _worker_blocker_lane_ids(task.get("followup_brief_review_lane_ids")),
         },
         mode="apply",
     )
@@ -361,11 +371,16 @@ def _worker_apply_not_ready_response(
         or "worker apply gate not ready"
     )
     suggested_action = str(blocker.get("suggested_action", "")).strip().lower()
+    suggested_lane_ids = _worker_blocker_lane_ids(blocker.get("suggested_lane_ids"))
     next_step = f"/task {label}"
     if suggested_action == "followup":
         next_step = f"/followup {label}"
+        if suggested_lane_ids:
+            next_step += f" lane {','.join(suggested_lane_ids)}"
     elif suggested_action == "followup_execute":
         next_step = f"/followup-exec {label}"
+        if suggested_lane_ids:
+            next_step += f" lane {','.join(suggested_lane_ids)}"
     elif suggested_action == "judge":
         next_step = f"/orch judge {alias}"
     remediation = str(blocker.get("remediation", "")).strip() or (
@@ -400,6 +415,7 @@ def _worker_apply_not_ready_response(
             "worker_blocker": str(blocker.get("summary_line", "")).strip() or detail,
             "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
             "worker_recommended_action": suggested_action or "task_review",
+            "worker_recommended_lane_ids": suggested_lane_ids,
             "preview": {
                 "kind": "worker_apply_preview",
                 "project_alias": alias,

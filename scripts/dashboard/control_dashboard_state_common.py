@@ -716,6 +716,14 @@ def _replan_manual_route_action_button(
     return None
 
 
+def _worker_blocker_lane_ids(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()][:4]
+    if isinstance(value, str) and str(value).strip() not in {"", "-"}:
+        return [token.strip() for token in str(value).split(",") if token.strip()][:4]
+    return []
+
+
 def _worker_blocker_action_button(
     *,
     project_alias: str,
@@ -723,6 +731,8 @@ def _worker_blocker_action_button(
     request_id: str,
     task: Dict[str, Any],
     followup_brief_status_key: str = "followup_brief_status",
+    followup_brief_execution_lane_ids_key: str = "followup_brief_execution_lane_ids",
+    followup_brief_review_lane_ids_key: str = "followup_brief_review_lane_ids",
     module_key: str = "background_run_task_contract_module",
     preflight_rows_summary_key: str = "background_run_worker_preflight_rows_summary",
     preflight_rows_key: str = "background_run_worker_preflight_rows",
@@ -758,16 +768,23 @@ def _worker_blocker_action_button(
     if not list(payload.get("rows") or []):
         return None
     payload["followup_brief_status"] = str(task.get(followup_brief_status_key, "")).strip() or "-"
+    payload["followup_brief_execution_lane_ids"] = _worker_blocker_lane_ids(task.get(followup_brief_execution_lane_ids_key))
+    payload["followup_brief_review_lane_ids"] = _worker_blocker_lane_ids(task.get(followup_brief_review_lane_ids_key))
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(payload, mode="apply")
     suggested_action = str(blocker.get("suggested_action", "")).strip().lower()
+    suggested_lane_ids = _worker_blocker_lane_ids(blocker.get("suggested_lane_ids"))
     module_kind = str(payload.get("module_kind", "")).strip().lower()
     command = ""
     custom_label = ""
     if suggested_action == "followup":
         command = f"/followup {task_ref}"
+        if suggested_lane_ids:
+            command += f" lane {','.join(suggested_lane_ids)}"
         custom_label = "Resolve Writing Blocker" if module_kind == "writing" else "Resolve Worker Blocker"
     elif suggested_action == "followup_execute":
         command = f"/followup-exec {task_ref}"
+        if suggested_lane_ids:
+            command += f" lane {','.join(suggested_lane_ids)}"
         custom_label = "Resolve Writing Execute Blocker" if module_kind == "writing" else "Resolve Worker Execute Blocker"
     elif suggested_action == "task_review":
         payload_json = json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":"))

@@ -94,6 +94,8 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
         "followup_summary": task.followup_summary,
         "followup_brief_status": getattr(task, "followup_brief_status", ""),
         "followup_brief_summary": getattr(task, "followup_brief_summary", ""),
+        "followup_brief_execution_lanes": getattr(task, "followup_brief_execution_lanes", ""),
+        "followup_brief_review_lanes": getattr(task, "followup_brief_review_lanes", ""),
         "completion_contract": {
             "focus": task.completion_focus,
             "done_when": task.completion_done_when,
@@ -243,6 +245,8 @@ def build_nightly_session_summary(
                 "active_task_phase2_quality": detail.active_task_phase2_quality,
                 "active_task_followup_brief_status": detail.active_task_followup_brief_status,
                 "active_task_followup_brief_summary": detail.active_task_followup_brief_summary,
+                "active_task_followup_brief_execution_lanes": detail.active_task_followup_brief_execution_lanes,
+                "active_task_followup_brief_review_lanes": detail.active_task_followup_brief_review_lanes,
                 "active_task_context_pack_summary": detail.active_task_context_pack_summary,
                 "active_task_model_plan_summary": detail.active_task_model_plan_summary,
                 "active_task_reentry_rails_summary": detail.active_task_reentry_rails_summary,

@@ -104,6 +104,14 @@ def _trimmed_values(values: Any, *, limit: int = 8, text_limit: int = 160) -> Li
     return [token for token in _uniq(rows, limit=limit, text_limit=text_limit) if token]
 
 
+def _lane_ids(values: Any, *, limit: int = 6) -> List[str]:
+    if isinstance(values, list):
+        return [token for token in _uniq(values, limit=limit, text_limit=48) if token]
+    if isinstance(values, str):
+        return [token for token in _uniq(values.split(","), limit=limit, text_limit=48) if token]
+    return []
+
+
 def _summarize_value_series(values: List[str], *, fallback: str = "-", limit: int = 96) -> str:
     cleaned = [token for token in values if _trim(token, limit)]
     if not cleaned:
@@ -1594,6 +1602,7 @@ def sanitize_worker_task_module_action_blocker(raw: Any) -> Dict[str, Any]:
         "reason_code": _trim(source.get("reason_code"), 96) or "-",
         "next_hint": _trim(source.get("next_hint"), 96) or "-",
         "suggested_action": _trim(source.get("suggested_action"), 48).lower() or "-",
+        "suggested_lane_ids": _lane_ids(source.get("suggested_lane_ids"), limit=4),
         "remediation": _trim(source.get("remediation"), 240) or "-",
         "blocked_rows": _uniq(source.get("blocked_rows"), limit=8, text_limit=160),
     }
@@ -1630,6 +1639,14 @@ def derive_worker_task_module_action_blocker(
     safe_mode = _trim(mode, 32).lower() or "apply"
     followup_brief_status = _trim(source.get("followup_brief_status"), 64).lower()
     followup_execute_enabled = followup_brief_status in {"executable", "partially_executable"}
+    followup_execution_lane_ids = _lane_ids(
+        source.get("followup_brief_execution_lane_ids") or source.get("followup_brief_execution_lanes"),
+        limit=4,
+    )
+    followup_review_lane_ids = _lane_ids(
+        source.get("followup_brief_review_lane_ids") or source.get("followup_brief_review_lanes"),
+        limit=4,
+    )
 
     def _entry(label: str) -> Dict[str, str]:
         return row_map.get(label, {})
@@ -1650,6 +1667,7 @@ def derive_worker_task_module_action_blocker(
     reason_code = "worker_apply_not_ready"
     next_hint = "-"
     suggested_action = "task_review"
+    suggested_lane_ids: List[str] = []
     remediation = "review the blocked worker rows before applying changes"
     blocked_rows: List[str] = []
 
@@ -1712,6 +1730,11 @@ def derive_worker_task_module_action_blocker(
                 if followup_execute_enabled
                 else "complete the writing handoff checklist before applying changes"
             )
+        suggested_lane_ids = (
+            list(followup_execution_lane_ids or followup_review_lane_ids)
+            if suggested_action == "followup_execute"
+            else list(followup_review_lane_ids or followup_execution_lane_ids)
+        )
         blocked_rows = _blocked("doc_present", "handoff_ready", "quality_ready", "writing_ready")
     elif module_kind == "package":
         if safe_mode == "syncback" and _entry("syncback_ready").get("state") == "blocked":
@@ -1752,6 +1775,7 @@ def derive_worker_task_module_action_blocker(
             "reason_code": reason_code,
             "next_hint": next_hint,
             "suggested_action": suggested_action,
+            "suggested_lane_ids": suggested_lane_ids,
             "remediation": remediation,
             "blocked_rows": blocked_rows,
         }

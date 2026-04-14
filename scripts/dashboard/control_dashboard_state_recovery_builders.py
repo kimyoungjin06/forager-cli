@@ -130,6 +130,8 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 label=label,
                 request_id=request_id,
                 task=row,
+                followup_brief_execution_lane_ids_key="followup_brief_execution_lanes",
+                followup_brief_review_lane_ids_key="followup_brief_review_lanes",
             )
             if worker_blocker_button is not None and str(worker_blocker_button.mode).strip() == "phase2":
                 phase2_action_buttons = _append_unique_action_button(phase2_action_buttons, worker_blocker_button)
@@ -325,6 +327,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 request_id=active_request_id,
                 task=row,
                 followup_brief_status_key="active_task_followup_brief_status",
+                followup_brief_execution_lane_ids_key="active_task_followup_brief_execution_lanes",
+                followup_brief_review_lane_ids_key="active_task_followup_brief_review_lanes",
                 module_key="active_task_background_run_task_contract_module",
                 preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
                 preflight_rows_key="active_task_background_run_worker_preflight_rows",
@@ -440,6 +444,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 request_id=active_request_id,
                 task=row,
                 followup_brief_status_key="active_task_followup_brief_status",
+                followup_brief_execution_lane_ids_key="active_task_followup_brief_execution_lanes",
+                followup_brief_review_lane_ids_key="active_task_followup_brief_review_lanes",
                 module_key="active_task_background_run_task_contract_module",
                 preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
                 preflight_rows_key="active_task_background_run_worker_preflight_rows",
