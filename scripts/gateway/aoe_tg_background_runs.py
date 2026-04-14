@@ -593,6 +593,8 @@ def advance_background_run_ticket(
     worker_item_classes: List[Any] | None = None,
     worker_records_summary: str = "",
     worker_records: List[Any] | None = None,
+    worker_record_rows_summary: str = "",
+    worker_record_rows: List[Any] | None = None,
     worker_result_actions: List[Any] | None = None,
     worker_result_cautions: List[Any] | None = None,
     worker_result_evidence_refs: List[Any] | None = None,
@@ -653,6 +655,10 @@ def advance_background_run_ticket(
         updated["worker_records_summary"] = str(worker_records_summary or "").strip()
     if worker_records is not None:
         updated["worker_records"] = list(worker_records or [])
+    if str(worker_record_rows_summary or "").strip():
+        updated["worker_record_rows_summary"] = str(worker_record_rows_summary or "").strip()
+    if worker_record_rows is not None:
+        updated["worker_record_rows"] = list(worker_record_rows or [])
     if worker_result_actions is not None:
         updated["worker_result_actions"] = list(worker_result_actions or [])
     if worker_result_cautions is not None:

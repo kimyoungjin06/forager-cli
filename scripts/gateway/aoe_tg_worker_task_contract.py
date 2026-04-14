@@ -19,6 +19,7 @@ WORKER_TASK_MODULE_CHECKLIST_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEMS_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEM_CLASSES_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_RECORDS_VERSION = "2026-04-14.v1"
+WORKER_TASK_MODULE_RECORD_ROWS_VERSION = "2026-04-14.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -1159,6 +1160,186 @@ def worker_task_module_syncback_ready(raw: Any) -> bool:
     if row.get("module_kind") != "package" and row.get("records_kind") != "package_records":
         return True
     return worker_task_module_record_map(row).get("syncback_record") == "ready"
+
+
+def sanitize_worker_task_module_record_rows(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_RECORD_ROWS_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "rows_kind": _trim(source.get("rows_kind"), 96) or "-",
+        "rows": _uniq(source.get("rows"), limit=8, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["rows_kind"] not in {"", "-"}:
+            parts.append(row["rows_kind"])
+        parts.extend(list(row["rows"])[:4])
+        row["summary_line"] = " | ".join(parts)[:320] if parts else "-"
+    return row
+
+
+def derive_worker_task_module_record_rows(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+    checklist: Any = None,
+    items: Any = None,
+    item_classes: Any = None,
+    records: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    gate_row = (
+        sanitize_worker_task_module_gate(gate)
+        if isinstance(gate, dict)
+        else derive_worker_task_module_gate(contract_row, result_row, update_stub=update_stub)
+    )
+    profile_row = (
+        sanitize_worker_task_module_profile(profile)
+        if isinstance(profile, dict)
+        else derive_worker_task_module_profile(contract_row, result_row, update_stub=update_stub, gate=gate_row)
+    )
+    checklist_row = (
+        sanitize_worker_task_module_checklist(checklist)
+        if isinstance(checklist, dict)
+        else derive_worker_task_module_checklist(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate_row,
+            profile=profile_row,
+        )
+    )
+    items_row = (
+        sanitize_worker_task_module_items(items)
+        if isinstance(items, dict)
+        else derive_worker_task_module_items(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate_row,
+            profile=profile_row,
+            checklist=checklist_row,
+        )
+    )
+    item_classes_row = (
+        sanitize_worker_task_module_item_classes(item_classes)
+        if isinstance(item_classes, dict)
+        else derive_worker_task_module_item_classes(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate_row,
+            profile=profile_row,
+            checklist=checklist_row,
+            items=items_row,
+        )
+    )
+    records_row = (
+        sanitize_worker_task_module_records(records)
+        if isinstance(records, dict)
+        else derive_worker_task_module_records(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate_row,
+            profile=profile_row,
+            checklist=checklist_row,
+            items=items_row,
+            item_classes=item_classes_row,
+        )
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    gate_state = _trim(gate_row.get("state"), 64).lower() or "-"
+    checklist_state = _trim(checklist_row.get("state"), 64).lower() or "-"
+    record_map = worker_task_module_record_map(records_row)
+
+    def _row(label: str, value: str, state: str, *, note: str = "") -> str:
+        token = f"{label}={_trim(value, 96) or '-'}|state={_trim(state, 48) or '-'}"
+        if note:
+            token += f"|note={_trim(note, 48) or '-'}"
+        return token[:160]
+
+    if module_kind == "analysis":
+        gap_open = record_map.get("gap_record") == "evidence_missing"
+        rows = [
+            _row(
+                "finding_row",
+                record_map.get("finding_record", "-"),
+                "stable" if gate_state == "findings_stable" else "open",
+            ),
+            _row(
+                "evidence_row",
+                record_map.get("evidence_record", "-"),
+                "attached" if not gap_open else "missing",
+            ),
+        ]
+        if gap_open:
+            rows.append(_row("gap_row", "evidence_missing", "open", note=checklist_state or "review"))
+        else:
+            rows.append(
+                _row(
+                    "caveat_row",
+                    record_map.get("caveat_record", "-"),
+                    "review" if record_map.get("caveat_record", "-") not in {"", "-"} else "clear",
+                    note=checklist_state or "validate_caveats",
+                )
+            )
+        return sanitize_worker_task_module_record_rows(
+            {"module_kind": module_kind, "rows_kind": "analysis_record_rows", "rows": rows}
+        )
+
+    if module_kind == "writing":
+        quality_state = "open" if record_map.get("quality_record") == "open" else "ready"
+        handoff_state = "ready" if record_map.get("handoff_record") == "ready" else "waiting"
+        rows = [
+            _row("doc_row", record_map.get("doc_record", "-"), "present"),
+            _row("handoff_row", record_map.get("handoff_record", "-"), handoff_state, note=checklist_state or "handoff"),
+            _row("quality_row", record_map.get("quality_record", "-"), quality_state, note=checklist_state or "quality_gate"),
+        ]
+        return sanitize_worker_task_module_record_rows(
+            {"module_kind": module_kind, "rows_kind": "writing_record_rows", "rows": rows}
+        )
+
+    if module_kind == "package":
+        rows = [
+            _row("artifact_row", record_map.get("artifact_record", "-"), "present"),
+            _row(
+                "verification_row",
+                record_map.get("verification_record", "-"),
+                "ready" if record_map.get("verification_record") not in {"", "-", "0"} else "open",
+            ),
+            _row("apply_row", record_map.get("apply_record", "-"), record_map.get("apply_record", "-")),
+            _row(
+                "syncback_row",
+                record_map.get("syncback_record", "-"),
+                "ready" if record_map.get("syncback_record") == "ready" else "blocked",
+                note=checklist_state or "syncback",
+            ),
+        ]
+        return sanitize_worker_task_module_record_rows(
+            {"module_kind": module_kind, "rows_kind": "package_record_rows", "rows": rows}
+        )
+
+    rows = [
+        _row("action_row", record_map.get("action_record", "-"), "ready"),
+        _row("ref_row", record_map.get("ref_record", "-"), "attached"),
+    ]
+    return sanitize_worker_task_module_record_rows(
+        {"module_kind": module_kind, "rows_kind": "general_record_rows", "rows": rows}
+    )
+
+
+def summarize_worker_task_module_record_rows(raw: Any) -> str:
+    row = sanitize_worker_task_module_record_rows(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
 
 
 def build_worker_task_contract(

@@ -789,6 +789,15 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
         "evidence_record=reports/summary.md",
         "caveat_record=-",
     ]
+    task["background_run_worker_record_rows_summary"] = (
+        "analysis_record_rows | finding_row=update reports/summary.md|state=stable | "
+        "evidence_row=reports/summary.md|state=attached | caveat_row=-|state=clear|note=findings_stable"
+    )
+    task["background_run_worker_record_rows"] = [
+        "finding_row=update reports/summary.md|state=stable",
+        "evidence_row=reports/summary.md|state=attached",
+        "caveat_row=-|state=clear|note=findings_stable",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -883,6 +892,16 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "analysis_records | finding_record=update reports/summary.md | evidence_record=reports/summary.md | caveat_record=-" in text
     assert "background_worker_record_tokens" in text
     assert "finding_record=update reports/summary.md, evidence_record=reports/summary.md, caveat_record=-" in text
+    assert "background_worker_record_rows" in text
+    assert (
+        "analysis_record_rows | finding_row=update reports/summary.md|state=stable | evidence_row=reports/summary.md|state=attached | caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
+    assert "background_worker_record_row_tokens" in text
+    assert (
+        "finding_row=update reports/summary.md|state=stable, evidence_row=reports/summary.md|state=attached, caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
@@ -1011,6 +1030,15 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
         "evidence_record=reports/summary.md",
         "caveat_record=-",
     ]
+    task["background_run_worker_record_rows_summary"] = (
+        "analysis_record_rows | finding_row=update reports/summary.md|state=stable | "
+        "evidence_row=reports/summary.md|state=attached | caveat_row=-|state=clear|note=findings_stable"
+    )
+    task["background_run_worker_record_rows"] = [
+        "finding_row=update reports/summary.md|state=stable",
+        "evidence_row=reports/summary.md|state=attached",
+        "caveat_row=-|state=clear|note=findings_stable",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1102,6 +1130,16 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "analysis_records | finding_record=update reports/summary.md | evidence_record=reports/summary.md | caveat_record=-" in text
     assert "background_worker_record_tokens" in text
     assert "finding_record=update reports/summary.md, evidence_record=reports/summary.md, caveat_record=-" in text
+    assert "background_worker_record_rows" in text
+    assert (
+        "analysis_record_rows | finding_row=update reports/summary.md|state=stable | evidence_row=reports/summary.md|state=attached | caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
+    assert "background_worker_record_row_tokens" in text
+    assert (
+        "finding_row=update reports/summary.md|state=stable, evidence_row=reports/summary.md|state=attached, caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text

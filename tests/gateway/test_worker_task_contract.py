@@ -583,3 +583,97 @@ def test_worker_task_module_syncback_ready_returns_false_for_pending_package_rec
             ],
         }
     ) is True
+
+
+def test_analysis_module_record_rows_capture_finding_evidence_and_caveat_states() -> None:
+    rows = worker_task_contract.derive_worker_task_module_record_rows(
+        {"module_kind": "analysis"},
+        {
+            "status": "ready",
+            "summary": "analysis ready",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+        gate={"state": "findings_stable", "summary_line": "state=findings_stable"},
+        profile={"state": "findings_stable", "summary_line": "analysis_findings_profile | findings=1 | evidence=1"},
+        checklist={"state": "findings_stable", "summary_line": "analysis_checklist | next=validate_caveats"},
+        items={
+            "module_kind": "analysis",
+            "items": [
+                "finding:update docs/analysis/provider_regressions.md",
+                "evidence:logs/provider_regressions.csv",
+                "caveat:keep review lane open",
+            ],
+        },
+        item_classes={
+            "module_kind": "analysis",
+            "classes": ["finding=1", "evidence=1", "gap=0", "caveat=1"],
+        },
+        records={
+            "module_kind": "analysis",
+            "records": [
+                "finding_record=update docs/analysis/provider_regressions.md",
+                "evidence_record=logs/provider_regressions.csv",
+                "caveat_record=keep review lane open",
+            ],
+        },
+    )
+
+    assert rows["summary_line"] == (
+        "analysis_record_rows | finding_row=update docs/analysis/provider_regressions.md|state=stable | "
+        "evidence_row=logs/provider_regressions.csv|state=attached | "
+        "caveat_row=keep review lane open|state=review|note=findings_stable"
+    )
+    assert rows["rows"] == [
+        "finding_row=update docs/analysis/provider_regressions.md|state=stable",
+        "evidence_row=logs/provider_regressions.csv|state=attached",
+        "caveat_row=keep review lane open|state=review|note=findings_stable",
+    ]
+
+
+def test_writing_module_record_rows_capture_handoff_and_quality_states() -> None:
+    rows = worker_task_contract.derive_worker_task_module_record_rows(
+        {"module_kind": "writing"},
+        {
+            "status": "ready",
+            "summary": "handoff drafted",
+            "actions": ["update docs/handoff/final_handoff.md"],
+            "cautions": ["quality gate open"],
+            "evidence_refs": ["docs/handoff/final_handoff.md"],
+        },
+        gate={"state": "quality_open", "summary_line": "state=quality_open"},
+        profile={"state": "quality_open", "summary_line": "writing_handoff_profile | handoff=review | quality=open"},
+        checklist={"state": "quality_open", "summary_line": "writing_checklist | next=close_quality_gate"},
+        items={
+            "module_kind": "writing",
+            "items": [
+                "doc:docs/handoff/final_handoff.md",
+                "handoff:review",
+                "quality:open",
+            ],
+        },
+        item_classes={
+            "module_kind": "writing",
+            "classes": ["doc=1", "handoff=review", "quality=open"],
+        },
+        records={
+            "module_kind": "writing",
+            "records": [
+                "doc_record=docs/handoff/final_handoff.md",
+                "handoff_record=review",
+                "quality_record=open",
+            ],
+        },
+    )
+
+    assert rows["summary_line"] == (
+        "writing_record_rows | doc_row=docs/handoff/final_handoff.md|state=present | "
+        "handoff_row=review|state=waiting|note=quality_open | "
+        "quality_row=open|state=open|note=quality_open"
+    )
+    assert rows["rows"] == [
+        "doc_row=docs/handoff/final_handoff.md|state=present",
+        "handoff_row=review|state=waiting|note=quality_open",
+        "quality_row=open|state=open|note=quality_open",
+    ]

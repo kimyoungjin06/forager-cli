@@ -1537,6 +1537,67 @@ def handle_orch_task_command(
                     worker_record_tokens_line = (
                         "worker_record_tokens: " + ", ".join(latest_worker_record_tokens[:6])[:240] + "\n"
                     )
+                latest_worker_record_rows_summary = str(
+                    (latest_task or {}).get("background_run_worker_record_rows_summary", "")
+                ).strip()
+                if latest_worker_record_rows_summary in {"", "-"} and latest_worker_module not in {"", "-", "general"}:
+                    latest_worker_record_rows_summary = str(
+                        worker_task_contract.derive_worker_task_module_record_rows(
+                            {
+                                "module_kind": latest_worker_module,
+                                "module_policy": (latest_task or {}).get("background_run_task_contract_policy"),
+                                "artifact_targets": (latest_task or {}).get("background_run_worker_update_stub_targets"),
+                            },
+                            {
+                                "status": (latest_task or {}).get("background_run_worker_result_status"),
+                                "summary": (latest_task or {}).get("background_run_worker_result_summary"),
+                                "actions": (latest_task or {}).get("background_run_worker_result_actions"),
+                                "cautions": (latest_task or {}).get("background_run_worker_result_cautions"),
+                                "evidence_refs": (latest_task or {}).get("background_run_worker_result_evidence_refs"),
+                            },
+                            gate={
+                                "state": (latest_task or {}).get("background_run_worker_gate_status"),
+                                "summary_line": latest_worker_gate_summary,
+                            },
+                            profile={
+                                "state": (latest_task or {}).get("background_run_worker_profile_status"),
+                                "summary_line": latest_worker_profile_summary,
+                            },
+                            checklist={
+                                "state": (latest_task or {}).get("background_run_worker_checklist_status"),
+                                "summary_line": latest_worker_checklist_summary,
+                            },
+                            items={
+                                "module_kind": latest_worker_module,
+                                "items": latest_worker_item_tokens,
+                                "summary_line": latest_worker_items_summary,
+                            },
+                            item_classes={
+                                "module_kind": latest_worker_module,
+                                "classes": latest_worker_item_class_tokens,
+                                "summary_line": latest_worker_item_classes_summary,
+                            },
+                            records={
+                                "module_kind": latest_worker_module,
+                                "records": latest_worker_record_tokens,
+                                "summary_line": latest_worker_records_summary,
+                            },
+                        ).get("summary_line", "")
+                    ).strip()
+                if latest_worker_record_rows_summary not in {"", "-"}:
+                    worker_record_rows_line = f"worker_record_rows: {latest_worker_record_rows_summary[:240]}\n"
+                latest_worker_record_row_tokens = [
+                    str(item).strip()
+                    for item in (
+                        (((latest_task or {}).get("background_run_worker_record_rows")) if isinstance((latest_task or {}).get("background_run_worker_record_rows"), list) else [])
+                        or []
+                    )
+                    if str(item).strip()
+                ]
+                if latest_worker_record_row_tokens:
+                    worker_record_row_tokens_line = (
+                        "worker_record_row_tokens: " + ", ".join(latest_worker_record_row_tokens[:6])[:240] + "\n"
+                    )
                 if latest_worker_apply_accept_summary not in {"", "-"}:
                     worker_apply_accept_line = (
                         f"worker_apply_accept: {latest_worker_apply_accept_summary[:240]}\n"
@@ -1608,6 +1669,8 @@ def handle_orch_task_command(
             worker_item_class_tokens_line = ""
             worker_records_line = ""
             worker_record_tokens_line = ""
+            worker_record_rows_line = ""
+            worker_record_row_tokens_line = ""
             worker_apply_accept_line = ""
             worker_syncback_line = ""
             escalation_binding_line = ""
@@ -1672,7 +1735,7 @@ def handle_orch_task_command(
         send(
             f"runtime: {key}\nroot: {entry.get('project_root')}\nteam: {entry.get('team_dir')}\n{lock_line}last_request: {entry.get('last_request_id') or '-'}\n"
             f"active_team_count: {active_tf_count} (pending={pending_tf} running={running_tf})\n"
-            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{replan_auto_route_status_line}{manual_step_line}{canonical_writeback_line}{canonical_mutation_line}{worker_module_line}{worker_policy_line}{worker_gate_line}{worker_profile_line}{worker_checklist_line}{worker_items_line}{worker_item_tokens_line}{worker_item_classes_line}{worker_item_class_tokens_line}{worker_records_line}{worker_record_tokens_line}{worker_apply_accept_line}{worker_syncback_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
+            f"{runner_line}{runner_note_line}{run_lock_line}{run_lock_note_line}{workspace_line}{document_registry_line}{model_routing_line}{model_registry_line}{judge_binding_line}{judge_probe_line}{judge_bridge_line}{replan_auto_routing_policy_line}{replan_auto_route_status_line}{manual_step_line}{canonical_writeback_line}{canonical_mutation_line}{worker_module_line}{worker_policy_line}{worker_gate_line}{worker_profile_line}{worker_checklist_line}{worker_items_line}{worker_item_tokens_line}{worker_item_classes_line}{worker_item_class_tokens_line}{worker_records_line}{worker_record_tokens_line}{worker_record_rows_line}{worker_record_row_tokens_line}{worker_apply_accept_line}{worker_syncback_line}{escalation_binding_line}{escalation_probe_line}{slots_line}{queue_line}{scheduler_line}{worker_line}{external_line}{external_next_line}\n{status}",
             context="status",
             with_menu=False,
             reply_markup=_orch_status_reply_markup(manager_state, key, entry),

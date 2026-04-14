@@ -363,6 +363,7 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         ("worker_items_summary", 240),
         ("worker_item_classes_summary", 240),
         ("worker_records_summary", 240),
+        ("worker_record_rows_summary", 240),
         ("worker_update_stub_status", 48),
         ("worker_update_stub_summary", 240),
         ("created_at", 64),
@@ -409,6 +410,7 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         ("worker_items", 8),
         ("worker_item_classes", 8),
         ("worker_records", 8),
+        ("worker_record_rows", 8),
         ("worker_update_stub_targets", 8),
     ):
         rows = _dedupe_rows(list(raw.get(key) or []), limit=limit, text_limit=160)
@@ -1379,6 +1381,8 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_worker_item_classes": list(snapshot.get("worker_item_classes") or []),
             "background_run_worker_records_summary": snapshot.get("worker_records_summary", ""),
             "background_run_worker_records": list(snapshot.get("worker_records") or []),
+            "background_run_worker_record_rows_summary": snapshot.get("worker_record_rows_summary", ""),
+            "background_run_worker_record_rows": list(snapshot.get("worker_record_rows") or []),
             "background_run_worker_result_actions": list(snapshot.get("worker_result_actions") or []),
             "background_run_worker_result_cautions": list(snapshot.get("worker_result_cautions") or []),
             "background_run_worker_result_evidence_refs": list(snapshot.get("worker_result_evidence_refs") or []),

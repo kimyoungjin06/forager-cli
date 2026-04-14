@@ -1510,6 +1510,15 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
                 "handoff_record=review",
                 "quality_record=open",
             ],
+            "background_run_worker_record_rows_summary": (
+                "writing_record_rows | doc_row=docs/RUNBOOK.md|state=present | "
+                "handoff_row=review|state=waiting|note=quality_open | quality_row=open|state=open|note=quality_open"
+            ),
+            "background_run_worker_record_rows": [
+                "doc_row=docs/RUNBOOK.md|state=present",
+                "handoff_row=review|state=waiting|note=quality_open",
+                "quality_row=open|state=open|note=quality_open",
+            ],
             "background_run_worker_update_stub_summary": "status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1",
             "background_run_worker_update_stub_targets": ["docs/RUNBOOK.md"],
             "background_run_worker_update_proposal_summary": "status=ready | proposals=1 | ids=PROP-001 | targets=docs/RUNBOOK.md",
@@ -1536,6 +1545,14 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
     assert "background_run_worker_item_class_tokens: doc=1, handoff=review, quality=open" in summary
     assert "background_run_worker_records: writing_records | doc_record=docs/RUNBOOK.md | handoff_record=review | quality_record=open" in summary
     assert "background_run_worker_record_tokens: doc_record=docs/RUNBOOK.md, handoff_record=review, quality_record=open" in summary
+    assert (
+        "background_run_worker_record_rows: writing_record_rows | doc_row=docs/RUNBOOK.md|state=present | handoff_row=review|state=waiting|note=quality_open | quality_row=open|state=open|note=quality_open"
+        in summary
+    )
+    assert (
+        "background_run_worker_record_row_tokens: doc_row=docs/RUNBOOK.md|state=present, handoff_row=review|state=waiting|note=quality_open, quality_row=open|state=open|note=quality_open"
+        in summary
+    )
     assert "background_run_worker_actions: update docs/RUNBOOK.md" in summary
     assert "background_run_worker_update_stub: status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1" in summary
     assert "background_run_worker_targets: docs/RUNBOOK.md" in summary

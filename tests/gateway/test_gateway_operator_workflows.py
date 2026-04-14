@@ -1651,6 +1651,17 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                     "apply_record=pending",
                     "syncback_record=ready",
                 ],
+                "background_run_worker_record_rows_summary": (
+                    "package_record_rows | artifact_row=TODO.md|state=present | "
+                    "verification_row=1|state=ready | apply_row=pending|state=pending | "
+                    "syncback_row=ready|state=ready|note=syncback_clean"
+                ),
+                "background_run_worker_record_rows": [
+                    "artifact_row=TODO.md|state=present",
+                    "verification_row=1|state=ready",
+                    "apply_row=pending|state=pending",
+                    "syncback_row=ready|state=ready|note=syncback_clean",
+                ],
                 "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
             }
         },
@@ -1752,6 +1763,14 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     assert "worker_item_class_tokens: artifact=1, verification=1, integrity=ready" in text
     assert "worker_records: package_records | artifact_record=TODO.md | verification_record=1 | apply_record=pending | syncback_record=ready" in text
     assert "worker_record_tokens: artifact_record=TODO.md, verification_record=1, apply_record=pending, syncback_record=ready" in text
+    assert (
+        "worker_record_rows: package_record_rows | artifact_row=TODO.md|state=present | verification_row=1|state=ready | apply_row=pending|state=pending | syncback_row=ready|state=ready|note=syncback_clean"
+        in text
+    )
+    assert (
+        "worker_record_row_tokens: artifact_row=TODO.md|state=present, verification_row=1|state=ready, apply_row=pending|state=pending, syncback_row=ready|state=ready|note=syncback_clean"
+        in text
+    )
     assert (
         "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00"
         in text
