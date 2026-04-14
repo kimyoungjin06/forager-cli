@@ -595,6 +595,8 @@ def advance_background_run_ticket(
     worker_records: List[Any] | None = None,
     worker_record_rows_summary: str = "",
     worker_record_rows: List[Any] | None = None,
+    worker_record_set_summary: str = "",
+    worker_record_set: List[Any] | None = None,
     worker_preflight_status: str = "",
     worker_preflight_summary: str = "",
     worker_preflight_rows_summary: str = "",
@@ -663,6 +665,10 @@ def advance_background_run_ticket(
         updated["worker_record_rows_summary"] = str(worker_record_rows_summary or "").strip()
     if worker_record_rows is not None:
         updated["worker_record_rows"] = list(worker_record_rows or [])
+    if str(worker_record_set_summary or "").strip():
+        updated["worker_record_set_summary"] = str(worker_record_set_summary or "").strip()
+    if worker_record_set is not None:
+        updated["worker_record_set"] = list(worker_record_set or [])
     if str(worker_preflight_status or "").strip():
         updated["worker_preflight_status"] = str(worker_preflight_status or "").strip()
     if str(worker_preflight_summary or "").strip():

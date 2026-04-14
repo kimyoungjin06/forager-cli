@@ -301,6 +301,43 @@ def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
         "evidence_record=logs/provider_regressions.csv",
         "caveat_record=keep review lane open",
     ]
+    record_set = worker_task_contract.derive_worker_task_module_record_set(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+        records=records,
+    )
+    assert record_set["summary_line"] == "analysis_record_set | finding=1 | evidence=1 | caveat=1"
+    assert record_set["records"] == [
+        {
+            "kind": "finding",
+            "label": "update docs/analysis/provider_regressions.md",
+            "state": "stable",
+            "note": "action",
+        },
+        {
+            "kind": "evidence",
+            "label": "logs/provider_regressions.csv",
+            "state": "attached",
+            "note": "ref",
+        },
+        {
+            "kind": "caveat",
+            "label": "keep review lane open",
+            "state": "review",
+            "note": "validate_caveats",
+        },
+    ]
 
 
 def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:

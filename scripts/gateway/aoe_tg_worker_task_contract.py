@@ -19,6 +19,7 @@ WORKER_TASK_MODULE_CHECKLIST_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEMS_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEM_CLASSES_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_RECORDS_VERSION = "2026-04-14.v1"
+WORKER_TASK_MODULE_RECORD_SET_VERSION = "2026-04-15.v1"
 WORKER_TASK_MODULE_RECORD_ROWS_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_PREFLIGHT_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_PREFLIGHT_ROWS_VERSION = "2026-04-14.v1"
@@ -1183,6 +1184,300 @@ def derive_worker_task_module_records(
 
 def summarize_worker_task_module_records(raw: Any) -> str:
     row = sanitize_worker_task_module_records(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def _sanitize_worker_task_module_record_set_entry(raw: Any) -> Dict[str, str]:
+    source = raw if isinstance(raw, dict) else {}
+    if not source and str(raw or "").strip():
+        source = {"kind": "record", "label": str(raw or "").strip()}
+    row = {
+        "kind": _trim(source.get("kind"), 48).lower() or "record",
+        "label": _trim(source.get("label"), 160) or "-",
+        "state": _trim(source.get("state"), 48).lower() or "-",
+        "note": _trim(source.get("note"), 96) or "-",
+    }
+    return row
+
+
+def sanitize_worker_task_module_record_set(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    records: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for item in list(source.get("records") or [])[:8]:
+        row = _sanitize_worker_task_module_record_set_entry(item)
+        signature = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        records.append(row)
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_RECORD_SET_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "record_set_kind": _trim(source.get("record_set_kind"), 96) or "-",
+        "records": records,
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        counts: Dict[str, int] = {}
+        for item in records:
+            kind = _trim(item.get("kind"), 48).lower() or "record"
+            counts[kind] = counts.get(kind, 0) + 1
+        parts = []
+        if row["record_set_kind"] not in {"", "-"}:
+            parts.append(row["record_set_kind"])
+        for kind in (
+            "finding",
+            "evidence",
+            "gap",
+            "caveat",
+            "doc",
+            "handoff",
+            "quality",
+            "artifact",
+            "verification",
+            "apply",
+            "syncback",
+            "action",
+            "ref",
+            "record",
+        ):
+            if counts.get(kind):
+                parts.append(f"{kind}={counts[kind]}")
+        row["summary_line"] = " | ".join(parts)[:320] if parts else "-"
+    return row
+
+
+def derive_worker_task_module_record_set(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+    checklist: Any = None,
+    items: Any = None,
+    item_classes: Any = None,
+    records: Any = None,
+    record_rows: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    items_row = (
+        sanitize_worker_task_module_items(items)
+        if isinstance(items, dict)
+        else derive_worker_task_module_items(
+            contract_row,
+            result_row,
+            update_stub=stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+        )
+    )
+    item_classes_row = (
+        sanitize_worker_task_module_item_classes(item_classes)
+        if isinstance(item_classes, dict)
+        else derive_worker_task_module_item_classes(
+            contract_row,
+            result_row,
+            update_stub=stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+            items=items_row,
+        )
+    )
+    records_row = (
+        sanitize_worker_task_module_records(records)
+        if isinstance(records, dict)
+        else derive_worker_task_module_records(
+            contract_row,
+            result_row,
+            update_stub=stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+            items=items_row,
+            item_classes=item_classes_row,
+        )
+    )
+    rows_row = (
+        sanitize_worker_task_module_record_rows(record_rows)
+        if isinstance(record_rows, dict)
+        else derive_worker_task_module_record_rows(
+            contract_row,
+            result_row,
+            update_stub=stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+            items=items_row,
+            item_classes=item_classes_row,
+            records=records_row,
+        )
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    actions = _trimmed_values(result_row.get("actions"), limit=8, text_limit=160)
+    refs = _trimmed_values(result_row.get("evidence_refs"), limit=8, text_limit=160)
+    cautions = _trimmed_values(result_row.get("cautions"), limit=8, text_limit=160)
+    target_tokens = _trimmed_values((stub or {}).get("target_artifacts"), limit=8, text_limit=160)
+    class_tokens = [str(item).strip() for item in list(item_classes_row.get("classes") or []) if str(item).strip()]
+    row_tokens = [str(item).strip() for item in list(rows_row.get("rows") or []) if str(item).strip()]
+
+    def _class_value(prefix: str, fallback: str = "-") -> str:
+        for token in class_tokens:
+            if token.startswith(prefix):
+                return _trim(token.split("=", 1)[-1], 96) or fallback
+        return fallback
+
+    def _row_state(prefix: str, fallback: str = "-") -> str:
+        for token in row_tokens:
+            if token.startswith(prefix):
+                parts = token.split("|")
+                for part in parts[1:]:
+                    if part.startswith("state="):
+                        return _trim(part.split("=", 1)[-1], 48).lower() or fallback
+        return fallback
+
+    def _row_note(prefix: str, fallback: str = "-") -> str:
+        for token in row_tokens:
+            if token.startswith(prefix):
+                parts = token.split("|")
+                for part in parts[1:]:
+                    if part.startswith("note="):
+                        return _trim(part.split("=", 1)[-1], 96) or fallback
+        return fallback
+
+    record_entries: List[Dict[str, str]] = []
+
+    if module_kind == "analysis":
+        for action in actions[:4]:
+            record_entries.append(
+                {"kind": "finding", "label": _trim(action, 160) or "-", "state": _row_state("finding_row="), "note": "action"}
+            )
+        for ref in refs[:4]:
+            record_entries.append(
+                {"kind": "evidence", "label": _trim(ref, 160) or "-", "state": _row_state("evidence_row="), "note": "ref"}
+            )
+        gap_count = _class_value("gap=", "0")
+        if gap_count not in {"0", "-", ""}:
+            record_entries.append(
+                {
+                    "kind": "gap",
+                    "label": "evidence_missing",
+                    "state": _row_state("gap_row=", "open"),
+                    "note": _row_note("gap_row=", "attach_evidence"),
+                }
+            )
+        for caution in cautions[:2]:
+            record_entries.append(
+                {
+                    "kind": "caveat",
+                    "label": _trim(caution, 160) or "-",
+                    "state": _row_state("caveat_row=", "review"),
+                    "note": _row_note("caveat_row=", "validate_caveats"),
+                }
+            )
+        return sanitize_worker_task_module_record_set(
+            {
+                "module_kind": module_kind,
+                "record_set_kind": "analysis_record_set",
+                "records": record_entries,
+            }
+        )
+
+    if module_kind == "writing":
+        for target in target_tokens[:4]:
+            record_entries.append(
+                {"kind": "doc", "label": _trim(target, 160) or "-", "state": _row_state("doc_row=", "present"), "note": "document"}
+            )
+        record_entries.append(
+            {
+                "kind": "handoff",
+                "label": _class_value("handoff=", "review"),
+                "state": _row_state("handoff_row=", "waiting"),
+                "note": _row_note("handoff_row=", "handoff"),
+            }
+        )
+        record_entries.append(
+            {
+                "kind": "quality",
+                "label": _class_value("quality=", "open"),
+                "state": _row_state("quality_row=", "open"),
+                "note": _row_note("quality_row=", "quality_gate"),
+            }
+        )
+        return sanitize_worker_task_module_record_set(
+            {
+                "module_kind": module_kind,
+                "record_set_kind": "writing_record_set",
+                "records": record_entries,
+            }
+        )
+
+    if module_kind == "package":
+        for target in target_tokens[:4]:
+            record_entries.append(
+                {
+                    "kind": "artifact",
+                    "label": _trim(target, 160) or "-",
+                    "state": _row_state("artifact_row=", "present"),
+                    "note": "artifact",
+                }
+            )
+        record_entries.extend(
+            [
+                {
+                    "kind": "verification",
+                    "label": _class_value("verification=", "0"),
+                    "state": _row_state("verification_row=", "open"),
+                    "note": _row_note("verification_row=", "verification"),
+                },
+                {
+                    "kind": "apply",
+                    "label": worker_task_module_record_map(records_row).get("apply_record", "-"),
+                    "state": _row_state("apply_row=", "pending"),
+                    "note": _row_note("apply_row=", "apply_gate"),
+                },
+                {
+                    "kind": "syncback",
+                    "label": worker_task_module_record_map(records_row).get("syncback_record", "-"),
+                    "state": _row_state("syncback_row=", "blocked"),
+                    "note": _row_note("syncback_row=", "prepare_syncback"),
+                },
+            ]
+        )
+        return sanitize_worker_task_module_record_set(
+            {
+                "module_kind": module_kind,
+                "record_set_kind": "package_record_set",
+                "records": record_entries,
+            }
+        )
+
+    for action in actions[:4]:
+        record_entries.append({"kind": "action", "label": _trim(action, 160) or "-", "state": "ready", "note": "action"})
+    for ref in refs[:4]:
+        record_entries.append({"kind": "ref", "label": _trim(ref, 160) or "-", "state": "attached", "note": "ref"})
+    return sanitize_worker_task_module_record_set(
+        {
+            "module_kind": module_kind,
+            "record_set_kind": "general_record_set",
+            "records": record_entries,
+        }
+    )
+
+
+def summarize_worker_task_module_record_set(raw: Any) -> str:
+    row = sanitize_worker_task_module_record_set(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 

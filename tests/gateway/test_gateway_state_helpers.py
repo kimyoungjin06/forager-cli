@@ -1519,6 +1519,14 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
                 "handoff_row=review|state=waiting|note=quality_open",
                 "quality_row=open|state=open|note=quality_open",
             ],
+            "background_run_worker_record_set_summary": (
+                "writing_record_set | doc=1 | handoff=1 | quality=1"
+            ),
+            "background_run_worker_record_set": [
+                {"kind": "doc", "label": "docs/RUNBOOK.md", "state": "present", "note": "document"},
+                {"kind": "handoff", "label": "review", "state": "waiting", "note": "handoff"},
+                {"kind": "quality", "label": "open", "state": "open", "note": "quality_gate"},
+            ],
             "background_run_worker_preflight_summary": (
                 "writing_preflight | state=handoff_open | doc=present | handoff=waiting | quality=open | apply=blocked | next=close_quality_gate"
             ),
@@ -1565,6 +1573,11 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
     )
     assert (
         "background_run_worker_record_row_tokens: doc_row=docs/RUNBOOK.md|state=present, handoff_row=review|state=waiting|note=quality_open, quality_row=open|state=open|note=quality_open"
+        in summary
+    )
+    assert "background_run_worker_record_set: writing_record_set | doc=1 | handoff=1 | quality=1" in summary
+    assert (
+        "background_run_worker_record_set_tokens: doc:docs/RUNBOOK.md|state=present|note=document, handoff:review|state=waiting|note=handoff, quality:open|state=open|note=quality_gate"
         in summary
     )
     assert (

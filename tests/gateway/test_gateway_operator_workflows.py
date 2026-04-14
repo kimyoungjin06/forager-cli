@@ -1662,6 +1662,15 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                     "apply_row=pending|state=pending",
                     "syncback_row=ready|state=ready|note=syncback_clean",
                 ],
+                "background_run_worker_record_set_summary": (
+                    "package_record_set | artifact=1 | verification=1 | apply=1 | syncback=1"
+                ),
+                "background_run_worker_record_set": [
+                    {"kind": "artifact", "label": "TODO.md", "state": "present", "note": "artifact"},
+                    {"kind": "verification", "label": "1", "state": "ready", "note": "verification"},
+                    {"kind": "apply", "label": "pending", "state": "pending", "note": "apply_gate"},
+                    {"kind": "syncback", "label": "ready", "state": "ready", "note": "syncback_clean"},
+                ],
                 "background_run_worker_preflight_summary": (
                     "package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
                 ),
@@ -1783,6 +1792,11 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "worker_record_row_tokens: artifact_row=TODO.md|state=present, verification_row=1|state=ready, apply_row=pending|state=pending, syncback_row=ready|state=ready|note=syncback_clean"
+        in text
+    )
+    assert "worker_record_set: package_record_set | artifact=1 | verification=1 | apply=1 | syncback=1" in text
+    assert (
+        "worker_record_set_tokens: artifact:TODO.md|state=present|note=artifact, verification:1|state=ready|note=verification, apply:pending|state=pending|note=apply_gate, syncback:ready|state=ready|note=syncback_clean"
         in text
     )
     assert (

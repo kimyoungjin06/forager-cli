@@ -799,6 +799,14 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
         "evidence_row=reports/summary.md|state=attached",
         "caveat_row=-|state=clear|note=findings_stable",
     ]
+    task["background_run_worker_record_set_summary"] = (
+        "analysis_record_set | finding=1 | evidence=1 | caveat=1"
+    )
+    task["background_run_worker_record_set"] = [
+        {"kind": "finding", "label": "update reports/summary.md", "state": "stable", "note": "action"},
+        {"kind": "evidence", "label": "reports/summary.md", "state": "attached", "note": "ref"},
+        {"kind": "caveat", "label": "keep review lane open", "state": "review", "note": "validate_caveats"},
+    ]
     task["background_run_worker_preflight_summary"] = (
         "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
     )
@@ -915,6 +923,13 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "background_worker_record_row_tokens" in text
     assert (
         "finding_row=update reports/summary.md|state=stable, evidence_row=reports/summary.md|state=attached, caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
+    assert "background_worker_record_set" in text
+    assert "analysis_record_set | finding=1 | evidence=1 | caveat=1" in text
+    assert "background_worker_record_set_tokens" in text
+    assert (
+        "finding:update reports/summary.md|state=stable|note=action, evidence:reports/summary.md|state=attached|note=ref, caveat:keep review lane open|state=review|note=validate_caveats"
         in text
     )
     assert "background_worker_preflight" in text
@@ -1069,6 +1084,14 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
         "evidence_row=reports/summary.md|state=attached",
         "caveat_row=-|state=clear|note=findings_stable",
     ]
+    task["background_run_worker_record_set_summary"] = (
+        "analysis_record_set | finding=1 | evidence=1 | caveat=1"
+    )
+    task["background_run_worker_record_set"] = [
+        {"kind": "finding", "label": "update reports/summary.md", "state": "stable", "note": "action"},
+        {"kind": "evidence", "label": "reports/summary.md", "state": "attached", "note": "ref"},
+        {"kind": "caveat", "label": "keep review lane open", "state": "review", "note": "validate_caveats"},
+    ]
     task["background_run_worker_preflight_summary"] = (
         "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
     )
@@ -1182,6 +1205,13 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "background_worker_record_row_tokens" in text
     assert (
         "finding_row=update reports/summary.md|state=stable, evidence_row=reports/summary.md|state=attached, caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
+    assert "background_worker_record_set" in text
+    assert "analysis_record_set | finding=1 | evidence=1 | caveat=1" in text
+    assert "background_worker_record_set_tokens" in text
+    assert (
+        "finding:update reports/summary.md|state=stable|note=action, evidence:reports/summary.md|state=attached|note=ref, caveat:keep review lane open|state=review|note=validate_caveats"
         in text
     )
     assert "background_worker_preflight" in text

@@ -260,6 +260,8 @@ def dispatch_claimed_background_ticket_via_adapter(
             worker_records=list(provider_invoke_result.get("task_records") or []),
             worker_record_rows_summary=str(provider_invoke_result.get("task_record_rows_summary", "")).strip(),
             worker_record_rows=list(provider_invoke_result.get("task_record_rows") or []),
+            worker_record_set_summary=str(provider_invoke_result.get("task_record_set_summary", "")).strip(),
+            worker_record_set=list(provider_invoke_result.get("task_record_set") or []),
             worker_preflight_status=str(provider_invoke_result.get("task_preflight_status", "")).strip(),
             worker_preflight_summary=str(provider_invoke_result.get("task_preflight_summary", "")).strip(),
             worker_preflight_rows_summary=str(provider_invoke_result.get("task_preflight_rows_summary", "")).strip(),

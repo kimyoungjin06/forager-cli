@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from pathlib import Path
 import shlex
 import sys
@@ -70,6 +71,26 @@ def _dedupe_rows(rows: List[Any], *, limit: int = 8, text_limit: int = 160) -> L
         token = _trim(item, text_limit)
         if token and token not in out:
             out.append(token)
+    return out[: max(1, int(limit))]
+
+
+def _dedupe_structured_rows(rows: List[Any], *, limit: int = 8) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        row = {
+            "kind": _trim(item.get("kind", ""), 48) or "record",
+            "label": _trim(item.get("label", ""), 160) or "-",
+            "state": _trim(item.get("state", ""), 48) or "-",
+            "note": _trim(item.get("note", ""), 96) or "-",
+        }
+        signature = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        out.append(row)
     return out[: max(1, int(limit))]
 
 
@@ -364,6 +385,7 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         ("worker_item_classes_summary", 240),
         ("worker_records_summary", 240),
         ("worker_record_rows_summary", 240),
+        ("worker_record_set_summary", 240),
         ("worker_preflight_status", 64),
         ("worker_preflight_summary", 240),
         ("worker_preflight_rows_summary", 240),
@@ -420,6 +442,10 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         rows = _dedupe_rows(list(raw.get(key) or []), limit=limit, text_limit=160)
         if rows:
             snapshot[key] = rows
+
+    record_set = _dedupe_structured_rows(list(raw.get("worker_record_set") or []), limit=8)
+    if record_set:
+        snapshot["worker_record_set"] = record_set
 
     launch_spec = normalize_background_launch_spec_snapshot(raw.get("launch_spec"))
     if launch_spec:
@@ -1387,6 +1413,8 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_worker_records": list(snapshot.get("worker_records") or []),
             "background_run_worker_record_rows_summary": snapshot.get("worker_record_rows_summary", ""),
             "background_run_worker_record_rows": list(snapshot.get("worker_record_rows") or []),
+            "background_run_worker_record_set_summary": snapshot.get("worker_record_set_summary", ""),
+            "background_run_worker_record_set": list(snapshot.get("worker_record_set") or []),
             "background_run_worker_preflight_status": snapshot.get("worker_preflight_status", ""),
             "background_run_worker_preflight_summary": snapshot.get("worker_preflight_summary", ""),
             "background_run_worker_preflight_rows_summary": snapshot.get("worker_preflight_rows_summary", ""),
