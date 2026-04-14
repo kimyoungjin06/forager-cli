@@ -920,6 +920,26 @@ def test_writing_apply_blocker_prefers_quality_open_reason() -> None:
     )
 
 
+def test_writing_apply_blocker_prefers_followup_execute_when_brief_executable() -> None:
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            "module_kind": "writing",
+            "rows_kind": "writing_preflight_rows",
+            "rows": [
+                "doc_present=present|state=ready|note=document",
+                "handoff_ready=waiting|state=blocked|note=handoff",
+                "quality_ready=open|state=blocked|note=quality_gate",
+                "writing_ready=handoff_open|state=blocked|note=close_quality_gate",
+            ],
+            "followup_brief_status": "partially_executable",
+        },
+        mode="apply",
+    )
+    assert blocker["reason_code"] == "writing_quality_open"
+    assert blocker["suggested_action"] == "followup_execute"
+    assert blocker["remediation"] == "execute the writing follow-up and close the document quality gate before applying changes"
+
+
 def test_package_syncback_blocker_prefers_syncback_pending_reason() -> None:
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(
         {

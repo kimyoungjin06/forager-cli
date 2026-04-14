@@ -478,6 +478,60 @@ def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir:
     followup_summary = str(task.get("followup_summary", "")).strip() or (
         str(task.get("followup_brief_summary", "")).strip() or "followup=none"
     )
+    worker_preflight_rows = (
+        [str(item).strip() for item in (task.get("background_run_worker_preflight_rows") or []) if str(item).strip()]
+        if isinstance(task.get("background_run_worker_preflight_rows"), list)
+        else []
+    )
+    if not worker_preflight_rows:
+        contract = {
+            "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+            "module_policy": task.get("background_run_task_contract_policy"),
+            "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+        }
+        result = {
+            "status": task.get("background_run_worker_result_status"),
+            "summary": task.get("background_run_worker_result_summary"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        }
+        derived_preflight_rows = worker_task_contract.derive_worker_task_module_preflight_rows(
+            contract,
+            result,
+            gate={
+                "state": task.get("background_run_worker_gate_status"),
+                "summary_line": task.get("background_run_worker_gate_summary"),
+            },
+            profile={
+                "state": task.get("background_run_worker_profile_status"),
+                "summary_line": task.get("background_run_worker_profile_summary"),
+            },
+            checklist={
+                "state": task.get("background_run_worker_checklist_status"),
+                "summary_line": task.get("background_run_worker_checklist_summary"),
+            },
+            record_rows={
+                "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+                "rows": task.get("background_run_worker_record_rows") if isinstance(task.get("background_run_worker_record_rows"), list) else [],
+                "summary_line": str(task.get("background_run_worker_record_rows_summary", "")).strip() or "-",
+            },
+            preflight={
+                "state": task.get("background_run_worker_preflight_status"),
+                "summary_line": str(task.get("background_run_worker_preflight_summary", "")).strip() or "-",
+            },
+        )
+        worker_preflight_rows = [str(item).strip() for item in (derived_preflight_rows.get("rows") or []) if str(item).strip()]
+    worker_blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+            "rows_kind": str(task.get("background_run_worker_preflight_rows_summary", "")).strip().split(" | ", 1)[0] or "",
+            "rows": worker_preflight_rows,
+            "summary_line": str(task.get("background_run_worker_preflight_rows_summary", "")).strip() or "-",
+            "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+        },
+        mode="apply",
+    )
     payload = {
         "runtime": alias,
         "project": project_name,
@@ -495,6 +549,14 @@ def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir:
         "context_pack_profile": str(pack.get("profile", "")).strip() or "-",
         "context_pack_docs": str(pack.get("docs_summary", "")).strip() or "-",
         "context_pack_excluded": str(pack.get("excluded_summary", "")).strip() or "-",
+        "worker_module": str(task.get("background_run_task_contract_module_summary", "")).strip() or "-",
+        "worker_gate": str(task.get("background_run_worker_gate_summary", "")).strip() or "-",
+        "worker_profile": str(task.get("background_run_worker_profile_summary", "")).strip() or "-",
+        "worker_checklist": str(task.get("background_run_worker_checklist_summary", "")).strip() or "-",
+        "worker_record_rows": str(task.get("background_run_worker_record_rows_summary", "")).strip() or "-",
+        "worker_preflight_rows": str(task.get("background_run_worker_preflight_rows_summary", "")).strip() or "-",
+        "worker_blocker": str(worker_blocker.get("summary_line", "")).strip() or "-",
+        "worker_blocked_rows": list(worker_blocker.get("blocked_rows") or []),
     }
     return (
         "Review the runtime and task state below and decide whether the operator should continue, "

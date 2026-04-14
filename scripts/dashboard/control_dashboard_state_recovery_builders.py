@@ -125,15 +125,16 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 _worker_apply_syncback_preview_button(project_alias=project_alias),
             )
         elif not worker_apply_applied:
-            safe_action_buttons = _append_unique_action_button(
-                safe_action_buttons,
-                _worker_blocker_action_button(
-                    project_alias=project_alias,
-                    label=label,
-                    request_id=request_id,
-                    task=row,
-                ),
+            worker_blocker_button = _worker_blocker_action_button(
+                project_alias=project_alias,
+                label=label,
+                request_id=request_id,
+                task=row,
             )
+            if worker_blocker_button is not None and str(worker_blocker_button.mode).strip() == "phase2":
+                phase2_action_buttons = _append_unique_action_button(phase2_action_buttons, worker_blocker_button)
+            else:
+                safe_action_buttons = _append_unique_action_button(safe_action_buttons, worker_blocker_button)
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(
@@ -318,27 +319,35 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 _worker_apply_syncback_preview_button(project_alias=alias),
             )
         elif not runtime_worker_apply_applied:
-            runtime_safe_action_buttons = _append_unique_action_button(
-                runtime_safe_action_buttons,
-                _worker_blocker_action_button(
-                    project_alias=alias,
-                    label=str(row.get("active_task_label", "")).strip(),
-                    request_id=active_request_id,
-                    task=row,
-                    module_key="active_task_background_run_task_contract_module",
-                    preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
-                    preflight_rows_key="active_task_background_run_worker_preflight_rows",
-                    preflight_summary_key="active_task_background_run_worker_preflight_summary",
-                    preflight_status_key="active_task_background_run_worker_preflight_status",
-                    record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
-                    record_rows_key="active_task_background_run_worker_record_rows",
-                    result_status_key="active_task_background_run_worker_result_status",
-                    result_summary_key="active_task_background_run_worker_result_summary",
-                    result_actions_key="active_task_background_run_worker_result_actions",
-                    result_cautions_key="active_task_background_run_worker_result_cautions",
-                    result_evidence_refs_key="active_task_background_run_worker_result_evidence_refs",
-                ),
+            runtime_worker_blocker_button = _worker_blocker_action_button(
+                project_alias=alias,
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                task=row,
+                followup_brief_status_key="active_task_followup_brief_status",
+                module_key="active_task_background_run_task_contract_module",
+                preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
+                preflight_rows_key="active_task_background_run_worker_preflight_rows",
+                preflight_summary_key="active_task_background_run_worker_preflight_summary",
+                preflight_status_key="active_task_background_run_worker_preflight_status",
+                record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
+                record_rows_key="active_task_background_run_worker_record_rows",
+                result_status_key="active_task_background_run_worker_result_status",
+                result_summary_key="active_task_background_run_worker_result_summary",
+                result_actions_key="active_task_background_run_worker_result_actions",
+                result_cautions_key="active_task_background_run_worker_result_cautions",
+                result_evidence_refs_key="active_task_background_run_worker_result_evidence_refs",
             )
+            if runtime_worker_blocker_button is not None and str(runtime_worker_blocker_button.mode).strip() == "phase2":
+                runtime_phase2_action_buttons = _append_unique_action_button(
+                    runtime_phase2_action_buttons,
+                    runtime_worker_blocker_button,
+                )
+            else:
+                runtime_safe_action_buttons = _append_unique_action_button(
+                    runtime_safe_action_buttons,
+                    runtime_worker_blocker_button,
+                )
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
@@ -425,27 +434,35 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 _worker_apply_syncback_preview_button(project_alias=alias),
             )
         elif not runtime_worker_apply_applied:
-            active_task_safe_action_buttons = _append_unique_action_button(
-                active_task_safe_action_buttons,
-                _worker_blocker_action_button(
-                    project_alias=alias,
-                    label=str(row.get("active_task_label", "")).strip(),
-                    request_id=active_request_id,
-                    task=row,
-                    module_key="active_task_background_run_task_contract_module",
-                    preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
-                    preflight_rows_key="active_task_background_run_worker_preflight_rows",
-                    preflight_summary_key="active_task_background_run_worker_preflight_summary",
-                    preflight_status_key="active_task_background_run_worker_preflight_status",
-                    record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
-                    record_rows_key="active_task_background_run_worker_record_rows",
-                    result_status_key="active_task_background_run_worker_result_status",
-                    result_summary_key="active_task_background_run_worker_result_summary",
-                    result_actions_key="active_task_background_run_worker_result_actions",
-                    result_cautions_key="active_task_background_run_worker_result_cautions",
-                    result_evidence_refs_key="active_task_background_run_worker_result_evidence_refs",
-                ),
+            active_task_worker_blocker_button = _worker_blocker_action_button(
+                project_alias=alias,
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                task=row,
+                followup_brief_status_key="active_task_followup_brief_status",
+                module_key="active_task_background_run_task_contract_module",
+                preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
+                preflight_rows_key="active_task_background_run_worker_preflight_rows",
+                preflight_summary_key="active_task_background_run_worker_preflight_summary",
+                preflight_status_key="active_task_background_run_worker_preflight_status",
+                record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
+                record_rows_key="active_task_background_run_worker_record_rows",
+                result_status_key="active_task_background_run_worker_result_status",
+                result_summary_key="active_task_background_run_worker_result_summary",
+                result_actions_key="active_task_background_run_worker_result_actions",
+                result_cautions_key="active_task_background_run_worker_result_cautions",
+                result_evidence_refs_key="active_task_background_run_worker_result_evidence_refs",
             )
+            if active_task_worker_blocker_button is not None and str(active_task_worker_blocker_button.mode).strip() == "phase2":
+                active_task_phase2_action_buttons = _append_unique_action_button(
+                    active_task_phase2_action_buttons,
+                    active_task_worker_blocker_button,
+                )
+            else:
+                active_task_safe_action_buttons = _append_unique_action_button(
+                    active_task_safe_action_buttons,
+                    active_task_worker_blocker_button,
+                )
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
             _worker_update_preview_button(

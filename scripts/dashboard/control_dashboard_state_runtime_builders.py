@@ -855,15 +855,22 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 _worker_apply_syncback_preview_button(project_alias=alias),
             )
         elif not worker_apply_applied:
-            runtime_safe_action_buttons = _append_unique_action_button(
-                runtime_safe_action_buttons,
-                _worker_blocker_action_button(
-                    project_alias=alias,
-                    label=str(row.get("active_task_label", "")).strip(),
-                    request_id=active_request_id,
-                    task=active_task or {},
-                ),
+            runtime_worker_blocker_button = _worker_blocker_action_button(
+                project_alias=alias,
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+                task=active_task or {},
             )
+            if runtime_worker_blocker_button is not None and str(runtime_worker_blocker_button.mode).strip() == "phase2":
+                runtime_phase2_action_buttons = _append_unique_action_button(
+                    runtime_phase2_action_buttons,
+                    runtime_worker_blocker_button,
+                )
+            else:
+                runtime_safe_action_buttons = _append_unique_action_button(
+                    runtime_safe_action_buttons,
+                    runtime_worker_blocker_button,
+                )
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
             _worker_update_preview_button(
@@ -1491,15 +1498,22 @@ def _build_runtime_detail(
             _worker_apply_syncback_preview_button(project_alias=target_alias),
         )
     elif not worker_apply_applied:
-        active_task_safe_action_buttons = _append_unique_action_button(
-            active_task_safe_action_buttons,
-            _worker_blocker_action_button(
-                project_alias=target_alias,
-                label=str(row.get("active_task_label", "")).strip(),
-                request_id=active_request_id,
-                task=active_task or {},
-            ),
+        active_task_worker_blocker_button = _worker_blocker_action_button(
+            project_alias=target_alias,
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+            task=active_task or {},
         )
+        if active_task_worker_blocker_button is not None and str(active_task_worker_blocker_button.mode).strip() == "phase2":
+            active_task_phase2_action_buttons = _append_unique_action_button(
+                active_task_phase2_action_buttons,
+                active_task_worker_blocker_button,
+            )
+        else:
+            active_task_safe_action_buttons = _append_unique_action_button(
+                active_task_safe_action_buttons,
+                active_task_worker_blocker_button,
+            )
     active_task_safe_action_buttons = _append_unique_action_button(
         active_task_safe_action_buttons,
         _worker_update_preview_button(

@@ -21,6 +21,7 @@ import aoe_tg_action_audit as action_audit  # noqa: E402
 import aoe_tg_background_runs as background_runs  # noqa: E402
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter  # noqa: E402
 import aoe_tg_operator_summary as operator_summary  # noqa: E402
+import aoe_tg_orch_task_handlers as orch_task_handlers  # noqa: E402
 from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
@@ -4415,6 +4416,119 @@ def test_dashboard_surfaces_analysis_blocker_judge_actions(tmp_path: Path) -> No
     assert preview_payload["outcome"]["reason_code"] == "analysis_evidence_missing"
     assert preview_payload["next_step"] == "/orch judge O2"
     assert preview_payload["worker_recommended_action"] == "judge"
+
+
+def test_dashboard_surfaces_writing_execute_blocker_actions(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "writing"
+    task["background_run_task_contract_module_summary"] = "writing | writer/doc signals"
+    task["followup_brief_status"] = "partially_executable"
+    task["followup_brief_summary"] = "partially_executable | execution=L2 | review=R1"
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=docs/handoff/final_handoff.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["docs/handoff/final_handoff.md"]
+    task["background_run_worker_record_rows_summary"] = (
+        "writing_record_rows | doc_row=docs/handoff/final_handoff.md|state=present | "
+        "handoff_row=review|state=waiting|note=quality_open | quality_row=open|state=open|note=quality_open"
+    )
+    task["background_run_worker_record_rows"] = [
+        "doc_row=docs/handoff/final_handoff.md|state=present",
+        "handoff_row=review|state=waiting|note=quality_open",
+        "quality_row=open|state=open|note=quality_open",
+    ]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        request_id="REQ-1",
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    expected_execute_payload = '{"task_ref":"T-001","lane_ids":[]}'
+
+    assert task_detail is not None
+    assert any(
+        btn.label == "Resolve Writing Execute Blocker"
+        and btn.path == "/control/actions/task/followup-execute"
+        and btn.payload_json == expected_execute_payload
+        for btn in runtime_card.runtime_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Resolve Writing Execute Blocker"
+        and btn.path == "/control/actions/task/followup-execute"
+        and btn.payload_json == expected_execute_payload
+        for btn in runtime_detail.active_task_phase2_action_buttons
+    )
+    assert any(
+        btn.label == "Resolve Writing Execute Blocker"
+        and btn.path == "/control/actions/task/followup-execute"
+        and btn.payload_json == expected_execute_payload
+        for btn in task_detail.phase2_action_buttons
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    assert preview_status == 409
+    assert preview_payload["outcome"]["reason_code"] == "writing_quality_open"
+    assert preview_payload["next_step"] == "/followup-exec T-001"
+    assert preview_payload["worker_recommended_action"] == "followup_execute"
+    assert preview_payload["remediation"] == "execute the writing follow-up and close the document quality gate before applying changes"
+
+
+def test_offdesk_judge_prompt_includes_worker_blocker_context(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    entry = state["projects"]["alpha"]
+    task = entry["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "analysis"
+    task["background_run_task_contract_module_summary"] = "analysis | analysis/review signals"
+    task["background_run_worker_gate_summary"] = "state=evidence_missing | refs=0"
+    task["background_run_worker_profile_summary"] = "analysis_findings_profile | findings=1 | evidence=0 | gaps=1"
+    task["background_run_worker_checklist_summary"] = "analysis_checklist | findings=1,evidence=0,gaps=1 | next=attach_evidence"
+    task["background_run_worker_record_rows_summary"] = (
+        "analysis_record_rows | finding_row=summary|state=stable | "
+        "evidence_row=missing|state=missing|note=attach_evidence | gap_row=open|state=open|note=attach_evidence"
+    )
+    task["background_run_worker_record_rows"] = [
+        "finding_row=summary|state=stable",
+        "evidence_row=missing|state=missing|note=attach_evidence",
+        "gap_row=open|state=open|note=attach_evidence",
+    ]
+
+    prompt = orch_task_handlers._offdesk_judge_prompt(entry, task, Path(entry["team_dir"]))
+
+    assert '"worker_module": "analysis | analysis/review signals"' in prompt
+    assert '"worker_record_rows": "analysis_record_rows | finding_row=summary|state=stable | evidence_row=missing|state=missing|note=attach_evidence | gap_row=open|state=open|note=attach_evidence"' in prompt
+    assert '"worker_blocker": "analysis_apply_blocker | reason=analysis_evidence_missing' in prompt
+    assert '"worker_blocked_rows": [' in prompt
 
 
 def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(tmp_path: Path) -> None:

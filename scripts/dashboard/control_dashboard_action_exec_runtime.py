@@ -242,7 +242,10 @@ def _worker_apply_not_ready_response(
     preflight_rows_detail = str(preflight_rows_payload.get("summary_line", "")).strip()
     row_detail = str(task.get("background_run_worker_record_rows_summary", "")).strip()
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(
-        preflight_rows_payload,
+        {
+            **preflight_rows_payload,
+            "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+        },
         mode="apply",
     )
     detail = (
@@ -255,6 +258,8 @@ def _worker_apply_not_ready_response(
     next_step = f"/task {label}"
     if suggested_action == "followup":
         next_step = f"/followup {label}"
+    elif suggested_action == "followup_execute":
+        next_step = f"/followup-exec {label}"
     elif suggested_action == "judge":
         next_step = f"/orch judge {alias}"
     remediation = str(blocker.get("remediation", "")).strip() or (

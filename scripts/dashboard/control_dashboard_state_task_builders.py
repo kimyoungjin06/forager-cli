@@ -858,15 +858,16 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 _worker_apply_syncback_preview_button(project_alias=alias),
             )
         elif not worker_apply_applied:
-            safe_action_buttons = _append_unique_action_button(
-                safe_action_buttons,
-                _worker_blocker_action_button(
-                    project_alias=alias,
-                    label=task_view.task_display_label(task, fallback_request_id=rid),
-                    request_id=rid,
-                    task=task,
-                ),
+            worker_blocker_button = _worker_blocker_action_button(
+                project_alias=alias,
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
+                task=task,
             )
+            if worker_blocker_button is not None and str(worker_blocker_button.mode).strip() == "phase2":
+                phase2_action_buttons = _append_unique_action_button(phase2_action_buttons, worker_blocker_button)
+            else:
+                safe_action_buttons = _append_unique_action_button(safe_action_buttons, worker_blocker_button)
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
             _worker_update_preview_button(

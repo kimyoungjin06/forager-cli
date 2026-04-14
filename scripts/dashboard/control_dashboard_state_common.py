@@ -616,6 +616,7 @@ def _worker_blocker_action_button(
     label: str,
     request_id: str,
     task: Dict[str, Any],
+    followup_brief_status_key: str = "followup_brief_status",
     module_key: str = "background_run_task_contract_module",
     preflight_rows_summary_key: str = "background_run_worker_preflight_rows_summary",
     preflight_rows_key: str = "background_run_worker_preflight_rows",
@@ -650,6 +651,7 @@ def _worker_blocker_action_button(
     )
     if not list(payload.get("rows") or []):
         return None
+    payload["followup_brief_status"] = str(task.get(followup_brief_status_key, "")).strip() or "-"
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(payload, mode="apply")
     suggested_action = str(blocker.get("suggested_action", "")).strip().lower()
     module_kind = str(payload.get("module_kind", "")).strip().lower()
@@ -658,6 +660,9 @@ def _worker_blocker_action_button(
     if suggested_action == "followup":
         command = f"/followup {task_ref}"
         custom_label = "Resolve Writing Blocker" if module_kind == "writing" else "Resolve Worker Blocker"
+    elif suggested_action == "followup_execute":
+        command = f"/followup-exec {task_ref}"
+        custom_label = "Resolve Writing Execute Blocker" if module_kind == "writing" else "Resolve Worker Execute Blocker"
     elif suggested_action == "judge" and alias:
         command = f"/orch judge {alias}"
         custom_label = "Resolve Analysis Blocker" if module_kind == "analysis" else "Resolve Worker Blocker"
