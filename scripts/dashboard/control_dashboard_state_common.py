@@ -236,6 +236,52 @@ def _worker_syncback_ready(
     return module_kind != "package"
 
 
+def _worker_record_rows_payload(
+    task: Dict[str, Any],
+    *,
+    module_key: str = "background_run_task_contract_module",
+    record_rows_summary_key: str = "background_run_worker_record_rows_summary",
+    record_rows_key: str = "background_run_worker_record_rows",
+) -> Dict[str, Any]:
+    module_kind = str(task.get(module_key, "")).strip().lower() or "general"
+    rows_summary = str(task.get(record_rows_summary_key, "")).strip()
+    rows_kind = ""
+    if rows_summary not in {"", "-"}:
+        rows_kind = rows_summary.split(" | ", 1)[0].strip()
+    raw_rows = task.get(record_rows_key)
+    row_tokens: List[str] = []
+    if isinstance(raw_rows, list):
+        row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
+    elif isinstance(raw_rows, str):
+        row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
+    elif rows_summary not in {"", "-"}:
+        row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
+    return {
+        "module_kind": module_kind,
+        "rows_kind": rows_kind or f"{module_kind}_record_rows",
+        "rows": row_tokens,
+        "summary_line": rows_summary or "-",
+    }
+
+
+def _worker_apply_ready(
+    task: Dict[str, Any],
+    *,
+    module_key: str = "background_run_task_contract_module",
+    record_rows_summary_key: str = "background_run_worker_record_rows_summary",
+    record_rows_key: str = "background_run_worker_record_rows",
+) -> bool:
+    payload = _worker_record_rows_payload(
+        task,
+        module_key=module_key,
+        record_rows_summary_key=record_rows_summary_key,
+        record_rows_key=record_rows_key,
+    )
+    if list(payload.get("rows") or []):
+        return worker_task_contract.worker_task_module_apply_ready(payload)
+    return True
+
+
 def _completion_contract_for_preset(raw: Any) -> Dict[str, str]:
     return orch_contract.preset_completion_contract(raw)
 

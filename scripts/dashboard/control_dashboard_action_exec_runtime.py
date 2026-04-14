@@ -113,6 +113,83 @@ def _worker_syncback_ready(task: Dict[str, Any]) -> bool:
     return module_kind != "package"
 
 
+def _worker_record_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower() or "general"
+    rows_summary = str(task.get("background_run_worker_record_rows_summary", "")).strip()
+    rows_kind = ""
+    if rows_summary not in {"", "-"}:
+        rows_kind = rows_summary.split(" | ", 1)[0].strip()
+    raw_rows = task.get("background_run_worker_record_rows")
+    row_tokens: list[str] = []
+    if isinstance(raw_rows, list):
+        row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
+    elif isinstance(raw_rows, str):
+        row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
+    elif rows_summary not in {"", "-"}:
+        row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
+    return {
+        "module_kind": module_kind,
+        "rows_kind": rows_kind or f"{module_kind}_record_rows",
+        "rows": row_tokens,
+        "summary_line": rows_summary or "-",
+    }
+
+
+def _worker_apply_ready(task: Dict[str, Any]) -> bool:
+    payload = _worker_record_rows_payload(task)
+    if list(payload.get("rows") or []):
+        return worker_task_contract.worker_task_module_apply_ready(payload)
+    return True
+
+
+def _worker_apply_not_ready_response(
+    *,
+    spec: Dict[str, object],
+    alias: str,
+    payload: Dict[str, Any],
+    task: Dict[str, Any],
+    label: str,
+    request_id: str,
+    mode: str,
+    outcome_kind: str,
+) -> Tuple[int, Dict[str, str], bytes]:
+    detail = str(task.get("background_run_worker_record_rows_summary", "")).strip() or "worker apply gate not ready"
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "blocked",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": mode,
+            "source_command": str(spec.get("command", "")).strip() or f"/task {label} | worker-apply-preview",
+            "payload": payload,
+            "next_step": f"/task {label}",
+            "remediation": "wait until the module-specific worker gate reports apply-ready rows before promoting or accepting artifact apply",
+            "outcome": {
+                "kind": outcome_kind,
+                "status": "blocked",
+                "reason_code": "worker_apply_not_ready",
+                "detail": detail,
+            },
+            "task": {
+                "request_id": request_id,
+                "label": label,
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+            "worker_record_rows": detail,
+            "preview": {
+                "kind": "worker_apply_preview",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+        },
+        status=409,
+    )
+
+
 def _package_syncback_not_ready_response(
     *,
     spec: Dict[str, object],
@@ -768,6 +845,17 @@ def _execute_worker_update_preview_action(spec: Dict[str, object], *, config: Da
         )
     alias = _project_alias(entry, key)
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    if not _worker_apply_ready(task):
+        return _worker_apply_not_ready_response(
+            spec=spec,
+            alias=alias,
+            payload=payload,
+            task=task,
+            label=label,
+            request_id=request_id,
+            mode=str(spec.get("mode", "")).strip() or "phase2",
+            outcome_kind="worker_apply_propose",
+        )
     update_stub = _worker_update_stub_for_task(task)
     proposal_ids = [
         str(item).strip()
@@ -887,6 +975,17 @@ def _execute_worker_apply_propose_action(spec: Dict[str, object], *, config: Das
         )
     alias = _project_alias(entry, key)
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    if not _worker_apply_ready(task):
+        return _worker_apply_not_ready_response(
+            spec=spec,
+            alias=alias,
+            payload=payload,
+            task=task,
+            label=label,
+            request_id=request_id,
+            mode=str(spec.get("mode", "")).strip() or "safe",
+            outcome_kind="worker_apply_preview",
+        )
     update_stub = _worker_update_stub_for_task(task)
     if not update_stub or str(update_stub.get("status", "")).strip().lower() in {"", "-", "none"}:
         return _json(
@@ -1067,6 +1166,17 @@ def _execute_worker_apply_preview_action(spec: Dict[str, object], *, config: Das
         )
     alias = _project_alias(entry, key)
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    if not _worker_apply_ready(task):
+        return _worker_apply_not_ready_response(
+            spec=spec,
+            alias=alias,
+            payload=payload,
+            task=task,
+            label=label,
+            request_id=request_id,
+            mode=str(spec.get("mode", "")).strip() or "phase2",
+            outcome_kind="worker_apply_accept",
+        )
     update_stub = _worker_update_stub_for_task(task)
     if not update_stub or str(update_stub.get("status", "")).strip().lower() in {"", "-", "none"}:
         return _json(

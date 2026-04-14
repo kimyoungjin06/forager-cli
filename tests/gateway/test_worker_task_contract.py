@@ -677,3 +677,80 @@ def test_writing_module_record_rows_capture_handoff_and_quality_states() -> None
         "handoff_row=review|state=waiting|note=quality_open",
         "quality_row=open|state=open|note=quality_open",
     ]
+
+
+def test_analysis_module_apply_ready_requires_stable_finding_and_attached_evidence() -> None:
+    assert worker_task_contract.worker_task_module_apply_ready(
+        {
+            "module_kind": "analysis",
+            "rows_kind": "analysis_record_rows",
+            "rows": [
+                "finding_row=update docs/analysis/provider_regressions.md|state=stable",
+                "evidence_row=logs/provider_regressions.csv|state=attached",
+                "caveat_row=keep review lane open|state=review|note=findings_stable",
+            ],
+        }
+    ) is True
+    assert worker_task_contract.worker_task_module_apply_ready(
+        {
+            "module_kind": "analysis",
+            "rows_kind": "analysis_record_rows",
+            "rows": [
+                "finding_row=update docs/analysis/provider_regressions.md|state=stable",
+                "evidence_row=-|state=missing",
+                "gap_row=evidence_missing|state=open|note=review",
+            ],
+        }
+    ) is False
+
+
+def test_writing_module_apply_ready_requires_ready_handoff_and_quality() -> None:
+    assert worker_task_contract.worker_task_module_apply_ready(
+        {
+            "module_kind": "writing",
+            "rows_kind": "writing_record_rows",
+            "rows": [
+                "doc_row=docs/handoff/final_handoff.md|state=present",
+                "handoff_row=ready|state=ready|note=handoff_ready",
+                "quality_row=ready|state=ready|note=handoff_ready",
+            ],
+        }
+    ) is True
+    assert worker_task_contract.worker_task_module_apply_ready(
+        {
+            "module_kind": "writing",
+            "rows_kind": "writing_record_rows",
+            "rows": [
+                "doc_row=docs/handoff/final_handoff.md|state=present",
+                "handoff_row=review|state=waiting|note=quality_open",
+                "quality_row=open|state=open|note=quality_open",
+            ],
+        }
+    ) is False
+
+
+def test_package_module_apply_ready_requires_verification_and_apply_ready() -> None:
+    assert worker_task_contract.worker_task_module_apply_ready(
+        {
+            "module_kind": "package",
+            "rows_kind": "package_record_rows",
+            "rows": [
+                "artifact_row=dist/release_bundle.zip|state=present",
+                "verification_row=1|state=ready",
+                "apply_row=ready|state=ready",
+                "syncback_row=pending|state=blocked|note=syncback_clean",
+            ],
+        }
+    ) is True
+    assert worker_task_contract.worker_task_module_apply_ready(
+        {
+            "module_kind": "package",
+            "rows_kind": "package_record_rows",
+            "rows": [
+                "artifact_row=dist/release_bundle.zip|state=present",
+                "verification_row=0|state=open",
+                "apply_row=pending|state=pending",
+                "syncback_row=pending|state=blocked|note=artifact_check_open",
+            ],
+        }
+    ) is False

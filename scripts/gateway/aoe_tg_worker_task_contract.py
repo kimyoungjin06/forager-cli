@@ -1180,6 +1180,56 @@ def sanitize_worker_task_module_record_rows(raw: Any) -> Dict[str, Any]:
     return row
 
 
+def worker_task_module_record_row_map(raw: Any) -> Dict[str, Dict[str, str]]:
+    row = sanitize_worker_task_module_record_rows(raw)
+    mapping: Dict[str, Dict[str, str]] = {}
+    for token in list(row.get("rows") or []):
+        safe = str(token).strip()
+        if not safe:
+            continue
+        parts = [part.strip() for part in safe.split("|") if str(part).strip()]
+        if not parts or "=" not in parts[0]:
+            continue
+        key, value = parts[0].split("=", 1)
+        safe_key = _trim(key, 64)
+        if not safe_key:
+            continue
+        entry: Dict[str, str] = {"value": _trim(value, 160)}
+        for extra in parts[1:]:
+            if "=" not in extra:
+                continue
+            extra_key, extra_value = extra.split("=", 1)
+            safe_extra_key = _trim(extra_key, 64)
+            if not safe_extra_key:
+                continue
+            entry[safe_extra_key] = _trim(extra_value, 160)
+        mapping[safe_key] = entry
+    return mapping
+
+
+def worker_task_module_apply_ready(raw: Any) -> bool:
+    row = sanitize_worker_task_module_record_rows(raw)
+    module_kind = str(row.get("module_kind", "")).strip().lower()
+    rows_kind = str(row.get("rows_kind", "")).strip()
+    row_map = worker_task_module_record_row_map(row)
+    if module_kind == "analysis" or rows_kind == "analysis_record_rows":
+        finding_state = row_map.get("finding_row", {}).get("state", "")
+        evidence_state = row_map.get("evidence_row", {}).get("state", "")
+        gap_state = row_map.get("gap_row", {}).get("state", "")
+        return finding_state == "stable" and evidence_state == "attached" and gap_state != "open"
+    if module_kind == "writing" or rows_kind == "writing_record_rows":
+        doc_state = row_map.get("doc_row", {}).get("state", "")
+        handoff_state = row_map.get("handoff_row", {}).get("state", "")
+        quality_state = row_map.get("quality_row", {}).get("state", "")
+        return doc_state == "present" and handoff_state == "ready" and quality_state == "ready"
+    if module_kind == "package" or rows_kind == "package_record_rows":
+        artifact_state = row_map.get("artifact_row", {}).get("state", "")
+        verification_state = row_map.get("verification_row", {}).get("state", "")
+        apply_state = row_map.get("apply_row", {}).get("state", "")
+        return artifact_state == "present" and verification_state == "ready" and apply_state == "ready"
+    return True
+
+
 def derive_worker_task_module_record_rows(
     contract: Any,
     result: Any,

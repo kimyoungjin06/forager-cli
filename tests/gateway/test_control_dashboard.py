@@ -4028,6 +4028,88 @@ def test_control_dashboard_post_task_worker_apply_accept_route_promotes_apply_pr
     assert not updated_task.get("background_run_worker_update_proposal_summary")
 
 
+def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "writing"
+    task["background_run_task_contract_module_summary"] = "writing | writer/doc signals"
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=docs/handoff/final_handoff.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["docs/handoff/final_handoff.md"]
+    task["background_run_worker_record_rows_summary"] = (
+        "writing_record_rows | doc_row=docs/handoff/final_handoff.md|state=present | "
+        "handoff_row=review|state=waiting|note=quality_open | quality_row=open|state=open|note=quality_open"
+    )
+    task["background_run_worker_record_rows"] = [
+        "doc_row=docs/handoff/final_handoff.md|state=present",
+        "handoff_row=review|state=waiting|note=quality_open",
+        "quality_row=open|state=open|note=quality_open",
+    ]
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        request_id="REQ-1",
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    apply_labels = {"Preview Artifact Apply", "Propose Artifact Apply", "Accept Artifact Apply"}
+
+    assert task_detail is not None
+    assert not any(btn.label in apply_labels for btn in runtime_card.runtime_safe_action_buttons)
+    assert not any(btn.label in apply_labels for btn in runtime_card.runtime_phase2_action_buttons)
+    assert not any(btn.label in apply_labels for btn in runtime_detail.active_task_safe_action_buttons)
+    assert not any(btn.label in apply_labels for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert not any(btn.label in apply_labels for btn in task_detail.safe_action_buttons)
+    assert not any(btn.label in apply_labels for btn in task_detail.phase2_action_buttons)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    propose_status, _propose_headers, propose_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-propose",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    propose_payload = json.loads(propose_body.decode("utf-8"))
+
+    assert preview_status == 409
+    assert preview_payload["outcome"]["reason_code"] == "worker_apply_not_ready"
+    assert preview_payload["next_step"] == "/task T-001"
+    assert "writing_record_rows" in preview_payload["worker_record_rows"]
+    assert propose_status == 409
+    assert propose_payload["outcome"]["reason_code"] == "worker_apply_not_ready"
+    assert propose_payload["next_step"] == "/task T-001"
+    assert "quality_row=open|state=open" in propose_payload["worker_record_rows"]
+
+
 def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

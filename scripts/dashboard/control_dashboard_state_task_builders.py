@@ -44,6 +44,7 @@ from control_dashboard_state_common import (
     _runtime_path,
     _worker_apply_proposal_button,
     _worker_apply_preview_button,
+    _worker_apply_ready,
     _worker_apply_proposal_accept_button,
     _worker_apply_syncback_apply_button,
     _worker_apply_syncback_preview_button,
@@ -721,7 +722,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         worker_apply_applied = str(task.get("background_run_worker_apply_accept_status", "")).strip() == "applied"
         worker_syncback_applied = _worker_syncback_applied(task)
         worker_syncback_ready = _worker_syncback_ready(task)
-        if not worker_apply_applied:
+        worker_apply_ready = _worker_apply_ready(task)
+        if not worker_apply_applied and worker_apply_ready:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
                 _worker_apply_preview_button(
@@ -759,7 +761,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-        if not worker_apply_applied:
+        if not worker_apply_applied and worker_apply_ready:
             phase2_action_buttons = _append_unique_action_button(
                 phase2_action_buttons,
                 _worker_apply_proposal_button(
@@ -783,7 +785,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-        if not worker_apply_applied:
+        if not worker_apply_applied and worker_apply_ready:
             phase2_action_buttons = _append_unique_action_button(
                 phase2_action_buttons,
                 _worker_apply_proposal_accept_button(
