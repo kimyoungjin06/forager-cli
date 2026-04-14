@@ -1539,6 +1539,8 @@ def sanitize_worker_task_module_action_blocker(raw: Any) -> Dict[str, Any]:
         "blocker_kind": _trim(source.get("blocker_kind"), 96) or "-",
         "reason_code": _trim(source.get("reason_code"), 96) or "-",
         "next_hint": _trim(source.get("next_hint"), 96) or "-",
+        "suggested_action": _trim(source.get("suggested_action"), 48).lower() or "-",
+        "remediation": _trim(source.get("remediation"), 240) or "-",
         "blocked_rows": _uniq(source.get("blocked_rows"), limit=8, text_limit=160),
     }
     row["summary_line"] = _trim(source.get("summary_line"), 320)
@@ -1590,52 +1592,80 @@ def derive_worker_task_module_action_blocker(
 
     reason_code = "worker_apply_not_ready"
     next_hint = "-"
+    suggested_action = "task_review"
+    remediation = "review the blocked worker rows before applying changes"
     blocked_rows: List[str] = []
 
     if module_kind == "analysis":
         if _entry("evidence_ready").get("state") == "blocked":
             reason_code = "analysis_evidence_missing"
             next_hint = _entry("evidence_ready").get("note", "") or "attach_evidence"
+            suggested_action = "judge"
+            remediation = "attach evidence and re-run analysis review before applying changes"
         elif _entry("gap_closed").get("state") == "blocked":
             reason_code = "analysis_gap_open"
             next_hint = _entry("gap_closed").get("note", "") or "validate_caveats"
+            suggested_action = "judge"
+            remediation = "close open analysis gaps and validate caveats before applying changes"
         elif _entry("finding_ready").get("state") == "blocked":
             reason_code = "analysis_findings_open"
             next_hint = _entry("finding_ready").get("note", "") or "findings"
+            suggested_action = "judge"
+            remediation = "stabilize findings before promoting analysis changes"
         else:
             reason_code = "analysis_review_not_ready"
             next_hint = _entry("review_ready").get("note", "") or "review"
+            suggested_action = "judge"
+            remediation = "run offdesk judge review before promoting analysis changes"
         blocked_rows = _blocked("finding_ready", "evidence_ready", "gap_closed", "review_ready")
     elif module_kind == "writing":
         if _entry("quality_ready").get("state") == "blocked":
             reason_code = "writing_quality_open"
             next_hint = _entry("quality_ready").get("note", "") or "close_quality_gate"
+            suggested_action = "followup"
+            remediation = "close the document quality gate before applying writing changes"
         elif _entry("handoff_ready").get("state") == "blocked":
             reason_code = "writing_handoff_waiting"
             next_hint = _entry("handoff_ready").get("note", "") or "handoff"
+            suggested_action = "followup"
+            remediation = "finish the writing handoff review before applying changes"
         elif _entry("doc_present").get("state") == "blocked":
             reason_code = "writing_doc_missing"
             next_hint = _entry("doc_present").get("note", "") or "document"
+            suggested_action = "followup"
+            remediation = "prepare the required document artifact before applying changes"
         else:
             reason_code = "writing_handoff_not_ready"
             next_hint = _entry("writing_ready").get("note", "") or "close_quality_gate"
+            suggested_action = "followup"
+            remediation = "complete the writing handoff checklist before applying changes"
         blocked_rows = _blocked("doc_present", "handoff_ready", "quality_ready", "writing_ready")
     elif module_kind == "package":
         if safe_mode == "syncback" and _entry("syncback_ready").get("state") == "blocked":
             reason_code = "package_syncback_pending"
             next_hint = _entry("syncback_ready").get("note", "") or "prepare_syncback"
+            suggested_action = "task_review"
+            remediation = "prepare syncback readiness before accepted syncback"
         elif _entry("verification_ready").get("state") == "blocked":
             reason_code = "package_verification_open"
             next_hint = _entry("verification_ready").get("note", "") or "verification"
+            suggested_action = "task_review"
+            remediation = "complete package verification before applying package changes"
         elif _entry("apply_ready").get("state") == "blocked":
             reason_code = "package_apply_pending"
             next_hint = _entry("apply_ready").get("note", "") or "apply_gate"
+            suggested_action = "task_review"
+            remediation = "complete package apply readiness before syncback"
         elif _entry("syncback_ready").get("state") == "blocked":
             reason_code = "package_syncback_pending"
             next_hint = _entry("syncback_ready").get("note", "") or "prepare_syncback"
+            suggested_action = "task_review"
+            remediation = "prepare syncback readiness before accepted syncback"
         else:
             reason_code = "package_artifact_open"
             next_hint = _entry("package_ready").get("note", "") or "artifact_check_open"
+            suggested_action = "task_review"
+            remediation = "review package artifact integrity before applying changes"
         blocked_rows = _blocked("verification_ready", "apply_ready", "syncback_ready", "package_ready")
     else:
         blocked_rows = list(rows_row.get("rows") or [])[:3]
@@ -1648,6 +1678,8 @@ def derive_worker_task_module_action_blocker(
             "blocker_kind": f"{module_kind}_{safe_mode}_blocker",
             "reason_code": reason_code,
             "next_hint": next_hint,
+            "suggested_action": suggested_action,
+            "remediation": remediation,
             "blocked_rows": blocked_rows,
         }
     )

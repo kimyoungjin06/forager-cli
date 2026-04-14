@@ -913,6 +913,8 @@ def test_writing_apply_blocker_prefers_quality_open_reason() -> None:
         mode="apply",
     )
     assert blocker["reason_code"] == "writing_quality_open"
+    assert blocker["suggested_action"] == "followup"
+    assert blocker["remediation"] == "close the document quality gate before applying writing changes"
     assert blocker["summary_line"] == (
         "writing_apply_blocker | reason=writing_quality_open | blocked=handoff_ready,quality_ready,writing_ready | next=quality_gate"
     )
@@ -933,6 +935,27 @@ def test_package_syncback_blocker_prefers_syncback_pending_reason() -> None:
         mode="syncback",
     )
     assert blocker["reason_code"] == "package_syncback_pending"
+    assert blocker["suggested_action"] == "task_review"
+    assert blocker["remediation"] == "prepare syncback readiness before accepted syncback"
     assert blocker["summary_line"] == (
         "package_syncback_blocker | reason=package_syncback_pending | blocked=syncback_ready | next=prepare_syncback"
     )
+
+
+def test_analysis_apply_blocker_prefers_judge_guidance() -> None:
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            "module_kind": "analysis",
+            "rows_kind": "analysis_preflight_rows",
+            "rows": [
+                "finding_ready=stable|state=ready|note=findings",
+                "evidence_ready=missing|state=blocked|note=attach_evidence",
+                "gap_closed=open|state=blocked|note=attach_evidence",
+                "review_ready=review_open|state=blocked|note=attach_evidence",
+            ],
+        },
+        mode="apply",
+    )
+    assert blocker["reason_code"] == "analysis_evidence_missing"
+    assert blocker["suggested_action"] == "judge"
+    assert blocker["remediation"] == "attach evidence and re-run analysis review before applying changes"

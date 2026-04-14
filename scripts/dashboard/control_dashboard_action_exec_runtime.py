@@ -251,6 +251,15 @@ def _worker_apply_not_ready_response(
         or row_detail
         or "worker apply gate not ready"
     )
+    suggested_action = str(blocker.get("suggested_action", "")).strip().lower()
+    next_step = f"/task {label}"
+    if suggested_action == "followup":
+        next_step = f"/followup {label}"
+    elif suggested_action == "judge":
+        next_step = f"/orch judge {alias}"
+    remediation = str(blocker.get("remediation", "")).strip() or (
+        "wait until the module-specific worker gate reports apply-ready rows before promoting or accepting artifact apply"
+    )
     return _json(
         {
             "ok": False,
@@ -262,8 +271,8 @@ def _worker_apply_not_ready_response(
             "mode": mode,
             "source_command": str(spec.get("command", "")).strip() or f"/task {label} | worker-apply-preview",
             "payload": payload,
-            "next_step": f"/task {label}",
-            "remediation": "wait until the module-specific worker gate reports apply-ready rows before promoting or accepting artifact apply",
+            "next_step": next_step,
+            "remediation": remediation,
             "outcome": {
                 "kind": outcome_kind,
                 "status": "blocked",
@@ -279,6 +288,7 @@ def _worker_apply_not_ready_response(
             "worker_preflight_rows": preflight_rows_detail or detail,
             "worker_blocker": str(blocker.get("summary_line", "")).strip() or detail,
             "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
+            "worker_recommended_action": suggested_action or "task_review",
             "preview": {
                 "kind": "worker_apply_preview",
                 "project_alias": alias,
@@ -310,6 +320,7 @@ def _package_syncback_not_ready_response(
     row_detail = str(latest_task.get("background_run_worker_record_rows_summary", "")).strip()
     record_detail = str(latest_task.get("background_run_worker_records_summary", "")).strip()
     detail = preflight_rows_detail or preflight_detail or row_detail or record_detail or "package syncback record pending"
+    remediation = str(blocker.get("remediation", "")).strip() or "wait until package preflight reports syncback_ready before accepted syncback"
     return _json(
         {
             "ok": False,
@@ -322,7 +333,7 @@ def _package_syncback_not_ready_response(
             "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback {'preview' if mode == 'safe' else 'apply'}",
             "payload": payload,
             "next_step": next_step,
-            "remediation": "wait until package preflight reports syncback_ready before accepted syncback",
+            "remediation": remediation,
             "outcome": {
                 "kind": "runtime_syncback_preview" if mode == "safe" else "runtime_syncback_apply",
                 "status": "blocked",
@@ -340,6 +351,7 @@ def _package_syncback_not_ready_response(
             "worker_preflight_rows": preflight_rows_detail or detail,
             "worker_blocker": str(blocker.get("summary_line", "")).strip() or detail,
             "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
+            "worker_recommended_action": str(blocker.get("suggested_action", "")).strip().lower() or "task_review",
         },
         status=409,
     )
