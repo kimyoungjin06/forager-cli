@@ -1662,6 +1662,9 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                     "apply_row=pending|state=pending",
                     "syncback_row=ready|state=ready|note=syncback_clean",
                 ],
+                "background_run_worker_preflight_summary": (
+                    "package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
+                ),
                 "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
             }
         },
@@ -1769,6 +1772,10 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
     )
     assert (
         "worker_record_row_tokens: artifact_row=TODO.md|state=present, verification_row=1|state=ready, apply_row=pending|state=pending, syncback_row=ready|state=ready|note=syncback_clean"
+        in text
+    )
+    assert (
+        "worker_preflight: package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
         in text
     )
     assert (

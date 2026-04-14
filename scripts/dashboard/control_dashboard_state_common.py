@@ -211,8 +211,18 @@ def _worker_syncback_ready(
     module_key: str = "background_run_task_contract_module",
     records_summary_key: str = "background_run_worker_records_summary",
     records_key: str = "background_run_worker_records",
+    record_rows_summary_key: str = "background_run_worker_record_rows_summary",
+    record_rows_key: str = "background_run_worker_record_rows",
 ) -> bool:
     module_kind = str(task.get(module_key, "")).strip().lower()
+    rows_payload = _worker_record_rows_payload(
+        task,
+        module_key=module_key,
+        record_rows_summary_key=record_rows_summary_key,
+        record_rows_key=record_rows_key,
+    )
+    if list(rows_payload.get("rows") or []):
+        return worker_task_contract.worker_task_module_syncback_ready_from_rows(rows_payload)
     records_summary = str(task.get(records_summary_key, "")).strip()
     records_kind = ""
     if records_summary not in {"", "-"}:

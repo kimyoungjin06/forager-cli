@@ -90,6 +90,9 @@ def _latest_task_for_runtime(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 def _worker_syncback_ready(task: Dict[str, Any]) -> bool:
     module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    rows_payload = _worker_record_rows_payload(task)
+    if list(rows_payload.get("rows") or []):
+        return worker_task_contract.worker_task_module_syncback_ready_from_rows(rows_payload)
     records_summary = str(task.get("background_run_worker_records_summary", "")).strip()
     records_kind = ""
     if records_summary not in {"", "-"}:
@@ -200,7 +203,10 @@ def _package_syncback_not_ready_response(
 ) -> Tuple[int, Dict[str, str], bytes]:
     task_ref = str(latest_task.get("short_id", "")).strip()
     next_step = f"/task {task_ref}" if task_ref else f"/orch status {alias}"
-    detail = str(latest_task.get("background_run_worker_records_summary", "")).strip() or "package syncback record pending"
+    preflight_detail = str(latest_task.get("background_run_worker_preflight_summary", "")).strip()
+    row_detail = str(latest_task.get("background_run_worker_record_rows_summary", "")).strip()
+    record_detail = str(latest_task.get("background_run_worker_records_summary", "")).strip()
+    detail = preflight_detail or row_detail or record_detail or "package syncback record pending"
     return _json(
         {
             "ok": False,
@@ -213,7 +219,7 @@ def _package_syncback_not_ready_response(
             "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback {'preview' if mode == 'safe' else 'apply'}",
             "payload": payload,
             "next_step": next_step,
-            "remediation": "wait until package verification and integrity rail reports syncback_record=ready before accepted syncback",
+            "remediation": "wait until package preflight reports syncback_ready before accepted syncback",
             "outcome": {
                 "kind": "runtime_syncback_preview" if mode == "safe" else "runtime_syncback_apply",
                 "status": "blocked",
@@ -225,7 +231,9 @@ def _package_syncback_not_ready_response(
                 "project_alias": alias,
                 "runtime_path": _runtime_action_link(alias),
             },
-            "worker_records": detail,
+            "worker_records": record_detail or detail,
+            "worker_record_rows": row_detail or detail,
+            "worker_preflight": preflight_detail or detail,
         },
         status=409,
     )

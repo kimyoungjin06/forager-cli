@@ -239,6 +239,7 @@ class TaskDetailDTO:
     background_run_worker_records: str = ""
     background_run_worker_record_rows_summary: str = ""
     background_run_worker_record_rows: str = ""
+    background_run_worker_preflight_summary: str = ""
     background_run_worker_result_summary: str = ""
     background_run_worker_result_actions: str = ""
     background_run_worker_result_cautions: str = ""
@@ -353,6 +354,7 @@ class RuntimeDetailDTO:
     active_task_background_run_worker_records: str
     active_task_background_run_worker_record_rows_summary: str
     active_task_background_run_worker_record_rows: str
+    active_task_background_run_worker_preflight_summary: str
     active_task_background_run_worker_result_summary: str
     active_task_background_run_worker_result_actions: str
     active_task_background_run_worker_result_cautions: str

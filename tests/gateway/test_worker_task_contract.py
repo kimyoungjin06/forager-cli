@@ -754,3 +754,63 @@ def test_package_module_apply_ready_requires_verification_and_apply_ready() -> N
             ],
         }
     ) is False
+
+
+def test_analysis_module_preflight_summarizes_review_readiness() -> None:
+    preflight = worker_task_contract.derive_worker_task_module_preflight(
+        {"module_kind": "analysis"},
+        {"status": "ready", "summary": "analysis ready", "actions": [], "cautions": [], "evidence_refs": []},
+        record_rows={
+            "module_kind": "analysis",
+            "rows_kind": "analysis_record_rows",
+            "rows": [
+                "finding_row=update docs/analysis/provider_regressions.md|state=stable",
+                "evidence_row=logs/provider_regressions.csv|state=attached",
+                "caveat_row=keep review lane open|state=review|note=findings_stable",
+            ],
+        },
+    )
+    assert preflight["summary_line"] == (
+        "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
+    )
+
+
+def test_writing_module_preflight_summarizes_handoff_open_state() -> None:
+    preflight = worker_task_contract.derive_worker_task_module_preflight(
+        {"module_kind": "writing"},
+        {"status": "ready", "summary": "handoff drafted", "actions": [], "cautions": [], "evidence_refs": []},
+        record_rows={
+            "module_kind": "writing",
+            "rows_kind": "writing_record_rows",
+            "rows": [
+                "doc_row=docs/handoff/final_handoff.md|state=present",
+                "handoff_row=review|state=waiting|note=quality_open",
+                "quality_row=open|state=open|note=quality_open",
+            ],
+        },
+    )
+    assert preflight["summary_line"] == (
+        "writing_preflight | state=handoff_open | doc=present | handoff=waiting | quality=open | apply=blocked | next=close_quality_gate"
+    )
+
+
+def test_package_module_preflight_and_syncback_row_ready() -> None:
+    rows = {
+        "module_kind": "package",
+        "rows_kind": "package_record_rows",
+        "rows": [
+            "artifact_row=dist/release_bundle.zip|state=present",
+            "verification_row=1|state=ready",
+            "apply_row=ready|state=ready",
+            "syncback_row=ready|state=ready|note=syncback_clean",
+        ],
+    }
+    preflight = worker_task_contract.derive_worker_task_module_preflight(
+        {"module_kind": "package"},
+        {"status": "ready", "summary": "package ready", "actions": [], "cautions": [], "evidence_refs": []},
+        record_rows=rows,
+    )
+    assert worker_task_contract.worker_task_module_syncback_ready_from_rows(rows) is True
+    assert preflight["summary_line"] == (
+        "package_preflight | state=syncback_ready | verification=ready | apply=ready | syncback=ready | next=syncback_clean"
+    )

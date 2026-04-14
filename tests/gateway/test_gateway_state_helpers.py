@@ -1519,6 +1519,9 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
                 "handoff_row=review|state=waiting|note=quality_open",
                 "quality_row=open|state=open|note=quality_open",
             ],
+            "background_run_worker_preflight_summary": (
+                "writing_preflight | state=handoff_open | doc=present | handoff=waiting | quality=open | apply=blocked | next=close_quality_gate"
+            ),
             "background_run_worker_update_stub_summary": "status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1",
             "background_run_worker_update_stub_targets": ["docs/RUNBOOK.md"],
             "background_run_worker_update_proposal_summary": "status=ready | proposals=1 | ids=PROP-001 | targets=docs/RUNBOOK.md",
@@ -1551,6 +1554,10 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
     )
     assert (
         "background_run_worker_record_row_tokens: doc_row=docs/RUNBOOK.md|state=present, handoff_row=review|state=waiting|note=quality_open, quality_row=open|state=open|note=quality_open"
+        in summary
+    )
+    assert (
+        "background_run_worker_preflight: writing_preflight | state=handoff_open | doc=present | handoff=waiting | quality=open | apply=blocked | next=close_quality_gate"
         in summary
     )
     assert "background_run_worker_actions: update docs/RUNBOOK.md" in summary

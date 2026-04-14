@@ -798,6 +798,9 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
         "evidence_row=reports/summary.md|state=attached",
         "caveat_row=-|state=clear|note=findings_stable",
     ]
+    task["background_run_worker_preflight_summary"] = (
+        "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
+    )
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -900,6 +903,11 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "background_worker_record_row_tokens" in text
     assert (
         "finding_row=update reports/summary.md|state=stable, evidence_row=reports/summary.md|state=attached, caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
+    assert "background_worker_preflight" in text
+    assert (
+        "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
         in text
     )
     assert "background_worker_result" in text
@@ -1039,6 +1047,9 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
         "evidence_row=reports/summary.md|state=attached",
         "caveat_row=-|state=clear|note=findings_stable",
     ]
+    task["background_run_worker_preflight_summary"] = (
+        "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
+    )
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1138,6 +1149,11 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "background_worker_record_row_tokens" in text
     assert (
         "finding_row=update reports/summary.md|state=stable, evidence_row=reports/summary.md|state=attached, caveat_row=-|state=clear|note=findings_stable"
+        in text
+    )
+    assert "background_worker_preflight" in text
+    assert (
+        "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
         in text
     )
     assert "background_worker_result" in text
@@ -3212,6 +3228,61 @@ def test_control_dashboard_syncback_routes_block_when_package_record_pending(tmp
     assert apply_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
     assert apply_payload["next_step"] == "/task T-001"
     assert "syncback_record=pending" in apply_payload["worker_records"]
+
+
+def test_control_dashboard_syncback_routes_prefer_package_record_rows_gate(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "package"
+    task["background_run_worker_records_summary"] = (
+        "package_records | artifact_record=dist/release_bundle.zip | verification_record=1 | apply_record=ready | syncback_record=ready"
+    )
+    task["background_run_worker_records"] = [
+        "artifact_record=dist/release_bundle.zip",
+        "verification_record=1",
+        "apply_record=ready",
+        "syncback_record=ready",
+    ]
+    task["background_run_worker_record_rows_summary"] = (
+        "package_record_rows | artifact_row=dist/release_bundle.zip|state=present | "
+        "verification_row=1|state=ready | apply_row=ready|state=ready | "
+        "syncback_row=pending|state=blocked|note=prepare_syncback"
+    )
+    task["background_run_worker_record_rows"] = [
+        "artifact_row=dist/release_bundle.zip|state=present",
+        "verification_row=1|state=ready",
+        "apply_row=ready|state=ready",
+        "syncback_row=pending|state=blocked|note=prepare_syncback",
+    ]
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
+    task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
+    task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/syncback-preview",
+        body=json.dumps({"project_ref": "O2"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+
+    assert preview_status == 409
+    assert preview_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
+    assert preview_payload["next_step"] == "/task T-001"
+    assert "syncback_record=ready" in preview_payload["worker_records"]
+    assert "syncback_row=pending|state=blocked" in preview_payload["worker_record_rows"]
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:

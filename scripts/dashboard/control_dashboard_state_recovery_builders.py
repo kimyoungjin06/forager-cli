@@ -278,6 +278,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
             row,
             records_summary_key="active_task_background_run_worker_records_summary",
             records_key="active_task_background_run_worker_records",
+            record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
+            record_rows_key="active_task_background_run_worker_record_rows",
         )
         runtime_worker_apply_ready = _worker_apply_ready(
             row,
