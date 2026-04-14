@@ -46,6 +46,7 @@ from control_dashboard_state_common import (
     _worker_apply_preview_button,
     _worker_apply_ready,
     _worker_apply_proposal_accept_button,
+    _worker_blocker_action_button,
     _worker_apply_syncback_apply_button,
     _worker_apply_syncback_preview_button,
     _worker_syncback_ready,
@@ -851,10 +852,20 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        elif worker_syncback_ready and not worker_syncback_applied:
+        elif worker_apply_applied and worker_syncback_ready and not worker_syncback_applied:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
+            )
+        elif not worker_apply_applied:
+            safe_action_buttons = _append_unique_action_button(
+                safe_action_buttons,
+                _worker_blocker_action_button(
+                    project_alias=alias,
+                    label=task_view.task_display_label(task, fallback_request_id=rid),
+                    request_id=rid,
+                    task=task,
+                ),
             )
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
@@ -907,7 +918,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     proposal_summary=task.get("background_run_worker_update_proposal_summary"),
                 ),
             )
-        elif worker_syncback_ready and not worker_syncback_applied:
+        elif worker_apply_applied and worker_syncback_ready and not worker_syncback_applied:
             phase2_action_buttons = _append_unique_action_button(
                 phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),

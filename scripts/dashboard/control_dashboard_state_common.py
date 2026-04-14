@@ -258,6 +258,10 @@ def _worker_record_rows_payload(
     rows_kind = ""
     if rows_summary not in {"", "-"}:
         rows_kind = rows_summary.split(" | ", 1)[0].strip()
+    if module_kind == "general" and rows_kind.endswith("_record_rows"):
+        inferred_module = rows_kind.split("_", 1)[0].strip().lower()
+        if inferred_module in worker_task_contract.WORKER_MODULE_KINDS:
+            module_kind = inferred_module
     raw_rows = task.get(record_rows_key)
     row_tokens: List[str] = []
     if isinstance(raw_rows, list):
@@ -290,6 +294,86 @@ def _worker_apply_ready(
     if list(payload.get("rows") or []):
         return worker_task_contract.worker_task_module_apply_ready(payload)
     return True
+
+
+def _worker_preflight_rows_payload(
+    task: Dict[str, Any],
+    *,
+    module_key: str = "background_run_task_contract_module",
+    preflight_rows_summary_key: str = "background_run_worker_preflight_rows_summary",
+    preflight_rows_key: str = "background_run_worker_preflight_rows",
+    preflight_summary_key: str = "background_run_worker_preflight_summary",
+    preflight_status_key: str = "background_run_worker_preflight_status",
+    record_rows_summary_key: str = "background_run_worker_record_rows_summary",
+    record_rows_key: str = "background_run_worker_record_rows",
+    result_status_key: str = "background_run_worker_result_status",
+    result_summary_key: str = "background_run_worker_result_summary",
+    result_actions_key: str = "background_run_worker_result_actions",
+    result_cautions_key: str = "background_run_worker_result_cautions",
+    result_evidence_refs_key: str = "background_run_worker_result_evidence_refs",
+) -> Dict[str, Any]:
+    module_kind = str(task.get(module_key, "")).strip().lower() or "general"
+    rows_summary = str(task.get(preflight_rows_summary_key, "")).strip()
+    rows_kind = ""
+    if rows_summary not in {"", "-"}:
+        rows_kind = rows_summary.split(" | ", 1)[0].strip()
+    if module_kind == "general" and rows_kind.endswith("_preflight_rows"):
+        inferred_module = rows_kind.split("_", 1)[0].strip().lower()
+        if inferred_module in worker_task_contract.WORKER_MODULE_KINDS:
+            module_kind = inferred_module
+    raw_rows = task.get(preflight_rows_key)
+    row_tokens: List[str] = []
+    if isinstance(raw_rows, list):
+        row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
+    elif isinstance(raw_rows, str):
+        row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
+    elif rows_summary not in {"", "-"}:
+        row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
+    if row_tokens:
+        return worker_task_contract.sanitize_worker_task_module_preflight_rows(
+            {
+                "module_kind": module_kind,
+                "rows_kind": rows_kind or f"{module_kind}_preflight_rows",
+                "rows": row_tokens,
+                "summary_line": rows_summary or "-",
+            }
+        )
+    record_rows = _worker_record_rows_payload(
+        task,
+        module_key=module_key,
+        record_rows_summary_key=record_rows_summary_key,
+        record_rows_key=record_rows_key,
+    )
+    if module_kind == "general":
+        record_module_kind = str(record_rows.get("module_kind", "")).strip().lower()
+        if record_module_kind in worker_task_contract.WORKER_MODULE_KINDS:
+            module_kind = record_module_kind
+    if list(record_rows.get("rows") or []):
+        derived = worker_task_contract.derive_worker_task_module_preflight_rows(
+            {"module_kind": module_kind},
+            {
+                "status": task.get(result_status_key),
+                "summary": task.get(result_summary_key),
+                "actions": task.get(result_actions_key),
+                "cautions": task.get(result_cautions_key),
+                "evidence_refs": task.get(result_evidence_refs_key),
+            },
+            record_rows=record_rows,
+            preflight={
+                "state": task.get(preflight_status_key),
+                "summary_line": task.get(preflight_summary_key),
+            },
+        )
+        if derived:
+            return worker_task_contract.sanitize_worker_task_module_preflight_rows(derived)
+    return worker_task_contract.sanitize_worker_task_module_preflight_rows(
+        {
+            "module_kind": module_kind,
+            "rows_kind": rows_kind or f"{module_kind}_preflight_rows",
+            "rows": [],
+            "summary_line": rows_summary or "-",
+        }
+    )
 
 
 def _completion_contract_for_preset(raw: Any) -> Dict[str, str]:
@@ -524,6 +608,81 @@ def _replan_manual_route_action_button(
         payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
     )
     return None
+
+
+def _worker_blocker_action_button(
+    *,
+    project_alias: str,
+    label: str,
+    request_id: str,
+    task: Dict[str, Any],
+    module_key: str = "background_run_task_contract_module",
+    preflight_rows_summary_key: str = "background_run_worker_preflight_rows_summary",
+    preflight_rows_key: str = "background_run_worker_preflight_rows",
+    preflight_summary_key: str = "background_run_worker_preflight_summary",
+    preflight_status_key: str = "background_run_worker_preflight_status",
+    record_rows_summary_key: str = "background_run_worker_record_rows_summary",
+    record_rows_key: str = "background_run_worker_record_rows",
+    result_status_key: str = "background_run_worker_result_status",
+    result_summary_key: str = "background_run_worker_result_summary",
+    result_actions_key: str = "background_run_worker_result_actions",
+    result_cautions_key: str = "background_run_worker_result_cautions",
+    result_evidence_refs_key: str = "background_run_worker_result_evidence_refs",
+) -> ActionButtonDTO | None:
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if task_ref == "-":
+        return None
+    alias = str(project_alias or "").strip().upper()
+    payload = _worker_preflight_rows_payload(
+        task,
+        module_key=module_key,
+        preflight_rows_summary_key=preflight_rows_summary_key,
+        preflight_rows_key=preflight_rows_key,
+        preflight_summary_key=preflight_summary_key,
+        preflight_status_key=preflight_status_key,
+        record_rows_summary_key=record_rows_summary_key,
+        record_rows_key=record_rows_key,
+        result_status_key=result_status_key,
+        result_summary_key=result_summary_key,
+        result_actions_key=result_actions_key,
+        result_cautions_key=result_cautions_key,
+        result_evidence_refs_key=result_evidence_refs_key,
+    )
+    if not list(payload.get("rows") or []):
+        return None
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(payload, mode="apply")
+    suggested_action = str(blocker.get("suggested_action", "")).strip().lower()
+    module_kind = str(payload.get("module_kind", "")).strip().lower()
+    command = ""
+    custom_label = ""
+    if suggested_action == "followup":
+        command = f"/followup {task_ref}"
+        custom_label = "Resolve Writing Blocker" if module_kind == "writing" else "Resolve Worker Blocker"
+    elif suggested_action == "judge" and alias:
+        command = f"/orch judge {alias}"
+        custom_label = "Resolve Analysis Blocker" if module_kind == "analysis" else "Resolve Worker Blocker"
+    else:
+        return None
+    spec = operator_action_contract.http_action_spec(command)
+    if not isinstance(spec, dict):
+        return None
+    payload_json = json.dumps(
+        spec.get("payload") if isinstance(spec.get("payload"), dict) else {},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    blocker_summary = str(blocker.get("summary_line", "")).strip()
+    remediation = str(blocker.get("remediation", "")).strip()
+    note = " | ".join(part for part in [blocker_summary, remediation] if part and part != "-")[:320]
+    return ActionButtonDTO(
+        label=custom_label,
+        command=str(spec.get("command", "")).strip() or command,
+        method=str(spec.get("method", "POST")).strip() or "POST",
+        path=str(spec.get("path", "")).strip() or "/control",
+        mode=str(spec.get("mode", "safe")).strip() or "safe",
+        note=note,
+        payload_json=payload_json,
+    )
 
 
 def _worker_update_proposal_accept_button(

@@ -29,6 +29,7 @@ from control_dashboard_state_common import (
     _worker_apply_preview_button,
     _worker_apply_ready,
     _worker_apply_proposal_accept_button,
+    _worker_blocker_action_button,
     _worker_apply_syncback_apply_button,
     _worker_apply_syncback_preview_button,
     _worker_syncback_ready,
@@ -118,10 +119,20 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                     proposal_ids=row.get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        elif worker_syncback_ready and not worker_syncback_applied:
+        elif worker_apply_applied and worker_syncback_ready and not worker_syncback_applied:
             safe_action_buttons = _append_unique_action_button(
                 safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=project_alias),
+            )
+        elif not worker_apply_applied:
+            safe_action_buttons = _append_unique_action_button(
+                safe_action_buttons,
+                _worker_blocker_action_button(
+                    project_alias=project_alias,
+                    label=label,
+                    request_id=request_id,
+                    task=row,
+                ),
             )
         safe_action_buttons = _append_unique_action_button(
             safe_action_buttons,
@@ -168,7 +179,7 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                     proposal_summary=row.get("background_run_worker_update_proposal_summary"),
                 ),
             )
-        elif worker_syncback_ready and not worker_syncback_applied:
+        elif worker_apply_applied and worker_syncback_ready and not worker_syncback_applied:
             phase2_action_buttons = _append_unique_action_button(
                 phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=project_alias),
@@ -301,10 +312,32 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        elif runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
+        elif runtime_worker_apply_applied and runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
             runtime_safe_action_buttons = _append_unique_action_button(
                 runtime_safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
+            )
+        elif not runtime_worker_apply_applied:
+            runtime_safe_action_buttons = _append_unique_action_button(
+                runtime_safe_action_buttons,
+                _worker_blocker_action_button(
+                    project_alias=alias,
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    task=row,
+                    module_key="active_task_background_run_task_contract_module",
+                    preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
+                    preflight_rows_key="active_task_background_run_worker_preflight_rows",
+                    preflight_summary_key="active_task_background_run_worker_preflight_summary",
+                    preflight_status_key="active_task_background_run_worker_preflight_status",
+                    record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
+                    record_rows_key="active_task_background_run_worker_record_rows",
+                    result_status_key="active_task_background_run_worker_result_status",
+                    result_summary_key="active_task_background_run_worker_result_summary",
+                    result_actions_key="active_task_background_run_worker_result_actions",
+                    result_cautions_key="active_task_background_run_worker_result_cautions",
+                    result_evidence_refs_key="active_task_background_run_worker_result_evidence_refs",
+                ),
             )
         runtime_safe_action_buttons = _append_unique_action_button(
             runtime_safe_action_buttons,
@@ -351,7 +384,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
                 ),
             )
-        elif runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
+        elif runtime_worker_apply_applied and runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
             runtime_phase2_action_buttons = _append_unique_action_button(
                 runtime_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
@@ -386,10 +419,32 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        elif runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
+        elif runtime_worker_apply_applied and runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
             active_task_safe_action_buttons = _append_unique_action_button(
                 active_task_safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
+            )
+        elif not runtime_worker_apply_applied:
+            active_task_safe_action_buttons = _append_unique_action_button(
+                active_task_safe_action_buttons,
+                _worker_blocker_action_button(
+                    project_alias=alias,
+                    label=str(row.get("active_task_label", "")).strip(),
+                    request_id=active_request_id,
+                    task=row,
+                    module_key="active_task_background_run_task_contract_module",
+                    preflight_rows_summary_key="active_task_background_run_worker_preflight_rows_summary",
+                    preflight_rows_key="active_task_background_run_worker_preflight_rows",
+                    preflight_summary_key="active_task_background_run_worker_preflight_summary",
+                    preflight_status_key="active_task_background_run_worker_preflight_status",
+                    record_rows_summary_key="active_task_background_run_worker_record_rows_summary",
+                    record_rows_key="active_task_background_run_worker_record_rows",
+                    result_status_key="active_task_background_run_worker_result_status",
+                    result_summary_key="active_task_background_run_worker_result_summary",
+                    result_actions_key="active_task_background_run_worker_result_actions",
+                    result_cautions_key="active_task_background_run_worker_result_cautions",
+                    result_evidence_refs_key="active_task_background_run_worker_result_evidence_refs",
+                ),
             )
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
@@ -436,7 +491,7 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                     proposal_summary=row.get("active_task_background_run_worker_update_proposal_summary"),
                 ),
             )
-        elif runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
+        elif runtime_worker_apply_applied and runtime_worker_syncback_ready and not runtime_worker_syncback_applied:
             active_task_phase2_action_buttons = _append_unique_action_button(
                 active_task_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
