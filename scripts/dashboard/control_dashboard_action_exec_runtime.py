@@ -156,7 +156,13 @@ def _worker_apply_not_ready_response(
     mode: str,
     outcome_kind: str,
 ) -> Tuple[int, Dict[str, str], bytes]:
-    detail = str(task.get("background_run_worker_record_rows_summary", "")).strip() or "worker apply gate not ready"
+    preflight_rows_detail = str(task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    detail = (
+        preflight_rows_detail
+        or str(task.get("background_run_worker_preflight_summary", "")).strip()
+        or str(task.get("background_run_worker_record_rows_summary", "")).strip()
+        or "worker apply gate not ready"
+    )
     return _json(
         {
             "ok": False,
@@ -182,6 +188,7 @@ def _worker_apply_not_ready_response(
                 "detail_path": f"/control/tasks/by-request/{request_id}",
             },
             "worker_record_rows": detail,
+            "worker_preflight_rows": preflight_rows_detail or detail,
             "preview": {
                 "kind": "worker_apply_preview",
                 "project_alias": alias,
@@ -204,9 +211,10 @@ def _package_syncback_not_ready_response(
     task_ref = str(latest_task.get("short_id", "")).strip()
     next_step = f"/task {task_ref}" if task_ref else f"/orch status {alias}"
     preflight_detail = str(latest_task.get("background_run_worker_preflight_summary", "")).strip()
+    preflight_rows_detail = str(latest_task.get("background_run_worker_preflight_rows_summary", "")).strip()
     row_detail = str(latest_task.get("background_run_worker_record_rows_summary", "")).strip()
     record_detail = str(latest_task.get("background_run_worker_records_summary", "")).strip()
-    detail = preflight_detail or row_detail or record_detail or "package syncback record pending"
+    detail = preflight_rows_detail or preflight_detail or row_detail or record_detail or "package syncback record pending"
     return _json(
         {
             "ok": False,
@@ -234,6 +242,7 @@ def _package_syncback_not_ready_response(
             "worker_records": record_detail or detail,
             "worker_record_rows": row_detail or detail,
             "worker_preflight": preflight_detail or detail,
+            "worker_preflight_rows": preflight_rows_detail or detail,
         },
         status=409,
     )

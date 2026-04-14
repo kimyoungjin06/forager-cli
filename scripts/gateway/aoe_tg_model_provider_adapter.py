@@ -757,6 +757,22 @@ def invoke_background_ticket_worker(
             if preflight:
                 result["task_preflight_status"] = _trim(preflight.get("state"), 64) or "-"
                 result["task_preflight_summary"] = _trim(preflight.get("summary_line"), 320) or "-"
+            preflight_rows = worker_task_contract.derive_worker_task_module_preflight_rows(
+                launch_spec.get("provider_task_contract_json"),
+                task_result,
+                update_stub=update_stub,
+                gate=gate,
+                profile=profile,
+                checklist=checklist,
+                items=items,
+                item_classes=item_classes,
+                records=records,
+                record_rows=record_rows,
+                preflight=preflight,
+            )
+            if preflight_rows:
+                result["task_preflight_rows_summary"] = _trim(preflight_rows.get("summary_line"), 320) or "-"
+                result["task_preflight_rows"] = list(preflight_rows.get("rows") or [])
             if update_stub:
                 result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
                 result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"

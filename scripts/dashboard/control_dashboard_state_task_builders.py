@@ -442,6 +442,70 @@ def _worker_preflight_summary(task: Dict[str, Any]) -> str:
     return str(derived.get("summary_line", "")).strip() or "-"
 
 
+def _worker_preflight_rows_summary(task: Dict[str, Any]) -> str:
+    summary = str(task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    if summary:
+        return summary
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_kind in {"", "-", "general"}:
+        return "-"
+    derived = worker_task_contract.derive_worker_task_module_preflight_rows(
+        {
+            "module_kind": module_kind,
+            "module_policy": task.get("background_run_task_contract_policy"),
+            "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+        },
+        {
+            "status": task.get("background_run_worker_result_status"),
+            "summary": task.get("background_run_worker_result_summary"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        },
+        gate={"state": task.get("background_run_worker_gate_status"), "summary_line": _worker_gate_summary(task)},
+        profile={"state": task.get("background_run_worker_profile_status"), "summary_line": _worker_profile_summary(task)},
+        checklist={"state": task.get("background_run_worker_checklist_status"), "summary_line": _worker_checklist_summary(task)},
+        items={
+            "module_kind": module_kind,
+            "items": (task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else []),
+            "summary_line": _worker_items_summary(task),
+        },
+        item_classes={
+            "module_kind": module_kind,
+            "classes": (task.get("background_run_worker_item_classes") if isinstance(task.get("background_run_worker_item_classes"), list) else []),
+            "summary_line": _worker_item_classes_summary(task),
+        },
+        records={
+            "module_kind": module_kind,
+            "records": (task.get("background_run_worker_records") if isinstance(task.get("background_run_worker_records"), list) else []),
+            "summary_line": _worker_records_summary(task),
+        },
+        record_rows={
+            "module_kind": module_kind,
+            "rows": (task.get("background_run_worker_record_rows") if isinstance(task.get("background_run_worker_record_rows"), list) else []),
+            "summary_line": _worker_record_rows_summary(task),
+        },
+        preflight={
+            "module_kind": module_kind,
+            "state": task.get("background_run_worker_preflight_status"),
+            "summary_line": _worker_preflight_summary(task),
+        },
+    )
+    return str(derived.get("summary_line", "")).strip() or "-"
+
+
+def _worker_preflight_rows(task: Dict[str, Any]) -> str:
+    rows = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_preflight_rows") if isinstance(task.get("background_run_worker_preflight_rows"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    return ", ".join(rows[:6])[:320] if rows else "-"
+
+
 def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
 
@@ -941,6 +1005,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             background_run_worker_record_rows_summary=_worker_record_rows_summary(task),
             background_run_worker_record_rows=_worker_record_rows(task),
             background_run_worker_preflight_summary=_worker_preflight_summary(task),
+            background_run_worker_preflight_rows_summary=_worker_preflight_rows_summary(task),
+            background_run_worker_preflight_rows=_worker_preflight_rows(task),
             background_run_worker_result_summary=(
                 str(task.get("background_run_worker_result_summary", "")).strip() or "-"
             ),

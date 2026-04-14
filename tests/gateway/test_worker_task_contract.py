@@ -814,3 +814,85 @@ def test_package_module_preflight_and_syncback_row_ready() -> None:
     assert preflight["summary_line"] == (
         "package_preflight | state=syncback_ready | verification=ready | apply=ready | syncback=ready | next=syncback_clean"
     )
+
+
+def test_analysis_module_preflight_rows_capture_review_ready_signals() -> None:
+    rows = worker_task_contract.derive_worker_task_module_preflight_rows(
+        {"module_kind": "analysis"},
+        {"status": "ready", "summary": "analysis ready", "actions": [], "cautions": [], "evidence_refs": []},
+        record_rows={
+            "module_kind": "analysis",
+            "rows_kind": "analysis_record_rows",
+            "rows": [
+                "finding_row=update docs/analysis/provider_regressions.md|state=stable",
+                "evidence_row=logs/provider_regressions.csv|state=attached",
+                "caveat_row=keep review lane open|state=review|note=findings_stable",
+            ],
+        },
+        preflight={
+            "module_kind": "analysis",
+            "preflight_kind": "analysis_preflight",
+            "state": "review_ready",
+            "next_hint": "validate_caveats",
+        },
+    )
+    assert rows["summary_line"] == (
+        "analysis_preflight_rows | finding_ready=stable|state=ready|note=findings | "
+        "evidence_ready=attached|state=ready|note=evidence | gap_closed=clear|state=ready|note=validate_caveats | "
+        "review_ready=review_ready|state=ready|note=validate_caveats"
+    )
+
+
+def test_writing_module_preflight_rows_capture_handoff_blockers() -> None:
+    rows = worker_task_contract.derive_worker_task_module_preflight_rows(
+        {"module_kind": "writing"},
+        {"status": "ready", "summary": "handoff drafted", "actions": [], "cautions": [], "evidence_refs": []},
+        record_rows={
+            "module_kind": "writing",
+            "rows_kind": "writing_record_rows",
+            "rows": [
+                "doc_row=docs/handoff/final_handoff.md|state=present",
+                "handoff_row=review|state=waiting|note=quality_open",
+                "quality_row=open|state=open|note=quality_open",
+            ],
+        },
+        preflight={
+            "module_kind": "writing",
+            "preflight_kind": "writing_preflight",
+            "state": "handoff_open",
+            "next_hint": "close_quality_gate",
+        },
+    )
+    assert rows["summary_line"] == (
+        "writing_preflight_rows | doc_present=present|state=ready|note=document | "
+        "handoff_ready=waiting|state=blocked|note=handoff | quality_ready=open|state=blocked|note=quality_gate | "
+        "writing_ready=handoff_open|state=blocked|note=close_quality_gate"
+    )
+
+
+def test_package_module_preflight_rows_capture_syncback_gate() -> None:
+    rows = worker_task_contract.derive_worker_task_module_preflight_rows(
+        {"module_kind": "package"},
+        {"status": "ready", "summary": "package ready", "actions": [], "cautions": [], "evidence_refs": []},
+        record_rows={
+            "module_kind": "package",
+            "rows_kind": "package_record_rows",
+            "rows": [
+                "artifact_row=dist/release_bundle.zip|state=present",
+                "verification_row=1|state=ready",
+                "apply_row=ready|state=ready",
+                "syncback_row=ready|state=ready|note=syncback_clean",
+            ],
+        },
+        preflight={
+            "module_kind": "package",
+            "preflight_kind": "package_preflight",
+            "state": "syncback_ready",
+            "next_hint": "syncback_clean",
+        },
+    )
+    assert rows["summary_line"] == (
+        "package_preflight_rows | verification_ready=ready|state=ready|note=verification | "
+        "apply_ready=ready|state=ready|note=apply_gate | syncback_ready=ready|state=ready|note=syncback_clean | "
+        "package_ready=syncback_ready|state=ready|note=syncback_clean"
+    )

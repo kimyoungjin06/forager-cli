@@ -1665,6 +1665,17 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
                 "background_run_worker_preflight_summary": (
                     "package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
                 ),
+                "background_run_worker_preflight_rows_summary": (
+                    "package_preflight_rows | verification_ready=ready|state=ready|note=verification | "
+                    "apply_ready=pending|state=blocked|note=apply_gate | syncback_ready=ready|state=ready|note=artifact_check_open | "
+                    "package_ready=artifact_open|state=blocked|note=artifact_check_open"
+                ),
+                "background_run_worker_preflight_rows": [
+                    "verification_ready=ready|state=ready|note=verification",
+                    "apply_ready=pending|state=blocked|note=apply_gate",
+                    "syncback_ready=ready|state=ready|note=artifact_check_open",
+                    "package_ready=artifact_open|state=blocked|note=artifact_check_open",
+                ],
                 "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
             }
         },
@@ -1778,6 +1789,9 @@ def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_pa
         "worker_preflight: package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
         in text
     )
+    assert "worker_preflight_rows: package_preflight_rows | verification_ready=ready|state=ready|note=verification" in text
+    assert "apply_ready=pending|state=blocked|note=apply_gate" in text
+    assert "syncback_ready=ready|state=ready|note=artifact_check_open" in text
     assert (
         "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00"
         in text

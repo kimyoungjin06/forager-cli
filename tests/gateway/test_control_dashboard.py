@@ -801,6 +801,17 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["background_run_worker_preflight_summary"] = (
         "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
     )
+    task["background_run_worker_preflight_rows_summary"] = (
+        "analysis_preflight_rows | finding_ready=stable|state=ready|note=findings | "
+        "evidence_ready=attached|state=ready|note=evidence | gap_closed=clear|state=ready|note=validate_caveats | "
+        "review_ready=review_ready|state=ready|note=validate_caveats"
+    )
+    task["background_run_worker_preflight_rows"] = [
+        "finding_ready=stable|state=ready|note=findings",
+        "evidence_ready=attached|state=ready|note=evidence",
+        "gap_closed=clear|state=ready|note=validate_caveats",
+        "review_ready=review_ready|state=ready|note=validate_caveats",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -908,6 +919,16 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "background_worker_preflight" in text
     assert (
         "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
+        in text
+    )
+    assert "background_worker_preflight_rows" in text
+    assert (
+        "analysis_preflight_rows | finding_ready=stable|state=ready|note=findings | evidence_ready=attached|state=ready|note=evidence | gap_closed=clear|state=ready|note=validate_caveats | review_ready=review_ready|state=ready|note=validate_caveats"
+        in text
+    )
+    assert "background_worker_preflight_row_tokens" in text
+    assert (
+        "finding_ready=stable|state=ready|note=findings, evidence_ready=attached|state=ready|note=evidence, gap_closed=clear|state=ready|note=validate_caveats, review_ready=review_ready|state=ready|note=validate_caveats"
         in text
     )
     assert "background_worker_result" in text
@@ -1050,6 +1071,17 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["background_run_worker_preflight_summary"] = (
         "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
     )
+    task["background_run_worker_preflight_rows_summary"] = (
+        "analysis_preflight_rows | finding_ready=stable|state=ready|note=findings | "
+        "evidence_ready=attached|state=ready|note=evidence | gap_closed=clear|state=ready|note=validate_caveats | "
+        "review_ready=review_ready|state=ready|note=validate_caveats"
+    )
+    task["background_run_worker_preflight_rows"] = [
+        "finding_ready=stable|state=ready|note=findings",
+        "evidence_ready=attached|state=ready|note=evidence",
+        "gap_closed=clear|state=ready|note=validate_caveats",
+        "review_ready=review_ready|state=ready|note=validate_caveats",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1154,6 +1186,16 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "background_worker_preflight" in text
     assert (
         "analysis_preflight | state=review_ready | finding=stable | evidence=attached | gap=- | apply=ready | next=validate_caveats"
+        in text
+    )
+    assert "background_worker_preflight_rows" in text
+    assert (
+        "analysis_preflight_rows | finding_ready=stable|state=ready|note=findings | evidence_ready=attached|state=ready|note=evidence | gap_closed=clear|state=ready|note=validate_caveats | review_ready=review_ready|state=ready|note=validate_caveats"
+        in text
+    )
+    assert "background_worker_preflight_row_tokens" in text
+    assert (
+        "finding_ready=stable|state=ready|note=findings, evidence_ready=attached|state=ready|note=evidence, gap_closed=clear|state=ready|note=validate_caveats, review_ready=review_ready|state=ready|note=validate_caveats"
         in text
     )
     assert "background_worker_result" in text
@@ -3256,6 +3298,17 @@ def test_control_dashboard_syncback_routes_prefer_package_record_rows_gate(tmp_p
         "apply_row=ready|state=ready",
         "syncback_row=pending|state=blocked|note=prepare_syncback",
     ]
+    task["background_run_worker_preflight_rows_summary"] = (
+        "package_preflight_rows | verification_ready=ready|state=ready|note=verification | "
+        "apply_ready=ready|state=ready|note=apply_gate | syncback_ready=blocked|state=blocked|note=prepare_syncback | "
+        "package_ready=apply_ready|state=ready|note=prepare_syncback"
+    )
+    task["background_run_worker_preflight_rows"] = [
+        "verification_ready=ready|state=ready|note=verification",
+        "apply_ready=ready|state=ready|note=apply_gate",
+        "syncback_ready=blocked|state=blocked|note=prepare_syncback",
+        "package_ready=apply_ready|state=ready|note=prepare_syncback",
+    ]
     task["background_run_worker_apply_accept_status"] = "applied"
     task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
     task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
@@ -3283,6 +3336,7 @@ def test_control_dashboard_syncback_routes_prefer_package_record_rows_gate(tmp_p
     assert preview_payload["next_step"] == "/task T-001"
     assert "syncback_record=ready" in preview_payload["worker_records"]
     assert "syncback_row=pending|state=blocked" in preview_payload["worker_record_rows"]
+    assert "syncback_ready=blocked|state=blocked" in preview_payload["worker_preflight_rows"]
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:

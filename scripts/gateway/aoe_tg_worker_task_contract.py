@@ -21,6 +21,7 @@ WORKER_TASK_MODULE_ITEM_CLASSES_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_RECORDS_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_RECORD_ROWS_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_PREFLIGHT_VERSION = "2026-04-14.v1"
+WORKER_TASK_MODULE_PREFLIGHT_ROWS_VERSION = "2026-04-14.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -1391,6 +1392,146 @@ def derive_worker_task_module_preflight(
 
 def summarize_worker_task_module_preflight(raw: Any) -> str:
     row = sanitize_worker_task_module_preflight(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def sanitize_worker_task_module_preflight_rows(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_PREFLIGHT_ROWS_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "rows_kind": _trim(source.get("rows_kind"), 96) or "-",
+        "rows": _uniq(source.get("rows"), limit=8, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["rows_kind"] not in {"", "-"}:
+            parts.append(row["rows_kind"])
+        parts.extend(list(row["rows"])[:4])
+        row["summary_line"] = " | ".join(parts)[:320] if parts else "-"
+    return row
+
+
+def derive_worker_task_module_preflight_rows(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+    checklist: Any = None,
+    items: Any = None,
+    item_classes: Any = None,
+    records: Any = None,
+    record_rows: Any = None,
+    preflight: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    rows_row = (
+        sanitize_worker_task_module_record_rows(record_rows)
+        if isinstance(record_rows, dict)
+        else derive_worker_task_module_record_rows(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+            items=items,
+            item_classes=item_classes,
+            records=records,
+        )
+    )
+    if not rows_row:
+        return {}
+    preflight_row = (
+        sanitize_worker_task_module_preflight(preflight)
+        if isinstance(preflight, dict)
+        else derive_worker_task_module_preflight(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+            items=items,
+            item_classes=item_classes,
+            records=records,
+            record_rows=rows_row,
+        )
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    row_map = worker_task_module_record_row_map(rows_row)
+    preflight_state = _trim(preflight_row.get("state"), 64).lower() or "-"
+    next_hint = _trim(preflight_row.get("next_hint"), 96) or "-"
+
+    def _row(label: str, value: str, state: str, *, note: str = "") -> str:
+        token = f"{label}={_trim(value, 96) or '-'}|state={_trim(state, 48) or '-'}"
+        if note:
+            token += f"|note={_trim(note, 48) or '-'}"
+        return token[:160]
+
+    if module_kind == "analysis":
+        finding_state = row_map.get("finding_row", {}).get("state", "") or "-"
+        evidence_state = row_map.get("evidence_row", {}).get("state", "") or "-"
+        gap_state = row_map.get("gap_row", {}).get("state", "") or "clear"
+        review_ready = preflight_state == "review_ready"
+        rows = [
+            _row("finding_ready", finding_state, "ready" if finding_state == "stable" else "blocked", note="findings"),
+            _row("evidence_ready", evidence_state, "ready" if evidence_state == "attached" else "blocked", note="evidence"),
+            _row("gap_closed", gap_state if gap_state != "-" else "clear", "blocked" if gap_state == "open" else "ready", note=next_hint),
+            _row("review_ready", preflight_state, "ready" if review_ready else "blocked", note=next_hint),
+        ]
+        return sanitize_worker_task_module_preflight_rows(
+            {"module_kind": module_kind, "rows_kind": "analysis_preflight_rows", "rows": rows}
+        )
+
+    if module_kind == "writing":
+        doc_state = row_map.get("doc_row", {}).get("state", "") or "-"
+        handoff_state = row_map.get("handoff_row", {}).get("state", "") or "-"
+        quality_state = row_map.get("quality_row", {}).get("state", "") or "-"
+        handoff_ready = preflight_state == "handoff_ready"
+        rows = [
+            _row("doc_present", doc_state, "ready" if doc_state == "present" else "blocked", note="document"),
+            _row("handoff_ready", handoff_state, "ready" if handoff_state == "ready" else "blocked", note="handoff"),
+            _row("quality_ready", quality_state, "ready" if quality_state == "ready" else "blocked", note="quality_gate"),
+            _row("writing_ready", preflight_state, "ready" if handoff_ready else "blocked", note=next_hint),
+        ]
+        return sanitize_worker_task_module_preflight_rows(
+            {"module_kind": module_kind, "rows_kind": "writing_preflight_rows", "rows": rows}
+        )
+
+    if module_kind == "package":
+        verification_state = row_map.get("verification_row", {}).get("state", "") or "-"
+        apply_state = row_map.get("apply_row", {}).get("state", "") or "-"
+        syncback_state = row_map.get("syncback_row", {}).get("state", "") or "-"
+        syncback_ready = preflight_state == "syncback_ready"
+        apply_ready = preflight_state in {"syncback_ready", "apply_ready"}
+        rows = [
+            _row("verification_ready", verification_state, "ready" if verification_state == "ready" else "blocked", note="verification"),
+            _row("apply_ready", apply_state, "ready" if apply_state == "ready" else "blocked", note="apply_gate"),
+            _row("syncback_ready", syncback_state, "ready" if syncback_state == "ready" else "blocked", note=next_hint),
+            _row("package_ready", preflight_state, "ready" if syncback_ready or apply_ready else "blocked", note=next_hint),
+        ]
+        return sanitize_worker_task_module_preflight_rows(
+            {"module_kind": module_kind, "rows_kind": "package_preflight_rows", "rows": rows}
+        )
+
+    return sanitize_worker_task_module_preflight_rows(
+        {
+            "module_kind": module_kind,
+            "rows_kind": "general_preflight_rows",
+            "rows": [_row("apply_ready", preflight_state, "ready" if preflight_state == "ready" else "blocked", note=next_hint)],
+        }
+    )
+
+
+def summarize_worker_task_module_preflight_rows(raw: Any) -> str:
+    row = sanitize_worker_task_module_preflight_rows(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 

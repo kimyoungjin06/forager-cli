@@ -23,6 +23,7 @@ from aoe_tg_worker_task_contract import (
     derive_worker_task_module_item_classes,
     derive_worker_task_module_items,
     derive_worker_task_module_preflight,
+    derive_worker_task_module_preflight_rows,
     derive_worker_task_module_record_rows,
     derive_worker_task_module_records,
     derive_worker_task_module_profile,
@@ -938,6 +939,70 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
         ).strip()
     if background_worker_preflight:
         lines.append("background_run_worker_preflight: " + background_worker_preflight[:240])
+    background_worker_preflight_rows = str(task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    if not background_worker_preflight_rows and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_preflight_rows = str(
+            derive_worker_task_module_preflight_rows(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+                item_classes={
+                    "module_kind": background_task_contract_module,
+                    "classes": background_worker_item_class_tokens,
+                    "summary_line": background_worker_item_classes,
+                },
+                records={
+                    "module_kind": background_task_contract_module,
+                    "records": background_worker_record_tokens,
+                    "summary_line": background_worker_records,
+                },
+                record_rows={
+                    "module_kind": background_task_contract_module,
+                    "rows": background_worker_record_row_tokens,
+                    "summary_line": background_worker_record_rows,
+                },
+                preflight={
+                    "module_kind": background_task_contract_module,
+                    "state": task.get("background_run_worker_preflight_status"),
+                    "summary_line": background_worker_preflight,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_preflight_rows:
+        lines.append("background_run_worker_preflight_rows: " + background_worker_preflight_rows[:240])
+    background_worker_preflight_row_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_preflight_rows") if isinstance(task.get("background_run_worker_preflight_rows"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_preflight_row_tokens:
+        lines.append("background_run_worker_preflight_row_tokens: " + ", ".join(background_worker_preflight_row_tokens[:6])[:240])
     background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
     if background_worker_result:
         lines.append("background_run_worker_result: " + background_worker_result[:240])
