@@ -122,6 +122,10 @@ def _worker_record_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     rows_kind = ""
     if rows_summary not in {"", "-"}:
         rows_kind = rows_summary.split(" | ", 1)[0].strip()
+    if module_kind == "general" and rows_kind.endswith("_record_rows"):
+        inferred_module = rows_kind.split("_", 1)[0].strip().lower()
+        if inferred_module in worker_task_contract.WORKER_MODULE_KINDS:
+            module_kind = inferred_module
     raw_rows = task.get("background_run_worker_record_rows")
     row_tokens: list[str] = []
     if isinstance(raw_rows, list):
@@ -130,6 +134,107 @@ def _worker_record_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
         row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
     elif rows_summary not in {"", "-"}:
         row_tokens = [str(item).strip() for item in rows_summary.split(" | ")[1:] if str(item).strip()]
+    if row_tokens:
+        return {
+            "module_kind": module_kind,
+            "rows_kind": rows_kind or f"{module_kind}_record_rows",
+            "rows": row_tokens,
+            "summary_line": rows_summary or "-",
+        }
+    records_summary = str(task.get("background_run_worker_records_summary", "")).strip()
+    records_kind = ""
+    if records_summary not in {"", "-"}:
+        records_kind = records_summary.split(" | ", 1)[0].strip()
+    if module_kind == "general" and records_kind.endswith("_records"):
+        inferred_module = records_kind.split("_", 1)[0].strip().lower()
+        if inferred_module in worker_task_contract.WORKER_MODULE_KINDS:
+            module_kind = inferred_module
+    if module_kind not in {"", "-", "general"}:
+        gate_state = task.get("background_run_worker_gate_status")
+        gate_summary = task.get("background_run_worker_gate_summary")
+        gate_payload = (
+            {
+                "state": gate_state,
+                "summary_line": gate_summary,
+            }
+            if str(gate_state or "").strip() or str(gate_summary or "").strip()
+            else None
+        )
+        profile_state = task.get("background_run_worker_profile_status")
+        profile_summary = task.get("background_run_worker_profile_summary")
+        profile_payload = (
+            {
+                "state": profile_state,
+                "summary_line": profile_summary,
+            }
+            if str(profile_state or "").strip() or str(profile_summary or "").strip()
+            else None
+        )
+        checklist_state = task.get("background_run_worker_checklist_status")
+        checklist_summary = task.get("background_run_worker_checklist_summary")
+        checklist_payload = (
+            {
+                "state": checklist_state,
+                "summary_line": checklist_summary,
+            }
+            if str(checklist_state or "").strip() or str(checklist_summary or "").strip()
+            else None
+        )
+        item_tokens = task.get("background_run_worker_items")
+        item_summary = task.get("background_run_worker_items_summary")
+        items_payload = (
+            {
+                "module_kind": module_kind,
+                "items": item_tokens if isinstance(item_tokens, list) else [],
+                "summary_line": item_summary,
+            }
+            if (isinstance(item_tokens, list) and item_tokens) or str(item_summary or "").strip()
+            else None
+        )
+        class_tokens = task.get("background_run_worker_item_classes")
+        class_summary = task.get("background_run_worker_item_classes_summary")
+        item_classes_payload = (
+            {
+                "module_kind": module_kind,
+                "classes": class_tokens if isinstance(class_tokens, list) else [],
+                "summary_line": class_summary,
+            }
+            if (isinstance(class_tokens, list) and class_tokens) or str(class_summary or "").strip()
+            else None
+        )
+        record_tokens = task.get("background_run_worker_records")
+        record_summary = task.get("background_run_worker_records_summary")
+        records_payload = (
+            {
+                "module_kind": module_kind,
+                "records": record_tokens if isinstance(record_tokens, list) else [],
+                "summary_line": record_summary,
+            }
+            if (isinstance(record_tokens, list) and record_tokens) or str(record_summary or "").strip()
+            else None
+        )
+        derived = worker_task_contract.derive_worker_task_module_record_rows(
+            {
+                "module_kind": module_kind,
+                "module_policy": task.get("background_run_task_contract_policy"),
+                "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+            },
+            {
+                "status": task.get("background_run_worker_result_status"),
+                "summary": task.get("background_run_worker_result_summary"),
+                "actions": task.get("background_run_worker_result_actions"),
+                "cautions": task.get("background_run_worker_result_cautions"),
+                "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+            },
+            gate=gate_payload,
+            profile=profile_payload,
+            checklist=checklist_payload,
+            items=items_payload,
+            item_classes=item_classes_payload,
+            records=records_payload,
+        )
+        if derived:
+            return worker_task_contract.sanitize_worker_task_module_record_rows(derived)
     return {
         "module_kind": module_kind,
         "rows_kind": rows_kind or f"{module_kind}_record_rows",
@@ -224,7 +329,7 @@ def _worker_apply_ready(task: Dict[str, Any]) -> bool:
     payload = _worker_record_rows_payload(task)
     if list(payload.get("rows") or []):
         return worker_task_contract.worker_task_module_apply_ready(payload)
-    return True
+    return str(payload.get("module_kind", "")).strip().lower() in {"", "-", "general"}
 
 
 def _worker_apply_not_ready_response(
@@ -238,9 +343,10 @@ def _worker_apply_not_ready_response(
     mode: str,
     outcome_kind: str,
 ) -> Tuple[int, Dict[str, str], bytes]:
+    record_rows_payload = _worker_record_rows_payload(task)
+    row_detail = str(record_rows_payload.get("summary_line", "")).strip()
     preflight_rows_payload = _worker_preflight_rows_payload(task)
     preflight_rows_detail = str(preflight_rows_payload.get("summary_line", "")).strip()
-    row_detail = str(task.get("background_run_worker_record_rows_summary", "")).strip()
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(
         {
             **preflight_rows_payload,
@@ -316,13 +422,14 @@ def _package_syncback_not_ready_response(
     task_ref = str(latest_task.get("short_id", "")).strip()
     next_step = f"/task {task_ref}" if task_ref else f"/orch status {alias}"
     preflight_detail = str(latest_task.get("background_run_worker_preflight_summary", "")).strip()
+    record_rows_payload = _worker_record_rows_payload(latest_task)
     preflight_rows_payload = _worker_preflight_rows_payload(latest_task)
     preflight_rows_detail = str(preflight_rows_payload.get("summary_line", "")).strip()
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(
         preflight_rows_payload,
         mode="syncback",
     )
-    row_detail = str(latest_task.get("background_run_worker_record_rows_summary", "")).strip()
+    row_detail = str(record_rows_payload.get("summary_line", "")).strip()
     record_detail = str(latest_task.get("background_run_worker_records_summary", "")).strip()
     detail = preflight_rows_detail or preflight_detail or row_detail or record_detail or "package syncback record pending"
     remediation = str(blocker.get("remediation", "")).strip() or "wait until package preflight reports syncback_ready before accepted syncback"
