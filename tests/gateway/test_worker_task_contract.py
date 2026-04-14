@@ -896,3 +896,43 @@ def test_package_module_preflight_rows_capture_syncback_gate() -> None:
         "apply_ready=ready|state=ready|note=apply_gate | syncback_ready=ready|state=ready|note=syncback_clean | "
         "package_ready=syncback_ready|state=ready|note=syncback_clean"
     )
+
+
+def test_writing_apply_blocker_prefers_quality_open_reason() -> None:
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            "module_kind": "writing",
+            "rows_kind": "writing_preflight_rows",
+            "rows": [
+                "doc_present=present|state=ready|note=document",
+                "handoff_ready=waiting|state=blocked|note=handoff",
+                "quality_ready=open|state=blocked|note=quality_gate",
+                "writing_ready=handoff_open|state=blocked|note=close_quality_gate",
+            ],
+        },
+        mode="apply",
+    )
+    assert blocker["reason_code"] == "writing_quality_open"
+    assert blocker["summary_line"] == (
+        "writing_apply_blocker | reason=writing_quality_open | blocked=handoff_ready,quality_ready,writing_ready | next=quality_gate"
+    )
+
+
+def test_package_syncback_blocker_prefers_syncback_pending_reason() -> None:
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            "module_kind": "package",
+            "rows_kind": "package_preflight_rows",
+            "rows": [
+                "verification_ready=ready|state=ready|note=verification",
+                "apply_ready=ready|state=ready|note=apply_gate",
+                "syncback_ready=blocked|state=blocked|note=prepare_syncback",
+                "package_ready=apply_ready|state=ready|note=prepare_syncback",
+            ],
+        },
+        mode="syncback",
+    )
+    assert blocker["reason_code"] == "package_syncback_pending"
+    assert blocker["summary_line"] == (
+        "package_syncback_blocker | reason=package_syncback_pending | blocked=syncback_ready | next=prepare_syncback"
+    )

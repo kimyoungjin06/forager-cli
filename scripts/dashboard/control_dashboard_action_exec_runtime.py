@@ -138,6 +138,88 @@ def _worker_record_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _worker_preflight_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower() or "general"
+    rows_summary = str(task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    rows_kind = ""
+    if rows_summary not in {"", "-"}:
+        rows_kind = rows_summary.split(" | ", 1)[0].strip()
+    raw_rows = task.get("background_run_worker_preflight_rows")
+    row_tokens: list[str] = []
+    if isinstance(raw_rows, list):
+        row_tokens = [str(item).strip() for item in raw_rows if str(item).strip()]
+    elif isinstance(raw_rows, str):
+        row_tokens = [str(item).strip() for item in raw_rows.split(",") if str(item).strip()]
+    if row_tokens or rows_summary not in {"", "-"}:
+        return {
+            "module_kind": module_kind,
+            "rows_kind": rows_kind or f"{module_kind}_preflight_rows",
+            "rows": row_tokens,
+            "summary_line": rows_summary or "-",
+        }
+    if module_kind in {"", "-", "general"}:
+        return {
+            "module_kind": module_kind or "general",
+            "rows_kind": "general_preflight_rows",
+            "rows": [],
+            "summary_line": "-",
+        }
+    record_rows_payload = _worker_record_rows_payload(task)
+    derived = worker_task_contract.derive_worker_task_module_preflight_rows(
+        {
+            "module_kind": module_kind,
+            "module_policy": task.get("background_run_task_contract_policy"),
+            "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+        },
+        {
+            "status": task.get("background_run_worker_result_status"),
+            "summary": task.get("background_run_worker_result_summary"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        },
+        gate={
+            "state": task.get("background_run_worker_gate_status"),
+            "summary_line": task.get("background_run_worker_gate_summary"),
+        },
+        profile={
+            "state": task.get("background_run_worker_profile_status"),
+            "summary_line": task.get("background_run_worker_profile_summary"),
+        },
+        checklist={
+            "state": task.get("background_run_worker_checklist_status"),
+            "summary_line": task.get("background_run_worker_checklist_summary"),
+        },
+        items={
+            "module_kind": module_kind,
+            "items": (task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else []),
+            "summary_line": task.get("background_run_worker_items_summary"),
+        },
+        item_classes={
+            "module_kind": module_kind,
+            "classes": (task.get("background_run_worker_item_classes") if isinstance(task.get("background_run_worker_item_classes"), list) else []),
+            "summary_line": task.get("background_run_worker_item_classes_summary"),
+        },
+        records={
+            "module_kind": module_kind,
+            "records": (task.get("background_run_worker_records") if isinstance(task.get("background_run_worker_records"), list) else []),
+            "summary_line": task.get("background_run_worker_records_summary"),
+        },
+        record_rows=record_rows_payload if list(record_rows_payload.get("rows") or []) else None,
+        preflight={
+            "module_kind": module_kind,
+            "state": task.get("background_run_worker_preflight_status"),
+            "summary_line": task.get("background_run_worker_preflight_summary"),
+        },
+    )
+    return {
+        "module_kind": module_kind,
+        "rows_kind": str(derived.get("rows_kind", "")).strip() or f"{module_kind}_preflight_rows",
+        "rows": list(derived.get("rows") or []),
+        "summary_line": str(derived.get("summary_line", "")).strip() or "-",
+    }
+
+
 def _worker_apply_ready(task: Dict[str, Any]) -> bool:
     payload = _worker_record_rows_payload(task)
     if list(payload.get("rows") or []):
@@ -156,11 +238,17 @@ def _worker_apply_not_ready_response(
     mode: str,
     outcome_kind: str,
 ) -> Tuple[int, Dict[str, str], bytes]:
-    preflight_rows_detail = str(task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    preflight_rows_payload = _worker_preflight_rows_payload(task)
+    preflight_rows_detail = str(preflight_rows_payload.get("summary_line", "")).strip()
+    row_detail = str(task.get("background_run_worker_record_rows_summary", "")).strip()
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        preflight_rows_payload,
+        mode="apply",
+    )
     detail = (
         preflight_rows_detail
         or str(task.get("background_run_worker_preflight_summary", "")).strip()
-        or str(task.get("background_run_worker_record_rows_summary", "")).strip()
+        or row_detail
         or "worker apply gate not ready"
     )
     return _json(
@@ -179,7 +267,7 @@ def _worker_apply_not_ready_response(
             "outcome": {
                 "kind": outcome_kind,
                 "status": "blocked",
-                "reason_code": "worker_apply_not_ready",
+                "reason_code": str(blocker.get("reason_code", "")).strip() or "worker_apply_not_ready",
                 "detail": detail,
             },
             "task": {
@@ -187,8 +275,10 @@ def _worker_apply_not_ready_response(
                 "label": label,
                 "detail_path": f"/control/tasks/by-request/{request_id}",
             },
-            "worker_record_rows": detail,
+            "worker_record_rows": row_detail or detail,
             "worker_preflight_rows": preflight_rows_detail or detail,
+            "worker_blocker": str(blocker.get("summary_line", "")).strip() or detail,
+            "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
             "preview": {
                 "kind": "worker_apply_preview",
                 "project_alias": alias,
@@ -211,7 +301,12 @@ def _package_syncback_not_ready_response(
     task_ref = str(latest_task.get("short_id", "")).strip()
     next_step = f"/task {task_ref}" if task_ref else f"/orch status {alias}"
     preflight_detail = str(latest_task.get("background_run_worker_preflight_summary", "")).strip()
-    preflight_rows_detail = str(latest_task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    preflight_rows_payload = _worker_preflight_rows_payload(latest_task)
+    preflight_rows_detail = str(preflight_rows_payload.get("summary_line", "")).strip()
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        preflight_rows_payload,
+        mode="syncback",
+    )
     row_detail = str(latest_task.get("background_run_worker_record_rows_summary", "")).strip()
     record_detail = str(latest_task.get("background_run_worker_records_summary", "")).strip()
     detail = preflight_rows_detail or preflight_detail or row_detail or record_detail or "package syncback record pending"
@@ -231,7 +326,7 @@ def _package_syncback_not_ready_response(
             "outcome": {
                 "kind": "runtime_syncback_preview" if mode == "safe" else "runtime_syncback_apply",
                 "status": "blocked",
-                "reason_code": "package_syncback_not_ready",
+                "reason_code": str(blocker.get("reason_code", "")).strip() or "package_syncback_not_ready",
                 "detail": detail,
             },
             "preview": {
@@ -243,6 +338,8 @@ def _package_syncback_not_ready_response(
             "worker_record_rows": row_detail or detail,
             "worker_preflight": preflight_detail or detail,
             "worker_preflight_rows": preflight_rows_detail or detail,
+            "worker_blocker": str(blocker.get("summary_line", "")).strip() or detail,
+            "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
         },
         status=409,
     )

@@ -3261,13 +3261,14 @@ def test_control_dashboard_syncback_routes_block_when_package_record_pending(tmp
 
     assert preview_status == 409
     assert preview_payload["status"] == "blocked"
-    assert preview_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
+    assert preview_payload["outcome"]["reason_code"] == "package_syncback_pending"
     assert preview_payload["next_step"] == "/task T-001"
     assert "syncback_record=pending" in preview_payload["worker_records"]
+    assert "package_syncback_blocker | reason=package_syncback_pending" in preview_payload["worker_blocker"]
 
     assert apply_status == 409
     assert apply_payload["status"] == "blocked"
-    assert apply_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
+    assert apply_payload["outcome"]["reason_code"] == "package_syncback_pending"
     assert apply_payload["next_step"] == "/task T-001"
     assert "syncback_record=pending" in apply_payload["worker_records"]
 
@@ -3332,11 +3333,12 @@ def test_control_dashboard_syncback_routes_prefer_package_record_rows_gate(tmp_p
     preview_payload = json.loads(preview_body.decode("utf-8"))
 
     assert preview_status == 409
-    assert preview_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
+    assert preview_payload["outcome"]["reason_code"] == "package_syncback_pending"
     assert preview_payload["next_step"] == "/task T-001"
     assert "syncback_record=ready" in preview_payload["worker_records"]
     assert "syncback_row=pending|state=blocked" in preview_payload["worker_record_rows"]
     assert "syncback_ready=blocked|state=blocked" in preview_payload["worker_preflight_rows"]
+    assert "package_syncback_blocker | reason=package_syncback_pending" in preview_payload["worker_blocker"]
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:
@@ -4226,13 +4228,15 @@ def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_p
     propose_payload = json.loads(propose_body.decode("utf-8"))
 
     assert preview_status == 409
-    assert preview_payload["outcome"]["reason_code"] == "worker_apply_not_ready"
+    assert preview_payload["outcome"]["reason_code"] == "writing_quality_open"
     assert preview_payload["next_step"] == "/task T-001"
     assert "writing_record_rows" in preview_payload["worker_record_rows"]
+    assert "writing_apply_blocker | reason=writing_quality_open" in preview_payload["worker_blocker"]
     assert propose_status == 409
-    assert propose_payload["outcome"]["reason_code"] == "worker_apply_not_ready"
+    assert propose_payload["outcome"]["reason_code"] == "writing_quality_open"
     assert propose_payload["next_step"] == "/task T-001"
     assert "quality_row=open|state=open" in propose_payload["worker_record_rows"]
+    assert "quality_ready=open|state=blocked" in propose_payload["worker_preflight_rows"]
 
 
 def test_dashboard_surfaces_worker_apply_accept_summary_and_hides_apply_buttons(tmp_path: Path) -> None:
