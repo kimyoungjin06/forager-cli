@@ -979,3 +979,162 @@ def test_analysis_apply_blocker_prefers_task_review_guidance() -> None:
     assert blocker["reason_code"] == "analysis_evidence_missing"
     assert blocker["suggested_action"] == "task_review"
     assert blocker["remediation"] == "attach evidence and re-run analysis review before applying changes"
+
+
+def test_analysis_module_multi_item_records_preserve_counts_and_series() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-AN-9",
+            "contract_preset": "analysis",
+            "objective": "Review multiple findings and supporting evidence.",
+            "artifact_targets": ["reports/analysis/findings.md", "reports/analysis/appendix.md"],
+        }
+    )
+    result = {
+        "status": "ready",
+        "summary": "analysis compiled",
+        "actions": [
+            "update reports/analysis/findings.md",
+            "update reports/analysis/appendix.md",
+        ],
+        "cautions": [
+            "keep caveat A open",
+            "keep caveat B open",
+        ],
+        "evidence_refs": [
+            "logs/findings_a.csv",
+            "logs/findings_b.csv",
+        ],
+    }
+    gate = worker_task_contract.derive_worker_task_module_gate(contract, result)
+    profile = worker_task_contract.derive_worker_task_module_profile(contract, result, gate=gate)
+    checklist = worker_task_contract.derive_worker_task_module_checklist(contract, result, gate=gate, profile=profile)
+    items = worker_task_contract.derive_worker_task_module_items(
+        contract, result, gate=gate, profile=profile, checklist=checklist
+    )
+    item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+        contract, result, gate=gate, profile=profile, checklist=checklist, items=items
+    )
+    records = worker_task_contract.derive_worker_task_module_records(
+        contract,
+        result,
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+    )
+
+    assert items["items"] == [
+        "finding:update reports/analysis/findings.md",
+        "finding:update reports/analysis/appendix.md",
+        "evidence:logs/findings_a.csv",
+        "evidence:logs/findings_b.csv",
+        "caveat:keep caveat A open",
+        "caveat:keep caveat B open",
+    ]
+    assert item_classes["classes"] == ["finding=2", "evidence=2", "gap=0", "caveat=2"]
+    assert records["records"] == [
+        "finding_record=update reports/analysis/findings.md (+1)",
+        "evidence_record=logs/findings_a.csv (+1)",
+        "caveat_record=keep caveat A open (+1)",
+    ]
+
+
+def test_writing_module_multi_doc_records_preserve_counts_and_series() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-WR-9",
+            "contract_preset": "writer",
+            "objective": "Prepare multiple handoff docs.",
+            "artifact_targets": ["docs/handoff/final.md", "docs/handoff/checklist.md"],
+        }
+    )
+    result = {
+        "status": "ready",
+        "summary": "handoff prepared",
+        "actions": ["update docs/handoff/final.md", "update docs/handoff/checklist.md"],
+        "cautions": [],
+        "evidence_refs": ["docs/handoff/final.md"],
+    }
+    gate = worker_task_contract.derive_worker_task_module_gate(contract, result)
+    profile = worker_task_contract.derive_worker_task_module_profile(contract, result, gate=gate)
+    checklist = worker_task_contract.derive_worker_task_module_checklist(contract, result, gate=gate, profile=profile)
+    items = worker_task_contract.derive_worker_task_module_items(
+        contract, result, gate=gate, profile=profile, checklist=checklist
+    )
+    item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+        contract, result, gate=gate, profile=profile, checklist=checklist, items=items
+    )
+    records = worker_task_contract.derive_worker_task_module_records(
+        contract,
+        result,
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+    )
+
+    assert items["items"] == [
+        "doc:docs/handoff/final.md",
+        "doc:docs/handoff/checklist.md",
+        "handoff:ready",
+        "quality:ready",
+    ]
+    assert item_classes["classes"] == ["doc=2", "handoff=ready", "quality=ready"]
+    assert records["records"] == [
+        "doc_record=docs/handoff/final.md (+1)",
+        "handoff_record=ready",
+        "quality_record=ready",
+    ]
+
+
+def test_package_module_multi_artifact_records_preserve_counts_and_series() -> None:
+    contract = worker_task_contract.sanitize_worker_task_contract(
+        {
+            "task_label": "T-PKG-9",
+            "contract_preset": "build",
+            "objective": "Verify multiple release artifacts.",
+            "artifact_targets": ["dist/release_bundle.zip", "dist/checksums.txt"],
+        }
+    )
+    result = {
+        "status": "ready",
+        "summary": "package verified",
+        "actions": ["update dist/release_bundle.zip", "update dist/checksums.txt"],
+        "cautions": [],
+        "evidence_refs": ["artifacts/release.sha256", "artifacts/checksums.txt"],
+    }
+    gate = worker_task_contract.derive_worker_task_module_gate(contract, result)
+    profile = worker_task_contract.derive_worker_task_module_profile(contract, result, gate=gate)
+    checklist = worker_task_contract.derive_worker_task_module_checklist(contract, result, gate=gate, profile=profile)
+    items = worker_task_contract.derive_worker_task_module_items(
+        contract, result, gate=gate, profile=profile, checklist=checklist
+    )
+    item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+        contract, result, gate=gate, profile=profile, checklist=checklist, items=items
+    )
+    records = worker_task_contract.derive_worker_task_module_records(
+        contract,
+        result,
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+        item_classes=item_classes,
+    )
+
+    assert items["items"][:3] == [
+        "artifact:dist/release_bundle.zip",
+        "artifact:dist/checksums.txt",
+        "artifact:artifacts/release.sha256",
+    ]
+    assert items["items"][-2:] == ["verification:2", "integrity:ready"]
+    assert item_classes["classes"] == ["artifact=4", "verification=2", "integrity=ready"]
+    assert records["records"] == [
+        "artifact_record=dist/release_bundle.zip (+3)",
+        "verification_record=2",
+        "apply_record=ready",
+        "syncback_record=ready",
+    ]

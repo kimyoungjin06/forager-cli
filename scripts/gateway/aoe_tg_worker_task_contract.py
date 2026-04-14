@@ -99,6 +99,24 @@ def _uniq(values: Any, *, limit: int = 6, text_limit: int = 240) -> List[str]:
     return out[: max(1, int(limit or 1))]
 
 
+def _trimmed_values(values: Any, *, limit: int = 8, text_limit: int = 160) -> List[str]:
+    rows = values if isinstance(values, list) else []
+    return [token for token in _uniq(rows, limit=limit, text_limit=text_limit) if token]
+
+
+def _summarize_value_series(values: List[str], *, fallback: str = "-", limit: int = 96) -> str:
+    cleaned = [token for token in values if _trim(token, limit)]
+    if not cleaned:
+        return fallback
+    head = _trim(cleaned[0], limit) or fallback
+    extra = max(0, len(cleaned) - 1)
+    if extra <= 0:
+        return head
+    suffix = f" (+{extra})"
+    allowed = max(1, int(limit) - len(suffix))
+    return (_trim(head, allowed) or fallback) + suffix
+
+
 def _task_label(task: Dict[str, Any]) -> str:
     return (
         _trim(task.get("short_id"), 48).upper()
@@ -818,29 +836,30 @@ def derive_worker_task_module_items(
         )
     )
     module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
-    actions = [item for item in list(result_row.get("actions") or []) if _trim(item, 160)]
-    refs = [item for item in list(result_row.get("evidence_refs") or []) if _trim(item, 160)]
-    cautions = [item for item in list(result_row.get("cautions") or []) if _trim(item, 160)]
-    targets = [item for item in list((stub or {}).get("target_artifacts") or []) if _trim(item, 160)]
+    actions = _trimmed_values(result_row.get("actions"), limit=6, text_limit=160)
+    refs = _trimmed_values(result_row.get("evidence_refs"), limit=6, text_limit=160)
+    cautions = _trimmed_values(result_row.get("cautions"), limit=6, text_limit=160)
+    targets = _trimmed_values((stub or {}).get("target_artifacts"), limit=6, text_limit=160)
 
     if module_kind == "analysis":
         items: List[str] = []
-        if actions:
-            items.append(f"finding:{_trim(actions[0], 96)}")
-        if refs:
-            items.append(f"evidence:{_trim(refs[0], 96)}")
+        for action in actions[:2]:
+            items.append(f"finding:{_trim(action, 96)}")
+        for ref in refs[:2]:
+            items.append(f"evidence:{_trim(ref, 96)}")
         if "gaps=0" not in str(checklist_row.get("summary_line", "")):
             items.append("gap:evidence_missing")
-        elif cautions:
-            items.append(f"caveat:{_trim(cautions[0], 96)}")
+        else:
+            for caution in cautions[:2]:
+                items.append(f"caveat:{_trim(caution, 96)}")
         return sanitize_worker_task_module_items(
             {"module_kind": module_kind, "items_kind": "analysis_items", "items": items}
         )
 
     if module_kind == "writing":
         items = []
-        if targets:
-            items.append(f"doc:{_trim(targets[0], 96)}")
+        for target in targets[:3]:
+            items.append(f"doc:{_trim(target, 96)}")
         if "handoff=ready" in str(profile_row.get("summary_line", "")):
             items.append("handoff:ready")
         elif "handoff=draft" in str(profile_row.get("summary_line", "")):
@@ -854,8 +873,8 @@ def derive_worker_task_module_items(
 
     if module_kind == "package":
         items = []
-        if targets:
-            items.append(f"artifact:{_trim(targets[0], 96)}")
+        for target in targets[:3]:
+            items.append(f"artifact:{_trim(target, 96)}")
         items.append(f"verification:{len(refs)}")
         items.append(
             "integrity:ready"
@@ -867,10 +886,10 @@ def derive_worker_task_module_items(
         )
 
     items = []
-    if actions:
-        items.append(f"action:{_trim(actions[0], 96)}")
-    if refs:
-        items.append(f"ref:{_trim(refs[0], 96)}")
+    for action in actions[:2]:
+        items.append(f"action:{_trim(action, 96)}")
+    for ref in refs[:2]:
+        items.append(f"ref:{_trim(ref, 96)}")
     return sanitize_worker_task_module_items(
         {"module_kind": module_kind, "items_kind": "general_items", "items": items}
     )
@@ -927,6 +946,15 @@ def derive_worker_task_module_item_classes(
     )
     module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
     item_tokens = [str(item).strip() for item in list(items_row.get("items") or []) if str(item).strip()]
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    actions = _trimmed_values(result_row.get("actions"), limit=8, text_limit=160)
+    refs = _trimmed_values(result_row.get("evidence_refs"), limit=8, text_limit=160)
+    cautions = _trimmed_values(result_row.get("cautions"), limit=8, text_limit=160)
+    targets = _trimmed_values((stub or {}).get("target_artifacts"), limit=8, text_limit=160)
 
     def _count(prefix: str) -> int:
         return len([token for token in item_tokens if token.startswith(prefix)])
@@ -943,10 +971,10 @@ def derive_worker_task_module_item_classes(
                 "module_kind": module_kind,
                 "classes_kind": "analysis_item_classes",
                 "classes": [
-                    f"finding={_count('finding:')}",
-                    f"evidence={_count('evidence:')}",
+                    f"finding={len(actions)}",
+                    f"evidence={len(refs)}",
                     f"gap={_count('gap:')}",
-                    f"caveat={_count('caveat:')}",
+                    f"caveat={0 if _count('gap:') > 0 else len(cautions)}",
                 ],
             }
         )
@@ -957,7 +985,7 @@ def derive_worker_task_module_item_classes(
                 "module_kind": module_kind,
                 "classes_kind": "writing_item_classes",
                 "classes": [
-                    f"doc={_count('doc:')}",
+                    f"doc={len(targets)}",
                     f"handoff={_suffix('handoff:')}",
                     f"quality={_suffix('quality:')}",
                 ],
@@ -970,8 +998,8 @@ def derive_worker_task_module_item_classes(
                 "module_kind": module_kind,
                 "classes_kind": "package_item_classes",
                 "classes": [
-                    f"artifact={_count('artifact:')}",
-                    f"verification={_suffix('verification:')}",
+                    f"artifact={len(targets)}",
+                    f"verification={len(refs)}",
                     f"integrity={_suffix('integrity:')}",
                 ],
             }
@@ -982,8 +1010,8 @@ def derive_worker_task_module_item_classes(
             "module_kind": module_kind,
             "classes_kind": "general_item_classes",
             "classes": [
-                f"action={_count('action:')}",
-                f"ref={_count('ref:')}",
+                f"action={len(actions)}",
+                f"ref={len(refs)}",
             ],
         }
     )
@@ -1060,13 +1088,13 @@ def derive_worker_task_module_records(
     module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
     item_tokens = [str(item).strip() for item in list(items_row.get("items") or []) if str(item).strip()]
     class_tokens = [str(item).strip() for item in list(item_classes_row.get("classes") or []) if str(item).strip()]
-    target_tokens = [str(item).strip() for item in list((stub or {}).get("target_artifacts") or []) if str(item).strip()]
+    actions = _trimmed_values(result_row.get("actions"), limit=8, text_limit=160)
+    refs = _trimmed_values(result_row.get("evidence_refs"), limit=8, text_limit=160)
+    cautions = _trimmed_values(result_row.get("cautions"), limit=8, text_limit=160)
+    target_tokens = _trimmed_values((stub or {}).get("target_artifacts"), limit=8, text_limit=160)
 
-    def _first(prefix: str, fallback: str = "-") -> str:
-        for token in item_tokens:
-            if token.startswith(prefix):
-                return _trim(token.split(":", 1)[-1], 96) or fallback
-        return fallback
+    def _series(prefix: str) -> List[str]:
+        return [_trim(token.split(":", 1)[-1], 160) for token in item_tokens if token.startswith(prefix) and _trim(token.split(":", 1)[-1], 160)]
 
     def _class_value(prefix: str, fallback: str = "-") -> str:
         for token in class_tokens:
@@ -1075,15 +1103,18 @@ def derive_worker_task_module_records(
         return fallback
 
     if module_kind == "analysis":
+        finding_series = actions or _series("finding:")
+        evidence_series = refs or _series("evidence:")
+        caveat_series = cautions or _series("caveat:")
         records = [
-            f"finding_record={_first('finding:')}",
-            f"evidence_record={_first('evidence:')}",
+            f"finding_record={_summarize_value_series(finding_series)}",
+            f"evidence_record={_summarize_value_series(evidence_series)}",
         ]
         gap_value = _class_value("gap=", "0")
         if gap_value not in {"0", "-", ""}:
             records.append("gap_record=evidence_missing")
         else:
-            records.append(f"caveat_record={_first('caveat:')}")
+            records.append(f"caveat_record={_summarize_value_series(caveat_series)}")
         return sanitize_worker_task_module_records(
             {
                 "module_kind": module_kind,
@@ -1093,8 +1124,9 @@ def derive_worker_task_module_records(
         )
 
     if module_kind == "writing":
+        doc_series = target_tokens or _series("doc:")
         records = [
-            f"doc_record={_first('doc:')}",
+            f"doc_record={_summarize_value_series(doc_series)}",
             f"handoff_record={_class_value('handoff=')}",
             f"quality_record={_class_value('quality=')}",
         ]
@@ -1111,8 +1143,9 @@ def derive_worker_task_module_records(
         verification = _class_value("verification=", "0")
         apply_state = "ready" if target_tokens else "pending"
         syncback_state = "ready" if integrity == "ready" and target_tokens else "pending"
+        artifact_series = target_tokens or _series("artifact:")
         records = [
-            f"artifact_record={_first('artifact:')}",
+            f"artifact_record={_summarize_value_series(artifact_series)}",
             f"verification_record={verification}",
             f"apply_record={apply_state}",
             f"syncback_record={syncback_state}",
@@ -1125,9 +1158,11 @@ def derive_worker_task_module_records(
             }
         )
 
+    action_series = actions or _series("action:")
+    ref_series = refs or _series("ref:")
     records = [
-        f"action_record={_first('action:')}",
-        f"ref_record={_first('ref:')}",
+        f"action_record={_summarize_value_series(action_series)}",
+        f"ref_record={_summarize_value_series(ref_series)}",
     ]
     return sanitize_worker_task_module_records(
         {
