@@ -260,6 +260,24 @@ def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
         "evidence:logs/provider_regressions.csv",
         "caveat:keep review lane open",
     ]
+    item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+        contract,
+        {
+            "status": "ready",
+            "summary": "findings compiled",
+            "actions": ["update docs/analysis/provider_regressions.md"],
+            "cautions": ["keep review lane open"],
+            "evidence_refs": ["logs/provider_regressions.csv"],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+    )
+    assert item_classes["summary_line"] == (
+        "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=1"
+    )
+    assert item_classes["classes"] == ["finding=1", "evidence=1", "gap=0", "caveat=1"]
 
 
 def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:
@@ -335,6 +353,24 @@ def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> Non
         "handoff:review",
         "quality:open",
     ]
+    item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+        contract,
+        {
+            "status": "ready",
+            "summary": "draft prepared",
+            "actions": ["update docs/handoff/final_handoff.md"],
+            "cautions": ["quality review still open"],
+            "evidence_refs": ["docs/handoff/final_handoff.md"],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+    )
+    assert item_classes["summary_line"] == (
+        "writing_item_classes | doc=1 | handoff=review | quality=open"
+    )
+    assert item_classes["classes"] == ["doc=1", "handoff=review", "quality=open"]
 
 
 def test_package_module_gate_surfaces_artifact_check_open_without_verification_refs() -> None:
@@ -410,3 +446,21 @@ def test_package_module_gate_surfaces_artifact_check_open_without_verification_r
         "verification:0",
         "integrity:open",
     ]
+    item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+        contract,
+        {
+            "status": "ready",
+            "summary": "package built",
+            "actions": ["update dist/release_bundle.zip"],
+            "cautions": [],
+            "evidence_refs": [],
+        },
+        gate=gate,
+        profile=profile,
+        checklist=checklist,
+        items=items,
+    )
+    assert item_classes["summary_line"] == (
+        "package_item_classes | artifact=1 | verification=0 | integrity=open"
+    )
+    assert item_classes["classes"] == ["artifact=1", "verification=0", "integrity=open"]

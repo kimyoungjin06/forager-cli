@@ -703,6 +703,18 @@ def invoke_background_ticket_worker(
             if items:
                 result["task_items_summary"] = _trim(items.get("summary_line"), 320) or "-"
                 result["task_items"] = list(items.get("items") or [])
+            item_classes = worker_task_contract.derive_worker_task_module_item_classes(
+                launch_spec.get("provider_task_contract_json"),
+                task_result,
+                update_stub=update_stub,
+                gate=gate,
+                profile=profile,
+                checklist=checklist,
+                items=items,
+            )
+            if item_classes:
+                result["task_item_classes_summary"] = _trim(item_classes.get("summary_line"), 320) or "-"
+                result["task_item_classes"] = list(item_classes.get("classes") or [])
             if update_stub:
                 result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
                 result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"

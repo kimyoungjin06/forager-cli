@@ -772,6 +772,15 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
         "finding:update reports/summary.md",
         "evidence:reports/summary.md",
     ]
+    task["background_run_worker_item_classes_summary"] = (
+        "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=0"
+    )
+    task["background_run_worker_item_classes"] = [
+        "finding=1",
+        "evidence=1",
+        "gap=0",
+        "caveat=0",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -858,6 +867,10 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "analysis_items | finding:update reports/summary.md,evidence:reports/summary.md" in text
     assert "background_worker_item_tokens" in text
     assert "finding:update reports/summary.md, evidence:reports/summary.md" in text
+    assert "background_worker_item_classes" in text
+    assert "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=0" in text
+    assert "background_worker_item_class_tokens" in text
+    assert "finding=1, evidence=1, gap=0, caveat=0" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text
@@ -969,6 +982,15 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
         "finding:update reports/summary.md",
         "evidence:reports/summary.md",
     ]
+    task["background_run_worker_item_classes_summary"] = (
+        "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=0"
+    )
+    task["background_run_worker_item_classes"] = [
+        "finding=1",
+        "evidence=1",
+        "gap=0",
+        "caveat=0",
+    ]
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
     task["background_run_worker_result_cautions"] = ["keep review lane open"]
@@ -1052,6 +1074,10 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "analysis_items | finding:update reports/summary.md,evidence:reports/summary.md" in text
     assert "background_worker_item_tokens" in text
     assert "finding:update reports/summary.md, evidence:reports/summary.md" in text
+    assert "background_worker_item_classes" in text
+    assert "analysis_item_classes | finding=1 | evidence=1 | gap=0 | caveat=0" in text
+    assert "background_worker_item_class_tokens" in text
+    assert "finding=1, evidence=1, gap=0, caveat=0" in text
     assert "background_worker_result" in text
     assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
     assert "background_worker_actions" in text

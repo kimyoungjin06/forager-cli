@@ -20,6 +20,7 @@ from aoe_tg_role_aliases import canonicalize_role_name
 from aoe_tg_worker_task_contract import (
     derive_worker_task_module_checklist,
     derive_worker_task_module_gate,
+    derive_worker_task_module_item_classes,
     derive_worker_task_module_items,
     derive_worker_task_module_profile,
     resolve_worker_module_policy,
@@ -737,6 +738,51 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     ]
     if background_worker_item_tokens:
         lines.append("background_run_worker_item_tokens: " + ", ".join(background_worker_item_tokens[:6])[:240])
+    background_worker_item_classes = str(task.get("background_run_worker_item_classes_summary", "")).strip()
+    if not background_worker_item_classes and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_item_classes = str(
+            derive_worker_task_module_item_classes(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items_kind": "",
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_item_classes:
+        lines.append("background_run_worker_item_classes: " + background_worker_item_classes[:240])
+    background_worker_item_class_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_item_classes") if isinstance(task.get("background_run_worker_item_classes"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_item_class_tokens:
+        lines.append("background_run_worker_item_class_tokens: " + ", ".join(background_worker_item_class_tokens[:6])[:240])
     background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
     if background_worker_result:
         lines.append("background_run_worker_result: " + background_worker_result[:240])

@@ -719,6 +719,10 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
         "handoff:review",
         "quality:open",
     ]
+    assert result["task_item_classes_summary"] == (
+        "writing_item_classes | doc=1 | handoff=review | quality=open"
+    )
+    assert result["task_item_classes"] == ["doc=1", "handoff=review", "quality=open"]
     assert result["task_result_actions"] == ["update reports/summary.md"]
     assert result["task_result_cautions"] == ["keep review lane open"]
     assert result["task_result_evidence_refs"] == ["reports/summary.md"]

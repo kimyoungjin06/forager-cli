@@ -17,6 +17,7 @@ WORKER_TASK_MODULE_GATE_VERSION = "2026-04-13.v1"
 WORKER_TASK_MODULE_PROFILE_VERSION = "2026-04-13.v1"
 WORKER_TASK_MODULE_CHECKLIST_VERSION = "2026-04-14.v1"
 WORKER_TASK_MODULE_ITEMS_VERSION = "2026-04-14.v1"
+WORKER_TASK_MODULE_ITEM_CLASSES_VERSION = "2026-04-14.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -872,6 +873,119 @@ def derive_worker_task_module_items(
 
 def summarize_worker_task_module_items(raw: Any) -> str:
     row = sanitize_worker_task_module_items(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def sanitize_worker_task_module_item_classes(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_ITEM_CLASSES_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "classes_kind": _trim(source.get("classes_kind"), 96) or "-",
+        "classes": _uniq(source.get("classes"), limit=8, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["classes_kind"] not in {"", "-"}:
+            parts.append(row["classes_kind"])
+        parts.extend(list(row["classes"])[:4])
+        row["summary_line"] = " | ".join(parts)[:320] if parts else "-"
+    return row
+
+
+def derive_worker_task_module_item_classes(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+    checklist: Any = None,
+    items: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    items_row = (
+        sanitize_worker_task_module_items(items)
+        if isinstance(items, dict)
+        else derive_worker_task_module_items(
+            contract_row,
+            result_row,
+            update_stub=update_stub,
+            gate=gate,
+            profile=profile,
+            checklist=checklist,
+        )
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    item_tokens = [str(item).strip() for item in list(items_row.get("items") or []) if str(item).strip()]
+
+    def _count(prefix: str) -> int:
+        return len([token for token in item_tokens if token.startswith(prefix)])
+
+    def _suffix(prefix: str, fallback: str = "-") -> str:
+        for token in item_tokens:
+            if token.startswith(prefix):
+                return _trim(token.split(":", 1)[-1], 96) or fallback
+        return fallback
+
+    if module_kind == "analysis":
+        return sanitize_worker_task_module_item_classes(
+            {
+                "module_kind": module_kind,
+                "classes_kind": "analysis_item_classes",
+                "classes": [
+                    f"finding={_count('finding:')}",
+                    f"evidence={_count('evidence:')}",
+                    f"gap={_count('gap:')}",
+                    f"caveat={_count('caveat:')}",
+                ],
+            }
+        )
+
+    if module_kind == "writing":
+        return sanitize_worker_task_module_item_classes(
+            {
+                "module_kind": module_kind,
+                "classes_kind": "writing_item_classes",
+                "classes": [
+                    f"doc={_count('doc:')}",
+                    f"handoff={_suffix('handoff:')}",
+                    f"quality={_suffix('quality:')}",
+                ],
+            }
+        )
+
+    if module_kind == "package":
+        return sanitize_worker_task_module_item_classes(
+            {
+                "module_kind": module_kind,
+                "classes_kind": "package_item_classes",
+                "classes": [
+                    f"artifact={_count('artifact:')}",
+                    f"verification={_suffix('verification:')}",
+                    f"integrity={_suffix('integrity:')}",
+                ],
+            }
+        )
+
+    return sanitize_worker_task_module_item_classes(
+        {
+            "module_kind": module_kind,
+            "classes_kind": "general_item_classes",
+            "classes": [
+                f"action={_count('action:')}",
+                f"ref={_count('ref:')}",
+            ],
+        }
+    )
+
+
+def summarize_worker_task_module_item_classes(raw: Any) -> str:
+    row = sanitize_worker_task_module_item_classes(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 

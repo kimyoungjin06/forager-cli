@@ -1494,6 +1494,14 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
                 "handoff:review",
                 "quality:open",
             ],
+            "background_run_worker_item_classes_summary": (
+                "writing_item_classes | doc=1 | handoff=review | quality=open"
+            ),
+            "background_run_worker_item_classes": [
+                "doc=1",
+                "handoff=review",
+                "quality=open",
+            ],
             "background_run_worker_update_stub_summary": "status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1",
             "background_run_worker_update_stub_targets": ["docs/RUNBOOK.md"],
             "background_run_worker_update_proposal_summary": "status=ready | proposals=1 | ids=PROP-001 | targets=docs/RUNBOOK.md",
@@ -1516,6 +1524,8 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
     )
     assert "background_run_worker_items: writing_items | doc:docs/RUNBOOK.md,handoff:review,quality:open" in summary
     assert "background_run_worker_item_tokens: doc:docs/RUNBOOK.md, handoff:review, quality:open" in summary
+    assert "background_run_worker_item_classes: writing_item_classes | doc=1 | handoff=review | quality=open" in summary
+    assert "background_run_worker_item_class_tokens: doc=1, handoff=review, quality=open" in summary
     assert "background_run_worker_actions: update docs/RUNBOOK.md" in summary
     assert "background_run_worker_update_stub: status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1" in summary
     assert "background_run_worker_targets: docs/RUNBOOK.md" in summary

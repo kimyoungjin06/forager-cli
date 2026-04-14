@@ -153,6 +153,7 @@ def dispatch_claimed_background_ticket_via_adapter(
             task_checklist_status = str(provider_invoke_result.get("task_checklist_status", "")).strip()
             task_checklist_summary = str(provider_invoke_result.get("task_checklist_summary", "")).strip()
             task_items_summary = str(provider_invoke_result.get("task_items_summary", "")).strip()
+            task_item_classes_summary = str(provider_invoke_result.get("task_item_classes_summary", "")).strip()
             task_result_actions = [
                 str(item).strip()
                 for item in (provider_invoke_result.get("task_result_actions") or [])
@@ -190,6 +191,8 @@ def dispatch_claimed_background_ticket_via_adapter(
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_checklist_summary}"[:240]
             if task_items_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_items_summary}"[:240]
+            if task_item_classes_summary:
+                completed_runtime_summary = f"{completed_runtime_summary} | {task_item_classes_summary}"[:240]
             if task_update_stub_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_update_stub_summary}"[:240]
             bundle_parts = [
@@ -239,6 +242,8 @@ def dispatch_claimed_background_ticket_via_adapter(
             worker_checklist_summary=str(provider_invoke_result.get("task_checklist_summary", "")).strip(),
             worker_items_summary=str(provider_invoke_result.get("task_items_summary", "")).strip(),
             worker_items=list(provider_invoke_result.get("task_items") or []),
+            worker_item_classes_summary=str(provider_invoke_result.get("task_item_classes_summary", "")).strip(),
+            worker_item_classes=list(provider_invoke_result.get("task_item_classes") or []),
             worker_result_actions=list(provider_invoke_result.get("task_result_actions") or []),
             worker_result_cautions=list(provider_invoke_result.get("task_result_cautions") or []),
             worker_result_evidence_refs=list(provider_invoke_result.get("task_result_evidence_refs") or []),
