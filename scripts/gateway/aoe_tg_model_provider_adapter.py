@@ -702,6 +702,7 @@ def invoke_background_ticket_worker(
             )
             if items:
                 result["task_items_summary"] = _trim(items.get("summary_line"), 320) or "-"
+                result["task_items"] = list(items.get("items") or [])
             if update_stub:
                 result["task_update_stub_status"] = _trim(update_stub.get("status"), 48) or "-"
                 result["task_update_stub_summary"] = _trim(update_stub.get("summary_line"), 320) or "-"

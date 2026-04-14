@@ -727,6 +727,16 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
         ).strip()
     if background_worker_items:
         lines.append("background_run_worker_items: " + background_worker_items[:240])
+    background_worker_item_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_item_tokens:
+        lines.append("background_run_worker_item_tokens: " + ", ".join(background_worker_item_tokens[:6])[:240])
     background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
     if background_worker_result:
         lines.append("background_run_worker_result: " + background_worker_result[:240])

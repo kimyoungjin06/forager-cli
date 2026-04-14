@@ -255,6 +255,11 @@ def test_analysis_module_gate_prefers_findings_stable_when_refs_exist() -> None:
     assert items["summary_line"] == (
         "analysis_items | finding:update docs/analysis/provider_regressions.md,evidence:logs/provider_regressions.csv,caveat:keep review lane open"
     )
+    assert items["items"] == [
+        "finding:update docs/analysis/provider_regressions.md",
+        "evidence:logs/provider_regressions.csv",
+        "caveat:keep review lane open",
+    ]
 
 
 def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> None:
@@ -325,6 +330,11 @@ def test_writing_module_gate_surfaces_quality_open_from_review_cautions() -> Non
     assert items["summary_line"] == (
         "writing_items | doc:docs/handoff/final_handoff.md,handoff:review,quality:open"
     )
+    assert items["items"] == [
+        "doc:docs/handoff/final_handoff.md",
+        "handoff:review",
+        "quality:open",
+    ]
 
 
 def test_package_module_gate_surfaces_artifact_check_open_without_verification_refs() -> None:
@@ -395,3 +405,8 @@ def test_package_module_gate_surfaces_artifact_check_open_without_verification_r
     assert items["summary_line"] == (
         "package_items | artifact:dist/release_bundle.zip,verification:0,integrity:open"
     )
+    assert items["items"] == [
+        "artifact:dist/release_bundle.zip",
+        "verification:0",
+        "integrity:open",
+    ]

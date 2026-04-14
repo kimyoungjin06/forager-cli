@@ -210,6 +210,18 @@ def _worker_items_summary(task: Dict[str, Any]) -> str:
     return str(derived.get("summary_line", "")).strip() or "-"
 
 
+def _worker_items(task: Dict[str, Any]) -> str:
+    rows = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    return ", ".join(rows[:6])[:320] if rows else "-"
+
+
 def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
 
@@ -1354,6 +1366,7 @@ def _build_runtime_detail(
         active_task_background_run_worker_profile_summary=_worker_profile_summary(active_task or {}),
         active_task_background_run_worker_checklist_summary=_worker_checklist_summary(active_task or {}),
         active_task_background_run_worker_items_summary=_worker_items_summary(active_task or {}),
+        active_task_background_run_worker_items=_worker_items(active_task or {}),
         active_task_background_run_worker_result_summary=(
             str((active_task or {}).get("background_run_worker_result_summary", "")).strip() or "-"
         ),

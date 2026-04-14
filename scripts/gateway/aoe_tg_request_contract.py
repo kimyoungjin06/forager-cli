@@ -404,6 +404,7 @@ def normalize_background_run_ticket_snapshot(raw: Any) -> Dict[str, Any]:
         ("worker_result_actions", 4),
         ("worker_result_cautions", 4),
         ("worker_result_evidence_refs", 8),
+        ("worker_items", 8),
         ("worker_update_stub_targets", 8),
     ):
         rows = _dedupe_rows(list(raw.get(key) or []), limit=limit, text_limit=160)
@@ -1369,6 +1370,7 @@ def background_run_ticket_metadata(ticket: Dict[str, Any]) -> Dict[str, Any]:
             "background_run_worker_checklist_status": snapshot.get("worker_checklist_status", ""),
             "background_run_worker_checklist_summary": snapshot.get("worker_checklist_summary", ""),
             "background_run_worker_items_summary": snapshot.get("worker_items_summary", ""),
+            "background_run_worker_items": list(snapshot.get("worker_items") or []),
             "background_run_worker_result_actions": list(snapshot.get("worker_result_actions") or []),
             "background_run_worker_result_cautions": list(snapshot.get("worker_result_cautions") or []),
             "background_run_worker_result_evidence_refs": list(snapshot.get("worker_result_evidence_refs") or []),

@@ -238,6 +238,7 @@ def dispatch_claimed_background_ticket_via_adapter(
             worker_checklist_status=str(provider_invoke_result.get("task_checklist_status", "")).strip(),
             worker_checklist_summary=str(provider_invoke_result.get("task_checklist_summary", "")).strip(),
             worker_items_summary=str(provider_invoke_result.get("task_items_summary", "")).strip(),
+            worker_items=list(provider_invoke_result.get("task_items") or []),
             worker_result_actions=list(provider_invoke_result.get("task_result_actions") or []),
             worker_result_cautions=list(provider_invoke_result.get("task_result_cautions") or []),
             worker_result_evidence_refs=list(provider_invoke_result.get("task_result_evidence_refs") or []),
