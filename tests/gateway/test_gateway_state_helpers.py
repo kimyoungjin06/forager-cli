@@ -1486,6 +1486,9 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
             "background_run_worker_checklist_summary": (
                 "writing_checklist | state=quality_open | docs=1,handoff=review,quality=open | next=close_quality_gate"
             ),
+            "background_run_worker_items_summary": (
+                "writing_items | doc:docs/RUNBOOK.md,handoff:review,quality:open"
+            ),
             "background_run_worker_update_stub_summary": "status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1",
             "background_run_worker_update_stub_targets": ["docs/RUNBOOK.md"],
             "background_run_worker_update_proposal_summary": "status=ready | proposals=1 | ids=PROP-001 | targets=docs/RUNBOOK.md",
@@ -1506,6 +1509,7 @@ def test_task_lifecycle_summary_includes_context_pack_snapshot(tmp_path: Path) -
         "background_run_worker_checklist: writing_checklist | state=quality_open | docs=1,handoff=review,quality=open | next=close_quality_gate"
         in summary
     )
+    assert "background_run_worker_items: writing_items | doc:docs/RUNBOOK.md,handoff:review,quality:open" in summary
     assert "background_run_worker_actions: update docs/RUNBOOK.md" in summary
     assert "background_run_worker_update_stub: status=ready | targets=docs/RUNBOOK.md | actions=1 | refs=1" in summary
     assert "background_run_worker_targets: docs/RUNBOOK.md" in summary

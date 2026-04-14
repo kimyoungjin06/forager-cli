@@ -152,6 +152,7 @@ def dispatch_claimed_background_ticket_via_adapter(
             task_profile_summary = str(provider_invoke_result.get("task_profile_summary", "")).strip()
             task_checklist_status = str(provider_invoke_result.get("task_checklist_status", "")).strip()
             task_checklist_summary = str(provider_invoke_result.get("task_checklist_summary", "")).strip()
+            task_items_summary = str(provider_invoke_result.get("task_items_summary", "")).strip()
             task_result_actions = [
                 str(item).strip()
                 for item in (provider_invoke_result.get("task_result_actions") or [])
@@ -187,6 +188,8 @@ def dispatch_claimed_background_ticket_via_adapter(
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_profile_summary}"[:240]
             if task_checklist_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_checklist_summary}"[:240]
+            if task_items_summary:
+                completed_runtime_summary = f"{completed_runtime_summary} | {task_items_summary}"[:240]
             if task_update_stub_summary:
                 completed_runtime_summary = f"{completed_runtime_summary} | {task_update_stub_summary}"[:240]
             bundle_parts = [
@@ -234,6 +237,7 @@ def dispatch_claimed_background_ticket_via_adapter(
             worker_profile_summary=str(provider_invoke_result.get("task_profile_summary", "")).strip(),
             worker_checklist_status=str(provider_invoke_result.get("task_checklist_status", "")).strip(),
             worker_checklist_summary=str(provider_invoke_result.get("task_checklist_summary", "")).strip(),
+            worker_items_summary=str(provider_invoke_result.get("task_items_summary", "")).strip(),
             worker_result_actions=list(provider_invoke_result.get("task_result_actions") or []),
             worker_result_cautions=list(provider_invoke_result.get("task_result_cautions") or []),
             worker_result_evidence_refs=list(provider_invoke_result.get("task_result_evidence_refs") or []),

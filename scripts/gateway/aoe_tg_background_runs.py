@@ -587,6 +587,7 @@ def advance_background_run_ticket(
     worker_profile_summary: str = "",
     worker_checklist_status: str = "",
     worker_checklist_summary: str = "",
+    worker_items_summary: str = "",
     worker_result_actions: List[Any] | None = None,
     worker_result_cautions: List[Any] | None = None,
     worker_result_evidence_refs: List[Any] | None = None,
@@ -635,6 +636,8 @@ def advance_background_run_ticket(
         updated["worker_checklist_status"] = str(worker_checklist_status or "").strip()
     if str(worker_checklist_summary or "").strip():
         updated["worker_checklist_summary"] = str(worker_checklist_summary or "").strip()
+    if str(worker_items_summary or "").strip():
+        updated["worker_items_summary"] = str(worker_items_summary or "").strip()
     if worker_result_actions is not None:
         updated["worker_result_actions"] = list(worker_result_actions or [])
     if worker_result_cautions is not None:

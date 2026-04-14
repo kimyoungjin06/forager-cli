@@ -174,6 +174,42 @@ def _worker_checklist_summary(task: Dict[str, Any]) -> str:
     return str(derived.get("summary_line", "")).strip() or "-"
 
 
+def _worker_items_summary(task: Dict[str, Any]) -> str:
+    summary = str(task.get("background_run_worker_items_summary", "")).strip()
+    if summary:
+        return summary
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_kind in {"", "-", "general"}:
+        return "-"
+    derived = worker_task_contract.derive_worker_task_module_items(
+        {
+            "module_kind": module_kind,
+            "module_policy": task.get("background_run_task_contract_policy"),
+            "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+        },
+        {
+            "status": task.get("background_run_worker_result_status"),
+            "summary": task.get("background_run_worker_result_summary"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        },
+        gate={
+            "state": task.get("background_run_worker_gate_status"),
+            "summary_line": _worker_gate_summary(task),
+        },
+        profile={
+            "state": task.get("background_run_worker_profile_status"),
+            "summary_line": _worker_profile_summary(task),
+        },
+        checklist={
+            "state": task.get("background_run_worker_checklist_status"),
+            "summary_line": _worker_checklist_summary(task),
+        },
+    )
+    return str(derived.get("summary_line", "")).strip() or "-"
+
+
 def _worker_apply_accept_summary(task: Dict[str, Any]) -> str:
     return str(task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
 
@@ -1317,6 +1353,7 @@ def _build_runtime_detail(
         active_task_background_run_worker_gate_summary=_worker_gate_summary(active_task or {}),
         active_task_background_run_worker_profile_summary=_worker_profile_summary(active_task or {}),
         active_task_background_run_worker_checklist_summary=_worker_checklist_summary(active_task or {}),
+        active_task_background_run_worker_items_summary=_worker_items_summary(active_task or {}),
         active_task_background_run_worker_result_summary=(
             str((active_task or {}).get("background_run_worker_result_summary", "")).strip() or "-"
         ),

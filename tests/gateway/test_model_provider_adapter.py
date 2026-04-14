@@ -711,6 +711,9 @@ def test_invoke_background_ticket_worker_renders_task_contract_when_prompt_missi
     assert result["task_checklist_summary"] == (
         "writing_checklist | state=quality_open | docs=1,handoff=review,quality=open | next=close_quality_gate"
     )
+    assert result["task_items_summary"] == (
+        "writing_items | doc:reports/summary.md,handoff:review,quality:open"
+    )
     assert result["task_result_actions"] == ["update reports/summary.md"]
     assert result["task_result_cautions"] == ["keep review lane open"]
     assert result["task_result_evidence_refs"] == ["reports/summary.md"]

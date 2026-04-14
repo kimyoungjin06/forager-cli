@@ -16,6 +16,7 @@ WORKER_TASK_RESULT_VERSION = "2026-04-11.v1"
 WORKER_TASK_MODULE_GATE_VERSION = "2026-04-13.v1"
 WORKER_TASK_MODULE_PROFILE_VERSION = "2026-04-13.v1"
 WORKER_TASK_MODULE_CHECKLIST_VERSION = "2026-04-14.v1"
+WORKER_TASK_MODULE_ITEMS_VERSION = "2026-04-14.v1"
 WORKER_TASK_UPDATE_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
 WORKER_TASK_APPLY_PROPOSAL_STUB_VERSION = "2026-04-11.v1"
@@ -753,6 +754,124 @@ def derive_worker_task_module_checklist(
 
 def summarize_worker_task_module_checklist(raw: Any) -> str:
     row = sanitize_worker_task_module_checklist(raw)
+    return _trim(row.get("summary_line"), 320) or "-"
+
+
+def sanitize_worker_task_module_items(raw: Any) -> Dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    row = {
+        "version": _trim(source.get("version"), 48) or WORKER_TASK_MODULE_ITEMS_VERSION,
+        "module_kind": _trim(source.get("module_kind"), 48).lower() or "general",
+        "items_kind": _trim(source.get("items_kind"), 96) or "-",
+        "items": _uniq(source.get("items"), limit=8, text_limit=160),
+    }
+    row["summary_line"] = _trim(source.get("summary_line"), 320)
+    if not row["summary_line"]:
+        parts = []
+        if row["items_kind"] not in {"", "-"}:
+            parts.append(row["items_kind"])
+        if row["items"]:
+            parts.append(",".join(list(row["items"])[:4]))
+        row["summary_line"] = " | ".join(parts)[:320] if parts else "-"
+    return row
+
+
+def derive_worker_task_module_items(
+    contract: Any,
+    result: Any,
+    *,
+    update_stub: Any = None,
+    gate: Any = None,
+    profile: Any = None,
+    checklist: Any = None,
+) -> Dict[str, Any]:
+    contract_row = load_worker_task_contract(contract)
+    result_row = load_worker_task_result(result)
+    if not contract_row or not result_row:
+        return {}
+    stub = (
+        sanitize_worker_task_update_stub(update_stub)
+        if isinstance(update_stub, dict)
+        else derive_worker_task_update_stub(contract_row, result_row)
+    )
+    gate_row = (
+        sanitize_worker_task_module_gate(gate)
+        if isinstance(gate, dict)
+        else derive_worker_task_module_gate(contract_row, result_row, update_stub=stub)
+    )
+    profile_row = (
+        sanitize_worker_task_module_profile(profile)
+        if isinstance(profile, dict)
+        else derive_worker_task_module_profile(contract_row, result_row, update_stub=stub, gate=gate_row)
+    )
+    checklist_row = (
+        sanitize_worker_task_module_checklist(checklist)
+        if isinstance(checklist, dict)
+        else derive_worker_task_module_checklist(
+            contract_row, result_row, update_stub=stub, gate=gate_row, profile=profile_row
+        )
+    )
+    module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
+    actions = [item for item in list(result_row.get("actions") or []) if _trim(item, 160)]
+    refs = [item for item in list(result_row.get("evidence_refs") or []) if _trim(item, 160)]
+    cautions = [item for item in list(result_row.get("cautions") or []) if _trim(item, 160)]
+    targets = [item for item in list((stub or {}).get("target_artifacts") or []) if _trim(item, 160)]
+
+    if module_kind == "analysis":
+        items: List[str] = []
+        if actions:
+            items.append(f"finding:{_trim(actions[0], 96)}")
+        if refs:
+            items.append(f"evidence:{_trim(refs[0], 96)}")
+        if "gaps=0" not in str(checklist_row.get("summary_line", "")):
+            items.append("gap:evidence_missing")
+        elif cautions:
+            items.append(f"caveat:{_trim(cautions[0], 96)}")
+        return sanitize_worker_task_module_items(
+            {"module_kind": module_kind, "items_kind": "analysis_items", "items": items}
+        )
+
+    if module_kind == "writing":
+        items = []
+        if targets:
+            items.append(f"doc:{_trim(targets[0], 96)}")
+        if "handoff=ready" in str(profile_row.get("summary_line", "")):
+            items.append("handoff:ready")
+        elif "handoff=draft" in str(profile_row.get("summary_line", "")):
+            items.append("handoff:draft")
+        else:
+            items.append("handoff:review")
+        items.append("quality:open" if "quality=open" in str(profile_row.get("summary_line", "")) else "quality:ready")
+        return sanitize_worker_task_module_items(
+            {"module_kind": module_kind, "items_kind": "writing_items", "items": items}
+        )
+
+    if module_kind == "package":
+        items = []
+        if targets:
+            items.append(f"artifact:{_trim(targets[0], 96)}")
+        items.append(f"verification:{len(refs)}")
+        items.append(
+            "integrity:ready"
+            if "integrity=ready" in str(profile_row.get("summary_line", ""))
+            else "integrity:open"
+        )
+        return sanitize_worker_task_module_items(
+            {"module_kind": module_kind, "items_kind": "package_items", "items": items}
+        )
+
+    items = []
+    if actions:
+        items.append(f"action:{_trim(actions[0], 96)}")
+    if refs:
+        items.append(f"ref:{_trim(refs[0], 96)}")
+    return sanitize_worker_task_module_items(
+        {"module_kind": module_kind, "items_kind": "general_items", "items": items}
+    )
+
+
+def summarize_worker_task_module_items(raw: Any) -> str:
+    row = sanitize_worker_task_module_items(raw)
     return _trim(row.get("summary_line"), 320) or "-"
 
 
