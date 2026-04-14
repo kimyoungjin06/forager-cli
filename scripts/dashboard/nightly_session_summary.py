@@ -108,6 +108,8 @@ def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
         "background_run_worker_update_proposal_ids": list(
             getattr(task, "background_run_worker_update_proposal_ids", []) or []
         ),
+        "background_run_worker_records_summary": getattr(task, "background_run_worker_records_summary", ""),
+        "background_run_worker_records": getattr(task, "background_run_worker_records", ""),
         "background_run_worker_apply_accept_summary": getattr(task, "background_run_worker_apply_accept_summary", ""),
         "background_run_worker_apply_accept_at": getattr(task, "background_run_worker_apply_accept_at", ""),
         "background_run_worker_syncback_status": getattr(task, "background_run_worker_syncback_status", ""),
@@ -249,6 +251,12 @@ def build_nightly_session_summary(
                 "active_task_background_run_worker_update_proposal_summary": detail.active_task_background_run_worker_update_proposal_summary,
                 "active_task_background_run_worker_update_proposal_ids": list(
                     getattr(detail, "active_task_background_run_worker_update_proposal_ids", []) or []
+                ),
+                "active_task_background_run_worker_records_summary": getattr(
+                    detail, "active_task_background_run_worker_records_summary", ""
+                ),
+                "active_task_background_run_worker_records": getattr(
+                    detail, "active_task_background_run_worker_records", ""
                 ),
                 "active_task_background_run_worker_apply_accept_summary": getattr(
                     detail, "active_task_background_run_worker_apply_accept_summary", ""

@@ -1539,6 +1539,55 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "idle (0/1)" in text
 
 
+def test_control_dashboard_recovery_hides_package_syncback_actions_when_record_pending(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "package"
+    task["background_run_worker_records_summary"] = (
+        "package_records | artifact_record=dist/release_bundle.zip | verification_record=1 | apply_record=ready | syncback_record=pending"
+    )
+    task["background_run_worker_records"] = [
+        "artifact_record=dist/release_bundle.zip",
+        "verification_record=1",
+        "apply_record=ready",
+        "syncback_record=pending",
+    ]
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_summary"] = (
+        "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=dist/release_bundle.zip | at=2026-04-10T10:06:00+09:00"
+    )
+    task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
+    gw.save_manager_state(manager_state_file, state)
+
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Preview Accepted Syncback" not in text
+    assert "Apply Accepted Syncback" not in text
+
+
 def test_resolve_control_paths_uses_manager_state_parent_for_sidecar_files(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     control_root.mkdir(parents=True, exist_ok=True)
@@ -2922,6 +2971,16 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
         }
     ]
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "package"
+    task["background_run_worker_records_summary"] = (
+        "package_records | artifact_record=reports/summary.md | verification_record=1 | apply_record=ready | syncback_record=ready"
+    )
+    task["background_run_worker_records"] = [
+        "artifact_record=reports/summary.md",
+        "verification_record=1",
+        "apply_record=ready",
+        "syncback_record=ready",
+    ]
     task["background_run_worker_apply_accept_status"] = "applied"
     task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
     task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
@@ -3004,6 +3063,117 @@ def test_control_dashboard_post_runtime_syncback_preview_and_apply_routes_return
     assert runtime_detail.latest_canonical_writeback_summary.startswith(
         "Syncback Apply | executed | state=executed | next=/sync preview O2 24h |"
     )
+
+
+def test_dashboard_hides_package_syncback_buttons_until_record_ready(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "package"
+    task["background_run_worker_records_summary"] = (
+        "package_records | artifact_record=dist/release_bundle.zip | verification_record=1 | apply_record=ready | syncback_record=pending"
+    )
+    task["background_run_worker_records"] = [
+        "artifact_record=dist/release_bundle.zip",
+        "verification_record=1",
+        "apply_record=ready",
+        "syncback_record=pending",
+    ]
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_summary"] = (
+        "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=dist/release_bundle.zip | at=2026-04-10T10:06:00+09:00"
+    )
+    task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
+    task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
+    task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        request_id="REQ-1",
+    )
+
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    syncback_labels = {"Preview Accepted Syncback", "Apply Accepted Syncback"}
+
+    assert task_detail is not None
+    assert not any(btn.label in syncback_labels for btn in runtime_card.runtime_safe_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in runtime_card.runtime_phase2_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in runtime_detail.active_task_safe_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in task_detail.safe_action_buttons)
+    assert not any(btn.label in syncback_labels for btn in task_detail.phase2_action_buttons)
+
+
+def test_control_dashboard_syncback_routes_block_when_package_record_pending(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "package"
+    task["background_run_worker_records_summary"] = (
+        "package_records | artifact_record=dist/release_bundle.zip | verification_record=1 | apply_record=ready | syncback_record=pending"
+    )
+    task["background_run_worker_records"] = [
+        "artifact_record=dist/release_bundle.zip",
+        "verification_record=1",
+        "apply_record=ready",
+        "syncback_record=pending",
+    ]
+    task["background_run_worker_apply_accept_status"] = "applied"
+    task["background_run_worker_apply_accept_todo_id"] = "TODO-002"
+    task["background_run_worker_apply_accept_proposal_id"] = "PROP-001"
+    task["background_run_worker_apply_accept_at"] = "2026-04-10T10:06:00+09:00"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/syncback-preview",
+        body=json.dumps({"project_ref": "O2"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    apply_status, _apply_headers, apply_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/syncback-apply",
+        body=json.dumps({"project_ref": "O2"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    apply_payload = json.loads(apply_body.decode("utf-8"))
+
+    assert preview_status == 409
+    assert preview_payload["status"] == "blocked"
+    assert preview_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
+    assert preview_payload["next_step"] == "/task T-001"
+    assert "syncback_record=pending" in preview_payload["worker_records"]
+
+    assert apply_status == 409
+    assert apply_payload["status"] == "blocked"
+    assert apply_payload["outcome"]["reason_code"] == "package_syncback_not_ready"
+    assert apply_payload["next_step"] == "/task T-001"
+    assert "syncback_record=pending" in apply_payload["worker_records"]
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:

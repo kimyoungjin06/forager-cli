@@ -534,3 +534,52 @@ def test_package_module_gate_surfaces_artifact_check_open_without_verification_r
         "apply_record=ready",
         "syncback_record=pending",
     ]
+
+
+def test_worker_task_module_record_map_parses_package_records() -> None:
+    record_map = worker_task_contract.worker_task_module_record_map(
+        {
+            "module_kind": "package",
+            "records_kind": "package_records",
+            "records": [
+                "artifact_record=dist/release_bundle.zip",
+                "verification_record=1",
+                "apply_record=ready",
+                "syncback_record=ready",
+            ],
+        }
+    )
+
+    assert record_map == {
+        "artifact_record": "dist/release_bundle.zip",
+        "verification_record": "1",
+        "apply_record": "ready",
+        "syncback_record": "ready",
+    }
+
+
+def test_worker_task_module_syncback_ready_returns_false_for_pending_package_records() -> None:
+    assert worker_task_contract.worker_task_module_syncback_ready(
+        {
+            "module_kind": "package",
+            "records_kind": "package_records",
+            "records": [
+                "artifact_record=dist/release_bundle.zip",
+                "verification_record=1",
+                "apply_record=ready",
+                "syncback_record=pending",
+            ],
+        }
+    ) is False
+    assert worker_task_contract.worker_task_module_syncback_ready(
+        {
+            "module_kind": "package",
+            "records_kind": "package_records",
+            "records": [
+                "artifact_record=dist/release_bundle.zip",
+                "verification_record=1",
+                "apply_record=ready",
+                "syncback_record=ready",
+            ],
+        }
+    ) is True

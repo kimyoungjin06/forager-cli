@@ -88,6 +88,72 @@ def _latest_task_for_runtime(entry: Dict[str, Any]) -> Dict[str, Any]:
     return latest
 
 
+def _worker_syncback_ready(task: Dict[str, Any]) -> bool:
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    records_summary = str(task.get("background_run_worker_records_summary", "")).strip()
+    records_kind = ""
+    if records_summary not in {"", "-"}:
+        records_kind = records_summary.split(" | ", 1)[0].strip()
+    raw_records = task.get("background_run_worker_records")
+    record_tokens = []
+    if isinstance(raw_records, list):
+        record_tokens = [str(item).strip() for item in raw_records if str(item).strip()]
+    elif isinstance(raw_records, str):
+        record_tokens = [str(item).strip() for item in raw_records.split(",") if str(item).strip()]
+    if record_tokens:
+        return worker_task_contract.worker_task_module_syncback_ready(
+            {
+                "module_kind": module_kind or ("package" if records_kind == "package_records" else "general"),
+                "records_kind": records_kind or ("package_records" if module_kind == "package" else ""),
+                "records": record_tokens,
+            }
+        )
+    if records_kind == "package_records":
+        return "syncback_record=ready" in records_summary
+    return module_kind != "package"
+
+
+def _package_syncback_not_ready_response(
+    *,
+    spec: Dict[str, object],
+    alias: str,
+    payload: Dict[str, Any],
+    latest_task: Dict[str, Any],
+    mode: str,
+) -> Tuple[int, Dict[str, str], bytes]:
+    task_ref = str(latest_task.get("short_id", "")).strip()
+    next_step = f"/task {task_ref}" if task_ref else f"/orch status {alias}"
+    detail = str(latest_task.get("background_run_worker_records_summary", "")).strip() or "package syncback record pending"
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "blocked",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": mode,
+            "source_command": str(spec.get("command", "")).strip() or f"/todo {alias} syncback {'preview' if mode == 'safe' else 'apply'}",
+            "payload": payload,
+            "next_step": next_step,
+            "remediation": "wait until package verification and integrity rail reports syncback_record=ready before accepted syncback",
+            "outcome": {
+                "kind": "runtime_syncback_preview" if mode == "safe" else "runtime_syncback_apply",
+                "status": "blocked",
+                "reason_code": "package_syncback_not_ready",
+                "detail": detail,
+            },
+            "preview": {
+                "kind": "runtime_syncback_preview",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+            },
+            "worker_records": detail,
+        },
+        status=409,
+    )
+
+
 def _resolve_task_entry(*, manager_state: Dict[str, Any], task_ref: str) -> tuple[str, Dict[str, Any], str, Dict[str, Any]]:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     target = str(task_ref or "").strip()
@@ -333,6 +399,19 @@ def _execute_runtime_syncback_preview_action(
     _paths, manager_state = _load_dashboard_manager_state(config)
     key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
     alias = _project_alias(entry, key)
+    latest_task = _latest_task_for_runtime(entry)
+    if (
+        isinstance(latest_task, dict)
+        and str(latest_task.get("background_run_worker_apply_accept_status", "")).strip() == "applied"
+        and not _worker_syncback_ready(latest_task)
+    ):
+        return _package_syncback_not_ready_response(
+            spec=spec,
+            alias=alias,
+            payload=payload,
+            latest_task=latest_task,
+            mode="safe",
+        )
     try:
         plan = todo_state.preview_syncback_plan(entry)
     except RuntimeError as exc:
@@ -407,6 +486,18 @@ def _execute_runtime_syncback_apply_action(
     key, entry = _resolve_runtime_entry(manager_state=manager_state, project_ref=project_ref)
     alias = _project_alias(entry, key)
     latest_task = _latest_task_for_runtime(entry)
+    if (
+        isinstance(latest_task, dict)
+        and str(latest_task.get("background_run_worker_apply_accept_status", "")).strip() == "applied"
+        and not _worker_syncback_ready(latest_task)
+    ):
+        return _package_syncback_not_ready_response(
+            spec=spec,
+            alias=alias,
+            payload=payload,
+            latest_task=latest_task,
+            mode="phase2",
+        )
     try:
         plan = todo_state.preview_syncback_plan(entry)
     except RuntimeError as exc:

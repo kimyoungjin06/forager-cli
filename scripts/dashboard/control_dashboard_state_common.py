@@ -205,6 +205,37 @@ def _task_rate_limit_summary(task: Dict[str, Any]) -> str:
     )
 
 
+def _worker_syncback_ready(
+    task: Dict[str, Any],
+    *,
+    module_key: str = "background_run_task_contract_module",
+    records_summary_key: str = "background_run_worker_records_summary",
+    records_key: str = "background_run_worker_records",
+) -> bool:
+    module_kind = str(task.get(module_key, "")).strip().lower()
+    records_summary = str(task.get(records_summary_key, "")).strip()
+    records_kind = ""
+    if records_summary not in {"", "-"}:
+        records_kind = records_summary.split(" | ", 1)[0].strip()
+    raw_records = task.get(records_key)
+    record_tokens: List[str] = []
+    if isinstance(raw_records, list):
+        record_tokens = [str(item).strip() for item in raw_records if str(item).strip()]
+    elif isinstance(raw_records, str):
+        record_tokens = [str(item).strip() for item in raw_records.split(",") if str(item).strip()]
+    if record_tokens:
+        return worker_task_contract.worker_task_module_syncback_ready(
+            {
+                "module_kind": module_kind or ("package" if records_kind == "package_records" else "general"),
+                "records_kind": records_kind or ("package_records" if module_kind == "package" else ""),
+                "records": record_tokens,
+            }
+        )
+    if records_kind == "package_records":
+        return "syncback_record=ready" in records_summary
+    return module_kind != "package"
+
+
 def _completion_contract_for_preset(raw: Any) -> Dict[str, str]:
     return orch_contract.preset_completion_contract(raw)
 

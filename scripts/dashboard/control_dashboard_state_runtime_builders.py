@@ -50,6 +50,7 @@ from control_dashboard_state_common import (
     _worker_apply_proposal_accept_button,
     _worker_apply_syncback_apply_button,
     _worker_apply_syncback_preview_button,
+    _worker_syncback_ready,
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
@@ -653,6 +654,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             runtime_safe_action_buttons = _append_unique_action_button(runtime_safe_action_buttons, runtime_manual_route_button)
         worker_apply_applied = str((active_task or {}).get("background_run_worker_apply_accept_status", "")).strip() == "applied"
         worker_syncback_applied = _worker_syncback_applied(active_task or {})
+        worker_syncback_ready = _worker_syncback_ready(active_task or {})
         if not worker_apply_applied:
             runtime_safe_action_buttons = _append_unique_action_button(
                 runtime_safe_action_buttons,
@@ -670,7 +672,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
                 ),
             )
-        elif not worker_syncback_applied:
+        elif worker_syncback_ready and not worker_syncback_applied:
             runtime_safe_action_buttons = _append_unique_action_button(
                 runtime_safe_action_buttons,
                 _worker_apply_syncback_preview_button(project_alias=alias),
@@ -726,7 +728,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
                 ),
             )
-        elif not worker_syncback_applied:
+        elif worker_syncback_ready and not worker_syncback_applied:
             runtime_phase2_action_buttons = _append_unique_action_button(
                 runtime_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
@@ -1277,6 +1279,7 @@ def _build_runtime_detail(
         active_task_safe_action_buttons = _append_unique_action_button(active_task_safe_action_buttons, active_task_manual_route_button)
     worker_apply_applied = str((active_task or {}).get("background_run_worker_apply_accept_status", "")).strip() == "applied"
     worker_syncback_applied = _worker_syncback_applied(active_task or {})
+    worker_syncback_ready = _worker_syncback_ready(active_task or {})
     if not worker_apply_applied:
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
@@ -1294,7 +1297,7 @@ def _build_runtime_detail(
                 proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
             ),
         )
-    elif not worker_syncback_applied:
+    elif worker_syncback_ready and not worker_syncback_applied:
         active_task_safe_action_buttons = _append_unique_action_button(
             active_task_safe_action_buttons,
             _worker_apply_syncback_preview_button(project_alias=target_alias),
@@ -1350,7 +1353,7 @@ def _build_runtime_detail(
                 proposal_summary=(active_task or {}).get("background_run_worker_update_proposal_summary"),
             ),
         )
-    elif not worker_syncback_applied:
+    elif worker_syncback_ready and not worker_syncback_applied:
         active_task_phase2_action_buttons = _append_unique_action_button(
             active_task_phase2_action_buttons,
             _worker_apply_syncback_apply_button(project_alias=target_alias),

@@ -1139,6 +1139,28 @@ def summarize_worker_task_module_records(raw: Any) -> str:
     return _trim(row.get("summary_line"), 320) or "-"
 
 
+def worker_task_module_record_map(raw: Any) -> Dict[str, str]:
+    row = sanitize_worker_task_module_records(raw)
+    mapping: Dict[str, str] = {}
+    for token in list(row.get("records") or []):
+        safe = str(token).strip()
+        if not safe or "=" not in safe:
+            continue
+        key, value = safe.split("=", 1)
+        safe_key = _trim(key, 64)
+        if not safe_key:
+            continue
+        mapping[safe_key] = _trim(value, 160)
+    return mapping
+
+
+def worker_task_module_syncback_ready(raw: Any) -> bool:
+    row = sanitize_worker_task_module_records(raw)
+    if row.get("module_kind") != "package" and row.get("records_kind") != "package_records":
+        return True
+    return worker_task_module_record_map(row).get("syncback_record") == "ready"
+
+
 def build_worker_task_contract(
     team_dir: Path | str,
     *,
