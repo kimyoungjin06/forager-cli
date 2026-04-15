@@ -155,6 +155,7 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
             selected_chat_id=str((query.get("chat") or [""])[0]).strip(),
+            selected_preset=str((query.get("preset") or [""])[0]).strip(),
         )
         return _html(
             render_template(
@@ -175,12 +176,22 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
         return _html(render_template("dashboard/offdesk.html", page_title="Offdesk Prep", snapshot=snapshot, current_path=path))
 
     if path == "/control/recovery":
+        query = parse_qs(parsed.query or "", keep_blank_values=False)
         snapshot, recovery = load_dashboard_recovery_page(
             control_root=config.control_root,
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
         )
-        return _html(render_template("dashboard/recovery.html", page_title="Recovery", snapshot=snapshot, recovery=recovery, current_path=path))
+        return _html(
+            render_template(
+                "dashboard/recovery.html",
+                page_title="Recovery",
+                snapshot=snapshot,
+                recovery=recovery,
+                recovery_focus=str((query.get("focus") or ["all"])[0]).strip() or "all",
+                current_path=path,
+            )
+        )
 
     if path == "/control/audit":
         query = parse_qs(parsed.query or "", keep_blank_values=False)

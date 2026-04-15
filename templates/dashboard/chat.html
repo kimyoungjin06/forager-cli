@@ -25,6 +25,19 @@
   {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
+  {% if chat.selected_chat_id and chat.deep_link_preset_label %}
+  <p><strong>deep_link_preset</strong></p>
+  <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Apply {{ chat.deep_link_preset_label }}" data-action-command="chat-session-preset:{{ chat.deep_link_preset_label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
+    <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
+    <input type="hidden" name="room" value="{{ chat.deep_link_preset_room }}">
+    <input type="hidden" name="default_mode" value="{{ chat.deep_link_preset_default_mode }}">
+    <input type="hidden" name="pending_mode" value="{{ chat.deep_link_preset_pending_mode }}">
+    <input type="hidden" name="lang" value="{{ chat.deep_link_preset_lang }}">
+    <input type="hidden" name="report_level" value="{{ chat.deep_link_preset_report_level }}">
+    <button type="submit">{{ chat.deep_link_preset_label }}</button>
+    {% if chat.deep_link_preset_note %}<div class="action-meta"><span class="muted">{{ chat.deep_link_preset_note }}</span></div>{% endif %}
+  </form>
+  {% endif %}
   {% if chat.selected_chat_id and chat.recommended_session_presets %}
   <p><strong>manager_presets</strong></p>
   <div class="chat-hints">

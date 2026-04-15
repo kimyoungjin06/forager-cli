@@ -32,9 +32,20 @@
     <li><span>server_guard_snapshot</span><strong>{{ recovery.server_guard.snapshot_path }}</strong></li>
     <li><span>server_guard_latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
     <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
+    <li><span>focus_filter</span><strong>{{ recovery_focus or 'all' }}</strong></li>
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
+  <p class="muted">
+    filter:
+    {% for value in ['all', 'server-guard'] %}
+      {% if (recovery_focus or 'all') == value %}
+      <span class="action-history-badge active-focus">{{ value }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/recovery{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}</a>
+      {% endif %}
+    {% endfor %}
+  </p>
   {% if recovery.server_guard.recommended_actions %}
   {% with title='server_guard_actions', actions=recovery.server_guard.recommended_actions %}
     {% include 'dashboard/_server_guard_actions.html' %}

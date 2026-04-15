@@ -26,30 +26,31 @@ def _server_guard_pressure_preview_payload(
     remediation: str,
     note: str,
     outcome_kind: str,
+    chat_console_href: str,
 ) -> Dict[str, object]:
     guard = snapshot.control_summary.server_guard
     links = {
         "codex": [
-            {"label": "Open Chat Console", "href": "/control/chat"},
+            {"label": "Open Chat Console", "href": chat_console_href},
             {"label": "Open Codex History", "href": "/control/history?q=codex&scope=control"},
             {"label": "Open Server Guard Audit", "href": "/control/audit?focus=server-guard"},
             {"label": "Open Health JSON", "href": "/control/health"},
         ],
         "python": [
-            {"label": "Open Recovery", "href": "/control/recovery"},
+            {"label": "Open Recovery", "href": "/control/recovery?focus=server-guard"},
             {"label": "Open Python History", "href": "/control/history?q=python&scope=control"},
             {"label": "Open Offdesk", "href": "/control/offdesk"},
             {"label": "Open Health JSON", "href": "/control/health"},
         ],
         "tmux": [
             {"label": "Open Tmux History", "href": "/control/history?q=tmux&scope=control"},
-            {"label": "Open Recovery", "href": "/control/recovery"},
+            {"label": "Open Recovery", "href": "/control/recovery?focus=server-guard"},
             {"label": "Open Server Guard Audit", "href": "/control/audit?focus=server-guard"},
             {"label": "Open Health JSON", "href": "/control/health"},
         ],
         "process": [
             {"label": "Open Process History", "href": "/control/history?q=process&scope=control"},
-            {"label": "Open Recovery", "href": "/control/recovery"},
+            {"label": "Open Recovery", "href": "/control/recovery?focus=server-guard"},
             {"label": "Open Server Guard Audit", "href": "/control/audit?focus=server-guard"},
             {"label": "Open Health JSON", "href": "/control/health"},
         ],
@@ -124,6 +125,16 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
         team_dir=config.team_dir,
         manager_state_file=config.manager_state_file,
     )
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    raw_sessions = manager_state.get("chat_sessions") if isinstance(manager_state.get("chat_sessions"), dict) else {}
+    chat_ids = sorted(str(key).strip() for key in raw_sessions.keys() if str(key).strip())
+    preferred_chat_id = chat_ids[0] if chat_ids else ""
+    chat_preset_href = {
+        "codex": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=global-direct",
+        "python": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=review-rail",
+        "tmux": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=review-rail",
+        "process": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=global-direct",
+    }[pressure_kind]
     guard = snapshot.control_summary.server_guard
     reasons = [token.strip() for token in str(guard.reason_summary or "").split("|") if token.strip()]
     prefixes = {
@@ -168,6 +179,7 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             remediation=remediation,
             note=note,
             outcome_kind=outcome_kind,
+            chat_console_href=chat_preset_href,
         ),
         status=200,
     )

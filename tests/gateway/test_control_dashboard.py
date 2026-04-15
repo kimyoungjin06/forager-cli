@@ -726,7 +726,7 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
         port=8765,
     )
 
-    status, headers, body = dashboard_app.build_dashboard_response("/control/chat?chat=123456", config)
+    status, headers, body = dashboard_app.build_dashboard_response("/control/chat?chat=123456&preset=global-direct", config)
     text = body.decode("utf-8")
 
     assert status == 200
@@ -750,9 +750,11 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "direct reply ok" in text
     assert "session updated" in text
     assert "selected task updated" in text
+    assert "deep_link_preset" in text
     assert "Analysis Rail" in text
     assert "Review Rail" in text
     assert "Global Direct" in text
+    assert "short direct replies on the global rail" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -1993,7 +1995,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
         port=8765,
     )
 
-    status, headers, body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    status, headers, body = dashboard_app.build_dashboard_response("/control/recovery?focus=server-guard", config)
     text = body.decode("utf-8")
 
     assert status == 200
@@ -2027,6 +2029,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "server_guard_snapshot" in text
     assert "server_guard_latest_action" in text
     assert "server_guard_latest_result" in text
+    assert "focus_filter" in text
+    assert "server-guard" in text
     assert "Open Health JSON" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
@@ -6080,6 +6084,19 @@ def test_control_dashboard_post_background_queue_clean_preview_returns_queue_sta
 def test_control_dashboard_post_server_guard_pressure_preview_returns_host_context(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "on",
+            "pending_mode": "direct",
+            "lang": "ko",
+            "report_level": "full",
+            "room": "O2/analysis",
+            "selected_task_refs": {"active": "REQ-1"},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -6110,7 +6127,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert payload["next_step"] == "/control/chat"
     assert "codex_process_high" in " | ".join(payload["preview"]["matching_reasons"])
     assert payload["preview"]["process_summary"].startswith("total=")
-    assert any(row.get("href") == "/control/chat" for row in (payload.get("links") or []))
+    assert any(row.get("href") == "/control/chat?chat=123456&preset=global-direct" for row in (payload.get("links") or []))
     assert any(row.get("href") == "/control/history?q=codex&scope=control" for row in (payload.get("links") or []))
 
     assert overview_status == 200
@@ -6122,6 +6139,10 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert any(
         row.get("path") == "/control/actions/runtime/server-guard-pressure-preview"
         and "\"pressure_kind\":\"codex\"" in str(row.get("payload_json", ""))
+        for row in (health.get("server_guard", {}).get("recommended_actions") or [])
+    )
+    assert any(
+        row.get("href") == "/control/chat?preset=global-direct"
         for row in (health.get("server_guard", {}).get("recommended_actions") or [])
     )
 

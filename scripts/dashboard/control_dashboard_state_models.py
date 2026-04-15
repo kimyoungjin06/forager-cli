@@ -730,6 +730,13 @@ class ChatConsolePageDTO:
     room_presets: List[str] = field(default_factory=list)
     session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
     recommended_session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
+    deep_link_preset_label: str = ""
+    deep_link_preset_note: str = ""
+    deep_link_preset_room: str = ""
+    deep_link_preset_default_mode: str = ""
+    deep_link_preset_pending_mode: str = ""
+    deep_link_preset_lang: str = ""
+    deep_link_preset_report_level: str = ""
     selected_recent_task_refs: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)

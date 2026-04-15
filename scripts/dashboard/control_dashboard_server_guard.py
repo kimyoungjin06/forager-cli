@@ -139,21 +139,21 @@ def _recommended_actions(
 
     _add_link("Open Health JSON", "/control/health", "inspect the raw host and queue snapshot")
     if next_step == "/control/recovery":
-        _add_link("Open Recovery", "/control/recovery", "review stale queue, retries, and blocked runtimes first")
+        _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review stale queue, retries, and blocked runtimes first")
     if next_step == "/control/offdesk":
         _add_link("Open Offdesk", "/control/offdesk", "reduce concurrent work before retrying under host pressure")
     if next_step == "/control/history":
         _add_link("Open History", "/control/history", "inspect recent operator and worker activity")
     if any(reason.startswith("queue") for reason in reasons):
-        _add_link("Open Recovery", "/control/recovery", "queue or stale runtime pressure needs recovery review")
+        _add_link("Open Recovery", "/control/recovery?focus=server-guard", "queue or stale runtime pressure needs recovery review")
     if any(reason.startswith("disk") for reason in reasons):
-        _add_link("Open Recovery", "/control/recovery", "review artifacts and cleanup targets before write-heavy work")
+        _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review artifacts and cleanup targets before write-heavy work")
     if any(
         reason.startswith(prefix)
         for reason in reasons
         for prefix in ("process", "codex_process", "python_process", "tmux_process", "total_process")
     ):
-        _add_link("Open Audit", "/control/audit?limit=50", "inspect recent high-frequency operator actions")
+        _add_link("Open Audit", "/control/audit?focus=server-guard&limit=50", "inspect recent high-frequency operator actions")
         _add_link("Open History", "/control/history", "inspect background worker churn and repeated runs")
     if _has_reason(reasons, "codex_process"):
         _add_action(
@@ -164,7 +164,7 @@ def _recommended_actions(
             command="/ops pressure codex preview",
         )
         _add_link("Review Codex Pressure", "/control/history?q=codex&scope=control", "inspect codex session churn and trim duplicated interactive runs")
-        _add_link("Open Chat Console", "/control/chat", "consolidate chat-bound codex sessions before opening more worker surfaces")
+        _add_link("Open Chat Console", "/control/chat?preset=global-direct", "consolidate chat-bound codex sessions before opening more worker surfaces")
     if _has_reason(reasons, "python_process"):
         _add_action(
             "Preview Python Pressure",
@@ -174,7 +174,7 @@ def _recommended_actions(
             command="/ops pressure python preview",
         )
         _add_link("Review Python Pressure", "/control/history?q=python&scope=control", "inspect python worker churn and repeated local background launches")
-        _add_link("Open Recovery", "/control/recovery", "review worker and queue rails before starting more python-backed jobs")
+        _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review worker and queue rails before starting more python-backed jobs")
     if _has_reason(reasons, "tmux_process"):
         _add_action(
             "Preview Tmux Pressure",

@@ -492,6 +492,25 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
     return presets[:6]
 
 
+def _chat_preset_slug(label: str) -> str:
+    return "-".join(token for token in str(label or "").strip().lower().replace("/", " ").split() if token)
+
+
+def _chat_select_preset(
+    presets: list[ChatSessionPresetDTO],
+    *,
+    token: str,
+) -> ChatSessionPresetDTO | None:
+    selected = str(token or "").strip()
+    if not selected:
+        return None
+    selected_slug = _chat_preset_slug(selected)
+    for row in presets:
+        if str(row.label).strip() == selected or _chat_preset_slug(row.label) == selected_slug:
+            return row
+    return None
+
+
 def _chat_recommended_session_presets(
     *,
     server_guard: ControlSummaryDTO | None,
@@ -632,6 +651,7 @@ def load_dashboard_chat_page(
     team_dir: Path | str | None = None,
     manager_state_file: Path | str | None = None,
     selected_chat_id: str = "",
+    selected_preset: str = "",
 ) -> tuple[DashboardSnapshotDTO, ChatConsolePageDTO]:
     snapshot_result = load_dashboard_snapshot_result(
         control_root=control_root,
@@ -734,6 +754,7 @@ def load_dashboard_chat_page(
         limit=20,
     )
     session_presets = _chat_session_presets(project_alias=selected_project_alias, selected_room=selected_room)
+    deep_link_preset = _chat_select_preset(session_presets, token=selected_preset)
 
     return snapshot_result.snapshot, ChatConsolePageDTO(
         selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
@@ -753,6 +774,13 @@ def load_dashboard_chat_page(
             server_guard=snapshot_result.snapshot.control_summary,
             session_presets=session_presets,
         ),
+        deep_link_preset_label=deep_link_preset.label if deep_link_preset is not None else "",
+        deep_link_preset_note=deep_link_preset.note if deep_link_preset is not None else "",
+        deep_link_preset_room=deep_link_preset.room if deep_link_preset is not None else "",
+        deep_link_preset_default_mode=deep_link_preset.default_mode if deep_link_preset is not None else "",
+        deep_link_preset_pending_mode=deep_link_preset.pending_mode if deep_link_preset is not None else "",
+        deep_link_preset_lang=deep_link_preset.lang if deep_link_preset is not None else "",
+        deep_link_preset_report_level=deep_link_preset.report_level if deep_link_preset is not None else "",
         selected_recent_task_refs=selected_recent_task_refs,
         sessions=sessions,
         room_tail=room_tail,
