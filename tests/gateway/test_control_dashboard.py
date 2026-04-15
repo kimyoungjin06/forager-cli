@@ -5982,6 +5982,97 @@ def test_control_dashboard_post_background_queue_clean_marks_stale_tickets(tmp_p
     assert summary["stale_count"] >= 1
 
 
+def test_control_dashboard_post_background_queue_clean_preview_returns_queue_state(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    queue_path = background_runs.background_runs_state_path(project_root / ".aoe-team")
+    background_runs.upsert_background_run_ticket(
+        queue_path,
+        {
+            "ticket_id": "BGT-STALE-PREVIEW",
+            "request_id": "REQ-STALE-PREVIEW",
+            "project_key": "alpha",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "dashboard-http",
+            "source_surface": "offdesk",
+            "status": "stale",
+            "created_at": "2026-03-16T07:00:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T07:00:00+09:00",
+    )
+
+    before = background_runs.summarize_background_runs_state(queue_path)
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/background-queue-clean-preview",
+        body=b'{"project_ref":"O2"}',
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    after = background_runs.summarize_background_runs_state(queue_path)
+
+    assert status == 200
+    assert payload["status"] == "preview"
+    assert payload["executed"] is False
+    assert payload["source_command"] == "/orch bgq-clean O2 preview"
+    assert payload["outcome"]["kind"] == "background_queue_cleanup_preview"
+    assert payload["outcome"]["reason_code"] == "stale_present"
+    assert payload["preview"]["before"]["stale_count"] >= 1
+    assert before["stale_count"] == after["stale_count"]
+
+
+def test_control_dashboard_overview_surfaces_server_guard_cleanup_preview_action(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    queue_path = background_runs.background_runs_state_path(project_root / ".aoe-team")
+    background_runs.upsert_background_run_ticket(
+        queue_path,
+        {
+            "ticket_id": "BGT-STALE-OVERVIEW",
+            "request_id": "REQ-STALE-OVERVIEW",
+            "project_key": "alpha",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "dashboard-http",
+            "source_surface": "offdesk",
+            "status": "stale",
+            "created_at": "2026-03-16T07:00:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T07:00:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    overview_status, _headers, overview_body = dashboard_app.build_dashboard_response("/control", config)
+    health_status, _health_headers, health_body = dashboard_app.build_dashboard_response("/control/health", config)
+    overview_text = overview_body.decode("utf-8")
+    health = json.loads(health_body.decode("utf-8"))
+
+    assert overview_status == 200
+    assert "Preview Queue Cleanup" in overview_text
+    assert "/control/actions/runtime/background-queue-clean-preview" in overview_text
+    assert health_status == 200
+    assert any(
+        row.get("path") == "/control/actions/runtime/background-queue-clean-preview"
+        for row in (health.get("server_guard", {}).get("recommended_actions") or [])
+    )
+
+
 def test_control_dashboard_post_auto_recover_blocked_includes_retry_at_remediation(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

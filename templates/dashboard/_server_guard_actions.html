@@ -1,0 +1,27 @@
+{% if actions %}
+<div class="action-block">
+  {% if title %}<p><strong>{{ title }}</strong></p>{% endif %}
+  <div class="action-toolbar">
+    {% for row in actions %}
+    {% if row.path %}
+    <form class="action-form" data-dashboard-action data-action-label="{{ row.label }}" data-action-command="{{ row.command or row.path }}" data-action-mode="{{ row.mode or 'safe' }}" method="post" action="{{ row.path }}">
+      <input type="hidden" name="payload_json" value="{{ row.payload_json or '{}' }}">
+      <button type="submit" class="action-button {{ row.mode or 'safe' }}">{{ row.label }}</button>
+      <div class="action-meta">
+        <code>{{ row.command or row.path }}</code>
+        {% if row.note %}<span class="muted">{{ row.note }}</span>{% endif %}
+      </div>
+    </form>
+    {% else %}
+    <div class="action-form">
+      <a class="action-button safe" href="{{ row.href }}">{{ row.label }}</a>
+      <div class="action-meta">
+        <code>{{ row.href }}</code>
+        {% if row.note %}<span class="muted">{{ row.note }}</span>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

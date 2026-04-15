@@ -10,11 +10,9 @@
   <p><strong>server_guard_note</strong> {{ snapshot.control_summary.server_guard.note }} | next={{ snapshot.control_summary.server_guard.next_step }}</p>
   <p><strong>server_guard_snapshot</strong> {{ snapshot.control_summary.server_guard.snapshot_path }}</p>
   {% if snapshot.control_summary.server_guard.recommended_actions %}
-  <div class="chat-hints">
-    {% for row in snapshot.control_summary.server_guard.recommended_actions %}
-    <a class="action-history-badge" href="{{ row.href }}">{{ row.label }}</a>
-    {% endfor %}
-  </div>
+  {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
+    {% include 'dashboard/_server_guard_actions.html' %}
+  {% endwith %}
   {% endif %}
   <div class="runtime-list single">
     {% for card in snapshot.runtime_cards %}

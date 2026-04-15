@@ -33,11 +33,9 @@
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
   {% if snapshot.control_summary.server_guard.recommended_actions %}
-  <div class="chat-hints">
-    {% for row in snapshot.control_summary.server_guard.recommended_actions %}
-    <a class="action-history-badge" href="{{ row.href }}">{{ row.label }}</a>
-    {% endfor %}
-  </div>
+  {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
+    {% include 'dashboard/_server_guard_actions.html' %}
+  {% endwith %}
   {% endif %}
   {% with
     section_title='control_actions',

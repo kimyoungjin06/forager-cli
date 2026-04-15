@@ -15,6 +15,7 @@ from control_dashboard_action_exec import (
     _execute_analysis_review_action,
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
+    _preview_background_queue_clean_action,
     _execute_chat_send_action,
     _execute_chat_session_select_task_action,
     _execute_chat_session_update_action,
@@ -301,6 +302,19 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
             raise ValueError("unsupported background queue cleanup action contract")
         return spec
 
+    if path == "/control/actions/runtime/background-queue-clean-preview":
+        project_ref = str(payload.get("project_ref", "")).strip()
+        if not project_ref:
+            raise ValueError("project_ref is required")
+        return {
+            "command": f"/orch bgq-clean {project_ref} preview",
+            "mode": "safe",
+            "method": "POST",
+            "path": path,
+            "payload": {"project_ref": project_ref},
+            "note": "inspect stale background queue tickets before marking them stale",
+        }
+
     if path == "/control/actions/control/auto-recover":
         force_raw = payload.get("force", False)
         if isinstance(force_raw, bool):
@@ -510,6 +524,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/runtime/background-queue-clean":
         return _with_action_audit(_execute_background_queue_clean_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/background-queue-clean-preview":
+        return _with_action_audit(_preview_background_queue_clean_action(spec, config=config), config=config)
 
     if path == "/control/actions/runtime/judge":
         return _with_action_audit(_execute_runtime_judge_action(spec, config=config), config=config)

@@ -88,35 +88,82 @@ def _server_guard_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir) / "control" / "server_guard.json"
 
 
-def _recommended_actions(*, reasons: List[str], next_step: str) -> list[ServerGuardActionDTO]:
-    actions: list[ServerGuardActionDTO] = []
+def _server_guard_cleanup_target(cards: Iterable[RuntimeCardDTO]) -> RuntimeCardDTO | None:
+    candidates = [row for row in cards if int(getattr(row, "background_queue_stale_count", 0) or 0) > 0]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda row: (
+            -int(getattr(row, "background_queue_stale_count", 0) or 0),
+            0 if str(getattr(row, "status", "")).strip() == "blocked" else 1,
+            -int(getattr(row, "severity_score", 0) or 0),
+            str(getattr(row, "project_alias", "")).strip(),
+        )
+    )
+    return candidates[0]
 
-    def _add(label: str, href: str, note: str) -> None:
-        if any(str(row.href).strip() == href for row in actions):
+
+def _recommended_actions(
+    *,
+    reasons: List[str],
+    next_step: str,
+    runtime_cards: Iterable[RuntimeCardDTO],
+) -> list[ServerGuardActionDTO]:
+    actions: list[ServerGuardActionDTO] = []
+    cleanup_target = _server_guard_cleanup_target(runtime_cards)
+
+    def _add_link(label: str, href: str, note: str) -> None:
+        if any(str(row.href).strip() == href and not str(row.path).strip() for row in actions):
             return
         actions.append(ServerGuardActionDTO(label=label, href=href, note=note))
 
-    _add("Open Health JSON", "/control/health", "inspect the raw host and queue snapshot")
+    def _add_action(label: str, path: str, payload: Dict[str, Any], note: str, *, command: str, mode: str = "safe") -> None:
+        payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if any(str(row.path).strip() == path and str(row.payload_json).strip() == payload_json for row in actions):
+            return
+        actions.append(
+            ServerGuardActionDTO(
+                label=label,
+                note=note,
+                method="POST",
+                path=path,
+                mode=mode,
+                payload_json=payload_json,
+                command=command,
+            )
+        )
+
+    _add_link("Open Health JSON", "/control/health", "inspect the raw host and queue snapshot")
     if next_step == "/control/recovery":
-        _add("Open Recovery", "/control/recovery", "review stale queue, retries, and blocked runtimes first")
+        _add_link("Open Recovery", "/control/recovery", "review stale queue, retries, and blocked runtimes first")
     if next_step == "/control/offdesk":
-        _add("Open Offdesk", "/control/offdesk", "reduce concurrent work before retrying under host pressure")
+        _add_link("Open Offdesk", "/control/offdesk", "reduce concurrent work before retrying under host pressure")
     if next_step == "/control/history":
-        _add("Open History", "/control/history", "inspect recent operator and worker activity")
+        _add_link("Open History", "/control/history", "inspect recent operator and worker activity")
     if any(reason.startswith("queue") for reason in reasons):
-        _add("Open Recovery", "/control/recovery", "queue or stale runtime pressure needs recovery review")
+        _add_link("Open Recovery", "/control/recovery", "queue or stale runtime pressure needs recovery review")
     if any(reason.startswith("disk") for reason in reasons):
-        _add("Open Recovery", "/control/recovery", "review artifacts and cleanup targets before write-heavy work")
+        _add_link("Open Recovery", "/control/recovery", "review artifacts and cleanup targets before write-heavy work")
     if any(
         reason.startswith(prefix)
         for reason in reasons
         for prefix in ("process", "codex_process", "python_process", "tmux_process", "total_process")
     ):
-        _add("Open Audit", "/control/audit?limit=50", "inspect recent high-frequency operator actions")
-        _add("Open History", "/control/history", "inspect background worker churn and repeated runs")
+        _add_link("Open Audit", "/control/audit?limit=50", "inspect recent high-frequency operator actions")
+        _add_link("Open History", "/control/history", "inspect background worker churn and repeated runs")
     if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
-        _add("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
-    return actions[:4]
+        _add_link("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
+    if cleanup_target is not None:
+        project_ref = str(getattr(cleanup_target, "project_alias", "")).strip()
+        if project_ref:
+            _add_action(
+                "Preview Queue Cleanup",
+                "/control/actions/runtime/background-queue-clean-preview",
+                {"project_ref": project_ref},
+                "inspect stale queue tickets before mutating background queue state",
+                command=f"/orch bgq-clean {project_ref} preview",
+            )
+    return actions[:5]
 
 
 def write_server_guard_snapshot(*, team_dir: Path | str, snapshot_taken_at: str, guard: ServerGuardDTO) -> tuple[str, str]:
@@ -135,7 +182,16 @@ def write_server_guard_snapshot(*, team_dir: Path | str, snapshot_taken_at: str,
         "process_summary": guard.process_summary,
         "queue_summary": guard.queue_summary,
         "recommended_actions": [
-            {"label": row.label, "href": row.href, "note": row.note}
+            {
+                "label": row.label,
+                "href": row.href,
+                "note": row.note,
+                "method": row.method,
+                "path": row.path,
+                "mode": row.mode,
+                "payload_json": row.payload_json,
+                "command": row.command,
+            }
             for row in list(guard.recommended_actions or [])
         ],
     }
@@ -149,7 +205,6 @@ def build_server_guard(
     team_dir: Path | str,
     runtime_cards: Iterable[RuntimeCardDTO],
 ) -> ServerGuardDTO:
-    root = Path(control_root)
     team = Path(team_dir)
     usage = shutil.disk_usage(team)
     disk_used_pct = ((usage.used / usage.total) * 100.0) if usage.total > 0 else 0.0
@@ -242,7 +297,7 @@ def build_server_guard(
         _raise("warn", f"total_process_warn:{counts['total']}")
 
     next_step = _dominant_next_step(reasons)
-    recommended_actions = _recommended_actions(reasons=reasons, next_step=next_step)
+    recommended_actions = _recommended_actions(reasons=reasons, next_step=next_step, runtime_cards=cards)
     if not reasons:
         reason_summary = "-"
         note = "server guard is stable; continue with normal operator flow"

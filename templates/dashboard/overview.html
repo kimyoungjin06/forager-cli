@@ -29,12 +29,9 @@
       <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
     </ul>
     {% if snapshot.control_summary.server_guard.recommended_actions %}
-    <p><strong>server_guard_actions</strong></p>
-    <div class="chat-hints">
-      {% for row in snapshot.control_summary.server_guard.recommended_actions %}
-      <a class="action-history-badge" href="{{ row.href }}">{{ row.label }}</a>
-      {% endfor %}
-    </div>
+    {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
+      {% include 'dashboard/_server_guard_actions.html' %}
+    {% endwith %}
     {% endif %}
   </article>
   <article class="panel">

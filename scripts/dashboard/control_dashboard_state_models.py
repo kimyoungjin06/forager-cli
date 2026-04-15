@@ -29,8 +29,13 @@ class ServerGuardDTO:
 @dataclass(frozen=True)
 class ServerGuardActionDTO:
     label: str
-    href: str
+    href: str = ""
     note: str = ""
+    method: str = "GET"
+    path: str = ""
+    mode: str = "safe"
+    payload_json: str = "{}"
+    command: str = ""
 
 
 @dataclass(frozen=True)

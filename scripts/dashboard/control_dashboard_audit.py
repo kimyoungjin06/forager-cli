@@ -87,6 +87,8 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Syncback Apply | {status}"
     if path == "/control/actions/runtime/background-queue-clean":
         return f"Background Queue Cleanup | {status}"
+    if path == "/control/actions/runtime/background-queue-clean-preview":
+        return f"Background Queue Cleanup Preview | {status}"
     if path == "/control/actions/task/retry":
         return f"Retry | {status}"
     if path == "/control/actions/control/auto-recover":

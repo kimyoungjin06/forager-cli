@@ -10,12 +10,109 @@ from typing import Any, Dict, Tuple
 import aoe_tg_background_runs as background_runs
 import aoe_tg_ops_policy as ops_policy
 
-from control_dashboard_action_exec_shared import _dashboard_paths, _json, _load_dashboard_manager_state
+from control_dashboard_action_exec_shared import _json, _load_dashboard_manager_state
 from control_dashboard_common import DashboardAppConfig, _not_found_json
 
 
 def _now_iso() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def _resolve_background_queue_runtime_entry(
+    project_ref: str,
+    *,
+    config: DashboardAppConfig,
+) -> Dict[str, object] | None:
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    alias_token = project_ref.upper()
+    for key, candidate in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
+        alias = ops_policy.project_alias(candidate, str(key)).upper()
+        if alias == alias_token or str(key).strip() == project_ref:
+            return candidate
+    return None
+
+
+def _background_queue_preview_payload(
+    *,
+    spec: Dict[str, object],
+    payload: Dict[str, object],
+    entry: Dict[str, object],
+    queue_path: Path,
+    before: Dict[str, object],
+) -> Dict[str, object]:
+    project_ref = str(payload.get("project_ref", "")).strip()
+    stale_count = int(before.get("stale_count", 0) or 0)
+    return {
+        "ok": True,
+        "implemented": True,
+        "executed": False,
+        "status": "preview",
+        "method": "POST",
+        "path": spec.get("path", "-"),
+        "mode": spec.get("mode", "-"),
+        "source_command": spec.get("command", "-"),
+        "payload": payload,
+        "next_step": f"/orch status {project_ref}",
+        "remediation": (
+            "run background queue cleanup only after confirming stale tickets belong to abandoned worker sessions"
+            if stale_count > 0
+            else "queue is already current; inspect runtime detail before launching more detached work"
+        ),
+        "preview": {
+            "kind": "background_queue_cleanup_preview",
+            "project_alias": ops_policy.project_alias(entry, str(entry.get("name", ""))).upper() or project_ref.upper(),
+            "runtime_path": f"/control/runtimes/{project_ref}",
+            "queue_path": str(queue_path),
+            "before": before,
+        },
+        "outcome": {
+            "kind": "background_queue_cleanup_preview",
+            "status": "preview",
+            "reason_code": "stale_present" if stale_count > 0 else "queue_current",
+            "detail": f"stale_count={stale_count} | summary={before.get('summary', '-')}",
+        },
+    }
+
+
+def _preview_background_queue_clean_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    project_ref = str(payload.get("project_ref", "")).strip()
+    if not project_ref:
+        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message="runtime not found: -")
+
+    entry = _resolve_background_queue_runtime_entry(project_ref, config=config)
+    if not isinstance(entry, dict):
+        return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"runtime not found: {project_ref}")
+
+    team_dir_raw = str(entry.get("team_dir", "")).strip()
+    if not team_dir_raw:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": spec.get("path", "-"),
+                "mode": spec.get("mode", "-"),
+                "source_command": spec.get("command", "-"),
+                "payload": payload,
+                "next_step": f"/orch status {project_ref}",
+                "remediation": "repair the runtime first; background queue cleanup requires a concrete team_dir",
+                "outcome": {
+                    "kind": "background_queue_cleanup",
+                    "status": "blocked",
+                    "reason_code": "team_dir_missing",
+                    "detail": "runtime is missing team_dir",
+                },
+            },
+            status=409,
+        )
+
+    queue_path = background_runs.background_runs_state_path(Path(team_dir_raw))
+    before = background_runs.summarize_background_runs_state(queue_path)
+    return _json(_background_queue_preview_payload(spec=spec, payload=payload, entry=entry, queue_path=queue_path, before=before), status=200)
 
 
 def _execute_background_queue_clean_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
@@ -24,15 +121,7 @@ def _execute_background_queue_clean_action(spec: Dict[str, object], *, config: D
     if not project_ref:
         return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message="runtime not found: -")
 
-    paths, manager_state = _load_dashboard_manager_state(config)
-    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
-    entry = None
-    alias_token = project_ref.upper()
-    for key, candidate in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
-        alias = ops_policy.project_alias(candidate, str(key)).upper()
-        if alias == alias_token or str(key).strip() == project_ref:
-            entry = candidate
-            break
+    entry = _resolve_background_queue_runtime_entry(project_ref, config=config)
     if not isinstance(entry, dict):
         return _not_found_json(path=str(spec.get("path", "")).strip() or "-", message=f"runtime not found: {project_ref}")
 

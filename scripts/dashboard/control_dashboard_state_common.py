@@ -618,6 +618,8 @@ def _action_button_label(spec: Dict[str, Any]) -> str:
         return "Apply Accepted Syncback"
     if path == "/control/actions/runtime/background-queue-clean":
         return "Background Queue Cleanup"
+    if path == "/control/actions/runtime/background-queue-clean-preview":
+        return "Preview Queue Cleanup"
     if path == "/control/actions/control/auto-recover":
         return "Auto Recover Force" if bool(payload.get("force")) else "Auto Recover"
     return str(spec.get("command", "")).strip() or "Action"

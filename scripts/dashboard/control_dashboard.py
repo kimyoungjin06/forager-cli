@@ -117,7 +117,16 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                     "snapshot_path": server_guard.snapshot_path,
                     "snapshot_updated_at": server_guard.snapshot_updated_at,
                     "recommended_actions": [
-                        {"label": row.label, "href": row.href, "note": row.note}
+                        {
+                            "label": row.label,
+                            "href": row.href,
+                            "note": row.note,
+                            "method": row.method,
+                            "path": row.path,
+                            "mode": row.mode,
+                            "payload_json": row.payload_json,
+                            "command": row.command,
+                        }
                         for row in list(server_guard.recommended_actions or [])
                     ],
                 },
