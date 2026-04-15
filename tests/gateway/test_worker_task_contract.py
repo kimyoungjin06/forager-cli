@@ -998,9 +998,32 @@ def test_writing_apply_blocker_prefers_followup_execute_when_brief_executable() 
         mode="apply",
     )
     assert blocker["reason_code"] == "writing_quality_open"
+    assert blocker["suggested_action"] == "followup"
+    assert blocker["suggested_lane_ids"] == ["R1"]
+    assert blocker["remediation"] == "close the document quality gate before applying writing changes"
+
+
+def test_writing_doc_missing_prefers_followup_execute_when_execution_lane_exists() -> None:
+    blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+        {
+            "module_kind": "writing",
+            "rows_kind": "writing_preflight_rows",
+            "rows": [
+                "doc_present=missing|state=blocked|note=document",
+                "handoff_ready=ready|state=ready|note=handoff",
+                "quality_ready=ready|state=ready|note=quality_gate",
+                "writing_ready=handoff_open|state=blocked|note=close_quality_gate",
+            ],
+            "followup_brief_status": "partially_executable",
+            "followup_brief_review_lane_ids": ["R1"],
+            "followup_brief_execution_lane_ids": ["L2"],
+        },
+        mode="apply",
+    )
+    assert blocker["reason_code"] == "writing_doc_missing"
     assert blocker["suggested_action"] == "followup_execute"
     assert blocker["suggested_lane_ids"] == ["L2"]
-    assert blocker["remediation"] == "execute the writing follow-up and close the document quality gate before applying changes"
+    assert blocker["remediation"] == "execute the writing follow-up and prepare the required document artifact before applying changes"
 
 
 def test_package_syncback_blocker_prefers_syncback_pending_reason() -> None:

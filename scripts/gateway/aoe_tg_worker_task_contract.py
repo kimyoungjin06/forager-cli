@@ -1959,6 +1959,25 @@ def derive_worker_task_module_action_blocker(
                 out.append(token[:160])
         return out
 
+    def _writing_followup_policy(*, prefer_execution: bool) -> tuple[str, List[str]]:
+        execution_lanes = list(followup_execution_lane_ids or [])
+        review_lanes = list(followup_review_lane_ids or [])
+        if prefer_execution:
+            if followup_execute_enabled and execution_lanes:
+                return "followup_execute", execution_lanes
+            if review_lanes:
+                return "followup", review_lanes
+            if execution_lanes:
+                return "followup", execution_lanes
+            return ("followup_execute" if followup_execute_enabled else "followup"), []
+        if review_lanes:
+            return "followup", review_lanes
+        if followup_execute_enabled and execution_lanes:
+            return "followup_execute", execution_lanes
+        if execution_lanes:
+            return "followup", execution_lanes
+        return ("followup_execute" if followup_execute_enabled else "followup"), []
+
     reason_code = "worker_apply_not_ready"
     next_hint = "-"
     suggested_action = "task_review"
@@ -1992,44 +2011,39 @@ def derive_worker_task_module_action_blocker(
         if _entry("quality_ready").get("state") == "blocked":
             reason_code = "writing_quality_open"
             next_hint = _entry("quality_ready").get("note", "") or "close_quality_gate"
-            suggested_action = "followup_execute" if followup_execute_enabled else "followup"
+            suggested_action, suggested_lane_ids = _writing_followup_policy(prefer_execution=False)
             remediation = (
                 "execute the writing follow-up and close the document quality gate before applying changes"
-                if followup_execute_enabled
+                if suggested_action == "followup_execute"
                 else "close the document quality gate before applying writing changes"
             )
         elif _entry("handoff_ready").get("state") == "blocked":
             reason_code = "writing_handoff_waiting"
             next_hint = _entry("handoff_ready").get("note", "") or "handoff"
-            suggested_action = "followup_execute" if followup_execute_enabled else "followup"
+            suggested_action, suggested_lane_ids = _writing_followup_policy(prefer_execution=False)
             remediation = (
                 "execute the writing follow-up and finish the handoff review before applying changes"
-                if followup_execute_enabled
+                if suggested_action == "followup_execute"
                 else "finish the writing handoff review before applying changes"
             )
         elif _entry("doc_present").get("state") == "blocked":
             reason_code = "writing_doc_missing"
             next_hint = _entry("doc_present").get("note", "") or "document"
-            suggested_action = "followup_execute" if followup_execute_enabled else "followup"
+            suggested_action, suggested_lane_ids = _writing_followup_policy(prefer_execution=True)
             remediation = (
                 "execute the writing follow-up and prepare the required document artifact before applying changes"
-                if followup_execute_enabled
+                if suggested_action == "followup_execute"
                 else "prepare the required document artifact before applying changes"
             )
         else:
             reason_code = "writing_handoff_not_ready"
             next_hint = _entry("writing_ready").get("note", "") or "close_quality_gate"
-            suggested_action = "followup_execute" if followup_execute_enabled else "followup"
+            suggested_action, suggested_lane_ids = _writing_followup_policy(prefer_execution=False)
             remediation = (
                 "execute the writing follow-up and complete the handoff checklist before applying changes"
-                if followup_execute_enabled
+                if suggested_action == "followup_execute"
                 else "complete the writing handoff checklist before applying changes"
             )
-        suggested_lane_ids = (
-            list(followup_execution_lane_ids or followup_review_lane_ids)
-            if suggested_action == "followup_execute"
-            else list(followup_review_lane_ids or followup_execution_lane_ids)
-        )
         blocked_rows = _blocked("doc_present", "handoff_ready", "quality_ready", "writing_ready")
     elif module_kind == "package":
         if safe_mode == "syncback" and _entry("syncback_ready").get("state") == "blocked":
