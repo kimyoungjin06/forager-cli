@@ -652,6 +652,7 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
                 "link_href": "/control/chat?chat=123456",
                 "source_command": "/direct how is the runtime?",
                 "chat_id": "123456",
+                "transcript_preview": "direct reply ok\n- next: /task T-001",
             },
             ensure_ascii=False,
         )
@@ -683,6 +684,8 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "Update Session Controls" in text
     assert "Chat Send History" in text
     assert "direct reply ok" in text
+    assert "O2/writing" in text
+    assert "O2/package" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -1096,6 +1099,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "analysis handoff wording" in text
     assert "context_pack" in text
     assert "profile=followup_preview" in text
+    assert "/control/chat" in text
+    assert "Open Chat Console" in text
     assert "context_pack_docs" in text
     assert "judge_binding" in text
     assert "judge=unbound:claude-opus-4.1" in text
@@ -1134,6 +1139,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "background_worker_checklist" in text
     assert "analysis_checklist | state=findings_stable | findings=1,evidence=1,gaps=0 | next=validate_caveats" in text
     assert "background_worker_items" in text
+    assert "/control/chat" in text
+    assert "Open Chat Console" in text
     assert "analysis_items | finding:update reports/summary.md,evidence:reports/summary.md" in text
     assert "background_worker_item_tokens" in text
     assert "finding:update reports/summary.md, evidence:reports/summary.md" in text

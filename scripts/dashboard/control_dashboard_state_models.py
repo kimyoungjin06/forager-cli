@@ -172,6 +172,8 @@ class TaskDetailDTO:
     project_key: str
     project_alias: str
     project_label: str
+    chat_console_path: str
+    chat_console_label: str
     request_id: str
     label: str
     status: str
@@ -295,6 +297,8 @@ class RuntimeDetailDTO:
     project_alias: str
     project_label: str
     runtime_path: str
+    chat_console_path: str
+    chat_console_label: str
     status: str
     readiness: str
     attention_summary: str
@@ -658,6 +662,7 @@ class ChatConsolePageDTO:
     selected_lang: str
     selected_report_level: str
     rooms: List[str] = field(default_factory=list)
+    room_presets: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)
     send_action_path: str = "/control/actions/chat/send"

@@ -20,6 +20,8 @@ import aoe_tg_orch_contract as orch_contract
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_task_view as task_view
+import aoe_tg_chat_aliases as chat_aliases
+import aoe_tg_chat_state as chat_state
 import aoe_tg_worker_task_contract as worker_task_contract
 from control_dashboard_state_models import ActionButtonDTO
 
@@ -203,6 +205,49 @@ def _task_rate_limit_summary(task: Dict[str, Any]) -> str:
         retry_after=(f"{retry_after}s" if retry_after > 0 else "-"),
         retry_at=retry_at,
     )
+
+
+def _chat_console_target(
+    manager_state: Dict[str, Any],
+    *,
+    root_team_dir: Path,
+    project_alias: str,
+    request_id: str,
+) -> tuple[str, str]:
+    raw_sessions = manager_state.get("chat_sessions") if isinstance(manager_state.get("chat_sessions"), dict) else {}
+    if not raw_sessions:
+        return "/control/chat", "Open Chat Console"
+    aliases = chat_aliases.load_chat_aliases(chat_aliases.resolve_chat_aliases_file(root_team_dir, None))
+    alias_by_chat_id = {str(chat_id).strip(): str(alias).strip() for alias, chat_id in aliases.items()}
+    target_alias = str(project_alias or "").strip().lower()
+    target_request = str(request_id or "").strip()
+    best_score = -1
+    best_chat_id = ""
+    for chat_id, raw in raw_sessions.items():
+        token = str(chat_id or "").strip()
+        if not token:
+            continue
+        row = chat_state.sanitize_chat_session_row(raw if isinstance(raw, dict) else {})
+        score = 0
+        if target_request:
+            selected = row.get("selected_task_refs") if isinstance(row.get("selected_task_refs"), dict) else {}
+            recent = row.get("recent_task_refs") if isinstance(row.get("recent_task_refs"), dict) else {}
+            if any(str(request_id).strip() == target_request for request_id in selected.values()):
+                score = max(score, 3)
+            for refs in recent.values():
+                if isinstance(refs, list) and any(str(request_id).strip() == target_request for request_id in refs):
+                    score = max(score, 2)
+                    break
+        room = str(row.get("room", "")).strip().lower()
+        if target_alias and room and (room == target_alias or room.startswith(target_alias + "/")):
+            score = max(score, 1)
+        if score > best_score:
+            best_score = score
+            best_chat_id = token
+    if best_score < 0 or not best_chat_id:
+        return "/control/chat", "Open Chat Console"
+    chat_label = alias_by_chat_id.get(best_chat_id, best_chat_id)
+    return f"/control/chat?chat={best_chat_id}", f"Open Chat {chat_label}"
 
 
 def _worker_syncback_ready(

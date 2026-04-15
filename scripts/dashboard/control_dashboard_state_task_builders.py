@@ -26,6 +26,7 @@ import aoe_tg_worker_task_contract as worker_task_contract
 
 from control_dashboard_state_common import (
     _append_unique_action_button,
+    _chat_console_target,
     _compose_backend_summary,
     _compose_lane_summary,
     _compose_phase2_shape,
@@ -994,10 +995,18 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             str(task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip(),
             str(task.get("backend_contract", "") or result.get("backend_contract", "")).strip(),
         )
+        chat_console_path, chat_console_label = _chat_console_target(
+            manager_state,
+            root_team_dir=root_team_dir,
+            project_alias=alias,
+            request_id=rid,
+        )
         return TaskDetailDTO(
             project_key=str(key),
             project_alias=alias,
             project_label=display,
+            chat_console_path=chat_console_path,
+            chat_console_label=chat_console_label,
             request_id=rid,
             label=task_view.task_display_label(task, fallback_request_id=rid),
             status=runtime_read.normalize_task_status(task.get("status", "pending")),

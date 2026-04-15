@@ -288,6 +288,53 @@ def _chat_recent_task_summary(row: Dict[str, Any]) -> str:
     return " | ".join(parts) if parts else "-"
 
 
+def _chat_session_project_alias(
+    manager_state: Dict[str, Any],
+    *,
+    raw_session: Dict[str, Any],
+    selected_room: str,
+) -> str:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    selected = raw_session.get("selected_task_refs") if isinstance(raw_session.get("selected_task_refs"), dict) else {}
+    recent = raw_session.get("recent_task_refs") if isinstance(raw_session.get("recent_task_refs"), dict) else {}
+    for key, entry in projects.items():
+        if not isinstance(entry, dict):
+            continue
+        project_alias = str(entry.get("project_alias", "")).strip()
+        if not project_alias:
+            continue
+        if key in selected or key in recent:
+            return project_alias
+    room_head = str(selected_room or "").strip().split("/", 1)[0]
+    if room_head and room_head.lower() != room_handlers.DEFAULT_ROOM_NAME:
+        return room_head
+    active_key = str(manager_state.get("active", "")).strip()
+    active_entry = projects.get(active_key) if active_key and isinstance(projects.get(active_key), dict) else {}
+    return str(active_entry.get("project_alias", "")).strip()
+
+
+def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[str]) -> list[str]:
+    tokens: list[str] = []
+    def _add(token: str) -> None:
+        safe = str(token or "").strip()
+        if safe and safe not in tokens:
+            tokens.append(safe)
+    _add(room_handlers.DEFAULT_ROOM_NAME)
+    project_token = str(project_alias or "").strip()
+    if project_token:
+        _add(project_token)
+        _add(f"{project_token}/analysis")
+        _add(f"{project_token}/writing")
+        _add(f"{project_token}/package")
+        _add(f"{project_token}/review")
+    _add(selected_room)
+    for room in rooms:
+        _add(room)
+        if len(tokens) >= 10:
+            break
+    return tokens[:10]
+
+
 def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: int = 8) -> list[ActionAuditRowDTO]:
     rows: list[ActionAuditRowDTO] = []
     raw_rows: list[dict[str, Any]] = []
@@ -326,6 +373,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             source_command=str(raw.get("source_command", "")).strip() or "-",
             focus_badge=str(raw.get("focus_badge", "")).strip(),
             chat_id=str(raw.get("chat_id", "")).strip(),
+            transcript_preview=str(raw.get("transcript_preview", "")).strip(),
         )
         if chat_id and row.chat_id and row.chat_id != chat_id:
             continue
@@ -403,6 +451,7 @@ def load_dashboard_chat_page(
     ]
 
     selected_room = selected_session.room if selected_session is not None else room_handlers.DEFAULT_ROOM_NAME
+    selected_session_row = raw_sessions.get(selected_token) if isinstance(raw_sessions.get(selected_token), dict) else {}
     room_tail = [
         ChatRoomLineDTO(
             at=str(row.get("ts", "")).strip() or "-",
@@ -416,6 +465,11 @@ def load_dashboard_chat_page(
     rooms = [name for name, _mt in room_handlers.list_rooms(team_dir=paths.team_dir, limit=24)]
     if selected_room and selected_room not in rooms:
         rooms.insert(0, selected_room)
+    selected_project_alias = _chat_session_project_alias(
+        snapshot_result.manager_state,
+        raw_session=selected_session_row if isinstance(selected_session_row, dict) else {},
+        selected_room=selected_room,
+    )
 
     return snapshot_result.snapshot, ChatConsolePageDTO(
         selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
@@ -426,6 +480,7 @@ def load_dashboard_chat_page(
         selected_lang=selected_session.lang if selected_session is not None else chat_state.DEFAULT_UI_LANG,
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
         rooms=rooms,
+        room_presets=_chat_room_presets(project_alias=selected_project_alias, selected_room=selected_room, rooms=rooms),
         sessions=sessions,
         room_tail=room_tail,
         recent_chat_actions=_load_recent_chat_action_rows(paths, chat_id=selected_token, limit=8),

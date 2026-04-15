@@ -63,6 +63,7 @@ class ActionAuditRowDTO:
     source_command: str
     focus_badge: str
     chat_id: str = ""
+    transcript_preview: str = ""
 
 
 @dataclass(frozen=True)
@@ -255,6 +256,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         source_command=str(raw.get("source_command", "")).strip() or "-",
         focus_badge=focus_badge,
         chat_id=str(raw.get("chat_id", "")).strip(),
+        transcript_preview=str(raw.get("transcript_preview", "")).strip(),
     )
 
 

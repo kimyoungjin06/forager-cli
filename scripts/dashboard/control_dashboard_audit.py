@@ -192,6 +192,7 @@ def _append_action_audit(
         "link_href": link_href,
         "source_command": source_command,
         "chat_id": str(payload.get("chat_id", "")).strip() or "",
+        "transcript_preview": str(payload.get("reply_text", "")).strip()[:4000],
     }
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:
