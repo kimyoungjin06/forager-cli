@@ -8,10 +8,11 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
+      <div class="topbar-copy">
+        <p class="topbar-kicker">Operator Surface</p>
         <h1>{{ page_title }}</h1>
         {% if snapshot is defined %}
-        <p class="muted">snapshot {{ snapshot.snapshot_taken_at }} | control_root {{ snapshot.control_root }}</p>
+        <p class="topbar-meta">snapshot {{ snapshot.snapshot_taken_at }} | control_root {{ snapshot.control_root }}</p>
         {% endif %}
       </div>
       <nav class="nav">

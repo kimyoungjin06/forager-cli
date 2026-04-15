@@ -2,6 +2,7 @@
 {% block content %}
 <section class="panel">
   <h2>Nightly Session Summary</h2>
+  <p class="muted">recovered operator state from the latest nightly summary artifact</p>
   {% if recovery.exists %}
   <ul class="kv-list">
     <li><span>artifact</span><strong>{{ recovery.artifact_path }}</strong></li>
@@ -45,12 +46,18 @@
 {% if recovery.runtimes %}
 <section class="panel">
   <h2>Recovered Runtimes</h2>
+  <p class="muted">nightly reconstruction of runtime pressure, action rails, and next-step signals</p>
   <div class="runtime-list">
     {% for runtime in recovery.runtimes %}
     <div class="runtime-card {{ runtime.status }}">
-      <h3><a href="{{ runtime.runtime_path }}">{{ runtime.project_alias }} {{ runtime.project_label }}</a></h3>
-      <p><strong>runtime</strong> {{ runtime.readiness }}</p>
-      <p><strong>attention</strong> {{ runtime.attention_summary }}</p>
+      <div class="runtime-card-header">
+        <div class="runtime-card-copy">
+          <p class="card-kicker">Runtime {{ runtime.readiness }}</p>
+          <h3><a href="{{ runtime.runtime_path }}">{{ runtime.project_alias }} {{ runtime.project_label }}</a></h3>
+          <p class="runtime-attention">{{ runtime.attention_summary }}</p>
+        </div>
+        <span class="status-pill {{ runtime.status }}">{{ runtime.status }}</span>
+      </div>
       <p><strong>first_focus</strong> {{ recovery.latest_intent_focus }} | next={{ runtime.priority_action }}</p>
       <p><strong>next_focus</strong> {{ runtime.next_focus }}</p>
       <p><strong>queue</strong> {{ runtime.queue_summary }}</p>

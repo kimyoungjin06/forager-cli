@@ -9,9 +9,14 @@
   <div class="runtime-list single">
     {% for card in snapshot.runtime_cards %}
     <div class="runtime-card {{ card.status }}">
-      <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
-      <p><strong>runtime</strong> {{ card.readiness }}</p>
-      <p><strong>attention</strong> {{ card.attention_summary }}</p>
+      <div class="runtime-card-header">
+        <div class="runtime-card-copy">
+          <p class="card-kicker">Runtime {{ card.readiness }}</p>
+          <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
+          <p class="runtime-attention">{{ card.attention_summary }}</p>
+        </div>
+        <span class="status-pill {{ card.status }}">{{ card.status }}</span>
+      </div>
       <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
       {% if card.active_task_label %}
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
@@ -80,6 +85,7 @@
 
 <section class="panel">
   <h2>Project Progress Board</h2>
+  <p class="muted">offdesk parity board for current task pressure and next operator move</p>
   <table class="task-table">
     <thead>
       <tr>

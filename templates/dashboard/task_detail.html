@@ -1,7 +1,14 @@
 {% extends 'dashboard/base.html' %}
 {% block content %}
-<section class="panel">
-  <h2>{{ detail.label }}</h2>
+<section class="panel detail-hero">
+  <div class="detail-hero-header">
+    <div class="detail-hero-copy">
+      <p class="card-kicker">Task Detail</p>
+      <h2>{{ detail.label }}</h2>
+      <p class="runtime-attention">{{ detail.project_alias }} {{ detail.project_label }} | {{ detail.status }}/{{ detail.tf_phase }} | {{ detail.request_id }}</p>
+    </div>
+    <span class="status-pill">{{ detail.status }}</span>
+  </div>
   <ul class="kv-list">
     <li><span>runtime</span><strong>{{ detail.project_alias }} {{ detail.project_label }}</strong></li>
     <li><span>request_id</span><strong>{{ detail.request_id }}</strong></li>
