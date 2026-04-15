@@ -42,6 +42,7 @@ from control_dashboard_common import (
 )
 from control_dashboard_state import (
     load_dashboard_action_audit_page,
+    load_dashboard_chat_page,
     load_dashboard_history_page,
     load_dashboard_recovery_page,
     load_dashboard_runtime_page,
@@ -66,7 +67,7 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, object])
 
 
 def _is_known_dashboard_get_route(path: str) -> bool:
-    if path in {"", "/", "/control", "/control/offdesk", "/control/recovery", "/control/audit", "/control/history", "/control/tasks", "/control/health"}:
+    if path in {"", "/", "/control", "/control/chat", "/control/offdesk", "/control/recovery", "/control/audit", "/control/history", "/control/tasks", "/control/health"}:
         return True
     if path.startswith("/static/"):
         return True
@@ -114,6 +115,24 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             manager_state_file=config.manager_state_file,
         )
         return _html(render_template("dashboard/overview.html", page_title="Control Dashboard", snapshot=snapshot, current_path=path))
+
+    if path == "/control/chat":
+        query = parse_qs(parsed.query or "", keep_blank_values=False)
+        snapshot, chat = load_dashboard_chat_page(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+            selected_chat_id=str((query.get("chat") or [""])[0]).strip(),
+        )
+        return _html(
+            render_template(
+                "dashboard/chat.html",
+                page_title="Chat Console",
+                snapshot=snapshot,
+                chat=chat,
+                current_path=path,
+            )
+        )
 
     if path == "/control/offdesk":
         snapshot = load_dashboard_snapshot(

@@ -15,6 +15,7 @@ from control_dashboard_action_exec import (
     _execute_analysis_review_action,
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
+    _execute_chat_send_action,
     _execute_followup_action,
     _execute_runtime_judge_action,
     _execute_runtime_syncback_apply_action,
@@ -44,6 +45,25 @@ from control_dashboard_state import load_dashboard_runtime_details, load_task_de
 
 
 def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str, object]:
+    if path == "/control/actions/chat/send":
+        chat_id = str(payload.get("chat_id", "")).strip()
+        if not chat_id:
+            raise ValueError("chat_id is required")
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            raise ValueError("text is required")
+        mode = str(payload.get("mode", "")).strip().lower() or "raw"
+        if mode not in {"raw", "direct", "dispatch", "room_post", "room_use"}:
+            raise ValueError("mode must be one of raw, direct, dispatch, room_post, room_use")
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"chat-send:{mode}:{chat_id}",
+            "note": "send a gateway command through the selected chat session",
+            "payload": {"chat_id": chat_id, "text": text, "mode": mode},
+        }
+
     if path in {"/control/actions/task/retry", "/control/actions/task/replan"}:
         task_ref = str(payload.get("task_ref", "")).strip()
         if not task_ref:
@@ -394,6 +414,9 @@ def build_dashboard_action_response(
         spec = _action_spec_for_request(path, payload)
     except ValueError as exc:
         return _bad_request(str(exc), path=path)
+
+    if path == "/control/actions/chat/send":
+        return _with_action_audit(_execute_chat_send_action(spec, config=config), config=config)
 
     if path == "/control/actions/task/followup":
         return _with_action_audit(_preview_followup_action(spec, config=config), config=config)

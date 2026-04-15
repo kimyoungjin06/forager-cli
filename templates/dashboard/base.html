@@ -17,6 +17,7 @@
       </div>
       <nav class="nav">
         <a class="{% if current_path == '/control' %}active{% endif %}" href="/control">Overview</a>
+        <a class="{% if current_path == '/control/chat' %}active{% endif %}" href="/control/chat">Chat Console</a>
         <a class="{% if current_path == '/control/offdesk' %}active{% endif %}" href="/control/offdesk">Offdesk Prep</a>
         <a class="{% if current_path == '/control/recovery' %}active{% endif %}" href="/control/recovery">Recovery</a>
         <a class="{% if current_path == '/control/history' %}active{% endif %}" href="/control/history">History</a>
@@ -365,8 +366,27 @@
               return;
             }
           }
-          const payloadField = form.querySelector('input[name="payload_json"]');
-          const payload = payloadField instanceof HTMLInputElement ? payloadField.value : "{}";
+          const payloadField = form.querySelector('input[name="payload_json"], textarea[name="payload_json"]');
+          let payload = "{}";
+          if (payloadField instanceof HTMLInputElement || payloadField instanceof HTMLTextAreaElement) {
+            payload = payloadField.value;
+          } else {
+            const formData = new window.FormData(form);
+            const rows = {};
+            formData.forEach((value, key) => {
+              if (key === "payload_json") {
+                return;
+              }
+              const normalized = typeof value === "string" ? value : String(value);
+              if (Object.prototype.hasOwnProperty.call(rows, key)) {
+                const current = rows[key];
+                rows[key] = Array.isArray(current) ? current.concat(normalized) : [current, normalized];
+                return;
+              }
+              rows[key] = normalized;
+            });
+            payload = JSON.stringify(rows);
+          }
           const label = form.dataset.actionLabel || form.action;
           const button = form.querySelector('button[type="submit"]');
           if (button instanceof HTMLButtonElement) {

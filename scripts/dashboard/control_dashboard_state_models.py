@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 from control_dashboard_state_io import ActionAuditRowDTO, FileFreshnessDTO
 
@@ -621,6 +621,45 @@ class HistorySearchPageDTO:
     limit: int
     total_rows: int
     rows: List[HistorySearchRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ChatSessionDTO:
+    chat_id: str
+    chat_alias: str
+    updated_at: str
+    default_mode: str
+    pending_mode: str
+    lang: str
+    report_level: str
+    room: str
+    selected_task_summary: str
+    recent_task_summary: str
+    is_selected: bool = False
+
+
+@dataclass(frozen=True)
+class ChatRoomLineDTO:
+    at: str
+    actor: str
+    kind: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ChatConsolePageDTO:
+    selected_chat_id: str
+    selected_chat_alias: str
+    selected_room: str
+    selected_default_mode: str
+    selected_pending_mode: str
+    selected_lang: str
+    selected_report_level: str
+    rooms: List[str] = field(default_factory=list)
+    sessions: List[ChatSessionDTO] = field(default_factory=list)
+    room_tail: List[ChatRoomLineDTO] = field(default_factory=list)
+    send_action_path: str = "/control/actions/chat/send"
+    send_mode_options: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

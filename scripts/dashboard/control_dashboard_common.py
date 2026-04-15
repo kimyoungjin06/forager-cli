@@ -15,6 +15,7 @@ from control_dashboard_views import render_template
 ROOT = Path(__file__).resolve().parents[2]
 STATIC_ROOT = ROOT / "static"
 ACTION_PATHS = {
+    "/control/actions/chat/send",
     "/control/actions/task/retry",
     "/control/actions/task/replan",
     "/control/actions/task/followup",

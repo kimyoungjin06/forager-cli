@@ -15,6 +15,7 @@ GW_DIR = ROOT / "scripts" / "gateway"
 if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
+import aoe_tg_chat_aliases as chat_aliases
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_runtime_read as runtime_read
@@ -68,6 +69,7 @@ class ControlPaths:
     control_root: Path
     team_dir: Path
     manager_state_file: Path
+    chat_aliases_file: Path
     auto_state_file: Path
     provider_capacity_file: Path
     latest_intent_file: Path
@@ -115,6 +117,7 @@ def resolve_control_paths(
         control_root=root,
         team_dir=resolved_team_dir,
         manager_state_file=resolved_manager,
+        chat_aliases_file=chat_aliases.resolve_chat_aliases_file(resolved_team_dir, None),
         auto_state_file=(resolved_team_dir / AUTO_STATE_FILENAME).resolve(),
         provider_capacity_file=runtime_core.provider_capacity_state_path(resolved_team_dir, filename=PROVIDER_CAPACITY_FILENAME),
         latest_intent_file=runtime_core.latest_intent_snapshot_path(resolved_team_dir),

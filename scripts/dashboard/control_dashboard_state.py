@@ -15,6 +15,9 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_history_search as history_search
+import aoe_tg_chat_aliases as chat_aliases
+import aoe_tg_chat_state as chat_state
+import aoe_tg_room_handlers as room_handlers
 import aoe_tg_task_state as task_state
 
 from control_dashboard_state_builders import (
@@ -45,6 +48,9 @@ from control_dashboard_state_io import (
 from control_dashboard_state_models import (
     ActionAuditPageDTO,
     ActiveTaskRowDTO,
+    ChatConsolePageDTO,
+    ChatRoomLineDTO,
+    ChatSessionDTO,
     ControlSummaryDTO,
     DashboardSnapshotDTO,
     DashboardSnapshotLoadResult,
@@ -246,6 +252,141 @@ def load_dashboard_snapshot_result(
         ),
         manager_state=manager_loaded.state,
         provider_state=provider_state,
+    )
+
+
+def _chat_selected_task_summary(row: Dict[str, Any]) -> str:
+    selected = row.get("selected_task_refs") if isinstance(row.get("selected_task_refs"), dict) else {}
+    if not selected:
+        return "-"
+    parts: list[str] = []
+    for key, request_id in sorted(selected.items()):
+        token = str(request_id or "").strip()
+        if not token:
+            continue
+        parts.append(f"{key}:{token}")
+        if len(parts) >= 3:
+            break
+    return " | ".join(parts) if parts else "-"
+
+
+def _chat_recent_task_summary(row: Dict[str, Any]) -> str:
+    recent = row.get("recent_task_refs") if isinstance(row.get("recent_task_refs"), dict) else {}
+    if not recent:
+        return "-"
+    parts: list[str] = []
+    for key, refs in sorted(recent.items()):
+        if not isinstance(refs, list):
+            continue
+        count = len([str(item or "").strip() for item in refs if str(item or "").strip()])
+        if count <= 0:
+            continue
+        parts.append(f"{key}:{count}")
+        if len(parts) >= 3:
+            break
+    return " | ".join(parts) if parts else "-"
+
+
+def load_dashboard_chat_page(
+    *,
+    control_root: Path | str,
+    team_dir: Path | str | None = None,
+    manager_state_file: Path | str | None = None,
+    selected_chat_id: str = "",
+) -> tuple[DashboardSnapshotDTO, ChatConsolePageDTO]:
+    snapshot_result = load_dashboard_snapshot_result(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
+    aliases = chat_aliases.load_chat_aliases(paths.chat_aliases_file)
+    alias_by_chat_id = {str(chat_id).strip(): str(alias).strip() for alias, chat_id in aliases.items()}
+    raw_sessions = (
+        snapshot_result.manager_state.get("chat_sessions")
+        if isinstance(snapshot_result.manager_state.get("chat_sessions"), dict)
+        else {}
+    )
+    sessions: list[ChatSessionDTO] = []
+    for chat_id, raw in raw_sessions.items():
+        chat_token = str(chat_id or "").strip()
+        if not chat_token:
+            continue
+        row = raw if isinstance(raw, dict) else {}
+        sanitized = chat_state.sanitize_chat_session_row(row) if isinstance(row, dict) else {}
+        session_row = sanitized if sanitized else row
+        sessions.append(
+            ChatSessionDTO(
+                chat_id=chat_token,
+                chat_alias=alias_by_chat_id.get(chat_token, ""),
+                updated_at=str(session_row.get("updated_at", "")).strip() or "-",
+                default_mode=str(session_row.get("default_mode", "")).strip() or "off",
+                pending_mode=str(session_row.get("pending_mode", "")).strip() or "none",
+                lang=str(session_row.get("lang", "")).strip() or chat_state.DEFAULT_UI_LANG,
+                report_level=str(session_row.get("report_level", "")).strip() or chat_state.DEFAULT_REPORT_LEVEL,
+                room=str(session_row.get("room", "")).strip() or room_handlers.DEFAULT_ROOM_NAME,
+                selected_task_summary=_chat_selected_task_summary(session_row),
+                recent_task_summary=_chat_recent_task_summary(session_row),
+            )
+        )
+    sessions.sort(key=lambda row: (row.updated_at, row.chat_id), reverse=True)
+
+    selected_token = str(selected_chat_id or "").strip()
+    selected_session = next((row for row in sessions if row.chat_id == selected_token), None)
+    if selected_session is None and sessions:
+        selected_session = sessions[0]
+    selected_token = selected_session.chat_id if selected_session is not None else selected_token
+
+    sessions = [
+        ChatSessionDTO(
+            chat_id=row.chat_id,
+            chat_alias=row.chat_alias,
+            updated_at=row.updated_at,
+            default_mode=row.default_mode,
+            pending_mode=row.pending_mode,
+            lang=row.lang,
+            report_level=row.report_level,
+            room=row.room,
+            selected_task_summary=row.selected_task_summary,
+            recent_task_summary=row.recent_task_summary,
+            is_selected=(row.chat_id == selected_token),
+        )
+        for row in sessions
+    ]
+
+    selected_room = selected_session.room if selected_session is not None else room_handlers.DEFAULT_ROOM_NAME
+    room_tail = [
+        ChatRoomLineDTO(
+            at=str(row.get("ts", "")).strip() or "-",
+            actor=str(row.get("actor", "")).strip() or "-",
+            kind=str(row.get("kind", "")).strip() or "-",
+            text=" ".join(str(row.get("text", "")).strip().split()) or "-",
+        )
+        for row in room_handlers.tail_room_events(team_dir=paths.team_dir, room=selected_room, limit=20)
+        if isinstance(row, dict)
+    ]
+    rooms = [name for name, _mt in room_handlers.list_rooms(team_dir=paths.team_dir, limit=24)]
+    if selected_room and selected_room not in rooms:
+        rooms.insert(0, selected_room)
+
+    return snapshot_result.snapshot, ChatConsolePageDTO(
+        selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
+        selected_chat_alias=selected_session.chat_alias if selected_session is not None else alias_by_chat_id.get(selected_token, ""),
+        selected_room=selected_room,
+        selected_default_mode=selected_session.default_mode if selected_session is not None else "off",
+        selected_pending_mode=selected_session.pending_mode if selected_session is not None else "none",
+        selected_lang=selected_session.lang if selected_session is not None else chat_state.DEFAULT_UI_LANG,
+        selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
+        rooms=rooms,
+        sessions=sessions,
+        room_tail=room_tail,
+        send_mode_options={
+            "raw": "As Typed",
+            "direct": "One-shot Direct",
+            "dispatch": "One-shot Dispatch",
+            "room_post": "Room Post",
+            "room_use": "Use Room",
+        },
     )
 
 

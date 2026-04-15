@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,6 +26,7 @@ import aoe_tg_orch_task_handlers as orch_task_handlers  # noqa: E402
 from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
+import control_dashboard_action_exec_chat as chat_exec  # noqa: E402
 import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
 import control_dashboard_action_exec_runtime as runtime_exec  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
@@ -596,6 +598,124 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert health_headers["Content-Type"].startswith("application/json")
     assert health["ok"] is True
     assert health["active_runtime_count"] == 1
+
+
+def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "on",
+            "pending_mode": "direct",
+            "lang": "ko",
+            "report_level": "full",
+            "room": "O2/analysis",
+            "selected_task_refs": {"active": "REQ-1"},
+            "recent_task_refs": {"done": ["REQ-2"]},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (team_dir / "telegram_chat_aliases.json").write_text(
+        json.dumps({"1": "123456"}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    room_dir = team_dir / "logs" / "rooms" / "O2" / "analysis"
+    room_dir.mkdir(parents=True, exist_ok=True)
+    (room_dir / "2026-04-15.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-04-15T11:12:00+09:00",
+                "actor": "operator",
+                "kind": "note",
+                "text": "analysis room tail line",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/chat?chat=123456", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Chat Console" in text
+    assert "123456" in text
+    assert "O2/analysis" in text
+    assert "analysis room tail line" in text
+    assert "/control/actions/chat/send" in text
+    assert "One-shot Direct" in text
+    assert "Send Chat Message" in text
+
+
+def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    (team_dir / "telegram_chat_aliases.json").write_text(
+        json.dumps({"1": "123456"}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_gateway_chat_send(argv: list[str], *, timeout_sec: int = 180) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = list(argv)
+        captured["timeout_sec"] = timeout_sec
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout="direct reply ok\n- next: /task T-001\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(chat_exec, "_run_gateway_chat_send", _fake_run_gateway_chat_send)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/chat/send",
+        body=json.dumps(
+            {
+                "chat_id": "123456",
+                "mode": "direct",
+                "text": "how is the runtime?",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    argv = [str(item) for item in captured.get("argv", [])]
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["ok"] is True
+    assert payload["mode"] == "direct"
+    assert payload["chat_id"] == "123456"
+    assert payload["source_command"] == "/direct how is the runtime?"
+    assert "direct reply ok" in payload["reply_text"]
+    assert "--simulate-chat-id" in argv
+    assert "123456" in argv
+    assert "--chat-aliases-file" in argv
 
 
 def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_path: Path) -> None:
