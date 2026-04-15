@@ -173,6 +173,14 @@ def _execute_chat_session_update_action(
             "room": current_room,
             "lang": current_lang,
             "report_level": current_report_level,
+            "reply_text": (
+                f"session updated\n"
+                f"- default_mode: {current_default_mode}\n"
+                f"- pending_mode: {current_pending_mode}\n"
+                f"- room: {current_room}\n"
+                f"- lang: {current_lang}\n"
+                f"- report: {current_report_level}"
+            ),
             "next_step": f"/control/chat?chat={chat_id}",
             "remediation": "-",
             "outcome": {
@@ -249,6 +257,12 @@ def _execute_chat_session_select_task_action(
             "project_alias": project_alias or project_key,
             "selected_task_ref": selected_task_ref or "-",
             "recent_task_refs": recent_task_refs,
+            "reply_text": (
+                f"selected task updated\n"
+                f"- project: {project_alias or project_key}\n"
+                f"- selected_task: {selected_task_ref or '-'}\n"
+                f"- recent: {', '.join(recent_task_refs) if recent_task_refs else '-'}"
+            ),
             "next_step": f"/control/chat?chat={chat_id}",
             "remediation": "-" if selected_task_ref else "set a task_ref to pin a task for this chat session",
             "outcome": {

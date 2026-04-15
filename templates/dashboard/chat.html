@@ -107,6 +107,21 @@
         </div>
         <button type="submit">Update Session Controls</button>
       </form>
+      {% if chat.selected_chat_id and chat.session_presets %}
+      <div class="chat-hints">
+        {% for preset in chat.session_presets %}
+        <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Apply {{ preset.label }}" data-action-command="chat-session-preset:{{ preset.label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
+          <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
+          <input type="hidden" name="room" value="{{ preset.room }}">
+          <input type="hidden" name="default_mode" value="{{ preset.default_mode }}">
+          <input type="hidden" name="pending_mode" value="{{ preset.pending_mode }}">
+          <input type="hidden" name="lang" value="{{ preset.lang }}">
+          <input type="hidden" name="report_level" value="{{ preset.report_level }}">
+          <button type="submit" class="{% if preset.room == chat.selected_room %}active-chip{% endif %}">{{ preset.label }}</button>
+        </form>
+        {% endfor %}
+      </div>
+      {% endif %}
       <form class="action-form chat-compose" data-dashboard-action data-action-label="Select Chat Task" data-action-command="chat-session-select-task" data-action-mode="safe" method="post" action="{{ chat.select_task_action_path }}">
         <div class="chat-compose-grid">
           <label>
@@ -189,6 +204,9 @@
           <p>{{ row.body }}</p>
           {% if row.next_step and row.next_step != '-' %}
           <p><strong>next</strong> {{ row.next_step }}</p>
+          {% endif %}
+          {% if row.room %}
+          <p class="muted"><strong>room</strong> {{ row.room }}</p>
           {% endif %}
         </article>
         {% endfor %}

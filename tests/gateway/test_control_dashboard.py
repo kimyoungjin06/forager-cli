@@ -637,24 +637,66 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
         encoding="utf-8",
     )
     (team_dir / "dashboard" / "action-history.jsonl").write_text(
-        json.dumps(
-            {
-                "at": "2026-04-15T11:15:00+09:00",
-                "headline": "Chat Send | completed",
-                "status": "completed",
-                "outcome_kind": "chat_send",
-                "outcome_status": "completed",
-                "outcome_reason_code": "-",
-                "outcome_detail": "direct reply ok",
-                "next_step": "/task T-001",
-                "remediation": "-",
-                "link_label": "Chat Console",
-                "link_href": "/control/chat?chat=123456",
-                "source_command": "/direct how is the runtime?",
-                "chat_id": "123456",
-                "transcript_preview": "direct reply ok\n- next: /task T-001",
-            },
-            ensure_ascii=False,
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "at": "2026-04-15T11:15:00+09:00",
+                        "headline": "Chat Send | completed",
+                        "status": "completed",
+                        "outcome_kind": "chat_send",
+                        "outcome_status": "completed",
+                        "outcome_reason_code": "-",
+                        "outcome_detail": "direct reply ok",
+                        "next_step": "/task T-001",
+                        "remediation": "-",
+                        "link_label": "Chat Console",
+                        "link_href": "/control/chat?chat=123456",
+                        "source_command": "/direct how is the runtime?",
+                        "chat_id": "123456",
+                        "transcript_preview": "direct reply ok\n- next: /task T-001",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "at": "2026-04-15T11:14:00+09:00",
+                        "headline": "Chat Session Update | completed",
+                        "status": "completed",
+                        "outcome_kind": "chat_session_update",
+                        "outcome_status": "completed",
+                        "outcome_reason_code": "-",
+                        "outcome_detail": "default=dispatch pending=none room=O2/analysis",
+                        "next_step": "/control/chat?chat=123456",
+                        "remediation": "-",
+                        "link_label": "Chat Console",
+                        "link_href": "/control/chat?chat=123456",
+                        "source_command": "chat-session 123456 default=dispatch pending=none room=O2/analysis",
+                        "chat_id": "123456",
+                        "transcript_preview": "session updated\n- room: O2/analysis",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "at": "2026-04-15T11:13:00+09:00",
+                        "headline": "Chat Session Task | completed",
+                        "status": "completed",
+                        "outcome_kind": "chat_session_select_task",
+                        "outcome_status": "completed",
+                        "outcome_reason_code": "-",
+                        "outcome_detail": "O2:REQ-1",
+                        "next_step": "/control/chat?chat=123456",
+                        "remediation": "-",
+                        "link_label": "Chat Console",
+                        "link_href": "/control/chat?chat=123456",
+                        "source_command": "chat-session-select-task:123456:O2:REQ-1",
+                        "chat_id": "123456",
+                        "transcript_preview": "selected task updated\n- selected_task: REQ-1",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
         )
         + "\n",
         encoding="utf-8",
@@ -686,6 +728,12 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "/control/actions/chat/session-select-task" in text
     assert "Chat Timeline" in text
     assert "direct reply ok" in text
+    assert "session updated" in text
+    assert "selected task updated" in text
+    assert "Analysis Rail" in text
+    assert "Writing Rail" in text
+    assert "Package Rail" in text
+    assert "Review Rail" in text
     assert "O2/writing" in text
     assert "O2/package" in text
 

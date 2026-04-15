@@ -669,6 +669,17 @@ class ChatTimelineEntryDTO:
 
 
 @dataclass(frozen=True)
+class ChatSessionPresetDTO:
+    label: str
+    room: str
+    default_mode: str
+    pending_mode: str
+    lang: str
+    report_level: str
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class ChatConsolePageDTO:
     selected_chat_id: str
     selected_chat_alias: str
@@ -682,6 +693,7 @@ class ChatConsolePageDTO:
     selected_report_level: str
     rooms: List[str] = field(default_factory=list)
     room_presets: List[str] = field(default_factory=list)
+    session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
     selected_recent_task_refs: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)

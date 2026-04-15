@@ -52,6 +52,7 @@ from control_dashboard_state_models import (
     ChatConsolePageDTO,
     ChatRoomLineDTO,
     ChatSessionDTO,
+    ChatSessionPresetDTO,
     ChatTimelineEntryDTO,
     ControlSummaryDTO,
     DashboardSnapshotDTO,
@@ -351,9 +352,9 @@ def _build_chat_timeline_entries(
         rows.append(
             ChatTimelineEntryDTO(
                 at=str(action.at or "-").strip() or "-",
-                source="reply",
+                source="reply" if str(action.outcome_kind or "").strip() == "chat_send" else "session",
                 headline=str(action.headline or "-").strip() or "-",
-                badge=str(action.status or "-").strip() or "-",
+                badge=str(action.outcome_kind or action.status or "-").strip() or "-",
                 body=str(action.transcript_preview or action.outcome_detail or "-").strip() or "-",
                 command=str(action.source_command or "").strip(),
                 next_step=str(action.next_step or "").strip(),
@@ -397,6 +398,76 @@ def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[st
     return tokens[:10]
 
 
+def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[ChatSessionPresetDTO]:
+    alias = str(project_alias or "").strip()
+    presets: list[ChatSessionPresetDTO] = [
+        ChatSessionPresetDTO(
+            label="Global Direct",
+            room=room_handlers.DEFAULT_ROOM_NAME,
+            default_mode="direct",
+            pending_mode="",
+            lang="ko",
+            report_level="short",
+            note="short direct replies on the global rail",
+        )
+    ]
+    if alias:
+        presets.extend(
+            [
+                ChatSessionPresetDTO(
+                    label="Analysis Rail",
+                    room=f"{alias}/analysis",
+                    default_mode="dispatch",
+                    pending_mode="",
+                    lang="ko",
+                    report_level="long",
+                    note="analysis findings, evidence, caveats",
+                ),
+                ChatSessionPresetDTO(
+                    label="Writing Rail",
+                    room=f"{alias}/writing",
+                    default_mode="dispatch",
+                    pending_mode="",
+                    lang="ko",
+                    report_level="normal",
+                    note="drafts, handoff, quality gate",
+                ),
+                ChatSessionPresetDTO(
+                    label="Package Rail",
+                    room=f"{alias}/package",
+                    default_mode="dispatch",
+                    pending_mode="",
+                    lang="ko",
+                    report_level="normal",
+                    note="artifact verification, apply, syncback",
+                ),
+                ChatSessionPresetDTO(
+                    label="Review Rail",
+                    room=f"{alias}/review",
+                    default_mode="direct",
+                    pending_mode="",
+                    lang="ko",
+                    report_level="normal",
+                    note="operator review and escalation",
+                ),
+            ]
+        )
+    current = str(selected_room or "").strip()
+    if current and current not in {preset.room for preset in presets}:
+        presets.append(
+            ChatSessionPresetDTO(
+                label="Current Room",
+                room=current,
+                default_mode="dispatch",
+                pending_mode="",
+                lang="ko",
+                report_level="normal",
+                note="keep the current room selection",
+            )
+        )
+    return presets[:6]
+
+
 def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: int = 8) -> list[ActionAuditRowDTO]:
     rows: list[ActionAuditRowDTO] = []
     raw_rows: list[dict[str, Any]] = []
@@ -418,7 +489,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
     for raw in reversed(raw_rows):
         if not isinstance(raw, dict):
             continue
-        if str(raw.get("outcome_kind", "")).strip() != "chat_send":
+        if str(raw.get("outcome_kind", "")).strip() not in {"chat_send", "chat_session_update", "chat_session_select_task"}:
             continue
         row = ActionAuditRowDTO(
             at=str(raw.get("at", "")).strip() or "-",
@@ -566,6 +637,7 @@ def load_dashboard_chat_page(
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
         rooms=rooms,
         room_presets=_chat_room_presets(project_alias=selected_project_alias, selected_room=selected_room, rooms=rooms),
+        session_presets=_chat_session_presets(project_alias=selected_project_alias, selected_room=selected_room),
         selected_recent_task_refs=selected_recent_task_refs,
         sessions=sessions,
         room_tail=room_tail,
