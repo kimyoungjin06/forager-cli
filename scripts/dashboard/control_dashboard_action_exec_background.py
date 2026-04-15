@@ -28,6 +28,32 @@ def _server_guard_pressure_preview_payload(
     outcome_kind: str,
 ) -> Dict[str, object]:
     guard = snapshot.control_summary.server_guard
+    links = {
+        "codex": [
+            {"label": "Open Chat Console", "href": "/control/chat"},
+            {"label": "Open Codex History", "href": "/control/history?q=codex&scope=control"},
+            {"label": "Open Server Guard Audit", "href": "/control/audit?focus=server-guard"},
+            {"label": "Open Health JSON", "href": "/control/health"},
+        ],
+        "python": [
+            {"label": "Open Recovery", "href": "/control/recovery"},
+            {"label": "Open Python History", "href": "/control/history?q=python&scope=control"},
+            {"label": "Open Offdesk", "href": "/control/offdesk"},
+            {"label": "Open Health JSON", "href": "/control/health"},
+        ],
+        "tmux": [
+            {"label": "Open Tmux History", "href": "/control/history?q=tmux&scope=control"},
+            {"label": "Open Recovery", "href": "/control/recovery"},
+            {"label": "Open Server Guard Audit", "href": "/control/audit?focus=server-guard"},
+            {"label": "Open Health JSON", "href": "/control/health"},
+        ],
+        "process": [
+            {"label": "Open Process History", "href": "/control/history?q=process&scope=control"},
+            {"label": "Open Recovery", "href": "/control/recovery"},
+            {"label": "Open Server Guard Audit", "href": "/control/audit?focus=server-guard"},
+            {"label": "Open Health JSON", "href": "/control/health"},
+        ],
+    }[pressure_kind]
     return {
         "ok": True,
         "implemented": True,
@@ -40,6 +66,7 @@ def _server_guard_pressure_preview_payload(
         "payload": payload,
         "next_step": next_step,
         "remediation": remediation,
+        "links": links,
         "preview": {
             "kind": outcome_kind,
             "pressure_kind": pressure_kind,

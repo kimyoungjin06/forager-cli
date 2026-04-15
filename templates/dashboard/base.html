@@ -183,6 +183,17 @@
           item.appendChild(anchor);
           links.appendChild(item);
         };
+        const appendPayloadLinks = (rawLinks) => {
+          if (!Array.isArray(rawLinks)) {
+            return;
+          }
+          rawLinks.forEach((row) => {
+            if (!row || typeof row !== "object") {
+              return;
+            }
+            appendLink(asText(row.label), asText(row.href));
+          });
+        };
         const renderHistory = () => {
           historyList.innerHTML = "";
           if (!history.length) {
@@ -316,6 +327,8 @@
             rows.classList.remove("hidden");
           }
           linkRows.forEach(([key, value]) => appendLink(key, value));
+          appendPayloadLinks(payload?.links);
+          appendPayloadLinks(payload?.preview?.links);
           if (links.children.length) {
             links.classList.remove("hidden");
           }

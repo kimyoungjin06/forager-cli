@@ -30,6 +30,8 @@
     <li><span>server_guard_note</span><strong>{{ recovery.server_guard.note }}</strong></li>
     <li><span>server_guard_next</span><strong>{{ recovery.server_guard.next_step }}</strong></li>
     <li><span>server_guard_snapshot</span><strong>{{ recovery.server_guard.snapshot_path }}</strong></li>
+    <li><span>server_guard_latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
+    <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>

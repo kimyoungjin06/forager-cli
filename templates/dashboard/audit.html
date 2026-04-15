@@ -25,6 +25,8 @@
     <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
     <li><span>focus_summary</span><strong>{{ audit.focus_summary }}</strong></li>
     <li><span>focus_filter</span><strong>{{ audit.focus_filter }}</strong></li>
+    <li><span>server_guard_latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
+    <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
     {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if audit.error %}<li><span>audit_error</span><strong>{{ audit.error }}</strong></li>{% endif %}
   </ul>

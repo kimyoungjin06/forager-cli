@@ -2025,6 +2025,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "server_guard_note" in text
     assert "server_guard_next" in text
     assert "server_guard_snapshot" in text
+    assert "server_guard_latest_action" in text
+    assert "server_guard_latest_result" in text
     assert "Open Health JSON" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
@@ -6108,6 +6110,8 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert payload["next_step"] == "/control/chat"
     assert "codex_process_high" in " | ".join(payload["preview"]["matching_reasons"])
     assert payload["preview"]["process_summary"].startswith("total=")
+    assert any(row.get("href") == "/control/chat" for row in (payload.get("links") or []))
+    assert any(row.get("href") == "/control/history?q=codex&scope=control" for row in (payload.get("links") or []))
 
     assert overview_status == 200
     assert "Preview Codex Pressure" in overview_text
@@ -6120,6 +6124,51 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
         and "\"pressure_kind\":\"codex\"" in str(row.get("payload_json", ""))
         for row in (health.get("server_guard", {}).get("recommended_actions") or [])
     )
+
+
+def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
+    status, _headers, _body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/server-guard-pressure-preview",
+        body=b'{"pressure_kind":"codex"}',
+        content_type="application/json",
+        config=config,
+    )
+    assert status == 200
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
+
+    audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard", config)
+    recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    audit_text = audit_body.decode("utf-8")
+    recovery_text = recovery_body.decode("utf-8")
+
+    assert audit_status == 200
+    assert "server_guard_latest_action" in audit_text
+    assert "server_guard_latest_result" in audit_text
+    assert "Codex Pressure Preview | preview" in audit_text
+    assert recovery_status == 200
+    assert "server_guard_latest_action" in recovery_text
+    assert "server_guard_latest_result" in recovery_text
+    assert "Codex Pressure Preview | preview" in recovery_text
 
 
 def test_control_dashboard_overview_surfaces_server_guard_cleanup_preview_action(tmp_path: Path) -> None:
