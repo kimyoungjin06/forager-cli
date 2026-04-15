@@ -42,6 +42,7 @@
         <div class="action-result-header">
           <h2>Action Result</h2>
           <div class="action-result-controls">
+            <button type="button" id="action-result-toggle" class="action-result-clear">Expand</button>
             <button type="button" id="action-result-clear-history" class="action-result-clear">Clear Local History</button>
             <button type="button" id="action-result-clear" class="action-result-clear">Clear</button>
           </div>
@@ -109,6 +110,7 @@
         const details = document.getElementById("action-result-details");
         const body = document.getElementById("action-result-body");
         const clear = document.getElementById("action-result-clear");
+        const toggle = document.getElementById("action-result-toggle");
         const clearHistory = document.getElementById("action-result-clear-history");
         const historyStorageKey = "control-dashboard-action-history";
         if (!panel || !summary || !rows || !links || !historyPanel || !historyList || !details || !body) {
@@ -140,6 +142,12 @@
         } catch (_error) {
           history = seedHistory();
         }
+        const syncCompactToggle = () => {
+          if (!(toggle instanceof HTMLButtonElement)) {
+            return;
+          }
+          toggle.textContent = panel.classList.contains("compact-view") ? "Expand" : "Compact";
+        };
         const clearRows = () => {
           rows.innerHTML = "";
           rows.classList.add("hidden");
@@ -295,6 +303,7 @@
         const setResult = (label, status, payload, error = false, recordHistory = true) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
+          panel.classList.toggle("compact-view", !error);
           const { headline, rowsData, linkRows } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
@@ -310,6 +319,7 @@
           body.textContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
           details.classList.remove("hidden");
           details.open = Boolean(error);
+          syncCompactToggle();
           if (recordHistory) {
             const primaryTaskLink = payload?.task?.detail_path || payload?.preview?.detail_path || "-";
             const primaryRuntimeLink = payload?.preview?.runtime_path || "-";
@@ -322,18 +332,26 @@
         clear?.addEventListener("click", () => {
           panel.classList.add("hidden");
           panel.classList.remove("error");
+          panel.classList.add("compact-view");
           summary.textContent = "No action has been run yet.";
           clearRows();
           clearLinks();
           body.textContent = "-";
           details.classList.add("hidden");
           details.open = false;
+          syncCompactToggle();
+        });
+        toggle?.addEventListener("click", () => {
+          panel.classList.toggle("compact-view");
+          syncCompactToggle();
         });
         clearHistory?.addEventListener("click", () => {
           history = [];
           persistHistory();
           renderHistory();
         });
+        panel.classList.add("compact-view");
+        syncCompactToggle();
         renderHistory();
         document.addEventListener("submit", async (event) => {
           const form = event.target;

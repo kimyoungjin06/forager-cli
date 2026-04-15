@@ -440,6 +440,10 @@ strong {
   padding: 1.15rem;
 }
 
+.action-result.compact-view {
+  padding-bottom: 0.95rem;
+}
+
 .action-result-header {
   display: flex;
   justify-content: space-between;
@@ -506,6 +510,19 @@ strong {
 
 .action-result .command-list {
   margin-top: 0.8rem;
+}
+
+.action-result.compact-view .action-result-rows li:nth-child(n + 5) {
+  display: none;
+}
+
+.action-result.compact-view .action-result-history,
+.action-result.compact-view .action-result-details {
+  display: none;
+}
+
+.action-result.compact-view .action-result-links {
+  margin-top: 0.55rem;
 }
 
 .action-result-history {
@@ -655,6 +672,54 @@ strong {
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.93rem;
+}
+
+.progress-mobile-cards {
+  display: none;
+}
+
+.progress-mobile-card {
+  padding: 0.9rem;
+  border: 1px solid rgba(215, 202, 177, 0.84);
+  border-radius: 14px;
+  background: rgba(255, 250, 241, 0.92);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.progress-mobile-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.progress-mobile-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.progress-mobile-head p {
+  margin: 0.18rem 0 0;
+}
+
+.progress-mobile-card > p {
+  margin: 0;
+  padding: 0.55rem 0.62rem;
+  border: 1px solid rgba(215, 202, 177, 0.72);
+  border-radius: 12px;
+  background: rgba(247, 240, 224, 0.74);
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.progress-mobile-card > p strong {
+  flex: 0 0 120px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .task-table th,
@@ -822,6 +887,24 @@ strong {
   .action-result-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .task-table.progress-board {
+    display: none;
+  }
+
+  .progress-mobile-cards {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .progress-mobile-card > p {
+    flex-direction: column;
+    gap: 0.24rem;
+  }
+
+  .progress-mobile-card > p strong {
+    flex-basis: auto;
   }
 
   .info-fold summary {

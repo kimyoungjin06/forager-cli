@@ -94,7 +94,7 @@
 <section class="panel">
   <h2>Project Progress Board</h2>
   <p class="muted">offdesk parity board for current task pressure and next operator move</p>
-  <table class="task-table">
+  <table class="task-table progress-board">
     <thead>
       <tr>
         <th>Runtime</th>
@@ -124,5 +124,27 @@
       {% endfor %}
     </tbody>
   </table>
+  <div class="progress-mobile-cards">
+    {% for card in snapshot.runtime_cards %}
+    {% if card.active_task_label %}
+    <article class="progress-mobile-card">
+      <div class="progress-mobile-head">
+        <div>
+          <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }}</a></h3>
+          <p class="muted">{{ card.project_label }}</p>
+        </div>
+        <span class="status-pill {{ card.status }}">{{ card.status }}</span>
+      </div>
+      <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
+      <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }} | {{ card.active_task_execution_brief_summary }}</p>
+      <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</p>
+      <p><strong>background_queue</strong> {{ card.background_queue_summary }} | {{ card.background_scheduler_summary }}</p>
+      <p><strong>decision</strong> {{ card.active_task_execution_brief_operator_decision }}</p>
+      <p><strong>blocked</strong> {{ card.active_task_execution_brief_blocked_slice }}</p>
+      <p><strong>do</strong> {{ card.active_task_execution_brief_executable_slice }}</p>
+    </article>
+    {% endif %}
+    {% endfor %}
+  </div>
 </section>
 {% endblock %}
