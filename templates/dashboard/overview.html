@@ -28,11 +28,9 @@
       <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
       <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
     </ul>
-    {% if snapshot.control_summary.server_guard.recommended_actions %}
-    {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
-      {% include 'dashboard/_server_guard_actions.html' %}
+    {% with title='Server Guard Health Card', include_actions=true %}
+      {% include 'dashboard/_server_guard_health_card.html' %}
     {% endwith %}
-    {% endif %}
   </article>
   <article class="panel">
     <h2>Attention Runtimes</h2>

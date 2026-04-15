@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -27,6 +28,7 @@ def _server_guard_pressure_preview_payload(
     note: str,
     outcome_kind: str,
     chat_console_href: str,
+    preset_action: Dict[str, object] | None,
 ) -> Dict[str, object]:
     guard = snapshot.control_summary.server_guard
     links = {
@@ -74,6 +76,7 @@ def _server_guard_pressure_preview_payload(
         "payload": payload,
         "next_step": next_step,
         "remediation": remediation,
+        "actions": [preset_action] if isinstance(preset_action, dict) else [],
         "links": links,
         "preview": {
             "kind": outcome_kind,
@@ -136,12 +139,74 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
     raw_sessions = manager_state.get("chat_sessions") if isinstance(manager_state.get("chat_sessions"), dict) else {}
     chat_ids = sorted(str(key).strip() for key in raw_sessions.keys() if str(key).strip())
     preferred_chat_id = chat_ids[0] if chat_ids else ""
+    default_project_alias = ""
+    runtime_cards = list(getattr(snapshot, "runtime_cards", []) or [])
+    if runtime_cards:
+        default_project_alias = str(getattr(runtime_cards[0], "project_alias", "")).strip()
+    preset_specs = {
+        "codex": {
+            "label": "Apply Global Direct",
+            "room": "global",
+            "default_mode": "direct",
+            "pending_mode": "",
+            "lang": "ko",
+            "report_level": "short",
+            "note": "switch the selected chat to the compact direct rail while codex pressure is high",
+        },
+        "python": {
+            "label": "Apply Package Rail",
+            "room": f"{default_project_alias}/package" if default_project_alias else "global",
+            "default_mode": "dispatch",
+            "pending_mode": "",
+            "lang": "ko",
+            "report_level": "normal",
+            "note": "switch the selected chat to the package rail before revisiting python-backed worker activity",
+        },
+        "tmux": {
+            "label": "Apply Review Rail",
+            "room": f"{default_project_alias}/review" if default_project_alias else "global",
+            "default_mode": "direct",
+            "pending_mode": "",
+            "lang": "ko",
+            "report_level": "normal",
+            "note": "switch the selected chat to the review rail before restarting detached tmux workers",
+        },
+        "process": {
+            "label": "Apply Analysis Rail",
+            "room": f"{default_project_alias}/analysis" if default_project_alias else "global",
+            "default_mode": "dispatch",
+            "pending_mode": "",
+            "lang": "ko",
+            "report_level": "long",
+            "note": "switch the selected chat to the lower-fanout analysis rail while total process pressure is high",
+        },
+    }
     chat_preset_href = {
         "codex": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=global-direct",
         "python": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=package-rail",
         "tmux": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=review-rail",
         "process": f"/control/chat{'?chat=' + preferred_chat_id + '&' if preferred_chat_id else '?'}preset=analysis-rail",
     }[pressure_kind]
+    preset_spec = preset_specs[pressure_kind]
+    preset_action = None
+    if preferred_chat_id:
+        preset_payload = {
+            "chat_id": preferred_chat_id,
+            "room": preset_spec["room"],
+            "default_mode": preset_spec["default_mode"],
+            "pending_mode": preset_spec["pending_mode"],
+            "lang": preset_spec["lang"],
+            "report_level": preset_spec["report_level"],
+        }
+        preset_action = {
+            "label": preset_spec["label"],
+            "note": preset_spec["note"],
+            "method": "POST",
+            "path": "/control/actions/chat/session-update",
+            "mode": "safe",
+            "payload_json": json.dumps(preset_payload, ensure_ascii=False, separators=(",", ":")),
+            "command": f"chat-session-preset:{preset_spec['label']}",
+        }
     guard = snapshot.control_summary.server_guard
     reasons = [token.strip() for token in str(guard.reason_summary or "").split("|") if token.strip()]
     prefixes = {
@@ -187,6 +252,7 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             note=note,
             outcome_kind=outcome_kind,
             chat_console_href=chat_preset_href,
+            preset_action=preset_action,
         ),
         status=200,
     )

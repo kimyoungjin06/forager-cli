@@ -550,6 +550,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "server_guard_snapshot" in overview_text
     assert "server_guard_latest_action" in overview_text
     assert "server_guard_latest_result" in overview_text
+    assert "Server Guard Health Card" in overview_text
     assert "Server Guard Audit" in overview_text
     assert "Open Health JSON" in overview_text
     assert "server-guard" in overview_text
@@ -6127,6 +6128,9 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert payload["next_step"] == "/control/chat"
     assert "codex_process_high" in " | ".join(payload["preview"]["matching_reasons"])
     assert payload["preview"]["process_summary"].startswith("total=")
+    assert any(row.get("path") == "/control/actions/chat/session-update" for row in (payload.get("actions") or []))
+    assert any("\"chat_id\":\"123456\"" in str(row.get("payload_json", "")) for row in (payload.get("actions") or []))
+    assert any("\"default_mode\":\"direct\"" in str(row.get("payload_json", "")) for row in (payload.get("actions") or []))
     assert any(row.get("href") == "/control/chat?chat=123456&preset=global-direct" for row in (payload.get("links") or []))
     assert any(row.get("href") == "/control/history?q=codex&scope=control" for row in (payload.get("links") or []))
     assert any(row.get("href") == "/control/health/view" for row in (payload.get("links") or []))
@@ -6215,6 +6219,7 @@ def test_control_dashboard_health_view_renders_operator_health_card(tmp_path: Pa
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Host Health View" in text
+    assert "Server Guard Health Card" in text
     assert "Health Summary" in text
     assert "Recommended Actions" in text
     assert "latest_action" in text
@@ -6272,10 +6277,13 @@ def test_control_dashboard_server_guard_pressure_links_are_preset_specific(tmp_p
 
     assert py_status == 200
     assert any(row.get("href") == "/control/chat?chat=123456&preset=package-rail" for row in (py_payload.get("links") or []))
+    assert any("\"room\":\"O2/package\"" in str(row.get("payload_json", "")) for row in (py_payload.get("actions") or []))
     assert tmux_status == 200
     assert any(row.get("href") == "/control/chat?chat=123456&preset=review-rail" for row in (tmux_payload.get("links") or []))
+    assert any("\"room\":\"O2/review\"" in str(row.get("payload_json", "")) for row in (tmux_payload.get("actions") or []))
     assert proc_status == 200
     assert any(row.get("href") == "/control/chat?chat=123456&preset=analysis-rail" for row in (proc_payload.get("links") or []))
+    assert any("\"room\":\"O2/analysis\"" in str(row.get("payload_json", "")) for row in (proc_payload.get("actions") or []))
 
 
 def test_control_dashboard_overview_surfaces_server_guard_cleanup_preview_action(tmp_path: Path) -> None:

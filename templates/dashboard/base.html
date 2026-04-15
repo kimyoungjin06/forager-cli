@@ -51,6 +51,7 @@
         </div>
         <p id="action-result-summary" class="muted">No action has been run yet.</p>
         <ul id="action-result-rows" class="kv-list action-result-rows hidden"></ul>
+        <div id="action-result-actions" class="hidden"></div>
         <ul id="action-result-links" class="command-list compact hidden"></ul>
         {% set audit_limit = audit.limit if audit is defined else 20 %}
         <section id="action-result-history-panel" class="action-result-history hidden" data-audit-limit="{{ audit_limit }}">
@@ -107,6 +108,7 @@
         const panel = document.getElementById("action-result");
         const summary = document.getElementById("action-result-summary");
         const rows = document.getElementById("action-result-rows");
+        const actions = document.getElementById("action-result-actions");
         const links = document.getElementById("action-result-links");
         const historyPanel = document.getElementById("action-result-history-panel");
         const historyList = document.getElementById("action-result-history");
@@ -116,7 +118,7 @@
         const toggle = document.getElementById("action-result-toggle");
         const clearHistory = document.getElementById("action-result-clear-history");
         const historyStorageKey = "control-dashboard-action-history";
-        if (!panel || !summary || !rows || !links || !historyPanel || !historyList || !details || !body) {
+        if (!panel || !summary || !rows || !actions || !links || !historyPanel || !historyList || !details || !body) {
           return;
         }
         let history = [];
@@ -159,6 +161,10 @@
           links.innerHTML = "";
           links.classList.add("hidden");
         };
+        const clearActions = () => {
+          actions.innerHTML = "";
+          actions.classList.add("hidden");
+        };
         const appendRow = (label, value) => {
           if (!value || value === "-") {
             return;
@@ -193,6 +199,98 @@
             }
             appendLink(asText(row.label), asText(row.href));
           });
+        };
+        const appendPayloadActions = (rawActions) => {
+          if (!Array.isArray(rawActions)) {
+            return;
+          }
+          let block = actions.querySelector(".action-block");
+          if (!(block instanceof HTMLElement)) {
+            block = document.createElement("div");
+            block.className = "action-block";
+            const title = document.createElement("p");
+            const strong = document.createElement("strong");
+            strong.textContent = "result_actions";
+            title.appendChild(strong);
+            block.appendChild(title);
+            const toolbar = document.createElement("div");
+            toolbar.className = "action-toolbar";
+            block.appendChild(toolbar);
+            actions.appendChild(block);
+          }
+          const toolbar = block.querySelector(".action-toolbar");
+          if (!(toolbar instanceof HTMLElement)) {
+            return;
+          }
+          rawActions.forEach((row) => {
+            if (!row || typeof row !== "object") {
+              return;
+            }
+            const path = asText(row.path);
+            const href = asText(row.href);
+            const label = asText(row.label);
+            const note = asText(row.note);
+            const command = asText(row.command || row.path || row.href);
+            if (path !== "-") {
+              const form = document.createElement("form");
+              form.className = "action-form";
+              form.setAttribute("data-dashboard-action", "");
+              form.dataset.actionLabel = label;
+              form.dataset.actionCommand = command;
+              form.dataset.actionMode = asText(row.mode || "safe");
+              form.method = "post";
+              form.action = path;
+              const input = document.createElement("input");
+              input.type = "hidden";
+              input.name = "payload_json";
+              input.value = asText(row.payload_json || "{}");
+              const button = document.createElement("button");
+              button.type = "submit";
+              button.className = `action-button ${asText(row.mode || "safe")}`;
+              button.textContent = label;
+              const meta = document.createElement("div");
+              meta.className = "action-meta";
+              const code = document.createElement("code");
+              code.textContent = command;
+              meta.appendChild(code);
+              if (note !== "-") {
+                const span = document.createElement("span");
+                span.className = "muted";
+                span.textContent = note;
+                meta.appendChild(span);
+              }
+              form.appendChild(input);
+              form.appendChild(button);
+              form.appendChild(meta);
+              toolbar.appendChild(form);
+              return;
+            }
+            if (href !== "-") {
+              const wrapper = document.createElement("div");
+              wrapper.className = "action-form";
+              const anchor = document.createElement("a");
+              anchor.className = "action-button safe";
+              anchor.href = href;
+              anchor.textContent = label;
+              const meta = document.createElement("div");
+              meta.className = "action-meta";
+              const code = document.createElement("code");
+              code.textContent = href;
+              meta.appendChild(code);
+              if (note !== "-") {
+                const span = document.createElement("span");
+                span.className = "muted";
+                span.textContent = note;
+                meta.appendChild(span);
+              }
+              wrapper.appendChild(anchor);
+              wrapper.appendChild(meta);
+              toolbar.appendChild(wrapper);
+            }
+          });
+          if (toolbar.children.length) {
+            actions.classList.remove("hidden");
+          }
         };
         const renderHistory = () => {
           historyList.innerHTML = "";
@@ -321,11 +419,13 @@
           const { headline, rowsData, linkRows } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
+          clearActions();
           clearLinks();
           rowsData.forEach(([key, value]) => appendRow(key, asText(value)));
           if (rows.children.length) {
             rows.classList.remove("hidden");
           }
+          appendPayloadActions(payload?.actions);
           linkRows.forEach(([key, value]) => appendLink(key, value));
           appendPayloadLinks(payload?.links);
           appendPayloadLinks(payload?.preview?.links);
@@ -351,6 +451,7 @@
           panel.classList.add("compact-view");
           summary.textContent = "No action has been run yet.";
           clearRows();
+          clearActions();
           clearLinks();
           body.textContent = "-";
           details.classList.add("hidden");
