@@ -67,7 +67,7 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, object])
 
 
 def _is_known_dashboard_get_route(path: str) -> bool:
-    if path in {"", "/", "/control", "/control/chat", "/control/offdesk", "/control/recovery", "/control/audit", "/control/history", "/control/tasks", "/control/health"}:
+    if path in {"", "/", "/control", "/control/chat", "/control/offdesk", "/control/recovery", "/control/audit", "/control/history", "/control/tasks", "/control/health", "/control/health/view"}:
         return True
     if path.startswith("/static/"):
         return True
@@ -135,6 +135,21 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                 "server_guard_latest_result_summary": snapshot.control_summary.server_guard_latest_result_summary,
                 "server_guard_latest_result_path": snapshot.control_summary.server_guard_latest_result_path,
             }
+        )
+
+    if path == "/control/health/view":
+        snapshot = load_dashboard_snapshot(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+        )
+        return _html(
+            render_template(
+                "dashboard/health.html",
+                page_title="Host Health",
+                snapshot=snapshot,
+                current_path=path,
+            )
         )
 
     if path in {"", "/"}:

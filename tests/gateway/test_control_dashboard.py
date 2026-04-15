@@ -6129,6 +6129,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert payload["preview"]["process_summary"].startswith("total=")
     assert any(row.get("href") == "/control/chat?chat=123456&preset=global-direct" for row in (payload.get("links") or []))
     assert any(row.get("href") == "/control/history?q=codex&scope=control" for row in (payload.get("links") or []))
+    assert any(row.get("href") == "/control/health/view" for row in (payload.get("links") or []))
 
     assert overview_status == 200
     assert "Preview Codex Pressure" in overview_text
@@ -6143,6 +6144,10 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     )
     assert any(
         row.get("href") == "/control/chat?preset=global-direct"
+        for row in (health.get("server_guard", {}).get("recommended_actions") or [])
+    )
+    assert any(
+        row.get("href") == "/control/health/view"
         for row in (health.get("server_guard", {}).get("recommended_actions") or [])
     )
 
@@ -6190,6 +6195,87 @@ def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result
     assert "server_guard_latest_action" in recovery_text
     assert "server_guard_latest_result" in recovery_text
     assert "Codex Pressure Preview | preview" in recovery_text
+
+
+def test_control_dashboard_health_view_renders_operator_health_card(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/health/view", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Host Health View" in text
+    assert "Health Summary" in text
+    assert "Recommended Actions" in text
+    assert "latest_action" in text
+    assert "latest_result" in text
+    assert "Open Health JSON" in text
+
+
+def test_control_dashboard_server_guard_pressure_links_are_preset_specific(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "on",
+            "pending_mode": "direct",
+            "lang": "ko",
+            "report_level": "full",
+            "room": "O2/analysis",
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 700, "python": 90, "tmux": 25, "codex": 10})
+    py_status, _py_headers, py_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/server-guard-pressure-preview",
+        body=b'{"pressure_kind":"python"}',
+        content_type="application/json",
+        config=config,
+    )
+    py_payload = json.loads(py_body.decode("utf-8"))
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 950, "python": 20, "tmux": 65, "codex": 10})
+    tmux_status, _tmux_headers, tmux_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/server-guard-pressure-preview",
+        body=b'{"pressure_kind":"tmux"}',
+        content_type="application/json",
+        config=config,
+    )
+    tmux_payload = json.loads(tmux_body.decode("utf-8"))
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 980, "python": 20, "tmux": 10, "codex": 10})
+    proc_status, _proc_headers, proc_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/server-guard-pressure-preview",
+        body=b'{"pressure_kind":"process"}',
+        content_type="application/json",
+        config=config,
+    )
+    proc_payload = json.loads(proc_body.decode("utf-8"))
+
+    assert py_status == 200
+    assert any(row.get("href") == "/control/chat?chat=123456&preset=package-rail" for row in (py_payload.get("links") or []))
+    assert tmux_status == 200
+    assert any(row.get("href") == "/control/chat?chat=123456&preset=review-rail" for row in (tmux_payload.get("links") or []))
+    assert proc_status == 200
+    assert any(row.get("href") == "/control/chat?chat=123456&preset=analysis-rail" for row in (proc_payload.get("links") or []))
 
 
 def test_control_dashboard_overview_surfaces_server_guard_cleanup_preview_action(tmp_path: Path) -> None:

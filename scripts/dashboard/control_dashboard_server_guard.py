@@ -137,6 +137,7 @@ def _recommended_actions(
             )
         )
 
+    _add_link("Open Health View", "/control/health/view", "inspect the operator-facing host health card view")
     _add_link("Open Health JSON", "/control/health", "inspect the raw host and queue snapshot")
     if next_step == "/control/recovery":
         _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review stale queue, retries, and blocked runtimes first")
@@ -174,6 +175,7 @@ def _recommended_actions(
             command="/ops pressure python preview",
         )
         _add_link("Review Python Pressure", "/control/history?q=python&scope=control", "inspect python worker churn and repeated local background launches")
+        _add_link("Open Package Rail", "/control/chat?preset=package-rail", "open the package-oriented chat rail before revisiting python-backed worker activity")
         _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review worker and queue rails before starting more python-backed jobs")
     if _has_reason(reasons, "tmux_process"):
         _add_action(
@@ -184,6 +186,7 @@ def _recommended_actions(
             command="/ops pressure tmux preview",
         )
         _add_link("Review Tmux Pressure", "/control/history?q=tmux&scope=control", "inspect detached runtime sessions and stale tmux-backed workers")
+        _add_link("Open Review Rail", "/control/chat?preset=review-rail", "open the review chat rail before restarting detached tmux-backed workers")
     if _has_reason(reasons, "total_process"):
         _add_action(
             "Preview Process Pressure",
@@ -193,6 +196,7 @@ def _recommended_actions(
             command="/ops pressure process preview",
         )
         _add_link("Review Process Pressure", "/control/history?q=process&scope=control", "inspect broad process churn before launching additional work")
+        _add_link("Open Analysis Rail", "/control/chat?preset=analysis-rail", "open the analysis rail for lower-fanout triage while total process pressure is elevated")
     if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
         _add_link("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
     if cleanup_target is not None:
