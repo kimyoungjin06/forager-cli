@@ -5,7 +5,10 @@ from __future__ import annotations
 
 from control_dashboard_action_exec_auto import _execute_auto_recover_action
 from control_dashboard_action_exec_background import _execute_background_queue_clean_action
-from control_dashboard_action_exec_chat import _execute_chat_send_action
+from control_dashboard_action_exec_chat import (
+    _execute_chat_send_action,
+    _execute_chat_session_update_action,
+)
 from control_dashboard_action_exec_runtime import (
     _execute_analysis_review_action,
     _execute_runtime_judge_action,
@@ -30,6 +33,7 @@ __all__ = [
     "_execute_background_queue_clean_action",
     "_execute_auto_recover_action",
     "_execute_chat_send_action",
+    "_execute_chat_session_update_action",
     "_execute_runtime_judge_action",
     "_execute_runtime_syncback_apply_action",
     "_execute_runtime_syncback_preview_action",

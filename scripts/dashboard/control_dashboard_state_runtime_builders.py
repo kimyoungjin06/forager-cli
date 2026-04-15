@@ -16,6 +16,8 @@ import aoe_tg_offdesk_flow as offdesk_flow
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_action_audit as action_audit
 import aoe_tg_background_runs as background_runs
+import aoe_tg_chat_aliases as chat_aliases
+import aoe_tg_chat_state as chat_state
 import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_document_registry as document_registry
@@ -68,6 +70,49 @@ def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
         },
         task.get("background_run_worker_update_proposal_ids"),
     )
+
+
+def _runtime_chat_console_target(
+    manager_state: Dict[str, Any],
+    *,
+    root_team_dir: Path,
+    project_alias: str,
+    active_request_id: str,
+) -> tuple[str, str]:
+    raw_sessions = manager_state.get("chat_sessions") if isinstance(manager_state.get("chat_sessions"), dict) else {}
+    if not raw_sessions:
+        return "", "-"
+    aliases = chat_aliases.load_chat_aliases(chat_aliases.resolve_chat_aliases_file(root_team_dir, None))
+    alias_by_chat_id = {str(chat_id).strip(): str(alias).strip() for alias, chat_id in aliases.items()}
+    target_alias = str(project_alias or "").strip().lower()
+    target_request = str(active_request_id or "").strip()
+    best_score = -1
+    best_chat_id = ""
+    for chat_id, raw in raw_sessions.items():
+        token = str(chat_id or "").strip()
+        if not token:
+            continue
+        row = chat_state.sanitize_chat_session_row(raw if isinstance(raw, dict) else {})
+        score = 0
+        if target_request:
+            selected = row.get("selected_task_refs") if isinstance(row.get("selected_task_refs"), dict) else {}
+            recent = row.get("recent_task_refs") if isinstance(row.get("recent_task_refs"), dict) else {}
+            if any(str(request_id).strip() == target_request for request_id in selected.values()):
+                score = max(score, 3)
+            for refs in recent.values():
+                if isinstance(refs, list) and any(str(request_id).strip() == target_request for request_id in refs):
+                    score = max(score, 2)
+                    break
+        room = str(row.get("room", "")).strip().lower()
+        if target_alias and room and (room == target_alias or room.startswith(target_alias + "/")):
+            score = max(score, 1)
+        if score > best_score:
+            best_score = score
+            best_chat_id = token
+    if best_score < 0 or not best_chat_id:
+        return "/control/chat", "Open Chat Console"
+    chat_label = alias_by_chat_id.get(best_chat_id, best_chat_id)
+    return f"/control/chat?chat={best_chat_id}", f"Open Chat {chat_label}"
 
 
 def _worker_module_summary(task: Dict[str, Any]) -> str:
@@ -991,6 +1036,12 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 runtime_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
             )
+        chat_console_path, chat_console_label = _runtime_chat_console_target(
+            manager_state,
+            root_team_dir=root_team_dir,
+            project_alias=alias,
+            active_request_id=active_request_id,
+        )
         cards.append(
             RuntimeCardDTO(
                 project_key=str(row.get("key", "")).strip() or str(row.get("alias", "")).strip(),
@@ -1008,6 +1059,8 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 provider_repeat_count=int(row.get("capacity_repeat_count", 0) or 0),
                 active_task_request_id=active_request_id,
                 active_task_label=str(row.get("active_task_label", "")).strip(),
+                chat_console_path=chat_console_path,
+                chat_console_label=chat_console_label,
                 active_task_phase=str(row.get("active_task_tf_phase", "")).strip(),
                 active_task_status=str(row.get("active_task_status", "")).strip(),
                 active_task_preset=f"phase1={phase1_preset or '-'} phase2={phase2_preset or phase1_preset or '-'}" if (phase1_preset or phase2_preset) else "-",

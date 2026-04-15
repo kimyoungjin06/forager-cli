@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -287,6 +288,53 @@ def _chat_recent_task_summary(row: Dict[str, Any]) -> str:
     return " | ".join(parts) if parts else "-"
 
 
+def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: int = 8) -> list[ActionAuditRowDTO]:
+    rows: list[ActionAuditRowDTO] = []
+    raw_rows: list[dict[str, Any]] = []
+    if paths.action_audit_file.exists():
+        try:
+            with paths.action_audit_file.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    token = str(line or "").strip()
+                    if not token:
+                        continue
+                    try:
+                        parsed = json.loads(token)
+                    except Exception:
+                        continue
+                    if isinstance(parsed, dict):
+                        raw_rows.append(parsed)
+        except Exception:
+            raw_rows = []
+    for raw in reversed(raw_rows):
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("outcome_kind", "")).strip() != "chat_send":
+            continue
+        row = ActionAuditRowDTO(
+            at=str(raw.get("at", "")).strip() or "-",
+            headline=str(raw.get("headline", "")).strip() or "-",
+            status=str(raw.get("status", "")).strip() or "unknown",
+            outcome_kind=str(raw.get("outcome_kind", "")).strip() or "-",
+            outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",
+            outcome_reason_code=str(raw.get("outcome_reason_code", "")).strip() or "-",
+            outcome_detail=str(raw.get("outcome_detail", "")).strip() or "-",
+            next_step=str(raw.get("next_step", "")).strip() or "-",
+            remediation=str(raw.get("remediation", "")).strip() or "-",
+            link_label=str(raw.get("link_label", "")).strip() or "-",
+            link_href=str(raw.get("link_href", "")).strip() or "-",
+            source_command=str(raw.get("source_command", "")).strip() or "-",
+            focus_badge=str(raw.get("focus_badge", "")).strip(),
+            chat_id=str(raw.get("chat_id", "")).strip(),
+        )
+        if chat_id and row.chat_id and row.chat_id != chat_id:
+            continue
+        rows.append(row)
+        if len(rows) >= max(1, int(limit)):
+            break
+    return rows
+
+
 def load_dashboard_chat_page(
     *,
     control_root: Path | str,
@@ -380,6 +428,7 @@ def load_dashboard_chat_page(
         rooms=rooms,
         sessions=sessions,
         room_tail=room_tail,
+        recent_chat_actions=_load_recent_chat_action_rows(paths, chat_id=selected_token, limit=8),
         send_mode_options={
             "raw": "As Typed",
             "direct": "One-shot Direct",

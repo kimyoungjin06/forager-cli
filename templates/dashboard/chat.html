@@ -57,6 +57,54 @@
         <li><span>lang</span><strong>{{ chat.selected_lang }}</strong></li>
         <li><span>report</span><strong>{{ chat.selected_report_level }}</strong></li>
       </ul>
+      <form class="action-form chat-compose" data-dashboard-action data-action-label="Update Chat Session" data-action-command="chat-session-update" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
+        <div class="chat-compose-grid">
+          <label>
+            <span>chat_id</span>
+            <input type="text" name="chat_id" value="{{ chat.selected_chat_id }}" placeholder="123456789">
+          </label>
+          <label>
+            <span>room</span>
+            <input type="text" name="room" value="{{ chat.selected_room }}" placeholder="O2/analysis">
+          </label>
+        </div>
+        <div class="chat-compose-grid">
+          <label>
+            <span>default_mode</span>
+            <select name="default_mode">
+              <option value="" {% if chat.selected_default_mode == '' or chat.selected_default_mode == 'off' %}selected{% endif %}>Off</option>
+              <option value="direct" {% if chat.selected_default_mode == 'direct' %}selected{% endif %}>Direct</option>
+              <option value="dispatch" {% if chat.selected_default_mode == 'dispatch' %}selected{% endif %}>Dispatch</option>
+            </select>
+          </label>
+          <label>
+            <span>pending_mode</span>
+            <select name="pending_mode">
+              <option value="" {% if chat.selected_pending_mode == '' or chat.selected_pending_mode == 'none' %}selected{% endif %}>None</option>
+              <option value="direct" {% if chat.selected_pending_mode == 'direct' %}selected{% endif %}>Direct</option>
+              <option value="dispatch" {% if chat.selected_pending_mode == 'dispatch' %}selected{% endif %}>Dispatch</option>
+            </select>
+          </label>
+        </div>
+        <div class="chat-compose-grid">
+          <label>
+            <span>lang</span>
+            <select name="lang">
+              <option value="ko" {% if chat.selected_lang == 'ko' %}selected{% endif %}>Korean</option>
+              <option value="en" {% if chat.selected_lang == 'en' %}selected{% endif %}>English</option>
+            </select>
+          </label>
+          <label>
+            <span>report</span>
+            <select name="report_level">
+              <option value="short" {% if chat.selected_report_level == 'short' %}selected{% endif %}>Short</option>
+              <option value="normal" {% if chat.selected_report_level == 'normal' %}selected{% endif %}>Normal</option>
+              <option value="long" {% if chat.selected_report_level == 'long' %}selected{% endif %}>Long</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit">Update Session Controls</button>
+      </form>
       <form class="action-form chat-compose" data-dashboard-action data-action-label="Send Chat Message" data-action-command="chat-send" data-action-mode="safe" method="post" action="{{ chat.send_action_path }}">
         <div class="chat-compose-grid">
           <label>
@@ -85,6 +133,37 @@
         </div>
         <button type="submit">Send</button>
       </form>
+    </section>
+
+    <section class="panel chat-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="section-kicker">Recent Replies</p>
+          <h2>Chat Send History</h2>
+        </div>
+        <span class="badge">{{ chat.recent_chat_actions|length }}</span>
+      </div>
+      {% if chat.recent_chat_actions %}
+      <div class="chat-room-feed">
+        {% for row in chat.recent_chat_actions %}
+        <article class="chat-room-line">
+          <div class="chat-room-line-head">
+            <strong>{{ row.headline }}</strong>
+            <span class="badge">{{ row.status }}</span>
+            {% if row.chat_id %}<span class="muted mono">{{ row.chat_id }}</span>{% endif %}
+            <span class="muted mono">{{ row.at }}</span>
+          </div>
+          <p class="mono">{{ row.source_command }}</p>
+          <p>{{ row.outcome_detail }}</p>
+          {% if row.next_step and row.next_step != '-' %}
+          <p><strong>next</strong> {{ row.next_step }}</p>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">현재 선택된 session의 recent chat action이 없습니다.</p>
+      {% endif %}
     </section>
 
     <section class="panel chat-panel">

@@ -79,6 +79,8 @@ class RuntimeCardDTO:
     provider_repeat_count: int
     active_task_request_id: str
     active_task_label: str
+    chat_console_path: str
+    chat_console_label: str
     active_task_phase: str
     active_task_status: str
     active_task_preset: str
@@ -659,7 +661,9 @@ class ChatConsolePageDTO:
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)
     send_action_path: str = "/control/actions/chat/send"
+    session_action_path: str = "/control/actions/chat/session-update"
     send_mode_options: Dict[str, str] = field(default_factory=dict)
+    recent_chat_actions: List[ActionAuditRowDTO] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

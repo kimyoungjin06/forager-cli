@@ -69,6 +69,8 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Artifact Apply Accept | {status}"
     if path == "/control/actions/chat/send":
         return f"Chat Send | {status}"
+    if path == "/control/actions/chat/session-update":
+        return f"Chat Session Update | {status}"
     if path == "/control/actions/runtime/judge":
         return f"Offdesk Judge | {status}"
     if path == "/control/actions/runtime/todo-accept":
@@ -189,6 +191,7 @@ def _append_action_audit(
         "link_label": link_label,
         "link_href": link_href,
         "source_command": source_command,
+        "chat_id": str(payload.get("chat_id", "")).strip() or "",
     }
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:

@@ -6,8 +6,10 @@ from __future__ import annotations
 import subprocess
 from typing import Dict, Tuple
 
+import aoe_tg_chat_state as chat_state
 import aoe_tg_request_contract as request_contract
 
+from control_dashboard_action_exec_shared import _load_dashboard_manager_state, _load_gateway_main_module
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths, _json
 
 
@@ -84,4 +86,69 @@ def _execute_chat_send_action(
             },
         },
         status=200 if ok else 500,
+    )
+
+
+def _execute_chat_session_update_action(
+    spec: Dict[str, object],
+    *,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    chat_id = str(payload.get("chat_id", "")).strip()
+    default_mode = str(payload.get("default_mode", "")).strip().lower()
+    pending_mode = str(payload.get("pending_mode", "")).strip().lower()
+    room = str(payload.get("room", "")).strip()
+    lang = str(payload.get("lang", "")).strip().lower()
+    report_level = str(payload.get("report_level", "")).strip().lower()
+
+    paths, manager_state = _load_dashboard_manager_state(config)
+    if default_mode in {"dispatch", "direct"}:
+        chat_state.set_default_mode(manager_state, chat_id, default_mode)
+    else:
+        chat_state.clear_default_mode(manager_state, chat_id)
+    if pending_mode in {"dispatch", "direct"}:
+        chat_state.set_pending_mode(manager_state, chat_id, pending_mode)
+    else:
+        chat_state.clear_pending_mode(manager_state, chat_id)
+    chat_state.set_chat_room(manager_state, chat_id, room)
+    if lang in {"ko", "en"}:
+        chat_state.set_chat_lang(manager_state, chat_id, lang)
+    if report_level in {"short", "normal", "long"}:
+        chat_state.set_chat_report_level(manager_state, chat_id, report_level)
+
+    gateway_main = _load_gateway_main_module()
+    gateway_main.save_manager_state(paths.manager_state_file, manager_state)
+
+    current_room = chat_state.get_chat_room(manager_state, chat_id)
+    current_default_mode = chat_state.get_default_mode(manager_state, chat_id) or "off"
+    current_pending_mode = chat_state.get_pending_mode(manager_state, chat_id) or "none"
+    current_lang = chat_state.get_chat_lang(manager_state, chat_id)
+    current_report_level = chat_state.get_chat_report_level(manager_state, chat_id)
+
+    return _json(
+        {
+            "ok": True,
+            "status": "completed",
+            "path": str(spec.get("path", "")).strip() or "/control/actions/chat/session-update",
+            "source_command": (
+                f"chat-session {chat_id} default={current_default_mode} pending={current_pending_mode} "
+                f"room={current_room} lang={current_lang} report={current_report_level}"
+            ),
+            "chat_id": chat_id,
+            "default_mode": current_default_mode,
+            "pending_mode": current_pending_mode,
+            "room": current_room,
+            "lang": current_lang,
+            "report_level": current_report_level,
+            "next_step": f"/control/chat?chat={chat_id}",
+            "remediation": "-",
+            "outcome": {
+                "kind": "chat_session_update",
+                "status": "completed",
+                "reason_code": "-",
+                "detail": f"default={current_default_mode} pending={current_pending_mode} room={current_room}",
+            },
+        },
+        status=200,
     )
