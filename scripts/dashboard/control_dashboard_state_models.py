@@ -611,6 +611,7 @@ class RecoverySummaryDTO:
     latest_intent_action: str
     latest_intent_trace: str
     latest_intent_focus: str
+    server_guard: ServerGuardDTO
     control_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     runtimes: List[RecoveryRuntimeDTO] = field(default_factory=list)
 

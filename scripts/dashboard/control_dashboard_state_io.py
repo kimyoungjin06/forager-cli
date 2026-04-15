@@ -241,6 +241,8 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         focus_badge = "judge"
     elif outcome_kind == "retry_run":
         focus_badge = "retry"
+    elif outcome_kind in {"background_queue_cleanup", "background_queue_cleanup_preview", "auto_recover"}:
+        focus_badge = "server-guard"
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",

@@ -88,6 +88,10 @@ def _server_guard_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir) / "control" / "server_guard.json"
 
 
+def _has_reason(reasons: Iterable[str], *prefixes: str) -> bool:
+    return any(str(reason).startswith(prefix) for reason in reasons for prefix in prefixes)
+
+
 def _server_guard_cleanup_target(cards: Iterable[RuntimeCardDTO]) -> RuntimeCardDTO | None:
     candidates = [row for row in cards if int(getattr(row, "background_queue_stale_count", 0) or 0) > 0]
     if not candidates:
@@ -151,6 +155,16 @@ def _recommended_actions(
     ):
         _add_link("Open Audit", "/control/audit?limit=50", "inspect recent high-frequency operator actions")
         _add_link("Open History", "/control/history", "inspect background worker churn and repeated runs")
+    if _has_reason(reasons, "codex_process"):
+        _add_link("Review Codex Pressure", "/control/history?q=codex&scope=control", "inspect codex session churn and trim duplicated interactive runs")
+        _add_link("Open Chat Console", "/control/chat", "consolidate chat-bound codex sessions before opening more worker surfaces")
+    if _has_reason(reasons, "python_process"):
+        _add_link("Review Python Pressure", "/control/history?q=python&scope=control", "inspect python worker churn and repeated local background launches")
+        _add_link("Open Recovery", "/control/recovery", "review worker and queue rails before starting more python-backed jobs")
+    if _has_reason(reasons, "tmux_process"):
+        _add_link("Review Tmux Pressure", "/control/history?q=tmux&scope=control", "inspect detached runtime sessions and stale tmux-backed workers")
+    if _has_reason(reasons, "total_process"):
+        _add_link("Review Process Pressure", "/control/history?q=process&scope=control", "inspect broad process churn before launching additional work")
     if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
         _add_link("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
     if cleanup_target is not None:
@@ -163,7 +177,7 @@ def _recommended_actions(
                 "inspect stale queue tickets before mutating background queue state",
                 command=f"/orch bgq-clean {project_ref} preview",
             )
-    return actions[:5]
+    return actions[:8]
 
 
 def write_server_guard_snapshot(*, team_dir: Path | str, snapshot_taken_at: str, guard: ServerGuardDTO) -> tuple[str, str]:
@@ -310,6 +324,18 @@ def build_server_guard(
     elif any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
         reason_summary = " | ".join(reasons)
         note = "host pressure is elevated; reduce concurrent execution before retrying"
+    elif _has_reason(reasons, "codex_process"):
+        reason_summary = " | ".join(reasons)
+        note = "codex process pressure is elevated; consolidate chat and operator sessions before launching more work"
+    elif _has_reason(reasons, "python_process"):
+        reason_summary = " | ".join(reasons)
+        note = "python worker pressure is elevated; inspect local background churn before retrying"
+    elif _has_reason(reasons, "tmux_process"):
+        reason_summary = " | ".join(reasons)
+        note = "tmux session pressure is elevated; inspect detached runtime handles and stale sessions"
+    elif _has_reason(reasons, "total_process"):
+        reason_summary = " | ".join(reasons)
+        note = "overall process pressure is elevated; inspect recent worker churn and recovery surfaces"
     else:
         reason_summary = " | ".join(reasons)
         note = "process pressure is elevated; inspect active background workers and history"

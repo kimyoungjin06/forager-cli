@@ -38,7 +38,43 @@ from control_dashboard_state_common import (
     _worker_update_proposal_accept_button,
 )
 from control_dashboard_state_io import FileFreshnessDTO
-from control_dashboard_state_models import RecoveryRuntimeDTO, RecoverySummaryDTO, RecoveryTaskDTO
+from control_dashboard_state_models import RecoveryRuntimeDTO, RecoverySummaryDTO, RecoveryTaskDTO, ServerGuardActionDTO, ServerGuardDTO
+
+
+def _server_guard_from_recovery_control(control: Dict[str, Any]) -> ServerGuardDTO:
+    raw = control.get("server_guard") if isinstance(control.get("server_guard"), dict) else {}
+    actions_raw = raw.get("recommended_actions") if isinstance(raw.get("recommended_actions"), list) else []
+    actions: List[ServerGuardActionDTO] = []
+    for item in actions_raw:
+        if not isinstance(item, dict):
+            continue
+        actions.append(
+            ServerGuardActionDTO(
+                label=str(item.get("label", "")).strip() or "-",
+                href=str(item.get("href", "")).strip(),
+                note=str(item.get("note", "")).strip(),
+                method=str(item.get("method", "GET")).strip() or "GET",
+                path=str(item.get("path", "")).strip(),
+                mode=str(item.get("mode", "safe")).strip() or "safe",
+                payload_json=str(item.get("payload_json", "{}")).strip() or "{}",
+                command=str(item.get("command", "")).strip(),
+            )
+        )
+    return ServerGuardDTO(
+        status=str(raw.get("status", "")).strip() or "-",
+        summary=str(raw.get("summary", "")).strip() or "-",
+        reason_summary=str(raw.get("reason_summary", "")).strip() or "-",
+        note=str(raw.get("note", "")).strip() or "-",
+        next_step=str(raw.get("next_step", "")).strip() or "-",
+        disk_summary=str(raw.get("disk_summary", "")).strip() or "-",
+        memory_summary=str(raw.get("memory_summary", "")).strip() or "-",
+        load_summary=str(raw.get("load_summary", "")).strip() or "-",
+        process_summary=str(raw.get("process_summary", "")).strip() or "-",
+        queue_summary=str(raw.get("queue_summary", "")).strip() or "-",
+        snapshot_path=str(raw.get("snapshot_path", "")).strip() or "-",
+        snapshot_updated_at=str(raw.get("snapshot_updated_at", "")).strip() or "-",
+        recommended_actions=actions,
+    )
 
 
 def _worker_apply_applied(row: Dict[str, Any], key: str) -> bool:
@@ -669,6 +705,7 @@ def _build_recovery_summary(
     root_team_dir: Path,
 ) -> RecoverySummaryDTO:
     control = summary_state.get("control_summary") if isinstance(summary_state.get("control_summary"), dict) else {}
+    server_guard = _server_guard_from_recovery_control(control)
     return RecoverySummaryDTO(
         exists=bool(freshness.exists and summary_state),
         artifact_path=freshness.path,
@@ -694,6 +731,7 @@ def _build_recovery_summary(
             str(control.get("latest_intent_action", "")).strip(),
             str(control.get("latest_intent_trace", "")).strip(),
         ),
+        server_guard=server_guard,
         control_phase2_action_buttons=_recovery_control_action_buttons(),
         runtimes=_build_recovery_runtime_rows(
             summary_state.get("runtimes") or [],

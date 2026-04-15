@@ -547,6 +547,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "server_guard_note" in overview_text
     assert "server_guard_snapshot" in overview_text
     assert "Open Health JSON" in overview_text
+    assert "server-guard" in overview_text
     assert "execution_brief" in overview_text
     assert "underspecified" in overview_text
     assert "brief_summary" in overview_text
@@ -1012,6 +1013,42 @@ def test_control_dashboard_audit_route_filters_by_focus_badge(tmp_path: Path) ->
     assert "auto-route" in text
     assert "Replan Auto Route | applied" in text
     assert "<span>total_rows</span><strong>1</strong>" in text
+
+
+def test_control_dashboard_audit_route_surfaces_server_guard_focus_badge(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Background Queue Cleanup Preview | preview",
+        status="preview",
+        outcome_kind="background_queue_cleanup_preview",
+        outcome_status="preview",
+        outcome_reason_code="stale_present",
+        outcome_detail="stale_count=1 | summary=running=1 stale=1",
+        next_step="/orch status O2",
+        remediation="inspect stale queue tickets before mutating background queue state",
+        source_command="/orch bgq-clean O2 preview",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-09T11:16:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "server-guard=1" in text
+    assert "focus_filter" in text
+    assert "Background Queue Cleanup Preview | preview" in text
 
 
 def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path: Path) -> None:
@@ -1850,6 +1887,7 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "server_guard_note" in text
     assert "server_guard_snapshot" in text
     assert "Open Health JSON" in text
+    assert "server-guard" in text
     assert "background_scheduler" in text
     assert "Decision Signals" in text
     assert "Execution Rails" in text
@@ -1978,6 +2016,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "selected=offdesk_prepare" in text
     assert "server_guard" in text
     assert "server_guard_reasons" in text
+    assert "server_guard_note" in text
     assert "server_guard_next" in text
     assert "server_guard_snapshot" in text
     assert "Open Health JSON" in text

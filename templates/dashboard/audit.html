@@ -6,7 +6,7 @@
     <label>
       <span>Focus</span>
       <select name="focus">
-        {% for token in ['all', 'auto-route', 'judge', 'retry'] %}
+        {% for token in ['all', 'auto-route', 'judge', 'retry', 'server-guard'] %}
         <option value="{{ token }}" {% if audit.focus_filter == token %}selected{% endif %}>{{ token }}</option>
         {% endfor %}
       </select>
@@ -30,7 +30,7 @@
   </ul>
   <p class="muted">
     filter:
-    {% for value in ['all', 'auto-route', 'judge', 'retry'] %}
+    {% for value in ['all', 'auto-route', 'judge', 'retry', 'server-guard'] %}
       {% set count = audit.focus_counts.get(value, 0) %}
       {% if audit.focus_filter == value %}
       <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>

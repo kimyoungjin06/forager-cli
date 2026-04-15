@@ -25,15 +25,16 @@
     <li><span>latest_intent_action</span><strong>{{ recovery.latest_intent_action }}</strong></li>
     <li><span>latest_intent_trace</span><strong>{{ recovery.latest_intent_trace }}</strong></li>
     <li><span>first_focus</span><strong>{{ recovery.latest_intent_focus }}</strong></li>
-    <li><span>server_guard</span><strong>{{ snapshot.control_summary.server_guard.summary }}</strong></li>
-    <li><span>server_guard_reasons</span><strong>{{ snapshot.control_summary.server_guard.reason_summary }}</strong></li>
-    <li><span>server_guard_next</span><strong>{{ snapshot.control_summary.server_guard.next_step }}</strong></li>
-    <li><span>server_guard_snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
+    <li><span>server_guard</span><strong>{{ recovery.server_guard.summary }}</strong></li>
+    <li><span>server_guard_reasons</span><strong>{{ recovery.server_guard.reason_summary }}</strong></li>
+    <li><span>server_guard_note</span><strong>{{ recovery.server_guard.note }}</strong></li>
+    <li><span>server_guard_next</span><strong>{{ recovery.server_guard.next_step }}</strong></li>
+    <li><span>server_guard_snapshot</span><strong>{{ recovery.server_guard.snapshot_path }}</strong></li>
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
-  {% if snapshot.control_summary.server_guard.recommended_actions %}
-  {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
+  {% if recovery.server_guard.recommended_actions %}
+  {% with title='server_guard_actions', actions=recovery.server_guard.recommended_actions %}
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
   {% endif %}
