@@ -438,6 +438,8 @@ class RecoveryTaskDTO:
     request_id: str
     label: str
     detail_path: str
+    chat_console_path: str
+    chat_console_label: str
     status: str
     tf_phase: str
     preset: str
@@ -472,6 +474,8 @@ class RecoveryRuntimeDTO:
     project_alias: str
     project_label: str
     runtime_path: str
+    chat_console_path: str
+    chat_console_label: str
     status: str
     readiness: str
     attention_summary: str
@@ -653,20 +657,38 @@ class ChatRoomLineDTO:
 
 
 @dataclass(frozen=True)
+class ChatTimelineEntryDTO:
+    at: str
+    source: str
+    headline: str
+    badge: str
+    body: str
+    command: str = ""
+    next_step: str = ""
+    room: str = ""
+
+
+@dataclass(frozen=True)
 class ChatConsolePageDTO:
     selected_chat_id: str
     selected_chat_alias: str
     selected_room: str
+    selected_project_key: str
+    selected_project_alias: str
+    selected_task_ref: str
     selected_default_mode: str
     selected_pending_mode: str
     selected_lang: str
     selected_report_level: str
     rooms: List[str] = field(default_factory=list)
     room_presets: List[str] = field(default_factory=list)
+    selected_recent_task_refs: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)
+    timeline_entries: List[ChatTimelineEntryDTO] = field(default_factory=list)
     send_action_path: str = "/control/actions/chat/send"
     session_action_path: str = "/control/actions/chat/session-update"
+    select_task_action_path: str = "/control/actions/chat/session-select-task"
     send_mode_options: Dict[str, str] = field(default_factory=dict)
     recent_chat_actions: List[ActionAuditRowDTO] = field(default_factory=list)
 

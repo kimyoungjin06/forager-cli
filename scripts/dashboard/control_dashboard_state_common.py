@@ -214,10 +214,13 @@ def _chat_console_target(
     project_alias: str,
     request_id: str,
 ) -> tuple[str, str]:
+    if root_team_dir is None:
+        return "/control/chat", "Open Chat Console"
+    team_dir = Path(root_team_dir)
     raw_sessions = manager_state.get("chat_sessions") if isinstance(manager_state.get("chat_sessions"), dict) else {}
     if not raw_sessions:
         return "/control/chat", "Open Chat Console"
-    aliases = chat_aliases.load_chat_aliases(chat_aliases.resolve_chat_aliases_file(root_team_dir, None))
+    aliases = chat_aliases.load_chat_aliases(chat_aliases.resolve_chat_aliases_file(team_dir, None))
     alias_by_chat_id = {str(chat_id).strip(): str(alias).strip() for alias, chat_id in aliases.items()}
     target_alias = str(project_alias or "").strip().lower()
     target_request = str(request_id or "").strip()

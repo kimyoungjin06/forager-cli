@@ -8,9 +8,41 @@ from typing import Dict, Tuple
 
 import aoe_tg_chat_state as chat_state
 import aoe_tg_request_contract as request_contract
+import aoe_tg_task_state as task_state
 
 from control_dashboard_action_exec_shared import _load_dashboard_manager_state, _load_gateway_main_module
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths, _json
+
+
+def _resolve_chat_project(manager_state: Dict[str, object], project_ref: str) -> tuple[str, str, Dict[str, object]]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    token = str(project_ref or "").strip()
+    active_key = str(manager_state.get("active", "")).strip()
+    if token:
+        token_upper = token.upper()
+        token_lower = token.lower()
+        for key, entry in projects.items():
+            if not isinstance(entry, dict):
+                continue
+            if str(key).strip().lower() == token_lower:
+                return str(key).strip(), str(entry.get("project_alias", "")).strip(), entry
+            if str(entry.get("project_alias", "")).strip().upper() == token_upper:
+                return str(key).strip(), str(entry.get("project_alias", "")).strip(), entry
+    if active_key:
+        active_entry = projects.get(active_key) if isinstance(projects.get(active_key), dict) else {}
+        if isinstance(active_entry, dict):
+            return active_key, str(active_entry.get("project_alias", "")).strip(), active_entry
+    return "", "", {}
+
+
+def _resolve_chat_task_request(project_entry: Dict[str, object], raw_ref: str) -> str:
+    token = str(raw_ref or "").strip()
+    if not token:
+        return ""
+    resolved = task_state.resolve_task_request_id(project_entry, token)
+    if resolved and task_state.get_task_record(project_entry, resolved):
+        return resolved
+    return ""
 
 
 def _chat_send_command_text(*, mode: str, text: str) -> str:
@@ -148,6 +180,82 @@ def _execute_chat_session_update_action(
                 "status": "completed",
                 "reason_code": "-",
                 "detail": f"default={current_default_mode} pending={current_pending_mode} room={current_room}",
+            },
+        },
+        status=200,
+    )
+
+
+def _execute_chat_session_select_task_action(
+    spec: Dict[str, object],
+    *,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    chat_id = str(payload.get("chat_id", "")).strip()
+    project_ref = str(payload.get("project_ref", "")).strip()
+    task_ref = str(payload.get("task_ref", "")).strip()
+
+    paths, manager_state = _load_dashboard_manager_state(config)
+    project_key, project_alias, project_entry = _resolve_chat_project(manager_state, project_ref)
+    if not project_key or not isinstance(project_entry, dict):
+        return _json(
+            {
+                "ok": False,
+                "status": "blocked",
+                "path": str(spec.get("path", "")).strip() or "/control/actions/chat/session-select-task",
+                "chat_id": chat_id,
+                "project_ref": project_ref or "-",
+                "error": "project_not_found",
+                "message": "project_ref did not resolve to a known runtime",
+                "next_step": f"/control/chat?chat={chat_id}",
+            },
+            status=400,
+        )
+
+    resolved_request_id = _resolve_chat_task_request(project_entry, task_ref) if task_ref else ""
+    if task_ref and not resolved_request_id:
+        return _json(
+            {
+                "ok": False,
+                "status": "blocked",
+                "path": str(spec.get("path", "")).strip() or "/control/actions/chat/session-select-task",
+                "chat_id": chat_id,
+                "project_ref": project_alias or project_key,
+                "task_ref": task_ref,
+                "error": "task_not_found",
+                "message": "task_ref did not resolve for the selected runtime",
+                "next_step": f"/control/chat?chat={chat_id}",
+            },
+            status=400,
+        )
+
+    chat_state.set_chat_selected_task_ref(manager_state, chat_id, project_key, resolved_request_id)
+
+    gateway_main = _load_gateway_main_module()
+    gateway_main.save_manager_state(paths.manager_state_file, manager_state)
+
+    selected_task_ref = chat_state.get_chat_selected_task_ref(manager_state, chat_id, project_key)
+    recent_task_refs = chat_state.get_chat_recent_task_refs(manager_state, chat_id, project_key)
+    detail = f"{project_alias or project_key}:{selected_task_ref or '-'}"
+    return _json(
+        {
+            "ok": True,
+            "status": "completed",
+            "path": str(spec.get("path", "")).strip() or "/control/actions/chat/session-select-task",
+            "source_command": f"chat-session-select-task:{chat_id}:{project_alias or project_key}:{selected_task_ref or '-'}",
+            "chat_id": chat_id,
+            "project_key": project_key,
+            "project_alias": project_alias or project_key,
+            "selected_task_ref": selected_task_ref or "-",
+            "recent_task_refs": recent_task_refs,
+            "next_step": f"/control/chat?chat={chat_id}",
+            "remediation": "-" if selected_task_ref else "set a task_ref to pin a task for this chat session",
+            "outcome": {
+                "kind": "chat_session_select_task",
+                "status": "completed",
+                "reason_code": "-",
+                "detail": detail,
             },
         },
         status=200,

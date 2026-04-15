@@ -17,6 +17,7 @@ import aoe_tg_operator_summary as operator_summary
 from control_dashboard_state_common import (
     _append_unique_action_button,
     _background_scheduler_note,
+    _chat_console_target,
     _detail_path,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
@@ -63,7 +64,13 @@ def _worker_syncback_applied(
     return True
 
 
-def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: str) -> List[RecoveryTaskDTO]:
+def _build_recovery_task_rows(
+    rows: Iterable[Dict[str, Any]],
+    *,
+    project_alias: str,
+    manager_state: Dict[str, Any],
+    root_team_dir: Path,
+) -> List[RecoveryTaskDTO]:
     built: List[RecoveryTaskDTO] = []
     for row in rows:
         if not isinstance(row, dict):
@@ -76,6 +83,12 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
         rate_limit_summary = str(row.get("rate_limit_summary", "")).strip() or "-"
         contract = row.get("completion_contract") if isinstance(row.get("completion_contract"), dict) else {}
         observatory = row.get("observatory") if isinstance(row.get("observatory"), dict) else {}
+        chat_console_path, chat_console_label = _chat_console_target(
+            manager_state,
+            root_team_dir=root_team_dir,
+            project_alias=project_alias,
+            request_id=request_id,
+        )
         action_contract = _task_command_contract(
             project_alias=project_alias,
             label=label,
@@ -192,6 +205,8 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
                 request_id=request_id,
                 label=label,
                 detail_path=_detail_path(request_id),
+                chat_console_path=chat_console_path,
+                chat_console_label=chat_console_label,
                 status=str(row.get("status", "")).strip() or "-",
                 tf_phase=str(row.get("tf_phase", "")).strip() or "-",
                 preset="phase1={phase1} phase2={phase2}".format(
@@ -226,7 +241,12 @@ def _build_recovery_task_rows(rows: Iterable[Dict[str, Any]], *, project_alias: 
     return built
 
 
-def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[RecoveryRuntimeDTO]:
+def _build_recovery_runtime_rows(
+    rows: Iterable[Dict[str, Any]],
+    *,
+    manager_state: Dict[str, Any],
+    root_team_dir: Path,
+) -> List[RecoveryRuntimeDTO]:
     built: List[RecoveryRuntimeDTO] = []
     for row in rows:
         if not isinstance(row, dict):
@@ -244,6 +264,12 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 if isinstance(item, dict) and str(item.get("request_id", "")).strip() == active_request_id
             ),
             {},
+        )
+        chat_console_path, chat_console_label = _chat_console_target(
+            manager_state,
+            root_team_dir=root_team_dir,
+            project_alias=alias,
+            request_id=active_request_id,
         )
         runtime_action_contract = _runtime_command_contract(
             project_alias=alias,
@@ -525,6 +551,8 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 project_alias=alias or "-",
                 project_label=label,
                 runtime_path=_runtime_path(alias),
+                chat_console_path=chat_console_path,
+                chat_console_label=chat_console_label,
                 status=str(row.get("status", "")).strip() or "-",
                 readiness=str(row.get("readiness", "")).strip() or "-",
                 attention_summary=str(row.get("attention_summary", "")).strip() or "-",
@@ -622,13 +650,24 @@ def _build_recovery_runtime_rows(rows: Iterable[Dict[str, Any]]) -> List[Recover
                 runtime_phase2_action_buttons=runtime_phase2_action_buttons,
                 active_task_safe_action_buttons=active_task_safe_action_buttons,
                 active_task_phase2_action_buttons=active_task_phase2_action_buttons,
-                task_teams=_build_recovery_task_rows(row.get("task_teams") or [], project_alias=alias),
+                task_teams=_build_recovery_task_rows(
+                    row.get("task_teams") or [],
+                    project_alias=alias,
+                    manager_state=manager_state,
+                    root_team_dir=root_team_dir,
+                ),
             )
         )
     return built
 
 
-def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshnessDTO) -> RecoverySummaryDTO:
+def _build_recovery_summary(
+    summary_state: Dict[str, Any],
+    freshness: FileFreshnessDTO,
+    *,
+    manager_state: Dict[str, Any],
+    root_team_dir: Path,
+) -> RecoverySummaryDTO:
     control = summary_state.get("control_summary") if isinstance(summary_state.get("control_summary"), dict) else {}
     return RecoverySummaryDTO(
         exists=bool(freshness.exists and summary_state),
@@ -656,5 +695,9 @@ def _build_recovery_summary(summary_state: Dict[str, Any], freshness: FileFreshn
             str(control.get("latest_intent_trace", "")).strip(),
         ),
         control_phase2_action_buttons=_recovery_control_action_buttons(),
-        runtimes=_build_recovery_runtime_rows(summary_state.get("runtimes") or []),
+        runtimes=_build_recovery_runtime_rows(
+            summary_state.get("runtimes") or [],
+            manager_state=manager_state,
+            root_team_dir=root_team_dir,
+        ),
     )

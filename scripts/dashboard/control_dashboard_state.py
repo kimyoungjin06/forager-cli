@@ -52,6 +52,7 @@ from control_dashboard_state_models import (
     ChatConsolePageDTO,
     ChatRoomLineDTO,
     ChatSessionDTO,
+    ChatTimelineEntryDTO,
     ControlSummaryDTO,
     DashboardSnapshotDTO,
     DashboardSnapshotLoadResult,
@@ -288,12 +289,12 @@ def _chat_recent_task_summary(row: Dict[str, Any]) -> str:
     return " | ".join(parts) if parts else "-"
 
 
-def _chat_session_project_alias(
+def _chat_session_project_context(
     manager_state: Dict[str, Any],
     *,
     raw_session: Dict[str, Any],
     selected_room: str,
-) -> str:
+) -> tuple[str, str]:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     selected = raw_session.get("selected_task_refs") if isinstance(raw_session.get("selected_task_refs"), dict) else {}
     recent = raw_session.get("recent_task_refs") if isinstance(raw_session.get("recent_task_refs"), dict) else {}
@@ -304,13 +305,74 @@ def _chat_session_project_alias(
         if not project_alias:
             continue
         if key in selected or key in recent:
-            return project_alias
+            return str(key).strip(), project_alias
     room_head = str(selected_room or "").strip().split("/", 1)[0]
     if room_head and room_head.lower() != room_handlers.DEFAULT_ROOM_NAME:
-        return room_head
+        room_key = ""
+        for key, entry in projects.items():
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("project_alias", "")).strip().upper() == room_head.upper():
+                room_key = str(key).strip()
+                break
+        return room_key, room_head
     active_key = str(manager_state.get("active", "")).strip()
     active_entry = projects.get(active_key) if active_key and isinstance(projects.get(active_key), dict) else {}
-    return str(active_entry.get("project_alias", "")).strip()
+    return active_key, str(active_entry.get("project_alias", "")).strip()
+
+
+def _chat_session_recent_task_refs(row: Dict[str, Any], *, project_key: str) -> list[str]:
+    key = str(project_key or "").strip()
+    if not key:
+        return []
+    recent = row.get("recent_task_refs") if isinstance(row.get("recent_task_refs"), dict) else {}
+    values = recent.get(key)
+    if not isinstance(values, list):
+        return []
+    refs: list[str] = []
+    for item in values:
+        token = str(item or "").strip()
+        if token and token not in refs:
+            refs.append(token)
+        if len(refs) >= 8:
+            break
+    return refs
+
+
+def _build_chat_timeline_entries(
+    *,
+    room: str,
+    room_tail: list[ChatRoomLineDTO],
+    recent_chat_actions: list[ActionAuditRowDTO],
+    limit: int = 20,
+) -> list[ChatTimelineEntryDTO]:
+    rows: list[ChatTimelineEntryDTO] = []
+    for action in recent_chat_actions:
+        rows.append(
+            ChatTimelineEntryDTO(
+                at=str(action.at or "-").strip() or "-",
+                source="reply",
+                headline=str(action.headline or "-").strip() or "-",
+                badge=str(action.status or "-").strip() or "-",
+                body=str(action.transcript_preview or action.outcome_detail or "-").strip() or "-",
+                command=str(action.source_command or "").strip(),
+                next_step=str(action.next_step or "").strip(),
+                room=room,
+            )
+        )
+    for line in room_tail:
+        rows.append(
+            ChatTimelineEntryDTO(
+                at=str(line.at or "-").strip() or "-",
+                source="room",
+                headline=str(line.actor or "-").strip() or "-",
+                badge=str(line.kind or "-").strip() or "-",
+                body=str(line.text or "-").strip() or "-",
+                room=room,
+            )
+        )
+    rows.sort(key=lambda row: (str(row.at).strip(), str(row.source).strip()), reverse=True)
+    return rows[: max(1, int(limit))]
 
 
 def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[str]) -> list[str]:
@@ -465,25 +527,50 @@ def load_dashboard_chat_page(
     rooms = [name for name, _mt in room_handlers.list_rooms(team_dir=paths.team_dir, limit=24)]
     if selected_room and selected_room not in rooms:
         rooms.insert(0, selected_room)
-    selected_project_alias = _chat_session_project_alias(
+    selected_project_key, selected_project_alias = _chat_session_project_context(
         snapshot_result.manager_state,
         raw_session=selected_session_row if isinstance(selected_session_row, dict) else {},
         selected_room=selected_room,
+    )
+    selected_task_ref = (
+        chat_state.get_chat_selected_task_ref(snapshot_result.manager_state, selected_token, selected_project_key)
+        if selected_project_key
+        else ""
+    )
+    selected_recent_task_refs = (
+        chat_state.get_chat_recent_task_refs(snapshot_result.manager_state, selected_token, selected_project_key)
+        if selected_project_key
+        else _chat_session_recent_task_refs(
+            selected_session_row if isinstance(selected_session_row, dict) else {},
+            project_key=selected_project_key,
+        )
+    )
+    recent_chat_actions = _load_recent_chat_action_rows(paths, chat_id=selected_token, limit=8)
+    timeline_entries = _build_chat_timeline_entries(
+        room=selected_room,
+        room_tail=room_tail,
+        recent_chat_actions=recent_chat_actions,
+        limit=20,
     )
 
     return snapshot_result.snapshot, ChatConsolePageDTO(
         selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
         selected_chat_alias=selected_session.chat_alias if selected_session is not None else alias_by_chat_id.get(selected_token, ""),
         selected_room=selected_room,
+        selected_project_key=selected_project_key,
+        selected_project_alias=selected_project_alias,
+        selected_task_ref=selected_task_ref,
         selected_default_mode=selected_session.default_mode if selected_session is not None else "off",
         selected_pending_mode=selected_session.pending_mode if selected_session is not None else "none",
         selected_lang=selected_session.lang if selected_session is not None else chat_state.DEFAULT_UI_LANG,
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
         rooms=rooms,
         room_presets=_chat_room_presets(project_alias=selected_project_alias, selected_room=selected_room, rooms=rooms),
+        selected_recent_task_refs=selected_recent_task_refs,
         sessions=sessions,
         room_tail=room_tail,
-        recent_chat_actions=_load_recent_chat_action_rows(paths, chat_id=selected_token, limit=8),
+        timeline_entries=timeline_entries,
+        recent_chat_actions=recent_chat_actions,
         send_mode_options={
             "raw": "As Typed",
             "direct": "One-shot Direct",
@@ -599,7 +686,12 @@ def load_dashboard_recovery_page(
     )
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     summary_state, freshness = _load_json_file(_recovery_summary_path(paths.team_dir), name="nightly_summary")
-    return loaded.snapshot, _build_recovery_summary(summary_state, freshness)
+    return loaded.snapshot, _build_recovery_summary(
+        summary_state,
+        freshness,
+        manager_state=loaded.manager_state,
+        root_team_dir=paths.team_dir,
+    )
 
 
 def load_dashboard_action_audit_page(

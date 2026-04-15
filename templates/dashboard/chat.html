@@ -52,6 +52,8 @@
       </div>
       <ul class="kv-list">
         <li><span>chat_id</span><strong class="mono">{{ chat.selected_chat_id or "-" }}</strong></li>
+        <li><span>project</span><strong>{{ chat.selected_project_alias or "-" }}</strong></li>
+        <li><span>selected_task</span><strong class="mono">{{ chat.selected_task_ref or "-" }}</strong></li>
         <li><span>default_mode</span><strong>{{ chat.selected_default_mode }}</strong></li>
         <li><span>pending_mode</span><strong>{{ chat.selected_pending_mode }}</strong></li>
         <li><span>lang</span><strong>{{ chat.selected_lang }}</strong></li>
@@ -105,6 +107,36 @@
         </div>
         <button type="submit">Update Session Controls</button>
       </form>
+      <form class="action-form chat-compose" data-dashboard-action data-action-label="Select Chat Task" data-action-command="chat-session-select-task" data-action-mode="safe" method="post" action="{{ chat.select_task_action_path }}">
+        <div class="chat-compose-grid">
+          <label>
+            <span>chat_id</span>
+            <input type="text" name="chat_id" value="{{ chat.selected_chat_id }}" placeholder="123456789">
+          </label>
+          <label>
+            <span>project_ref</span>
+            <input type="text" name="project_ref" value="{{ chat.selected_project_alias or chat.selected_project_key }}" placeholder="O2">
+          </label>
+        </div>
+        <label>
+          <span>selected task ref</span>
+          <input type="text" name="task_ref" value="{{ chat.selected_task_ref }}" placeholder="REQ-1 or T-001">
+        </label>
+        <p class="muted">blank로 보내면 현재 runtime의 selected task pin을 해제합니다.</p>
+        <button type="submit">Update Selected Task</button>
+      </form>
+      {% if chat.selected_recent_task_refs %}
+      <div class="chat-room-chip-list">
+        {% for ref in chat.selected_recent_task_refs %}
+        <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Pin Task {{ ref }}" data-action-command="chat-session-select-task:{{ ref }}" data-action-mode="safe" method="post" action="{{ chat.select_task_action_path }}">
+          <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
+          <input type="hidden" name="project_ref" value="{{ chat.selected_project_alias or chat.selected_project_key }}">
+          <input type="hidden" name="task_ref" value="{{ ref }}">
+          <button type="submit" class="{% if ref == chat.selected_task_ref %}active-chip{% endif %}">{{ ref }}</button>
+        </form>
+        {% endfor %}
+      </div>
+      {% endif %}
       <form class="action-form chat-compose" data-dashboard-action data-action-label="Send Chat Message" data-action-command="chat-send" data-action-mode="safe" method="post" action="{{ chat.send_action_path }}">
         <div class="chat-compose-grid">
           <label>
@@ -138,23 +170,23 @@
     <section class="panel chat-panel">
       <div class="panel-heading">
         <div>
-          <p class="section-kicker">Recent Replies</p>
-          <h2>Chat Send History</h2>
+          <p class="section-kicker">Session Timeline</p>
+          <h2>Chat Timeline</h2>
         </div>
-        <span class="badge">{{ chat.recent_chat_actions|length }}</span>
+        <span class="badge">{{ chat.timeline_entries|length }}</span>
       </div>
-      {% if chat.recent_chat_actions %}
+      {% if chat.timeline_entries %}
       <div class="chat-room-feed">
-        {% for row in chat.recent_chat_actions %}
+        {% for row in chat.timeline_entries %}
         <article class="chat-room-line">
           <div class="chat-room-line-head">
             <strong>{{ row.headline }}</strong>
-            <span class="badge">{{ row.status }}</span>
-            {% if row.chat_id %}<span class="muted mono">{{ row.chat_id }}</span>{% endif %}
+            <span class="badge">{{ row.badge }}</span>
+            <span class="badge">{{ row.source }}</span>
             <span class="muted mono">{{ row.at }}</span>
           </div>
-          <p class="mono">{{ row.source_command }}</p>
-          <p>{{ row.transcript_preview or row.outcome_detail }}</p>
+          {% if row.command %}<p class="mono">{{ row.command }}</p>{% endif %}
+          <p>{{ row.body }}</p>
           {% if row.next_step and row.next_step != '-' %}
           <p><strong>next</strong> {{ row.next_step }}</p>
           {% endif %}
@@ -162,7 +194,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="muted">현재 선택된 session의 recent chat action이 없습니다.</p>
+      <p class="muted">현재 선택된 session timeline이 비어 있습니다.</p>
       {% endif %}
     </section>
 

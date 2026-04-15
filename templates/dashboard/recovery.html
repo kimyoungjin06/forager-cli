@@ -55,6 +55,7 @@
           <p class="card-kicker">Runtime {{ runtime.readiness }}</p>
           <h3><a href="{{ runtime.runtime_path }}">{{ runtime.project_alias }} {{ runtime.project_label }}</a></h3>
           <p class="runtime-attention">{{ runtime.attention_summary }}</p>
+          <p><strong>chat_console</strong> <a href="{{ runtime.chat_console_path }}">{{ runtime.chat_console_label }}</a></p>
         </div>
         <span class="status-pill {{ runtime.status }}">{{ runtime.status }}</span>
       </div>
@@ -154,7 +155,7 @@
         <tbody>
           {% for task in runtime.task_teams %}
           <tr>
-            <td><a href="{{ task.detail_path }}">{{ task.label }}</a><br><span class="muted">{{ task.request_id }}</span></td>
+            <td><a href="{{ task.detail_path }}">{{ task.label }}</a><br><span class="muted">{{ task.request_id }}</span><br><span class="muted"><a href="{{ task.chat_console_path }}">{{ task.chat_console_label }}</a></span></td>
             <td>{{ task.status }}/{{ task.tf_phase }}</td>
             <td>{{ task.preset }}</td>
             <td>

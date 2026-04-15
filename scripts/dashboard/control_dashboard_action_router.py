@@ -16,6 +16,7 @@ from control_dashboard_action_exec import (
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
     _execute_chat_send_action,
+    _execute_chat_session_select_task_action,
     _execute_chat_session_update_action,
     _execute_followup_action,
     _execute_runtime_judge_action,
@@ -95,6 +96,25 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
                 "room": room,
                 "lang": lang,
                 "report_level": report_level,
+            },
+        }
+
+    if path == "/control/actions/chat/session-select-task":
+        chat_id = str(payload.get("chat_id", "")).strip()
+        if not chat_id:
+            raise ValueError("chat_id is required")
+        project_ref = str(payload.get("project_ref", "")).strip()
+        task_ref = str(payload.get("task_ref", "")).strip()
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"chat-session-select-task:{chat_id}",
+            "note": "pin or clear the selected task ref for a chat session and runtime",
+            "payload": {
+                "chat_id": chat_id,
+                "project_ref": project_ref,
+                "task_ref": task_ref,
             },
         }
 
@@ -454,6 +474,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/chat/session-update":
         return _with_action_audit(_execute_chat_session_update_action(spec, config=config), config=config)
+
+    if path == "/control/actions/chat/session-select-task":
+        return _with_action_audit(_execute_chat_session_select_task_action(spec, config=config), config=config)
 
     if path == "/control/actions/task/followup":
         return _with_action_audit(_preview_followup_action(spec, config=config), config=config)

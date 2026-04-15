@@ -71,6 +71,8 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Chat Send | {status}"
     if path == "/control/actions/chat/session-update":
         return f"Chat Session Update | {status}"
+    if path == "/control/actions/chat/session-select-task":
+        return f"Chat Session Task | {status}"
     if path == "/control/actions/runtime/judge":
         return f"Offdesk Judge | {status}"
     if path == "/control/actions/runtime/todo-accept":

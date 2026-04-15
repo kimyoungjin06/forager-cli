@@ -682,7 +682,9 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "One-shot Direct" in text
     assert "Send Chat Message" in text
     assert "Update Session Controls" in text
-    assert "Chat Send History" in text
+    assert "Update Selected Task" in text
+    assert "/control/actions/chat/session-select-task" in text
+    assert "Chat Timeline" in text
     assert "direct reply ok" in text
     assert "O2/writing" in text
     assert "O2/package" in text
@@ -795,6 +797,46 @@ def test_control_dashboard_post_chat_session_update_route_persists_defaults(tmp_
     assert session["room"] == "O2/writing"
     assert session["lang"] == "en"
     assert session["report_level"] == "long"
+
+
+def test_control_dashboard_post_chat_session_select_task_route_persists_selected_task(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {"123456": {"room": "O2/analysis"}}
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/chat/session-select-task",
+        body=json.dumps(
+            {
+                "chat_id": "123456",
+                "project_ref": "O2",
+                "task_ref": "T-001",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    saved = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    session = saved["chat_sessions"]["123456"]
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["ok"] is True
+    assert payload["project_alias"] == "O2"
+    assert payload["selected_task_ref"] == "REQ-1"
+    assert payload["next_step"] == "/control/chat?chat=123456"
+    assert session["selected_task_refs"]["alpha"] == "REQ-1"
 
 
 def test_control_dashboard_overview_surfaces_chat_console_link(tmp_path: Path) -> None:
@@ -1773,6 +1815,19 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
 def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "room": "O2/review",
+            "selected_task_refs": {"alpha": "REQ-1"},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (team_dir / "telegram_chat_aliases.json").write_text(
+        json.dumps({"1": "123456"}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Offdesk Judge",
@@ -1887,6 +1942,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "/control/actions/runtime/sync-preview" in text
     assert "/control/actions/task/followup" in text
     assert "/control/actions/task/retry" in text
+    assert "/control/chat?chat=123456" in text
+    assert "Open Chat 1" in text
     assert "action-section" in text
     assert "/control/tasks/by-request/REQ-1" in text
     assert "/monitor O2" in text
