@@ -302,6 +302,11 @@ def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
         "canonical_feedback_kind": str(row.get("canonical_feedback_kind", "")).strip() or "-",
         "canonical_feedback_profile": str(row.get("canonical_feedback_profile", "")).strip() or "-",
         "canonical_feedback_applied": bool(row.get("canonical_feedback_applied", False)),
+        "analysis_feedback_state": str(row.get("analysis_feedback_state", "")).strip() or "-",
+        "analysis_feedback_summary": str(row.get("analysis_feedback_summary", "")).strip() or "-",
+        "analysis_feedback_next_step": str(row.get("analysis_feedback_next_step", "")).strip() or "-",
+        "analysis_feedback_open_kinds": str(row.get("analysis_feedback_open_kinds", "")).strip() or "-",
+        "analysis_feedback_applied": bool(row.get("analysis_feedback_applied", False)),
     }
 
 
@@ -328,6 +333,8 @@ def summarize_replan_auto_decision(decision: Any) -> str:
         kind = str(row.get("canonical_feedback_kind", "")).strip() or "-"
         profile = str(row.get("canonical_feedback_profile", "")).strip() or "-"
         parts.append(f"reuse={kind}:{profile}")
+    elif bool(row.get("analysis_feedback_applied", False)):
+        parts.append("reuse=analysis_record_set")
     if bool(row.get("can_auto_apply", False)):
         parts.append("auto=yes")
     return " | ".join(parts)
@@ -358,6 +365,10 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
         "canonical_feedback_kind": str(row.get("canonical_feedback_kind", "")).strip() or "-",
         "canonical_feedback_profile": str(row.get("canonical_feedback_profile", "")).strip() or "-",
         "canonical_feedback_applied": bool(row.get("canonical_feedback_applied", False)),
+        "analysis_feedback_state": str(row.get("analysis_feedback_state", "")).strip() or "-",
+        "analysis_feedback_summary": str(row.get("analysis_feedback_summary", "")).strip() or "-",
+        "analysis_feedback_open_kinds": str(row.get("analysis_feedback_open_kinds", "")).strip() or "-",
+        "analysis_feedback_applied": bool(row.get("analysis_feedback_applied", False)),
     }
 
 

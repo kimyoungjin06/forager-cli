@@ -2913,6 +2913,74 @@ def test_control_dashboard_post_replan_route_reuses_canonical_writeback_feedback
     )
 
 
+def test_control_dashboard_post_replan_route_reuses_analysis_record_set_feedback(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Offdesk Judge",
+        status="executed",
+        outcome_kind="offdesk_judge",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+        next_step="/offdesk review O2",
+        remediation="-",
+        source_command="/orch judge O2",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:06:00+09:00",
+        extra={
+            "decision_snapshot": {
+                "verdict": "hold",
+                "confidence": "medium",
+                "reasoning": "analysis evidence still missing",
+                "next_step": "/orch judge O2",
+                "caution": "close evidence gaps before retry",
+                "analysis_record_set": "analysis_record_set | finding=1 | evidence=1 | gap=1",
+                "analysis_record_set_records": [
+                    {"kind": "finding", "label": "summary", "state": "stable", "note": "action"},
+                    {"kind": "evidence", "label": "missing", "state": "missing", "note": "attach_evidence"},
+                    {"kind": "gap", "label": "evidence_missing", "state": "open", "note": "attach_evidence"},
+                ],
+            },
+        },
+    )
+
+    def _fake_resolve_retry_replan_transition(*, send, **_kwargs):
+        send("plan gate blocked", context="planning-gate")
+        return {"terminal": True}
+
+    monkeypatch.setattr(retry_exec.retry_handlers, "resolve_retry_replan_transition", _fake_resolve_retry_replan_transition)
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/replan",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert payload["next_step"] == "/task T-001"
+    assert payload["latest_judge_decision"]["analysis_record_set"] == "analysis_record_set | finding=1 | evidence=1 | gap=1"
+    assert payload["replan_auto_decision"]["suggested_action"] == "task_review"
+    assert payload["replan_auto_decision"]["suggested_next_step"] == "/task T-001"
+    assert payload["replan_auto_decision"]["decision_mode"] == "analysis_record_set_reuse"
+    assert payload["replan_auto_decision"]["analysis_feedback_open_kinds"] == "evidence,gap"
+    assert payload["replan_auto_decision"]["analysis_feedback_applied"] is True
+    assert payload["replan_auto_routing_policy"]["status"] == "analysis_review_ready"
+    assert payload["replan_auto_routing_policy"]["requires_operator_confirmation"] is False
+    assert "analysis records reused" in payload["remediation"]
+
+
 def test_control_dashboard_post_replan_route_auto_routes_to_retry_when_confirmed(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
