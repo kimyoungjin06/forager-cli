@@ -114,6 +114,12 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                     "load_summary": server_guard.load_summary,
                     "process_summary": server_guard.process_summary,
                     "queue_summary": server_guard.queue_summary,
+                    "snapshot_path": server_guard.snapshot_path,
+                    "snapshot_updated_at": server_guard.snapshot_updated_at,
+                    "recommended_actions": [
+                        {"label": row.label, "href": row.href, "note": row.note}
+                        for row in list(server_guard.recommended_actions or [])
+                    ],
                 },
             }
         )

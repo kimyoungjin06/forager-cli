@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,7 +22,7 @@ import aoe_tg_chat_state as chat_state
 import aoe_tg_room_handlers as room_handlers
 import aoe_tg_task_state as task_state
 
-from control_dashboard_server_guard import build_server_guard
+from control_dashboard_server_guard import build_server_guard, write_server_guard_snapshot
 from control_dashboard_state_builders import (
     _build_active_task_rows,
     _build_recovery_summary,
@@ -213,6 +214,16 @@ def load_dashboard_snapshot_result(
         control_root=paths.control_root,
         team_dir=paths.team_dir,
         runtime_cards=runtime_cards,
+    )
+    server_guard_snapshot_path, server_guard_snapshot_updated_at = write_server_guard_snapshot(
+        team_dir=paths.team_dir,
+        snapshot_taken_at=snapshot_taken_at,
+        guard=server_guard,
+    )
+    server_guard = replace(
+        server_guard,
+        snapshot_path=server_guard_snapshot_path,
+        snapshot_updated_at=server_guard_snapshot_updated_at,
     )
 
     summary = ControlSummaryDTO(

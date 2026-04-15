@@ -21,6 +21,16 @@ class ServerGuardDTO:
     load_summary: str
     process_summary: str
     queue_summary: str
+    snapshot_path: str = ""
+    snapshot_updated_at: str = ""
+    recommended_actions: List["ServerGuardActionDTO"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ServerGuardActionDTO:
+    label: str
+    href: str
+    note: str = ""
 
 
 @dataclass(frozen=True)

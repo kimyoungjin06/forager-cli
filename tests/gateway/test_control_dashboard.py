@@ -545,6 +545,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "selected=offdesk_prepare" in overview_text
     assert "server_guard" in overview_text
     assert "server_guard_note" in overview_text
+    assert "server_guard_snapshot" in overview_text
+    assert "Open Health JSON" in overview_text
     assert "execution_brief" in overview_text
     assert "underspecified" in overview_text
     assert "brief_summary" in overview_text
@@ -604,6 +606,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "status" in health["server_guard"]
     assert "summary" in health["server_guard"]
     assert "next_step" in health["server_guard"]
+    assert "snapshot_path" in health["server_guard"]
+    assert "recommended_actions" in health["server_guard"]
 
 
 def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp_path: Path) -> None:
@@ -1844,6 +1848,8 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "status running=1" in text
     assert "server_guard" in text
     assert "server_guard_note" in text
+    assert "server_guard_snapshot" in text
+    assert "Open Health JSON" in text
     assert "background_scheduler" in text
     assert "Decision Signals" in text
     assert "Execution Rails" in text
@@ -1973,6 +1979,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "server_guard" in text
     assert "server_guard_reasons" in text
     assert "server_guard_next" in text
+    assert "server_guard_snapshot" in text
+    assert "Open Health JSON" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "execution_brief_summary" in text

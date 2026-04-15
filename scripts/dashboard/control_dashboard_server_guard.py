@@ -3,12 +3,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from control_dashboard_state_models import RuntimeCardDTO, ServerGuardDTO
+from control_dashboard_state_models import RuntimeCardDTO, ServerGuardActionDTO, ServerGuardDTO
 
 
 def _fmt_percent(value: float) -> str:
@@ -74,9 +75,72 @@ def _dominant_next_step(reasons: List[str]) -> str:
         return "/control/recovery"
     if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
         return "/control/offdesk"
-    if any(reason.startswith("process") for reason in reasons):
+    if any(
+        reason.startswith(prefix)
+        for reason in reasons
+        for prefix in ("process", "codex_process", "python_process", "tmux_process", "total_process")
+    ):
         return "/control/history"
     return "/control"
+
+
+def _server_guard_snapshot_path(team_dir: Path | str) -> Path:
+    return Path(team_dir) / "control" / "server_guard.json"
+
+
+def _recommended_actions(*, reasons: List[str], next_step: str) -> list[ServerGuardActionDTO]:
+    actions: list[ServerGuardActionDTO] = []
+
+    def _add(label: str, href: str, note: str) -> None:
+        if any(str(row.href).strip() == href for row in actions):
+            return
+        actions.append(ServerGuardActionDTO(label=label, href=href, note=note))
+
+    _add("Open Health JSON", "/control/health", "inspect the raw host and queue snapshot")
+    if next_step == "/control/recovery":
+        _add("Open Recovery", "/control/recovery", "review stale queue, retries, and blocked runtimes first")
+    if next_step == "/control/offdesk":
+        _add("Open Offdesk", "/control/offdesk", "reduce concurrent work before retrying under host pressure")
+    if next_step == "/control/history":
+        _add("Open History", "/control/history", "inspect recent operator and worker activity")
+    if any(reason.startswith("queue") for reason in reasons):
+        _add("Open Recovery", "/control/recovery", "queue or stale runtime pressure needs recovery review")
+    if any(reason.startswith("disk") for reason in reasons):
+        _add("Open Recovery", "/control/recovery", "review artifacts and cleanup targets before write-heavy work")
+    if any(
+        reason.startswith(prefix)
+        for reason in reasons
+        for prefix in ("process", "codex_process", "python_process", "tmux_process", "total_process")
+    ):
+        _add("Open Audit", "/control/audit?limit=50", "inspect recent high-frequency operator actions")
+        _add("Open History", "/control/history", "inspect background worker churn and repeated runs")
+    if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
+        _add("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
+    return actions[:4]
+
+
+def write_server_guard_snapshot(*, team_dir: Path | str, snapshot_taken_at: str, guard: ServerGuardDTO) -> tuple[str, str]:
+    path = _server_guard_snapshot_path(team_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "snapshot_taken_at": str(snapshot_taken_at or "").strip(),
+        "status": guard.status,
+        "summary": guard.summary,
+        "reason_summary": guard.reason_summary,
+        "note": guard.note,
+        "next_step": guard.next_step,
+        "disk_summary": guard.disk_summary,
+        "memory_summary": guard.memory_summary,
+        "load_summary": guard.load_summary,
+        "process_summary": guard.process_summary,
+        "queue_summary": guard.queue_summary,
+        "recommended_actions": [
+            {"label": row.label, "href": row.href, "note": row.note}
+            for row in list(guard.recommended_actions or [])
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return str(path), str(snapshot_taken_at or "").strip()
 
 
 def build_server_guard(
@@ -157,12 +221,28 @@ def build_server_guard(
     elif queue_stale >= 1:
         _raise("warn", f"queue_warn:{queue_stale}")
 
+    if counts["codex"] >= 70:
+        _raise("blocked", f"codex_process_high:{counts['codex']}")
+    elif counts["codex"] >= 40:
+        _raise("warn", f"codex_process_warn:{counts['codex']}")
+
+    if counts["python"] >= 160:
+        _raise("blocked", f"python_process_high:{counts['python']}")
+    elif counts["python"] >= 80:
+        _raise("warn", f"python_process_warn:{counts['python']}")
+
+    if counts["tmux"] >= 60:
+        _raise("blocked", f"tmux_process_high:{counts['tmux']}")
+    elif counts["tmux"] >= 20:
+        _raise("warn", f"tmux_process_warn:{counts['tmux']}")
+
     if counts["total"] >= 900:
-        _raise("blocked", f"process_high:{counts['total']}")
+        _raise("blocked", f"total_process_high:{counts['total']}")
     elif counts["total"] >= 500:
-        _raise("warn", f"process_warn:{counts['total']}")
+        _raise("warn", f"total_process_warn:{counts['total']}")
 
     next_step = _dominant_next_step(reasons)
+    recommended_actions = _recommended_actions(reasons=reasons, next_step=next_step)
     if not reasons:
         reason_summary = "-"
         note = "server guard is stable; continue with normal operator flow"
@@ -195,4 +275,5 @@ def build_server_guard(
         load_summary=load_summary,
         process_summary=process_summary,
         queue_summary=queue_summary,
+        recommended_actions=recommended_actions,
     )

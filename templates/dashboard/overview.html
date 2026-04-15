@@ -24,9 +24,18 @@
       <li><span>server_guard_reasons</span><strong>{{ snapshot.control_summary.server_guard.reason_summary }}</strong></li>
       <li><span>server_guard_note</span><strong>{{ snapshot.control_summary.server_guard.note }}</strong></li>
       <li><span>server_guard_next</span><strong>{{ snapshot.control_summary.server_guard.next_step }}</strong></li>
+      <li><span>server_guard_snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
       <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
       <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
     </ul>
+    {% if snapshot.control_summary.server_guard.recommended_actions %}
+    <p><strong>server_guard_actions</strong></p>
+    <div class="chat-hints">
+      {% for row in snapshot.control_summary.server_guard.recommended_actions %}
+      <a class="action-history-badge" href="{{ row.href }}">{{ row.label }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
   </article>
   <article class="panel">
     <h2>Attention Runtimes</h2>

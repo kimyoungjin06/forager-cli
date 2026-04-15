@@ -8,6 +8,14 @@
   <p><strong>background_worker_summary</strong> {{ snapshot.control_summary.background_worker_summary }}</p>
   <p><strong>server_guard</strong> {{ snapshot.control_summary.server_guard.summary }}</p>
   <p><strong>server_guard_note</strong> {{ snapshot.control_summary.server_guard.note }} | next={{ snapshot.control_summary.server_guard.next_step }}</p>
+  <p><strong>server_guard_snapshot</strong> {{ snapshot.control_summary.server_guard.snapshot_path }}</p>
+  {% if snapshot.control_summary.server_guard.recommended_actions %}
+  <div class="chat-hints">
+    {% for row in snapshot.control_summary.server_guard.recommended_actions %}
+    <a class="action-history-badge" href="{{ row.href }}">{{ row.label }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="runtime-list single">
     {% for card in snapshot.runtime_cards %}
     <div class="runtime-card {{ card.status }}">

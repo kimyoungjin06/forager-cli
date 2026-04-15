@@ -28,9 +28,17 @@
     <li><span>server_guard</span><strong>{{ snapshot.control_summary.server_guard.summary }}</strong></li>
     <li><span>server_guard_reasons</span><strong>{{ snapshot.control_summary.server_guard.reason_summary }}</strong></li>
     <li><span>server_guard_next</span><strong>{{ snapshot.control_summary.server_guard.next_step }}</strong></li>
+    <li><span>server_guard_snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
     {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
   </ul>
+  {% if snapshot.control_summary.server_guard.recommended_actions %}
+  <div class="chat-hints">
+    {% for row in snapshot.control_summary.server_guard.recommended_actions %}
+    <a class="action-history-badge" href="{{ row.href }}">{{ row.label }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% with
     section_title='control_actions',
     safe_hints=[],
