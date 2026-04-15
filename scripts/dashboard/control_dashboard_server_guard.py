@@ -156,14 +156,42 @@ def _recommended_actions(
         _add_link("Open Audit", "/control/audit?limit=50", "inspect recent high-frequency operator actions")
         _add_link("Open History", "/control/history", "inspect background worker churn and repeated runs")
     if _has_reason(reasons, "codex_process"):
+        _add_action(
+            "Preview Codex Pressure",
+            "/control/actions/runtime/server-guard-pressure-preview",
+            {"pressure_kind": "codex"},
+            "inspect codex session pressure before trimming or consolidating interactive surfaces",
+            command="/ops pressure codex preview",
+        )
         _add_link("Review Codex Pressure", "/control/history?q=codex&scope=control", "inspect codex session churn and trim duplicated interactive runs")
         _add_link("Open Chat Console", "/control/chat", "consolidate chat-bound codex sessions before opening more worker surfaces")
     if _has_reason(reasons, "python_process"):
+        _add_action(
+            "Preview Python Pressure",
+            "/control/actions/runtime/server-guard-pressure-preview",
+            {"pressure_kind": "python"},
+            "inspect python worker pressure before launching more local background tasks",
+            command="/ops pressure python preview",
+        )
         _add_link("Review Python Pressure", "/control/history?q=python&scope=control", "inspect python worker churn and repeated local background launches")
         _add_link("Open Recovery", "/control/recovery", "review worker and queue rails before starting more python-backed jobs")
     if _has_reason(reasons, "tmux_process"):
+        _add_action(
+            "Preview Tmux Pressure",
+            "/control/actions/runtime/server-guard-pressure-preview",
+            {"pressure_kind": "tmux"},
+            "inspect detached tmux runtime pressure before starting more off-desk workers",
+            command="/ops pressure tmux preview",
+        )
         _add_link("Review Tmux Pressure", "/control/history?q=tmux&scope=control", "inspect detached runtime sessions and stale tmux-backed workers")
     if _has_reason(reasons, "total_process"):
+        _add_action(
+            "Preview Process Pressure",
+            "/control/actions/runtime/server-guard-pressure-preview",
+            {"pressure_kind": "process"},
+            "inspect total process pressure before widening worker fanout",
+            command="/ops pressure process preview",
+        )
         _add_link("Review Process Pressure", "/control/history?q=process&scope=control", "inspect broad process churn before launching additional work")
     if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
         _add_link("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
@@ -177,7 +205,7 @@ def _recommended_actions(
                 "inspect stale queue tickets before mutating background queue state",
                 command=f"/orch bgq-clean {project_ref} preview",
             )
-    return actions[:8]
+    return actions[:12]
 
 
 def write_server_guard_snapshot(*, team_dir: Path | str, snapshot_taken_at: str, guard: ServerGuardDTO) -> tuple[str, str]:

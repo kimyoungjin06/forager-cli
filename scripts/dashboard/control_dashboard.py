@@ -130,6 +130,10 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                         for row in list(server_guard.recommended_actions or [])
                     ],
                 },
+                "server_guard_latest_action_summary": snapshot.control_summary.server_guard_latest_action_summary,
+                "server_guard_latest_action_path": snapshot.control_summary.server_guard_latest_action_path,
+                "server_guard_latest_result_summary": snapshot.control_summary.server_guard_latest_result_summary,
+                "server_guard_latest_result_path": snapshot.control_summary.server_guard_latest_result_path,
             }
         )
 

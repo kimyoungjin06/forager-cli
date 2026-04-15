@@ -12,6 +12,138 @@ import aoe_tg_ops_policy as ops_policy
 
 from control_dashboard_action_exec_shared import _json, _load_dashboard_manager_state
 from control_dashboard_common import DashboardAppConfig, _not_found_json
+from control_dashboard_state import load_dashboard_snapshot
+
+
+def _server_guard_pressure_preview_payload(
+    *,
+    spec: Dict[str, object],
+    payload: Dict[str, object],
+    pressure_kind: str,
+    snapshot,
+    matching_reasons: list[str],
+    next_step: str,
+    remediation: str,
+    note: str,
+    outcome_kind: str,
+) -> Dict[str, object]:
+    guard = snapshot.control_summary.server_guard
+    return {
+        "ok": True,
+        "implemented": True,
+        "executed": False,
+        "status": "preview",
+        "method": "POST",
+        "path": spec.get("path", "-"),
+        "mode": spec.get("mode", "-"),
+        "source_command": spec.get("command", "-"),
+        "payload": payload,
+        "next_step": next_step,
+        "remediation": remediation,
+        "preview": {
+            "kind": outcome_kind,
+            "pressure_kind": pressure_kind,
+            "server_guard_summary": guard.summary,
+            "server_guard_note": guard.note,
+            "server_guard_next_step": guard.next_step,
+            "reason_summary": guard.reason_summary,
+            "matching_reasons": matching_reasons,
+            "disk_summary": guard.disk_summary,
+            "memory_summary": guard.memory_summary,
+            "load_summary": guard.load_summary,
+            "process_summary": guard.process_summary,
+            "queue_summary": guard.queue_summary,
+            "snapshot_path": guard.snapshot_path,
+            "note": note,
+        },
+        "outcome": {
+            "kind": outcome_kind,
+            "status": "preview",
+            "reason_code": matching_reasons[0] if matching_reasons else f"{pressure_kind}_pressure_open",
+            "detail": f"pressure_kind={pressure_kind} | reasons={' | '.join(matching_reasons) if matching_reasons else '-'} | process={guard.process_summary}",
+        },
+    }
+
+
+def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    pressure_kind = str(payload.get("pressure_kind", "")).strip().lower()
+    if pressure_kind not in {"codex", "python", "tmux", "process"}:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": spec.get("path", "-"),
+                "mode": spec.get("mode", "-"),
+                "source_command": spec.get("command", "-"),
+                "payload": payload,
+                "next_step": "/control/health",
+                "remediation": "select a concrete pressure_kind before previewing server guard pressure",
+                "outcome": {
+                    "kind": "server_guard_pressure_preview",
+                    "status": "blocked",
+                    "reason_code": "pressure_kind_missing",
+                    "detail": "pressure_kind must be one of codex, python, tmux, process",
+                },
+            },
+            status=400,
+        )
+
+    snapshot = load_dashboard_snapshot(
+        control_root=config.control_root,
+        team_dir=config.team_dir,
+        manager_state_file=config.manager_state_file,
+    )
+    guard = snapshot.control_summary.server_guard
+    reasons = [token.strip() for token in str(guard.reason_summary or "").split("|") if token.strip()]
+    prefixes = {
+        "codex": ("codex_process",),
+        "python": ("python_process",),
+        "tmux": ("tmux_process",),
+        "process": ("total_process", "process"),
+    }[pressure_kind]
+    matching_reasons = [reason for reason in reasons if any(reason.startswith(prefix) for prefix in prefixes)]
+    next_step = {
+        "codex": "/control/chat",
+        "python": "/control/recovery",
+        "tmux": "/control/history?q=tmux&scope=control",
+        "process": "/control/history?q=process&scope=control",
+    }[pressure_kind]
+    note = {
+        "codex": "inspect duplicated chat sessions and interactive codex runs before opening more operator surfaces",
+        "python": "inspect local worker churn and queue pressure before launching more python-backed runs",
+        "tmux": "inspect detached runtime handles and stale tmux sessions before starting more off-desk workers",
+        "process": "inspect broad process churn before increasing runtime fanout",
+    }[pressure_kind]
+    remediation = {
+        "codex": "consolidate chat sessions, trim duplicate codex loops, and keep new work in the chat manager rail until pressure drops",
+        "python": "reduce local worker churn, inspect queue buildup, and prefer recovery/offdesk review before relaunching python-backed work",
+        "tmux": "inspect detached runtime handles and stale tmux workers before starting additional detached runs",
+        "process": "review global process churn and recovery surfaces before increasing concurrency",
+    }[pressure_kind]
+    outcome_kind = {
+        "codex": "codex_process_pressure_preview",
+        "python": "python_process_pressure_preview",
+        "tmux": "tmux_process_pressure_preview",
+        "process": "process_pressure_preview",
+    }[pressure_kind]
+    return _json(
+        _server_guard_pressure_preview_payload(
+            spec=spec,
+            payload=payload,
+            pressure_kind=pressure_kind,
+            snapshot=snapshot,
+            matching_reasons=matching_reasons,
+            next_step=next_step,
+            remediation=remediation,
+            note=note,
+            outcome_kind=outcome_kind,
+        ),
+        status=200,
+    )
 
 
 def _now_iso() -> str:

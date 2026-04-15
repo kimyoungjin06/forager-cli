@@ -89,6 +89,8 @@ class ControlSummaryDTO:
     server_guard: ServerGuardDTO
     server_guard_latest_action_summary: str
     server_guard_latest_action_path: str
+    server_guard_latest_result_summary: str
+    server_guard_latest_result_path: str
     active_runtime_count: int
     attention_runtime_count: int
     snapshot_taken_at: str

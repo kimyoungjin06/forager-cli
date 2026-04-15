@@ -226,6 +226,7 @@ def load_dashboard_snapshot_result(
         snapshot_updated_at=server_guard_snapshot_updated_at,
     )
     server_guard_latest_action_summary, server_guard_latest_action_path = _latest_server_guard_action(action_audit_rows)
+    server_guard_latest_result_summary, server_guard_latest_result_path = _latest_server_guard_result(action_audit_rows)
 
     summary = ControlSummaryDTO(
         auto_mode=auto_mode,
@@ -249,6 +250,8 @@ def load_dashboard_snapshot_result(
         server_guard=server_guard,
         server_guard_latest_action_summary=server_guard_latest_action_summary,
         server_guard_latest_action_path=server_guard_latest_action_path,
+        server_guard_latest_result_summary=server_guard_latest_result_summary,
+        server_guard_latest_result_path=server_guard_latest_result_path,
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
         snapshot_taken_at=snapshot_taken_at,
@@ -541,7 +544,36 @@ def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         summary = f"{headline} | at={at} | next={next_step}"
-        href = str(getattr(row, "link_href", "")).strip() or "/control/audit?focus=server-guard"
+        href = str(getattr(row, "link_href", "")).strip()
+        if not href or href == "-":
+            href = "/control/audit?focus=server-guard"
+        return summary, href
+    return "-", "/control/audit?focus=server-guard"
+
+
+def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str]:
+    result_kinds = {
+        "background_queue_cleanup_preview",
+        "background_queue_cleanup",
+        "auto_recover",
+        "codex_process_pressure_preview",
+        "python_process_pressure_preview",
+        "tmux_process_pressure_preview",
+        "process_pressure_preview",
+    }
+    for row in rows:
+        if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
+            continue
+        if str(getattr(row, "outcome_kind", "")).strip() not in result_kinds:
+            continue
+        headline = str(getattr(row, "headline", "")).strip() or "-"
+        status = str(getattr(row, "outcome_status", "")).strip() or str(getattr(row, "status", "")).strip() or "-"
+        at = str(getattr(row, "at", "")).strip() or "-"
+        next_step = str(getattr(row, "next_step", "")).strip() or "-"
+        summary = f"{headline} | status={status} | at={at} | next={next_step}"
+        href = str(getattr(row, "link_href", "")).strip()
+        if not href or href == "-":
+            href = "/control/audit?focus=server-guard"
         return summary, href
     return "-", "/control/audit?focus=server-guard"
 

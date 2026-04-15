@@ -85,6 +85,15 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Syncback Preview | {status}"
     if path == "/control/actions/runtime/syncback-apply":
         return f"Syncback Apply | {status}"
+    if path == "/control/actions/runtime/server-guard-pressure-preview":
+        pressure_kind = str((payload.get("payload") or {}).get("pressure_kind", "")).strip().lower()
+        label = {
+            "codex": "Codex Pressure Preview",
+            "python": "Python Pressure Preview",
+            "tmux": "Tmux Pressure Preview",
+            "process": "Process Pressure Preview",
+        }.get(pressure_kind, "Server Guard Pressure Preview")
+        return f"{label} | {status}"
     if path == "/control/actions/runtime/background-queue-clean":
         return f"Background Queue Cleanup | {status}"
     if path == "/control/actions/runtime/background-queue-clean-preview":
@@ -99,6 +108,9 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
 
 
 def _action_audit_link(payload: Dict[str, Any]) -> Tuple[str, str]:
+    path = str(payload.get("path", "")).strip()
+    if path == "/control/actions/runtime/server-guard-pressure-preview":
+        return "health", "/control/health"
     task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
     preview = payload.get("preview") if isinstance(payload.get("preview"), dict) else {}
     task_href = str(task.get("detail_path", "")).strip() or str(preview.get("detail_path", "")).strip()

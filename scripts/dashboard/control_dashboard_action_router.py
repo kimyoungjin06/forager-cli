@@ -16,6 +16,7 @@ from control_dashboard_action_exec import (
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
     _preview_background_queue_clean_action,
+    _preview_server_guard_pressure_action,
     _execute_chat_send_action,
     _execute_chat_session_select_task_action,
     _execute_chat_session_update_action,
@@ -315,6 +316,19 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
             "note": "inspect stale background queue tickets before marking them stale",
         }
 
+    if path == "/control/actions/runtime/server-guard-pressure-preview":
+        pressure_kind = str(payload.get("pressure_kind", "")).strip().lower()
+        if pressure_kind not in {"codex", "python", "tmux", "process"}:
+            raise ValueError("pressure_kind must be one of codex, python, tmux, process")
+        return {
+            "command": f"/ops pressure {pressure_kind} preview",
+            "mode": "safe",
+            "method": "POST",
+            "path": path,
+            "payload": {"pressure_kind": pressure_kind},
+            "note": "inspect server guard pressure before opening more manager surfaces or launching more work",
+        }
+
     if path == "/control/actions/control/auto-recover":
         force_raw = payload.get("force", False)
         if isinstance(force_raw, bool):
@@ -527,6 +541,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/runtime/background-queue-clean-preview":
         return _with_action_audit(_preview_background_queue_clean_action(spec, config=config), config=config)
+
+    if path == "/control/actions/runtime/server-guard-pressure-preview":
+        return _with_action_audit(_preview_server_guard_pressure_action(spec, config=config), config=config)
 
     if path == "/control/actions/runtime/judge":
         return _with_action_audit(_execute_runtime_judge_action(spec, config=config), config=config)
