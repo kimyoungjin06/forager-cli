@@ -6,6 +6,43 @@
   <p class="section-note">session을 고르고 direct, dispatch, room rail을 웹에서 바로 보냅니다. 이 화면은 dashboard 위에 얹힌 operator console이고, gateway simulate path를 그대로 사용합니다.</p>
 </section>
 
+<section class="panel ops-manager-panel">
+  <div class="panel-heading">
+    <div>
+      <p class="section-kicker">Ops Manager</p>
+      <h2>Server Guard + Chat Rails</h2>
+    </div>
+    <span class="status-pill {{ snapshot.control_summary.server_guard.status }}">{{ snapshot.control_summary.server_guard.status }}</span>
+  </div>
+  <ul class="kv-list">
+    <li><span>server_guard</span><strong>{{ snapshot.control_summary.server_guard.summary }}</strong></li>
+    <li><span>reasons</span><strong>{{ snapshot.control_summary.server_guard.reason_summary }}</strong></li>
+    <li><span>note</span><strong>{{ snapshot.control_summary.server_guard.note }}</strong></li>
+    <li><span>next</span><strong>{{ snapshot.control_summary.server_guard.next_step }}</strong></li>
+    <li><span>chat_session</span><strong>{{ chat.selected_chat_alias or chat.selected_chat_id or '-' }}</strong></li>
+    <li><span>selected_task</span><strong>{{ chat.selected_task_ref or '-' }}</strong></li>
+  </ul>
+  {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
+    {% include 'dashboard/_server_guard_actions.html' %}
+  {% endwith %}
+  {% if chat.selected_chat_id and chat.session_presets %}
+  <p><strong>manager_presets</strong></p>
+  <div class="chat-hints">
+    {% for preset in chat.session_presets %}
+    <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Apply {{ preset.label }}" data-action-command="chat-session-preset:{{ preset.label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
+      <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
+      <input type="hidden" name="room" value="{{ preset.room }}">
+      <input type="hidden" name="default_mode" value="{{ preset.default_mode }}">
+      <input type="hidden" name="pending_mode" value="{{ preset.pending_mode }}">
+      <input type="hidden" name="lang" value="{{ preset.lang }}">
+      <input type="hidden" name="report_level" value="{{ preset.report_level }}">
+      <button type="submit" class="{% if preset.room == chat.selected_room %}active-chip{% endif %}">{{ preset.label }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
 <section class="chat-console-grid">
   <aside class="panel chat-sidebar">
     <div class="panel-heading">
@@ -107,21 +144,6 @@
         </div>
         <button type="submit">Update Session Controls</button>
       </form>
-      {% if chat.selected_chat_id and chat.session_presets %}
-      <div class="chat-hints">
-        {% for preset in chat.session_presets %}
-        <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Apply {{ preset.label }}" data-action-command="chat-session-preset:{{ preset.label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
-          <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
-          <input type="hidden" name="room" value="{{ preset.room }}">
-          <input type="hidden" name="default_mode" value="{{ preset.default_mode }}">
-          <input type="hidden" name="pending_mode" value="{{ preset.pending_mode }}">
-          <input type="hidden" name="lang" value="{{ preset.lang }}">
-          <input type="hidden" name="report_level" value="{{ preset.report_level }}">
-          <button type="submit" class="{% if preset.room == chat.selected_room %}active-chip{% endif %}">{{ preset.label }}</button>
-        </form>
-        {% endfor %}
-      </div>
-      {% endif %}
       <form class="action-form chat-compose" data-dashboard-action data-action-label="Select Chat Task" data-action-command="chat-session-select-task" data-action-mode="safe" method="post" action="{{ chat.select_task_action_path }}">
         <div class="chat-compose-grid">
           <label>

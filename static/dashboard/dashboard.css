@@ -125,7 +125,8 @@ strong {
 }
 
 .page,
-.source-strip {
+.source-strip,
+.manager-strip {
   width: min(1540px, calc(100% - 2rem));
   margin: 0 auto;
 }
@@ -141,6 +142,48 @@ strong {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0.75rem;
+}
+
+.manager-strip {
+  margin-top: 0.9rem;
+  padding: 1rem 1.1rem;
+}
+
+.manager-strip-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.manager-strip-head h2 {
+  margin: 0.08rem 0 0;
+  font-size: 1rem;
+}
+
+.manager-strip-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 1rem;
+  margin-top: 0.85rem;
+}
+
+.manager-strip-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.manager-strip-copy p {
+  margin: 0;
+}
+
+.manager-strip-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ops-manager-panel {
+  margin-bottom: 1rem;
 }
 
 .source-card,
@@ -1072,8 +1115,13 @@ strong {
   }
 
   .page,
-  .source-strip {
+  .source-strip,
+  .manager-strip {
     width: min(100%, calc(100% - 1rem));
+  }
+
+  .manager-strip-grid {
+    grid-template-columns: 1fr;
   }
 
   .runtime-card-header,

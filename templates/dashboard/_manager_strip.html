@@ -1,0 +1,30 @@
+{% if snapshot is defined %}
+<section class="manager-strip panel">
+  <div class="manager-strip-head">
+    <div>
+      <p class="section-kicker">Ops Manager</p>
+      <h2>Ops Manager Rail</h2>
+      <p class="muted">{{ snapshot.control_summary.server_guard.summary }}</p>
+    </div>
+    <span class="status-pill {{ snapshot.control_summary.server_guard.status }}">{{ snapshot.control_summary.server_guard.status }}</span>
+  </div>
+  <div class="manager-strip-grid">
+    <div class="manager-strip-copy">
+      <p><strong>reasons</strong> {{ snapshot.control_summary.server_guard.reason_summary }}</p>
+      <p><strong>note</strong> {{ snapshot.control_summary.server_guard.note }}</p>
+      <p><strong>next</strong> {{ snapshot.control_summary.server_guard.next_step }}</p>
+      <p><strong>snapshot</strong> {{ snapshot.control_summary.server_guard.snapshot_path }}</p>
+    </div>
+    <div class="manager-strip-actions">
+      {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
+        {% include 'dashboard/_server_guard_actions.html' %}
+      {% endwith %}
+      <div class="chat-hints">
+        <a class="action-history-badge" href="/control/chat">Open Chat Console</a>
+        <a class="action-history-badge" href="/control/recovery">Open Recovery</a>
+        <a class="action-history-badge" href="/control/history">Open History</a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}

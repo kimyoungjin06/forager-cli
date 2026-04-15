@@ -512,6 +512,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert overview_status == 200
     assert overview_headers["Content-Type"].startswith("text/html")
     assert "Control Summary" in overview_text
+    assert "Ops Manager Rail" in overview_text
     assert "Action Audit" in overview_text
     assert "auto-route" in overview_text
     assert "O2 Alpha" in overview_text
@@ -727,6 +728,8 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Chat Console" in text
+    assert "Server Guard + Chat Rails" in text
+    assert "Ops Manager Rail" in text
     assert "123456" in text
     assert "O2/analysis" in text
     assert "analysis room tail line" in text
