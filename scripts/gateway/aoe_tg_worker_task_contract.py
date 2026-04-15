@@ -2035,27 +2035,27 @@ def derive_worker_task_module_action_blocker(
         if safe_mode == "syncback" and _entry("syncback_ready").get("state") == "blocked":
             reason_code = "package_syncback_pending"
             next_hint = _entry("syncback_ready").get("note", "") or "prepare_syncback"
-            suggested_action = "task_review"
+            suggested_action = "package_syncback_review"
             remediation = "prepare syncback readiness before accepted syncback"
         elif _entry("verification_ready").get("state") == "blocked":
             reason_code = "package_verification_open"
             next_hint = _entry("verification_ready").get("note", "") or "verification"
-            suggested_action = "task_review"
+            suggested_action = "package_verification_review"
             remediation = "complete package verification before applying package changes"
         elif _entry("apply_ready").get("state") == "blocked":
             reason_code = "package_apply_pending"
             next_hint = _entry("apply_ready").get("note", "") or "apply_gate"
-            suggested_action = "task_review"
+            suggested_action = "package_apply_review"
             remediation = "complete package apply readiness before syncback"
         elif _entry("syncback_ready").get("state") == "blocked":
             reason_code = "package_syncback_pending"
             next_hint = _entry("syncback_ready").get("note", "") or "prepare_syncback"
-            suggested_action = "task_review"
+            suggested_action = "package_syncback_review"
             remediation = "prepare syncback readiness before accepted syncback"
         else:
             reason_code = "package_artifact_open"
             next_hint = _entry("package_ready").get("note", "") or "artifact_check_open"
-            suggested_action = "task_review"
+            suggested_action = "package_artifact_review"
             remediation = "review package artifact integrity before applying changes"
         blocked_rows = _blocked("verification_ready", "apply_ready", "syncback_ready", "package_ready")
     else:

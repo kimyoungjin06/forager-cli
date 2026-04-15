@@ -3365,7 +3365,7 @@ def test_control_dashboard_syncback_routes_block_when_package_record_pending(tmp
     assert preview_payload["remediation"] == "prepare syncback readiness before accepted syncback"
     assert "syncback_record=pending" in preview_payload["worker_records"]
     assert "package_syncback_blocker | reason=package_syncback_pending" in preview_payload["worker_blocker"]
-    assert preview_payload["worker_recommended_action"] == "task_review"
+    assert preview_payload["worker_recommended_action"] == "package_syncback_review"
 
     assert apply_status == 409
     assert apply_payload["status"] == "blocked"
@@ -3442,6 +3442,99 @@ def test_control_dashboard_syncback_routes_prefer_package_record_rows_gate(tmp_p
     assert "syncback_row=pending|state=blocked" in preview_payload["worker_record_rows"]
     assert "syncback_ready=blocked|state=blocked" in preview_payload["worker_preflight_rows"]
     assert "package_syncback_blocker | reason=package_syncback_pending" in preview_payload["worker_blocker"]
+    assert preview_payload["worker_recommended_action"] == "package_syncback_review"
+
+
+def test_dashboard_and_routes_surface_package_verification_review_actions(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "package"
+    task["background_run_task_contract_module_summary"] = "package | artifact_integrity_gate"
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=dist/release_bundle.zip | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["dist/release_bundle.zip"]
+    task["background_run_worker_record_rows_summary"] = (
+        "package_record_rows | artifact_row=dist/release_bundle.zip|state=present | "
+        "verification_row=0|state=open|note=verify_artifacts | apply_row=ready|state=ready | "
+        "syncback_row=pending|state=blocked|note=prepare_syncback"
+    )
+    task["background_run_worker_record_rows"] = [
+        "artifact_row=dist/release_bundle.zip|state=present",
+        "verification_row=0|state=open|note=verify_artifacts",
+        "apply_row=ready|state=ready",
+        "syncback_row=pending|state=blocked|note=prepare_syncback",
+    ]
+    task["background_run_worker_preflight_rows_summary"] = (
+        "package_preflight_rows | verification_ready=open|state=blocked|note=verify_artifacts | "
+        "apply_ready=ready|state=ready|note=apply_gate | syncback_ready=blocked|state=blocked|note=verify_artifacts | "
+        "package_ready=verification_pending|state=blocked|note=verify_artifacts"
+    )
+    task["background_run_worker_preflight_rows"] = [
+        "verification_ready=open|state=blocked|note=verify_artifacts",
+        "apply_ready=ready|state=ready|note=apply_gate",
+        "syncback_ready=blocked|state=blocked|note=verify_artifacts",
+        "package_ready=verification_pending|state=blocked|note=verify_artifacts",
+    ]
+    gw.save_manager_state(manager_state_file, state)
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        request_id="REQ-1",
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+
+    assert task_detail is not None
+    assert any(
+        btn.label == "Review Package Verification"
+        and btn.path == "/control/actions/task/analysis-review"
+        and btn.payload_json == '{"task_ref":"T-001"}'
+        for btn in runtime_card.runtime_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Review Package Verification"
+        and btn.path == "/control/actions/task/analysis-review"
+        for btn in runtime_detail.active_task_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Review Package Verification"
+        and btn.path == "/control/actions/task/analysis-review"
+        for btn in task_detail.safe_action_buttons
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    assert preview_status == 409
+    assert preview_payload["outcome"]["reason_code"] == "package_verification_open"
+    assert preview_payload["next_step"] == "/task T-001"
+    assert preview_payload["worker_recommended_action"] == "package_verification_review"
+    assert "package_apply_blocker | reason=package_verification_open" in preview_payload["worker_blocker"]
 
 
 def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> None:

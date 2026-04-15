@@ -786,14 +786,35 @@ def _worker_blocker_action_button(
         if suggested_lane_ids:
             command += f" lane {','.join(suggested_lane_ids)}"
         custom_label = "Resolve Writing Execute Blocker" if module_kind == "writing" else "Resolve Worker Execute Blocker"
-    elif suggested_action == "task_review":
+    elif suggested_action in {
+        "task_review",
+        "package_verification_review",
+        "package_apply_review",
+        "package_syncback_review",
+        "package_artifact_review",
+    }:
         payload_json = json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":"))
         blocker_summary = str(blocker.get("summary_line", "")).strip()
         remediation = str(blocker.get("remediation", "")).strip()
         note = " | ".join(part for part in [blocker_summary, remediation] if part and part != "-")[:320]
+        if suggested_action == "package_verification_review":
+            button_label = "Review Package Verification"
+            command = f"/task {task_ref} | package-verification-review"
+        elif suggested_action == "package_apply_review":
+            button_label = "Review Package Apply Gate"
+            command = f"/task {task_ref} | package-apply-review"
+        elif suggested_action == "package_syncback_review":
+            button_label = "Review Package Syncback"
+            command = f"/task {task_ref} | package-syncback-review"
+        elif suggested_action == "package_artifact_review":
+            button_label = "Review Package Integrity"
+            command = f"/task {task_ref} | package-artifact-review"
+        else:
+            button_label = "Resolve Analysis Blocker" if module_kind == "analysis" else "Review Worker Blocker"
+            command = f"/task {task_ref} | analysis-review"
         return ActionButtonDTO(
-            label="Resolve Analysis Blocker" if module_kind == "analysis" else "Review Worker Blocker",
-            command=f"/task {task_ref} | analysis-review",
+            label=button_label,
+            command=command,
             method="POST",
             path="/control/actions/task/analysis-review",
             mode="safe",
