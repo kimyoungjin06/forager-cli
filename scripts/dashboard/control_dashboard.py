@@ -96,12 +96,25 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
         )
+        server_guard = snapshot.control_summary.server_guard
         return _json(
             {
                 "ok": True,
                 "snapshot_taken_at": snapshot.snapshot_taken_at,
                 "active_runtime_count": snapshot.control_summary.active_runtime_count,
                 "attention_runtime_count": snapshot.control_summary.attention_runtime_count,
+                "server_guard": {
+                    "status": server_guard.status,
+                    "summary": server_guard.summary,
+                    "reason_summary": server_guard.reason_summary,
+                    "note": server_guard.note,
+                    "next_step": server_guard.next_step,
+                    "disk_summary": server_guard.disk_summary,
+                    "memory_summary": server_guard.memory_summary,
+                    "load_summary": server_guard.load_summary,
+                    "process_summary": server_guard.process_summary,
+                    "queue_summary": server_guard.queue_summary,
+                },
             }
         )
 

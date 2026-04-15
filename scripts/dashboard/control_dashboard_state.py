@@ -21,6 +21,7 @@ import aoe_tg_chat_state as chat_state
 import aoe_tg_room_handlers as room_handlers
 import aoe_tg_task_state as task_state
 
+from control_dashboard_server_guard import build_server_guard
 from control_dashboard_state_builders import (
     _build_active_task_rows,
     _build_recovery_summary,
@@ -208,6 +209,11 @@ def load_dashboard_snapshot_result(
         auto_mode = "on" if bool(auto_state.get("enabled", False)) else "off"
     offdesk_mode = "on" if bool(auto_state.get("offdesk_enabled", auto_state.get("offdesk_mode") not in {None, "", "off"})) else "off"
     state_root = runtime_core.describe_resolved_team_dir(paths.team_dir)
+    server_guard = build_server_guard(
+        control_root=paths.control_root,
+        team_dir=paths.team_dir,
+        runtime_cards=runtime_cards,
+    )
 
     summary = ControlSummaryDTO(
         auto_mode=auto_mode,
@@ -228,6 +234,7 @@ def load_dashboard_snapshot_result(
             str(latest_intent.get("action", "")).strip(),
             str(latest_intent.get("trace", "")).strip(),
         ),
+        server_guard=server_guard,
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
         snapshot_taken_at=snapshot_taken_at,

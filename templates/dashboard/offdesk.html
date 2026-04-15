@@ -6,6 +6,8 @@
   <p><strong>execution_brief_summary</strong> {{ snapshot.control_summary.execution_brief_summary }}</p>
   <p><strong>background_run_summary</strong> {{ snapshot.control_summary.background_run_summary }}</p>
   <p><strong>background_worker_summary</strong> {{ snapshot.control_summary.background_worker_summary }}</p>
+  <p><strong>server_guard</strong> {{ snapshot.control_summary.server_guard.summary }}</p>
+  <p><strong>server_guard_note</strong> {{ snapshot.control_summary.server_guard.note }} | next={{ snapshot.control_summary.server_guard.next_step }}</p>
   <div class="runtime-list single">
     {% for card in snapshot.runtime_cards %}
     <div class="runtime-card {{ card.status }}">

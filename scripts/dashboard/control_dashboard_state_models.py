@@ -10,6 +10,20 @@ from control_dashboard_state_io import ActionAuditRowDTO, FileFreshnessDTO
 
 
 @dataclass(frozen=True)
+class ServerGuardDTO:
+    status: str
+    summary: str
+    reason_summary: str
+    note: str
+    next_step: str
+    disk_summary: str
+    memory_summary: str
+    load_summary: str
+    process_summary: str
+    queue_summary: str
+
+
+@dataclass(frozen=True)
 class ActionButtonDTO:
     label: str
     command: str
@@ -57,6 +71,7 @@ class ControlSummaryDTO:
     latest_intent_action: str
     latest_intent_trace: str
     latest_intent_focus: str
+    server_guard: ServerGuardDTO
     active_runtime_count: int
     attention_runtime_count: int
     snapshot_taken_at: str
