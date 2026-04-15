@@ -4843,6 +4843,18 @@ def test_dashboard_surfaces_apply_preview_and_accept_labels(tmp_path: Path) -> N
 def test_control_dashboard_post_runtime_judge_route_executes_bound_review(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["background_run_task_contract_module"] = "analysis"
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["background_run_task_contract_module_summary"] = "module=analysis | findings_evidence_gate"
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["background_run_worker_record_set_summary"] = (
+        "analysis_record_set | finding=1 | evidence=1 | gap=1"
+    )
+    state["projects"]["alpha"]["tasks"]["REQ-1"]["background_run_worker_record_set"] = [
+        {"kind": "finding", "label": "summary", "state": "stable", "note": "action"},
+        {"kind": "evidence", "label": "missing", "state": "missing", "note": "attach_evidence"},
+        {"kind": "gap", "label": "evidence_missing", "state": "open", "note": "attach_evidence"},
+    ]
+    gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -4889,9 +4901,13 @@ def test_control_dashboard_post_runtime_judge_route_executes_bound_review(tmp_pa
     assert payload["source_command"] == "/orch judge O2"
     assert payload["binding"] == "judge=codex_cli-gpt-5-4:gpt-5.4"
     assert payload["latest_judge_decision"]["verdict"] == "continue"
+    assert payload["latest_judge_decision"]["analysis_record_set"] == "analysis_record_set | finding=1 | evidence=1 | gap=1"
+    assert payload["latest_judge_decision"]["analysis_record_set_records"][1]["kind"] == "evidence"
     row = action_audit.load_latest_action_audit_for_runtime_kind(team_dir, project_alias="O2", outcome_kind="offdesk_judge")
     assert row["headline"] == "Offdesk Judge | executed"
     assert row["outcome_detail"] == "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed"
+    decision = action_audit.load_latest_offdesk_judge_decision_for_runtime(team_dir, project_alias="O2")
+    assert decision["analysis_record_set"] == "analysis_record_set | finding=1 | evidence=1 | gap=1"
     updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
     updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
     assert updated_task["background_run_manual_step_execution_status"] == "executed"

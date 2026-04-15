@@ -131,12 +131,12 @@ def _latest_judge_summary_payload(*, team_dir: Path, entry: Dict[str, Any]) -> D
     }
 
 
-def _latest_judge_decision_payload(*, team_dir: Path, entry: Dict[str, Any]) -> Dict[str, str]:
+def _latest_judge_decision_payload(*, team_dir: Path, entry: Dict[str, Any]) -> Dict[str, Any]:
     alias = _project_status_ref(str(entry.get("name", "")).strip(), entry)
     decision = load_latest_offdesk_judge_decision_for_runtime(team_dir, project_alias=alias)
     if not isinstance(decision, dict) or not decision:
         return {}
-    return {
+    payload: Dict[str, Any] = {
         "verdict": str(decision.get("verdict", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
@@ -145,9 +145,25 @@ def _latest_judge_decision_payload(*, team_dir: Path, entry: Dict[str, Any]) -> 
         "recommended_action": str(decision.get("recommended_action", "")).strip() or "-",
         "at": str(decision.get("at", "")).strip() or "-",
     }
+    worker_module = str(decision.get("worker_module", "")).strip() or "-"
+    worker_record_set = str(decision.get("worker_record_set", "")).strip() or "-"
+    analysis_record_set = str(decision.get("analysis_record_set", "")).strip() or "-"
+    worker_record_set_records = [item for item in (decision.get("worker_record_set_records") or []) if isinstance(item, dict)]
+    analysis_record_set_records = [item for item in (decision.get("analysis_record_set_records") or []) if isinstance(item, dict)]
+    if worker_module != "-":
+        payload["worker_module"] = worker_module
+    if worker_record_set != "-":
+        payload["worker_record_set"] = worker_record_set
+    if worker_record_set_records:
+        payload["worker_record_set_records"] = worker_record_set_records
+    if analysis_record_set != "-":
+        payload["analysis_record_set"] = analysis_record_set
+    if analysis_record_set_records:
+        payload["analysis_record_set_records"] = analysis_record_set_records
+    return payload
 
 
-def _retry_blocked_remediation_with_latest_judge(remediation: str, latest_judge: Dict[str, str]) -> str:
+def _retry_blocked_remediation_with_latest_judge(remediation: str, latest_judge: Dict[str, Any]) -> str:
     if not isinstance(latest_judge, dict) or not latest_judge:
         return remediation
     parts: List[str] = []

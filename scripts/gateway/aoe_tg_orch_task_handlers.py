@@ -453,31 +453,7 @@ def _latest_task_for_model_status(entry: Dict[str, Any]) -> Dict[str, Any]:
             best_task = task
     return best_task if isinstance(best_task, dict) else {}
 
-
-def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir: Path) -> str:
-    alias = _project_alias(entry, str(entry.get("name", "")).strip())
-    project_name = str(entry.get("display_name", "")).strip() or str(entry.get("name", "")).strip() or alias
-    task_label = (
-        str(task.get("short_id", "")).strip().upper()
-        or str(task.get("alias", "")).strip()
-        or str(task.get("request_id", "")).strip()
-        or "task"
-    )
-    pack = context_pack.load_context_pack(
-        team_dir,
-        entry=entry,
-        task=task,
-        project_root=entry.get("project_root"),
-    )
-    rerun_summary = str(task.get("rerun_summary", "")).strip() or (
-        "retry="
-        + (
-            str(task.get("rerun_status", "")).strip() or "none"
-        )
-    )
-    followup_summary = str(task.get("followup_summary", "")).strip() or (
-        str(task.get("followup_brief_summary", "")).strip() or "followup=none"
-    )
+def _offdesk_judge_worker_record_set(task: Dict[str, Any]) -> tuple[str, list[Dict[str, Any]]]:
     worker_record_set_summary = str(task.get("background_run_worker_record_set_summary", "")).strip()
     worker_record_set = (
         [item for item in (task.get("background_run_worker_record_set") or []) if isinstance(item, dict)]
@@ -535,6 +511,55 @@ def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir:
         )
         worker_record_set_summary = str(derived_record_set.get("summary_line", "")).strip() or worker_record_set_summary
         worker_record_set = [item for item in (derived_record_set.get("records") or []) if isinstance(item, dict)]
+    return worker_record_set_summary or "-", worker_record_set
+
+
+def _offdesk_judge_decision_snapshot(task: Dict[str, Any], response_text: str) -> Dict[str, Any]:
+    decision = normalize_offdesk_judge_decision(response_text)
+    if not decision:
+        return {}
+    worker_module = str(task.get("background_run_task_contract_module", "")).strip().lower() or "general"
+    worker_module_summary = str(task.get("background_run_task_contract_module_summary", "")).strip() or worker_module
+    worker_record_set_summary, worker_record_set = _offdesk_judge_worker_record_set(task)
+    if worker_module_summary not in {"", "-", "general"}:
+        decision["worker_module"] = worker_module_summary
+    if worker_record_set_summary not in {"", "-"}:
+        decision["worker_record_set"] = worker_record_set_summary
+    if worker_record_set:
+        decision["worker_record_set_records"] = worker_record_set
+    if worker_module == "analysis":
+        if worker_record_set_summary not in {"", "-"}:
+            decision["analysis_record_set"] = worker_record_set_summary
+        if worker_record_set:
+            decision["analysis_record_set_records"] = worker_record_set
+    return decision
+
+
+def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir: Path) -> str:
+    alias = _project_alias(entry, str(entry.get("name", "")).strip())
+    project_name = str(entry.get("display_name", "")).strip() or str(entry.get("name", "")).strip() or alias
+    task_label = (
+        str(task.get("short_id", "")).strip().upper()
+        or str(task.get("alias", "")).strip()
+        or str(task.get("request_id", "")).strip()
+        or "task"
+    )
+    pack = context_pack.load_context_pack(
+        team_dir,
+        entry=entry,
+        task=task,
+        project_root=entry.get("project_root"),
+    )
+    rerun_summary = str(task.get("rerun_summary", "")).strip() or (
+        "retry="
+        + (
+            str(task.get("rerun_status", "")).strip() or "none"
+        )
+    )
+    followup_summary = str(task.get("followup_summary", "")).strip() or (
+        str(task.get("followup_brief_summary", "")).strip() or "followup=none"
+    )
+    worker_record_set_summary, worker_record_set = _offdesk_judge_worker_record_set(task)
     worker_preflight_rows = (
         [str(item).strip() for item in (task.get("background_run_worker_preflight_rows") or []) if str(item).strip()]
         if isinstance(task.get("background_run_worker_preflight_rows"), list)
@@ -2912,7 +2937,7 @@ def handle_orch_task_command(
         summary = str(result.get("summary", "-")).strip() or "-"
         response_text = str(result.get("response_text", "")).strip()
         reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
-        judge_decision = normalize_offdesk_judge_decision(response_text)
+        judge_decision = _offdesk_judge_decision_snapshot(latest_task, response_text)
         append_action_audit_row(
             team_dir,
             headline=f"Offdesk Judge | {'executed' if ok else 'blocked'}",

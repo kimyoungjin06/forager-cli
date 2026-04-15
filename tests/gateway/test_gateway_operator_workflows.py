@@ -535,6 +535,14 @@ def test_orch_judge_executes_bound_review_stub(tmp_path: Path, monkeypatch: pyte
                 "execution_brief_summary": "executable | do=reports/summary.md",
                 "followup_brief_status": "preview_only",
                 "followup_brief_summary": "preview_only | exec=L2 review=R1",
+                "background_run_task_contract_module": "analysis",
+                "background_run_task_contract_module_summary": "module=analysis | findings_evidence_gate",
+                "background_run_worker_record_set_summary": "analysis_record_set | finding=1 | evidence=1 | gap=1",
+                "background_run_worker_record_set": [
+                    {"kind": "finding", "label": "summary", "state": "stable", "note": "action"},
+                    {"kind": "evidence", "label": "missing", "state": "missing", "note": "attach_evidence"},
+                    {"kind": "gap", "label": "evidence_missing", "state": "open", "note": "attach_evidence"},
+                ],
             }
         },
         "last_request_id": "REQ-1",
@@ -634,6 +642,8 @@ def test_orch_judge_executes_bound_review_stub(tmp_path: Path, monkeypatch: pyte
     assert audit_rows[-1]["outcome_kind"] == "offdesk_judge"
     assert audit_rows[-1]["decision_snapshot"]["verdict"] == "continue"
     assert audit_rows[-1]["decision_snapshot"]["recommended_action"] == "retry"
+    assert audit_rows[-1]["decision_snapshot"]["analysis_record_set"] == "analysis_record_set | finding=1 | evidence=1 | gap=1"
+    assert audit_rows[-1]["decision_snapshot"]["analysis_record_set_records"][1]["kind"] == "evidence"
     assert audit_rows[-1]["outcome_reason_code"] == "ok"
 
 

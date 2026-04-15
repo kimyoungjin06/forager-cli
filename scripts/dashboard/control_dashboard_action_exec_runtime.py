@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-import aoe_tg_action_audit as operator_audit
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
 import aoe_tg_todo_state as todo_state
@@ -15,6 +14,7 @@ import aoe_tg_worker_task_contract as worker_task_contract
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_orch_task_handlers import (
     _OFFDESK_JUDGE_SYSTEM,
+    _offdesk_judge_decision_snapshot,
     _offdesk_judge_prompt,
     _project_alias,
     _runtime_action_link,
@@ -996,7 +996,7 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
     summary = str(result.get("summary", "-")).strip() or "-"
     response_text = str(result.get("response_text", "")).strip()
     reason_code = str(result.get("reason_code", "")).strip() or ("ok" if ok else "not_executed")
-    judge_decision = operator_audit.normalize_offdesk_judge_decision(response_text)
+    judge_decision = _offdesk_judge_decision_snapshot(latest_task, response_text)
     audit_team_dir = Path(str(config.team_dir or team_dir)).expanduser().resolve()
     recorded_at = _now_iso()
     append_action_audit_row(

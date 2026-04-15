@@ -154,7 +154,33 @@ def _judge_recommended_action(next_step: str, verdict: str) -> str:
     return "review"
 
 
-def normalize_offdesk_judge_decision(raw: Any) -> Dict[str, str]:
+def _normalize_offdesk_judge_record_set_records(raw: Any) -> list[Dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    normalized: list[Dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind", "")).strip()
+        label = str(item.get("label", "")).strip()
+        state = str(item.get("state", "")).strip()
+        note = str(item.get("note", "")).strip()
+        if not any((kind, label, state, note)):
+            continue
+        normalized.append(
+            {
+                "kind": kind or "-",
+                "label": label or "-",
+                "state": state or "-",
+                "note": note or "-",
+            }
+        )
+        if len(normalized) >= 8:
+            break
+    return normalized
+
+
+def normalize_offdesk_judge_decision(raw: Any) -> Dict[str, Any]:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
         return {}
@@ -163,7 +189,7 @@ def normalize_offdesk_judge_decision(raw: Any) -> Dict[str, str]:
     reasoning = str(row.get("reasoning", "")).strip() or "-"
     next_step = str(row.get("next_step", "")).strip() or "-"
     caution = str(row.get("caution", "")).strip() or "-"
-    return {
+    payload: Dict[str, Any] = {
         "verdict": verdict,
         "confidence": confidence,
         "reasoning": reasoning,
@@ -171,6 +197,22 @@ def normalize_offdesk_judge_decision(raw: Any) -> Dict[str, str]:
         "caution": caution,
         "recommended_action": _judge_recommended_action(next_step, verdict),
     }
+    worker_module = str(row.get("worker_module", "")).strip() or "-"
+    worker_record_set = str(row.get("worker_record_set", "")).strip() or "-"
+    worker_record_set_records = _normalize_offdesk_judge_record_set_records(row.get("worker_record_set_records"))
+    analysis_record_set = str(row.get("analysis_record_set", "")).strip() or "-"
+    analysis_record_set_records = _normalize_offdesk_judge_record_set_records(row.get("analysis_record_set_records"))
+    if worker_module != "-":
+        payload["worker_module"] = worker_module
+    if worker_record_set != "-":
+        payload["worker_record_set"] = worker_record_set
+    if worker_record_set_records:
+        payload["worker_record_set_records"] = worker_record_set_records
+    if analysis_record_set != "-":
+        payload["analysis_record_set"] = analysis_record_set
+    if analysis_record_set_records:
+        payload["analysis_record_set_records"] = analysis_record_set_records
+    return payload
 
 
 def summarize_offdesk_judge_decision(decision: Any) -> str:
@@ -501,7 +543,7 @@ def load_latest_offdesk_judge_decision_for_runtime(
     team_dir: Any,
     *,
     project_alias: Any,
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     alias = str(project_alias or "").strip()
     if not alias:
         return {}
