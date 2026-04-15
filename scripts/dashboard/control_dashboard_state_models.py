@@ -87,6 +87,8 @@ class ControlSummaryDTO:
     latest_intent_trace: str
     latest_intent_focus: str
     server_guard: ServerGuardDTO
+    server_guard_latest_action_summary: str
+    server_guard_latest_action_path: str
     active_runtime_count: int
     attention_runtime_count: int
     snapshot_taken_at: str
@@ -725,6 +727,7 @@ class ChatConsolePageDTO:
     rooms: List[str] = field(default_factory=list)
     room_presets: List[str] = field(default_factory=list)
     session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
+    recommended_session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
     selected_recent_task_refs: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)

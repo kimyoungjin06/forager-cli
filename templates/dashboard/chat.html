@@ -25,10 +25,10 @@
   {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
-  {% if chat.selected_chat_id and chat.session_presets %}
+  {% if chat.selected_chat_id and chat.recommended_session_presets %}
   <p><strong>manager_presets</strong></p>
   <div class="chat-hints">
-    {% for preset in chat.session_presets %}
+    {% for preset in chat.recommended_session_presets %}
     <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Apply {{ preset.label }}" data-action-command="chat-session-preset:{{ preset.label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
       <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
       <input type="hidden" name="room" value="{{ preset.room }}">
@@ -41,6 +41,7 @@
     {% endfor %}
   </div>
   {% endif %}
+  <p><strong>server_guard_latest_action</strong> <a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></p>
 </section>
 
 <section class="chat-console-grid">

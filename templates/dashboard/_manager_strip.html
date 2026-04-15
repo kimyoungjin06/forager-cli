@@ -14,6 +14,7 @@
       <p><strong>note</strong> {{ snapshot.control_summary.server_guard.note }}</p>
       <p><strong>next</strong> {{ snapshot.control_summary.server_guard.next_step }}</p>
       <p><strong>snapshot</strong> {{ snapshot.control_summary.server_guard.snapshot_path }}</p>
+      <p><strong>server_guard_latest_action</strong> <a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></p>
     </div>
     <div class="manager-strip-actions">
       {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
@@ -23,6 +24,7 @@
         <a class="action-history-badge" href="/control/chat">Open Chat Console</a>
         <a class="action-history-badge" href="/control/recovery">Open Recovery</a>
         <a class="action-history-badge" href="/control/history">Open History</a>
+        <a class="action-history-badge" href="/control/audit?focus=server-guard">Server Guard Audit</a>
       </div>
     </div>
   </div>

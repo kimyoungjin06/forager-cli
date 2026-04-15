@@ -225,6 +225,7 @@ def load_dashboard_snapshot_result(
         snapshot_path=server_guard_snapshot_path,
         snapshot_updated_at=server_guard_snapshot_updated_at,
     )
+    server_guard_latest_action_summary, server_guard_latest_action_path = _latest_server_guard_action(action_audit_rows)
 
     summary = ControlSummaryDTO(
         auto_mode=auto_mode,
@@ -246,6 +247,8 @@ def load_dashboard_snapshot_result(
             str(latest_intent.get("trace", "")).strip(),
         ),
         server_guard=server_guard,
+        server_guard_latest_action_summary=server_guard_latest_action_summary,
+        server_guard_latest_action_path=server_guard_latest_action_path,
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
         snapshot_taken_at=snapshot_taken_at,
@@ -486,6 +489,63 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
     return presets[:6]
 
 
+def _chat_recommended_session_presets(
+    *,
+    server_guard: ControlSummaryDTO | None,
+    session_presets: list[ChatSessionPresetDTO],
+) -> list[ChatSessionPresetDTO]:
+    if not session_presets:
+        return []
+    reason_summary = ""
+    if isinstance(server_guard, ControlSummaryDTO):
+        reason_summary = str(server_guard.server_guard.reason_summary or "").strip()
+    tokens = [token.strip() for token in reason_summary.split("|") if token.strip()]
+
+    def _has(prefix: str) -> bool:
+        return any(token.startswith(prefix) for token in tokens)
+
+    preferred_labels: list[str]
+    if _has("codex_process") or _has("total_process") or _has("memory") or _has("load"):
+        preferred_labels = ["Global Direct", "Review Rail", "Current Room"]
+    elif _has("python_process"):
+        preferred_labels = ["Review Rail", "Global Direct", "Current Room"]
+    elif _has("queue") or _has("disk"):
+        preferred_labels = ["Package Rail", "Review Rail", "Current Room"]
+    else:
+        preferred_labels = ["Analysis Rail", "Writing Rail", "Package Rail"]
+
+    selected: list[ChatSessionPresetDTO] = []
+    seen: set[str] = set()
+    by_label = {row.label: row for row in session_presets}
+    for label in preferred_labels:
+        row = by_label.get(label)
+        if row is None or row.label in seen:
+            continue
+        selected.append(row)
+        seen.add(row.label)
+    for row in session_presets:
+        if row.label in seen:
+            continue
+        selected.append(row)
+        seen.add(row.label)
+        if len(selected) >= 4:
+            break
+    return selected[:4]
+
+
+def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str]:
+    for row in rows:
+        if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
+            continue
+        headline = str(getattr(row, "headline", "")).strip() or "-"
+        next_step = str(getattr(row, "next_step", "")).strip() or "-"
+        at = str(getattr(row, "at", "")).strip() or "-"
+        summary = f"{headline} | at={at} | next={next_step}"
+        href = str(getattr(row, "link_href", "")).strip() or "/control/audit?focus=server-guard"
+        return summary, href
+    return "-", "/control/audit?focus=server-guard"
+
+
 def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: int = 8) -> list[ActionAuditRowDTO]:
     rows: list[ActionAuditRowDTO] = []
     raw_rows: list[dict[str, Any]] = []
@@ -641,6 +701,7 @@ def load_dashboard_chat_page(
         recent_chat_actions=recent_chat_actions,
         limit=20,
     )
+    session_presets = _chat_session_presets(project_alias=selected_project_alias, selected_room=selected_room)
 
     return snapshot_result.snapshot, ChatConsolePageDTO(
         selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
@@ -655,7 +716,11 @@ def load_dashboard_chat_page(
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
         rooms=rooms,
         room_presets=_chat_room_presets(project_alias=selected_project_alias, selected_room=selected_room, rooms=rooms),
-        session_presets=_chat_session_presets(project_alias=selected_project_alias, selected_room=selected_room),
+        session_presets=session_presets,
+        recommended_session_presets=_chat_recommended_session_presets(
+            server_guard=snapshot_result.snapshot.control_summary,
+            session_presets=session_presets,
+        ),
         selected_recent_task_refs=selected_recent_task_refs,
         sessions=sessions,
         room_tail=room_tail,

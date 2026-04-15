@@ -547,6 +547,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "server_guard" in overview_text
     assert "server_guard_note" in overview_text
     assert "server_guard_snapshot" in overview_text
+    assert "server_guard_latest_action" in overview_text
+    assert "Server Guard Audit" in overview_text
     assert "Open Health JSON" in overview_text
     assert "server-guard" in overview_text
     assert "execution_brief" in overview_text
@@ -730,6 +732,7 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "Chat Console" in text
     assert "Server Guard + Chat Rails" in text
     assert "Ops Manager Rail" in text
+    assert "server_guard_latest_action" in text
     assert "123456" in text
     assert "O2/analysis" in text
     assert "analysis room tail line" in text
@@ -745,11 +748,8 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "session updated" in text
     assert "selected task updated" in text
     assert "Analysis Rail" in text
-    assert "Writing Rail" in text
-    assert "Package Rail" in text
     assert "Review Rail" in text
-    assert "O2/writing" in text
-    assert "O2/package" in text
+    assert "Global Direct" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
