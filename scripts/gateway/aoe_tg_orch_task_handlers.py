@@ -478,6 +478,63 @@ def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir:
     followup_summary = str(task.get("followup_summary", "")).strip() or (
         str(task.get("followup_brief_summary", "")).strip() or "followup=none"
     )
+    worker_record_set_summary = str(task.get("background_run_worker_record_set_summary", "")).strip()
+    worker_record_set = (
+        [item for item in (task.get("background_run_worker_record_set") or []) if isinstance(item, dict)]
+        if isinstance(task.get("background_run_worker_record_set"), list)
+        else []
+    )
+    if (not worker_record_set or worker_record_set_summary in {"", "-"}) and str(task.get("background_run_task_contract_module", "")).strip():
+        contract = {
+            "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+            "module_policy": task.get("background_run_task_contract_policy"),
+            "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+        }
+        result = {
+            "status": task.get("background_run_worker_result_status"),
+            "summary": task.get("background_run_worker_result_summary"),
+            "actions": task.get("background_run_worker_result_actions"),
+            "cautions": task.get("background_run_worker_result_cautions"),
+            "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+        }
+        derived_record_set = worker_task_contract.derive_worker_task_module_record_set(
+            contract,
+            result,
+            gate={
+                "state": task.get("background_run_worker_gate_status"),
+                "summary_line": task.get("background_run_worker_gate_summary"),
+            },
+            profile={
+                "state": task.get("background_run_worker_profile_status"),
+                "summary_line": task.get("background_run_worker_profile_summary"),
+            },
+            checklist={
+                "state": task.get("background_run_worker_checklist_status"),
+                "summary_line": task.get("background_run_worker_checklist_summary"),
+            },
+            items={
+                "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+                "items": task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else [],
+                "summary_line": str(task.get("background_run_worker_items_summary", "")).strip() or "-",
+            },
+            item_classes={
+                "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+                "classes": task.get("background_run_worker_item_classes") if isinstance(task.get("background_run_worker_item_classes"), list) else [],
+                "summary_line": str(task.get("background_run_worker_item_classes_summary", "")).strip() or "-",
+            },
+            records={
+                "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+                "records": task.get("background_run_worker_records") if isinstance(task.get("background_run_worker_records"), list) else [],
+                "summary_line": str(task.get("background_run_worker_records_summary", "")).strip() or "-",
+            },
+            record_rows={
+                "module_kind": str(task.get("background_run_task_contract_module", "")).strip() or "general",
+                "rows": task.get("background_run_worker_record_rows") if isinstance(task.get("background_run_worker_record_rows"), list) else [],
+                "summary_line": str(task.get("background_run_worker_record_rows_summary", "")).strip() or "-",
+            },
+        )
+        worker_record_set_summary = str(derived_record_set.get("summary_line", "")).strip() or worker_record_set_summary
+        worker_record_set = [item for item in (derived_record_set.get("records") or []) if isinstance(item, dict)]
     worker_preflight_rows = (
         [str(item).strip() for item in (task.get("background_run_worker_preflight_rows") or []) if str(item).strip()]
         if isinstance(task.get("background_run_worker_preflight_rows"), list)
@@ -553,7 +610,8 @@ def _offdesk_judge_prompt(entry: Dict[str, Any], task: Dict[str, Any], team_dir:
         "worker_gate": str(task.get("background_run_worker_gate_summary", "")).strip() or "-",
         "worker_profile": str(task.get("background_run_worker_profile_summary", "")).strip() or "-",
         "worker_checklist": str(task.get("background_run_worker_checklist_summary", "")).strip() or "-",
-        "worker_record_set": str(task.get("background_run_worker_record_set_summary", "")).strip() or "-",
+        "worker_record_set": worker_record_set_summary or "-",
+        "worker_record_set_records": worker_record_set,
         "worker_record_rows": str(task.get("background_run_worker_record_rows_summary", "")).strip() or "-",
         "worker_preflight_rows": str(task.get("background_run_worker_preflight_rows_summary", "")).strip() or "-",
         "worker_blocker": str(worker_blocker.get("summary_line", "")).strip() or "-",

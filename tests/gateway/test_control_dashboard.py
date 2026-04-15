@@ -4685,10 +4685,20 @@ def test_offdesk_judge_prompt_includes_worker_blocker_context(tmp_path: Path) ->
         "evidence_row=missing|state=missing|note=attach_evidence",
         "gap_row=open|state=open|note=attach_evidence",
     ]
+    task["background_run_worker_record_set_summary"] = "analysis_record_set | finding=1 | evidence=1 | gap=1"
+    task["background_run_worker_record_set"] = [
+        {"kind": "finding", "label": "summary", "state": "stable", "note": "action"},
+        {"kind": "evidence", "label": "missing", "state": "missing", "note": "attach_evidence"},
+        {"kind": "gap", "label": "evidence_missing", "state": "open", "note": "attach_evidence"},
+    ]
 
     prompt = orch_task_handlers._offdesk_judge_prompt(entry, task, Path(entry["team_dir"]))
 
     assert '"worker_module": "analysis | analysis/review signals"' in prompt
+    assert '"worker_record_set": "analysis_record_set | finding=1 | evidence=1 | gap=1"' in prompt
+    assert '"worker_record_set_records": [' in prompt
+    assert '"kind": "evidence"' in prompt
+    assert '"label": "missing"' in prompt
     assert '"worker_record_rows": "analysis_record_rows | finding_row=summary|state=stable | evidence_row=missing|state=missing|note=attach_evidence | gap_row=open|state=open|note=attach_evidence"' in prompt
     assert '"worker_blocker": "analysis_apply_blocker | reason=analysis_evidence_missing' in prompt
     assert '"worker_blocked_rows": [' in prompt
