@@ -1210,6 +1210,10 @@ def test_offdesk_flow_module_matches_management_prepare_report_and_markup(tmp_pa
     report_b = offdesk_flow.offdesk_prepare_project_report(state, "proj3", entry)
 
     assert report_a == report_b
+    assert report_b["active_task_worker_update_summary"] == "-"
+    assert report_b["active_task_worker_apply_summary"] == "-"
+    assert report_b["active_task_worker_apply_accept_summary"] == "-"
+    assert report_b["active_task_worker_syncback_summary"] == "-"
     assert mgmt_handlers._offdesk_review_reply_markup([report_a]) == offdesk_flow.offdesk_review_reply_markup([report_b])
     assert mgmt_handlers._offdesk_prepare_reply_markup([report_a], blocked_count=1) == offdesk_flow.offdesk_prepare_reply_markup([report_b], blocked_count=1)
 

@@ -1158,6 +1158,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"classes={sync_quality.get('classes_summary', '-')} "
         f"doc_types={sync_quality.get('doc_types_summary', '-')}".rstrip(),
     ]
+    worker_update_summary = "-"
+    worker_apply_summary = "-"
+    worker_apply_accept_summary = "-"
+    worker_syncback_summary = "-"
     if int(proposal_triage.get("open_count", 0) or 0) > 0:
         lines.append(f"  proposal_top: {proposal_triage.get('top_summary', '-')}")
     if latest_task:
