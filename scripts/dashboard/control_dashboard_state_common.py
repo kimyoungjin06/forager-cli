@@ -793,7 +793,11 @@ def _worker_blocker_action_button(
         "package_syncback_review",
         "package_artifact_review",
     }:
-        payload_json = json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":"))
+        payload_json = json.dumps(
+            {"task_ref": task_ref, "review_kind": suggested_action or "task_review"},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         blocker_summary = str(blocker.get("summary_line", "")).strip()
         remediation = str(blocker.get("remediation", "")).strip()
         note = " | ".join(part for part in [blocker_summary, remediation] if part and part != "-")[:320]
@@ -816,7 +820,7 @@ def _worker_blocker_action_button(
             label=button_label,
             command=command,
             method="POST",
-            path="/control/actions/task/analysis-review",
+            path="/control/actions/task/task-review",
             mode="safe",
             note=note,
             payload_json=payload_json,

@@ -89,17 +89,25 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
             raise ValueError("unsupported followup execute action contract")
         return spec
 
-    if path == "/control/actions/task/analysis-review":
+    if path in {"/control/actions/task/task-review", "/control/actions/task/analysis-review"}:
         task_ref = str(payload.get("task_ref", "")).strip()
         if not task_ref:
             raise ValueError("task_ref is required")
+        review_kind = str(payload.get("review_kind", "")).strip().lower() or "task_review"
+        command_suffix = {
+            "task_review": "analysis-review",
+            "package_verification_review": "package-verification-review",
+            "package_apply_review": "package-apply-review",
+            "package_syncback_review": "package-syncback-review",
+            "package_artifact_review": "package-artifact-review",
+        }.get(review_kind, review_kind.replace("_", "-") or "task-review")
         return {
-            "path": path,
+            "path": "/control/actions/task/task-review",
             "method": "POST",
             "mode": "safe",
-            "command": f"/task {task_ref} | analysis-review",
-            "note": "inspect the blocked analysis rows before escalating or promoting changes",
-            "payload": {"task_ref": task_ref},
+            "command": f"/task {task_ref} | {command_suffix}",
+            "note": "inspect the blocked worker rows before escalating or promoting changes",
+            "payload": {"task_ref": task_ref, "review_kind": review_kind},
         }
 
     if path == "/control/actions/task/worker-update-preview":
@@ -393,7 +401,7 @@ def build_dashboard_action_response(
     if path == "/control/actions/task/followup-execute":
         return _with_action_audit(_execute_followup_action(spec, config=config), config=config)
 
-    if path == "/control/actions/task/analysis-review":
+    if path in {"/control/actions/task/task-review", "/control/actions/task/analysis-review"}:
         return _with_action_audit(_execute_analysis_review_action(spec, config=config), config=config)
 
     if path == "/control/actions/task/worker-update-preview":

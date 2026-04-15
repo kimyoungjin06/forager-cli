@@ -3501,18 +3501,18 @@ def test_dashboard_and_routes_surface_package_verification_review_actions(tmp_pa
     assert task_detail is not None
     assert any(
         btn.label == "Review Package Verification"
-        and btn.path == "/control/actions/task/analysis-review"
-        and btn.payload_json == '{"task_ref":"T-001"}'
+        and btn.path == "/control/actions/task/task-review"
+        and btn.payload_json == '{"task_ref":"T-001","review_kind":"package_verification_review"}'
         for btn in runtime_card.runtime_safe_action_buttons
     )
     assert any(
         btn.label == "Review Package Verification"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         for btn in runtime_detail.active_task_safe_action_buttons
     )
     assert any(
         btn.label == "Review Package Verification"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         for btn in task_detail.safe_action_buttons
     )
 
@@ -4646,24 +4646,24 @@ def test_dashboard_surfaces_analysis_blocker_review_actions(tmp_path: Path) -> N
     )
     runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
     runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
-    expected_review_payload = '{"task_ref":"T-001"}'
+    expected_review_payload = '{"task_ref":"T-001","review_kind":"task_review"}'
 
     assert task_detail is not None
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         and btn.payload_json == expected_review_payload
         for btn in runtime_card.runtime_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         and btn.payload_json == expected_review_payload
         for btn in runtime_detail.active_task_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         and btn.payload_json == expected_review_payload
         for btn in task_detail.safe_action_buttons
     )
@@ -4687,19 +4687,19 @@ def test_dashboard_surfaces_analysis_blocker_review_actions(tmp_path: Path) -> N
     recovery_task = next(row for row in recovery_runtime.task_teams if row.request_id == "REQ-1")
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         and btn.payload_json == expected_review_payload
         for btn in recovery_runtime.runtime_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         and btn.payload_json == expected_review_payload
         for btn in recovery_runtime.active_task_safe_action_buttons
     )
     assert any(
         btn.label == "Resolve Analysis Blocker"
-        and btn.path == "/control/actions/task/analysis-review"
+        and btn.path == "/control/actions/task/task-review"
         and btn.payload_json == expected_review_payload
         for btn in recovery_task.safe_action_buttons
     )
@@ -4724,8 +4724,8 @@ def test_dashboard_surfaces_analysis_blocker_review_actions(tmp_path: Path) -> N
     assert preview_payload["worker_recommended_action"] == "task_review"
 
     review_status, _review_headers, review_body = dashboard_app.build_dashboard_action_response(
-        "/control/actions/task/analysis-review",
-        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        "/control/actions/task/task-review",
+        body=json.dumps({"task_ref": "T-001", "review_kind": "task_review"}).encode("utf-8"),
         content_type="application/json",
         config=config,
     )

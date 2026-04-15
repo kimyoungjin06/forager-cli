@@ -1071,6 +1071,14 @@ def _execute_runtime_judge_action(spec: Dict[str, object], *, config: DashboardA
 def _execute_analysis_review_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
     task_ref = str(payload.get("task_ref", "")).strip()
+    review_kind = str(payload.get("review_kind", "")).strip().lower() or "task_review"
+    review_suffix = {
+        "task_review": "analysis-review",
+        "package_verification_review": "package-verification-review",
+        "package_apply_review": "package-apply-review",
+        "package_syncback_review": "package-syncback-review",
+        "package_artifact_review": "package-artifact-review",
+    }.get(review_kind, review_kind.replace("_", "-") or "task-review")
     _paths, manager_state = _load_dashboard_manager_state(config)
     try:
         key, entry, request_id, task = _resolve_task_entry(manager_state=manager_state, task_ref=task_ref)
@@ -1121,7 +1129,7 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
             "method": "POST",
             "path": str(spec.get("path", "")).strip() or "-",
             "mode": str(spec.get("mode", "")).strip() or "safe",
-            "source_command": str(spec.get("command", "")).strip() or f"/task {label} | analysis-review",
+            "source_command": str(spec.get("command", "")).strip() or f"/task {label} | {review_suffix}",
             "payload": payload,
             "next_step": f"/task {label}",
             "remediation": remediation,
@@ -1143,6 +1151,7 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
             "worker_recommended_action": str(blocker.get("suggested_action", "")).strip().lower() or "task_review",
             "preview": {
                 "kind": "task_review",
+                "review_kind": review_kind,
                 "project_alias": alias,
                 "runtime_path": _runtime_action_link(alias),
                 "detail_path": f"/control/tasks/by-request/{request_id}",
