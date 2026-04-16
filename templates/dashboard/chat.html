@@ -32,6 +32,22 @@
   {% with title='live_preview_actions · ' ~ live_group.label, actions=live_group.actions %}
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
+  {% if chat.selected_chat_id and chat.live_preview_preset_label %}
+  <p><strong>live_preview_preset</strong></p>
+  <form class="action-form chat-room-chip-form live-preview-preset-form" data-dashboard-action data-action-label="Apply {{ chat.live_preview_preset_label }}" data-action-command="chat-session-preset:{{ chat.live_preview_preset_label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">
+    <input type="hidden" name="chat_id" value="{{ chat.selected_chat_id }}">
+    <input type="hidden" name="room" value="{{ chat.live_preview_preset_room }}">
+    <input type="hidden" name="default_mode" value="{{ chat.live_preview_preset_default_mode }}">
+    <input type="hidden" name="pending_mode" value="{{ chat.live_preview_preset_pending_mode }}">
+    <input type="hidden" name="lang" value="{{ chat.live_preview_preset_lang }}">
+    <input type="hidden" name="report_level" value="{{ chat.live_preview_preset_report_level }}">
+    <button type="submit">Apply {{ chat.live_preview_preset_label }}</button>
+    <div class="action-meta">
+      <code>server-guard-live-preview:{{ live_group.key }}:{{ chat.selected_chat_id }}:{{ chat.live_preview_preset_label }}</code>
+      {% if chat.live_preview_preset_note %}<span class="muted">{{ chat.live_preview_preset_note }}</span>{% endif %}
+    </div>
+  </form>
+  {% endif %}
   {% endif %}
   {% if chat.selected_chat_id and chat.deep_link_preset_label %}
   <p><strong>deep_link_preset</strong></p>

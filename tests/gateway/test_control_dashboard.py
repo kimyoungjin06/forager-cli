@@ -762,6 +762,9 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "live_preview_focus" in text
     assert "Codex Pressure" in text
     assert "consolidate chat and operator sessions" in text
+    assert "live_preview_preset" in text
+    assert "Apply Global Direct" in text
+    assert "server-guard-live-preview:codex:123456:Global Direct" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -6184,6 +6187,36 @@ def test_control_dashboard_server_guard_preview_groups_follow_dominant_reason(tm
     assert snapshot.control_summary.server_guard_preview_groups[0].label == "Python Pressure"
 
 
+def test_control_dashboard_chat_live_preview_preset_follows_dominant_reason(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "dispatch",
+            "pending_mode": "",
+            "lang": "ko",
+            "report_level": "normal",
+            "room": "O2/analysis",
+            "selected_task_refs": {"active": "REQ-1"},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 420, "python": 120, "tmux": 3, "codex": 12})
+
+    _snapshot, chat_page = dashboard_state.load_dashboard_chat_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        selected_chat_id="123456",
+    )
+
+    assert chat_page.live_preview_preset_label == "Package Rail"
+    assert chat_page.live_preview_preset_room == "O2/package"
+    assert chat_page.live_preview_preset_default_mode == "dispatch"
+
+
 def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_chat_timeline(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -6339,6 +6372,9 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert recovery_text.count(">Chat<") >= 1
     assert recovery_text.count(">Audit<") >= 1
     assert recovery_text.count(">Health<") >= 1
+    assert "server-guard-mini-link chat" in recovery_text
+    assert "server-guard-mini-link audit" in recovery_text
+    assert "server-guard-mini-link health" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:

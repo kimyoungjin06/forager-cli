@@ -769,6 +769,13 @@ class ChatConsolePageDTO:
     deep_link_preset_pending_mode: str = ""
     deep_link_preset_lang: str = ""
     deep_link_preset_report_level: str = ""
+    live_preview_preset_label: str = ""
+    live_preview_preset_note: str = ""
+    live_preview_preset_room: str = ""
+    live_preview_preset_default_mode: str = ""
+    live_preview_preset_pending_mode: str = ""
+    live_preview_preset_lang: str = ""
+    live_preview_preset_report_level: str = ""
     selected_recent_task_refs: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)

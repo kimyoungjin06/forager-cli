@@ -728,6 +728,26 @@ def _chat_select_preset(
     return None
 
 
+def _chat_live_preview_preset(
+    *,
+    preview_groups: list[ServerGuardActionGroupDTO],
+    session_presets: list[ChatSessionPresetDTO],
+) -> ChatSessionPresetDTO | None:
+    if not preview_groups or not session_presets:
+        return None
+    dominant_key = str(preview_groups[0].key or "").strip().lower()
+    preferred_label = {
+        "codex": "Global Direct",
+        "python": "Package Rail",
+        "tmux": "Review Rail",
+        "process": "Analysis Rail",
+        "queue": "Package Rail",
+    }.get(dominant_key, "")
+    if not preferred_label:
+        return None
+    return _chat_select_preset(session_presets, token=preferred_label)
+
+
 def _chat_recommended_session_presets(
     *,
     server_guard: ControlSummaryDTO | None,
@@ -999,6 +1019,10 @@ def load_dashboard_chat_page(
     )
     session_presets = _chat_session_presets(project_alias=selected_project_alias, selected_room=selected_room)
     deep_link_preset = _chat_select_preset(session_presets, token=selected_preset)
+    live_preview_preset = _chat_live_preview_preset(
+        preview_groups=snapshot_result.snapshot.control_summary.server_guard_preview_groups,
+        session_presets=session_presets,
+    )
 
     return snapshot_result.snapshot, ChatConsolePageDTO(
         selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
@@ -1025,6 +1049,13 @@ def load_dashboard_chat_page(
         deep_link_preset_pending_mode=deep_link_preset.pending_mode if deep_link_preset is not None else "",
         deep_link_preset_lang=deep_link_preset.lang if deep_link_preset is not None else "",
         deep_link_preset_report_level=deep_link_preset.report_level if deep_link_preset is not None else "",
+        live_preview_preset_label=live_preview_preset.label if live_preview_preset is not None else "",
+        live_preview_preset_note=live_preview_preset.note if live_preview_preset is not None else "",
+        live_preview_preset_room=live_preview_preset.room if live_preview_preset is not None else "",
+        live_preview_preset_default_mode=live_preview_preset.default_mode if live_preview_preset is not None else "",
+        live_preview_preset_pending_mode=live_preview_preset.pending_mode if live_preview_preset is not None else "",
+        live_preview_preset_lang=live_preview_preset.lang if live_preview_preset is not None else "",
+        live_preview_preset_report_level=live_preview_preset.report_level if live_preview_preset is not None else "",
         selected_recent_task_refs=selected_recent_task_refs,
         sessions=sessions,
         room_tail=room_tail,
