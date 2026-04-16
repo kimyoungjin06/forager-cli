@@ -165,21 +165,30 @@
           actions.innerHTML = "";
           actions.classList.add("hidden");
         };
-        const appendRow = (label, value) => {
+        const appendRow = (label, value, options = {}) => {
           if (!value || value === "-") {
             return;
           }
           const item = document.createElement("li");
           const key = document.createElement("span");
           const val = document.createElement("strong");
-          key.textContent = label;
+          key.textContent = options.labelText || label;
           if (label === "preset_diff") {
             item.classList.add("diff-badge-row");
+            if (options.highlighted) {
+              item.classList.add("highlighted-diff-row");
+            }
             const tokens = String(value)
               .split(" | ")
               .map((row) => row.trim())
               .filter((row) => row && row !== "-");
             if (tokens.length) {
+              if (options.highlighted) {
+                const emphasis = document.createElement("span");
+                emphasis.className = "action-history-badge preview action-result-emphasis-badge";
+                emphasis.textContent = "live preview";
+                val.appendChild(emphasis);
+              }
               const badgeList = document.createElement("span");
               badgeList.className = "diff-badge-list";
               tokens.forEach((token) => {
@@ -432,18 +441,28 @@
             ["task detail", payload?.task?.detail_path || payload?.preview?.detail_path || "-"],
             ["runtime detail", payload?.preview?.runtime_path || "-"],
           ];
-          return { headline, rowsData, linkRows };
+          return {
+            headline,
+            rowsData,
+            linkRows,
+            presetDiffHighlight: Boolean(payload?.server_guard_preset_label),
+          };
         };
         const setResult = (label, status, payload, error = false, recordHistory = true) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
           panel.classList.toggle("compact-view", !error);
-          const { headline, rowsData, linkRows } = buildSummary(label, status, payload);
+          const { headline, rowsData, linkRows, presetDiffHighlight } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
           clearActions();
           clearLinks();
-          rowsData.forEach(([key, value]) => appendRow(key, asText(value)));
+          rowsData.forEach(([key, value]) =>
+            appendRow(key, asText(value), key === "preset_diff" && presetDiffHighlight ? {
+              highlighted: true,
+              labelText: "preset_diff · live_preview",
+            } : {})
+          );
           if (rows.children.length) {
             rows.classList.remove("hidden");
           }

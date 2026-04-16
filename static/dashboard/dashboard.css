@@ -556,6 +556,15 @@ strong {
   flex-wrap: wrap;
 }
 
+.action-result-rows li.highlighted-diff-row {
+  border-color: rgba(33, 78, 90, 0.28);
+  background: linear-gradient(180deg, rgba(214, 229, 232, 0.46), rgba(255, 250, 241, 0.9));
+}
+
+.action-result-emphasis-badge {
+  width: fit-content;
+}
+
 .diff-badge-list {
   display: flex;
   flex-wrap: wrap;
@@ -1232,6 +1241,11 @@ strong {
   border-color: rgba(59, 109, 70, 0.34);
   background: rgba(220, 234, 218, 0.86);
   color: var(--success);
+}
+
+.server-guard-mini-link.priority {
+  box-shadow: 0 0 0 2px rgba(33, 78, 90, 0.12);
+  transform: translateY(-1px);
 }
 
 .live-preview-preset-form {

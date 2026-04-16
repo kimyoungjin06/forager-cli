@@ -1,4 +1,5 @@
 {% if threads %}
+{% set dominant_group_key = snapshot.control_summary.server_guard_preview_groups[0].key if snapshot is defined and snapshot.control_summary.server_guard_preview_groups else '' %}
 <div class="server-guard-thread-list{% if compact %} compact{% endif %}">
   {% for row in threads %}
   <article class="server-guard-thread-card{% if compact %} compact{% endif %}">
@@ -28,9 +29,9 @@
     {% endif %}
     {% if compact %}
     <div class="chat-hints server-guard-mini-links">
-      {% if row.chat_href %}<a class="action-history-badge server-guard-mini-link chat" href="{{ row.chat_href }}">Chat</a>{% endif %}
-      {% if row.audit_href %}<a class="action-history-badge server-guard-mini-link audit" href="{{ row.audit_href }}">Audit</a>{% endif %}
-      {% if row.health_href %}<a class="action-history-badge server-guard-mini-link health" href="{{ row.health_href }}">Health</a>{% endif %}
+      {% if row.chat_href %}<a class="action-history-badge server-guard-mini-link chat{% if dominant_group_key == 'codex' %} priority{% endif %}" href="{{ row.chat_href }}">Chat</a>{% endif %}
+      {% if row.audit_href %}<a class="action-history-badge server-guard-mini-link audit{% if dominant_group_key in ['tmux', 'process'] %} priority{% endif %}" href="{{ row.audit_href }}">Audit</a>{% endif %}
+      {% if row.health_href %}<a class="action-history-badge server-guard-mini-link health{% if dominant_group_key in ['python', 'queue', 'other'] %} priority{% endif %}" href="{{ row.health_href }}">Health</a>{% endif %}
     </div>
     {% endif %}
   </article>

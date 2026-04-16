@@ -594,6 +594,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "action-result-rows" in overview_text
     assert "action-result-links" in overview_text
     assert "action-result-history" in overview_text
+    assert "preset_diff · live_preview" in overview_text
+    assert "action-result-emphasis-badge" in overview_text
     assert "action-history-badge" in overview_text
     assert "/control/audit?focus=auto-route" in overview_text
     assert "/control/audit?limit=20" in overview_text
@@ -6375,6 +6377,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "server-guard-mini-link chat" in recovery_text
     assert "server-guard-mini-link audit" in recovery_text
     assert "server-guard-mini-link health" in recovery_text
+    assert "server-guard-mini-link chat priority" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
