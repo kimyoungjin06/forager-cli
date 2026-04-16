@@ -6124,6 +6124,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert payload["status"] == "preview"
     assert payload["executed"] is False
     assert payload["source_command"] == "/ops pressure codex preview"
+    assert payload["chat_id"] == "123456"
     assert payload["outcome"]["kind"] == "codex_process_pressure_preview"
     assert payload["next_step"] == "/control/chat"
     assert "codex_process_high" in " | ".join(payload["preview"]["matching_reasons"])
@@ -6209,11 +6210,15 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert apply_payload["focus_badge"] == "server-guard"
     assert apply_payload["server_guard_preset_label"] == "Apply Global Direct"
     assert apply_payload["next_step"] == "/control/chat?chat=123456&preset=global-direct"
+    assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
+    assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
 
     assert overview_status == 200
     assert "Apply Global Direct | completed" in overview_text
     assert chat_status == 200
     assert "Apply Global Direct | completed" in chat_text
+    assert "Server Guard Preset Thread" in chat_text
+    assert "Codex Pressure Preview | preview -&gt; Apply Global Direct | completed" in chat_text
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")

@@ -28,6 +28,7 @@ def _server_guard_pressure_preview_payload(
     note: str,
     outcome_kind: str,
     chat_console_href: str,
+    chat_id: str,
     preset_action: Dict[str, object] | None,
 ) -> Dict[str, object]:
     guard = snapshot.control_summary.server_guard
@@ -73,6 +74,8 @@ def _server_guard_pressure_preview_payload(
         "path": spec.get("path", "-"),
         "mode": spec.get("mode", "-"),
         "source_command": spec.get("command", "-"),
+        "chat_id": chat_id,
+        "focus_badge": "server-guard",
         "payload": payload,
         "next_step": next_step,
         "remediation": remediation,
@@ -257,6 +260,7 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             note=note,
             outcome_kind=outcome_kind,
             chat_console_href=chat_preset_href,
+            chat_id=preferred_chat_id,
             preset_action=preset_action,
         ),
         status=200,

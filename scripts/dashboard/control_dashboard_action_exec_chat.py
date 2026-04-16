@@ -174,6 +174,25 @@ def _execute_chat_session_update_action(
     detail = f"default={current_default_mode} pending={current_pending_mode} room={current_room}"
     if focus_badge == "server-guard" and server_guard_preset_label:
         detail = f"{server_guard_preset_label} | {detail}"
+    followup_actions = []
+    if focus_badge == "server-guard" and server_guard_preset_label:
+        followup_actions = [
+            {
+                "label": "Open Chat Console",
+                "href": effective_next_step if effective_next_step.startswith("/control/chat") else f"/control/chat?chat={chat_id}",
+                "note": "inspect the selected chat session after applying the server-guard preset",
+            },
+            {
+                "label": "Open Health View",
+                "href": "/control/health/view",
+                "note": "inspect host pressure after switching the chat rail",
+            },
+            {
+                "label": "Open Server Guard Audit",
+                "href": "/control/audit?focus=server-guard",
+                "note": "inspect the full server-guard action trail",
+            },
+        ]
 
     return _json(
         {
@@ -190,6 +209,7 @@ def _execute_chat_session_update_action(
             "focus_badge": focus_badge,
             "server_guard_preset_label": server_guard_preset_label,
             "server_guard_pressure_kind": server_guard_pressure_kind,
+            "actions": followup_actions,
             "reply_text": (
                 f"{server_guard_preset_label + chr(10) if focus_badge == 'server-guard' and server_guard_preset_label else ''}"
                 f"session updated\n"

@@ -372,11 +372,57 @@ def _build_chat_timeline_entries(
     limit: int = 20,
 ) -> list[ChatTimelineEntryDTO]:
     rows: list[ChatTimelineEntryDTO] = []
-    for action in recent_chat_actions:
+    pressure_preview_kinds = {
+        "codex_process_pressure_preview",
+        "python_process_pressure_preview",
+        "tmux_process_pressure_preview",
+        "process_pressure_preview",
+    }
+    consumed: set[int] = set()
+    for index, action in enumerate(recent_chat_actions):
+        if index in consumed:
+            continue
+        outcome_kind = str(action.outcome_kind or "").strip()
+        focus_badge = str(action.focus_badge or "").strip()
+        if outcome_kind == "chat_session_update" and focus_badge == "server-guard":
+            matched_index = None
+            matched_preview = None
+            for older_index in range(index + 1, len(recent_chat_actions)):
+                older = recent_chat_actions[older_index]
+                if older_index in consumed:
+                    continue
+                if str(older.focus_badge or "").strip() != "server-guard":
+                    continue
+                if str(older.outcome_kind or "").strip() not in pressure_preview_kinds:
+                    continue
+                if action.chat_id and older.chat_id and action.chat_id != older.chat_id:
+                    continue
+                matched_index = older_index
+                matched_preview = older
+                break
+            if matched_preview is not None and matched_index is not None:
+                rows.append(
+                    ChatTimelineEntryDTO(
+                        at=str(action.at or "-").strip() or "-",
+                        source="thread",
+                        headline="Server Guard Preset Thread",
+                        badge="server-guard",
+                        body=(
+                            f"{str(matched_preview.headline or '-').strip() or '-'}"
+                            f" -> {str(action.headline or '-').strip() or '-'}"
+                        ),
+                        command=str(action.source_command or "").strip(),
+                        next_step=str(action.next_step or "").strip(),
+                        room=room,
+                    )
+                )
+                consumed.add(index)
+                consumed.add(matched_index)
+                continue
         rows.append(
             ChatTimelineEntryDTO(
                 at=str(action.at or "-").strip() or "-",
-                source="reply" if str(action.outcome_kind or "").strip() == "chat_send" else "session",
+                source="reply" if outcome_kind == "chat_send" else "session",
                 headline=str(action.headline or "-").strip() or "-",
                 badge=str(action.outcome_kind or action.status or "-").strip() or "-",
                 body=str(action.transcript_preview or action.outcome_detail or "-").strip() or "-",
@@ -619,13 +665,30 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
     for raw in reversed(raw_rows):
         if not isinstance(raw, dict):
             continue
-        if str(raw.get("outcome_kind", "")).strip() not in {"chat_send", "chat_session_update", "chat_session_select_task"}:
+        outcome_kind = str(raw.get("outcome_kind", "")).strip()
+        if outcome_kind not in {
+            "chat_send",
+            "chat_session_update",
+            "chat_session_select_task",
+            "codex_process_pressure_preview",
+            "python_process_pressure_preview",
+            "tmux_process_pressure_preview",
+            "process_pressure_preview",
+        }:
             continue
+        focus_badge = str(raw.get("focus_badge", "")).strip()
+        if not focus_badge and outcome_kind in {
+            "codex_process_pressure_preview",
+            "python_process_pressure_preview",
+            "tmux_process_pressure_preview",
+            "process_pressure_preview",
+        }:
+            focus_badge = "server-guard"
         row = ActionAuditRowDTO(
             at=str(raw.get("at", "")).strip() or "-",
             headline=str(raw.get("headline", "")).strip() or "-",
             status=str(raw.get("status", "")).strip() or "unknown",
-            outcome_kind=str(raw.get("outcome_kind", "")).strip() or "-",
+            outcome_kind=outcome_kind or "-",
             outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",
             outcome_reason_code=str(raw.get("outcome_reason_code", "")).strip() or "-",
             outcome_detail=str(raw.get("outcome_detail", "")).strip() or "-",
@@ -634,7 +697,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             link_label=str(raw.get("link_label", "")).strip() or "-",
             link_href=str(raw.get("link_href", "")).strip() or "-",
             source_command=str(raw.get("source_command", "")).strip() or "-",
-            focus_badge=str(raw.get("focus_badge", "")).strip(),
+            focus_badge=focus_badge,
             chat_id=str(raw.get("chat_id", "")).strip(),
             transcript_preview=str(raw.get("transcript_preview", "")).strip(),
         )
