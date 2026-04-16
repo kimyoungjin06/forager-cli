@@ -226,9 +226,25 @@
           <h2>Server Guard Preset Threads</h2>
         </div>
       </div>
-      {% with threads=chat.server_guard_threads, compact=false %}
-        {% include 'dashboard/_server_guard_threads.html' %}
+      {% if chat.server_guard_threads %}
+      {% with
+        thread=chat.server_guard_threads[0],
+        title='Latest Server Guard Thread',
+        kicker='Selected Session',
+        compact=false
+      %}
+        {% include 'dashboard/_server_guard_thread_highlight.html' %}
       {% endwith %}
+      {% endif %}
+      {% if chat.server_guard_threads|length > 1 %}
+        {% with threads=chat.server_guard_threads[1:], compact=false, show_empty=false %}
+          {% include 'dashboard/_server_guard_threads.html' %}
+        {% endwith %}
+      {% elif not chat.server_guard_threads %}
+        {% with threads=chat.server_guard_threads, compact=false %}
+          {% include 'dashboard/_server_guard_threads.html' %}
+        {% endwith %}
+      {% endif %}
     </section>
 
     <section class="panel chat-panel">

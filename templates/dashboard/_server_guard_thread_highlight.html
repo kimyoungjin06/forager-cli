@@ -1,0 +1,30 @@
+{% if thread is defined and thread.exists %}
+<article class="server-guard-thread-highlight{% if compact %} compact{% endif %}">
+  <div class="server-guard-thread-highlight-head">
+    <div>
+      {% if kicker %}<p class="section-kicker">{{ kicker }}</p>{% endif %}
+      <h3>{{ title or 'Latest Server Guard Thread' }}</h3>
+    </div>
+    {% if thread.detail_href %}
+    <a class="action-history-badge" href="{{ thread.detail_href }}">{{ thread.detail_label or 'detail' }}</a>
+    {% endif %}
+  </div>
+  <div class="server-guard-thread-highlight-grid">
+    <p><strong>preview</strong> {{ thread.preview_headline }}</p>
+    <p><strong>apply</strong> {{ thread.apply_headline }}</p>
+    <p><strong>at</strong> <span class="mono">{{ thread.at }}</span></p>
+    {% if thread.next_step and thread.next_step != '-' %}
+    <p><strong>next</strong> {{ thread.next_step }}</p>
+    {% endif %}
+  </div>
+  <p><strong>preset_diff</strong></p>
+  <div class="diff-badge-list">
+    {% for token in thread.preset_diff_summary.split(' | ') if token %}
+    <span class="diff-badge {% if token == 'no change' %}unchanged{% else %}changed{% endif %}">{{ token }}</span>
+    {% endfor %}
+  </div>
+  {% if not compact and thread.command and thread.command != '-' %}
+  <p><strong>command</strong> <code>{{ thread.command }}</code></p>
+  {% endif %}
+</article>
+{% endif %}

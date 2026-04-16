@@ -51,10 +51,6 @@
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
   {% endif %}
-  <p><strong>server_guard_threads</strong></p>
-  {% with threads=snapshot.control_summary.server_guard_threads, compact=true, show_empty=false %}
-    {% include 'dashboard/_server_guard_threads.html' %}
-  {% endwith %}
   {% with
     section_title='control_actions',
     safe_hints=[],
@@ -69,6 +65,32 @@
   <pre class="code-block">python3 scripts/dashboard/nightly_session_summary.py --control-root {{ snapshot.control_root }}</pre>
   {% endif %}
 </section>
+
+{% if snapshot.control_summary.server_guard_threads %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="section-kicker">Recovery Threads</p>
+      <h2>Server Guard Preset Threads</h2>
+      <p class="section-note">latest pressure preview -> preset apply 흐름을 recovery surface에서 직접 읽습니다.</p>
+    </div>
+    <span class="badge">{{ snapshot.control_summary.server_guard_threads|length }}</span>
+  </div>
+  {% with
+    thread=snapshot.control_summary.server_guard_threads[0],
+    title='Latest Server Guard Thread',
+    kicker='Recovery Focus',
+    compact=false
+  %}
+    {% include 'dashboard/_server_guard_thread_highlight.html' %}
+  {% endwith %}
+  {% if snapshot.control_summary.server_guard_threads|length > 1 %}
+    {% with threads=snapshot.control_summary.server_guard_threads[1:], compact=true, show_empty=false %}
+      {% include 'dashboard/_server_guard_threads.html' %}
+    {% endwith %}
+  {% endif %}
+</section>
+{% endif %}
 
 {% if recovery.runtimes %}
 <section class="panel">
