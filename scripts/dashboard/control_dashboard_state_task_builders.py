@@ -1057,6 +1057,40 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             )
             or "-",
             execution_brief_operator_decision=str(task.get("execution_brief_operator_decision", "")).strip() or "-",
+            job_contract_summary=str(task.get("job_contract_summary", "")).strip() or "-",
+            job_contract_goal=str(task.get("job_contract_goal", "")).strip() or "-",
+            job_contract_scope=", ".join(
+                str(item).strip() for item in (task.get("job_contract_scope") or []) if str(item).strip()
+            )
+            or "-",
+            job_contract_non_goals=", ".join(
+                str(item).strip() for item in (task.get("job_contract_non_goals") or []) if str(item).strip()
+            )
+            or "-",
+            job_contract_acceptance_checks=" | ".join(
+                str(item).strip() for item in (task.get("job_contract_acceptance_checks") or []) if str(item).strip()
+            )
+            or "-",
+            job_contract_artifacts_to_touch=", ".join(
+                str(item).strip() for item in (task.get("job_contract_artifacts_to_touch") or []) if str(item).strip()
+            )
+            or "-",
+            job_contract_rollback_hint=str(task.get("job_contract_rollback_hint", "")).strip() or "-",
+            debug_packet_summary=str(task.get("debug_packet_summary", "")).strip() or "-",
+            debug_packet_symptom=str(task.get("debug_packet_symptom", "")).strip() or "-",
+            debug_packet_root_cause=str(task.get("debug_packet_root_cause", "")).strip() or "-",
+            debug_packet_evidence=", ".join(
+                str(item).strip() for item in (task.get("debug_packet_evidence") or []) if str(item).strip()
+            )
+            or "-",
+            debug_packet_failed_attempt=str(task.get("debug_packet_failed_attempt", "")).strip() or "-",
+            debug_packet_next_step=str(task.get("debug_packet_next_step", "")).strip() or "-",
+            phase_checkpoint_summary=str(task.get("phase_checkpoint_summary", "")).strip() or "-",
+            phase_checkpoint_current_phase=str(task.get("phase_checkpoint_current_phase", "")).strip() or "-",
+            phase_checkpoint_rows=" | ".join(
+                str(item).strip() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()
+            )
+            or "-",
             background_run_status=str(task.get("background_run_status", "")).strip() or "-",
             background_run_runner_target=str(task.get("background_run_runner_target", "")).strip() or "-",
             background_run_ticket_id=str(task.get("background_run_ticket_id", "")).strip() or "-",

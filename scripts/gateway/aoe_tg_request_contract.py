@@ -33,6 +33,7 @@ from aoe_tg_request_contract_review import (
 
 REQUEST_CONTRACT_VERSION = "2026-03-30.v1"
 EXECUTION_BRIEF_VERSION = "2026-04-04.v1"
+JOB_CONTRACT_VERSION = "2026-04-16.v1"
 BACKGROUND_RUN_TICKET_VERSION = "2026-04-04.v1"
 BACKGROUND_LAUNCH_SPEC_VERSION = "2026-04-06.v1"
 EXECUTION_BRIEF_STATUSES = (
@@ -59,6 +60,8 @@ BACKGROUND_RUNNER_DEFAULT_MODES = {
     "github_runner": "github_action_json",
     "remote_worker": "remote_worker_json",
 }
+JOB_CONTRACT_STATUSES = ("ready", "blocked", "review")
+JOB_CONTRACT_PLANNING_MODES = ("light", "standard", "deep")
 
 
 def _trim(raw: Any, limit: int) -> str:
@@ -171,6 +174,44 @@ def normalize_request_contract_snapshot(raw: Any) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
 
+    meaningful_keys = (
+        "contract_type",
+        "preset",
+        "status",
+        "objective",
+        "project_key",
+        "intent_action",
+        "source_prompt",
+        "summary",
+        "approval_mode",
+        "readonly",
+        "missing_fields",
+        "ambiguity_notes",
+        "required_outputs",
+        "required_evidence",
+        "fields",
+        "artifact_contracts",
+    )
+    has_meaningful_value = False
+    for key in meaningful_keys:
+        value = raw.get(key)
+        if isinstance(value, dict):
+            if value:
+                has_meaningful_value = True
+                break
+        elif isinstance(value, list):
+            if any(_trim(item, 200) for item in value):
+                has_meaningful_value = True
+                break
+        elif isinstance(value, bool):
+            has_meaningful_value = True
+            break
+        elif _trim(value, 400):
+            has_meaningful_value = True
+            break
+    if not has_meaningful_value:
+        return {}
+
     contract_type = normalize_role_preset(raw.get("contract_type") or raw.get("preset") or "general")
     status = _trim(raw.get("status", "complete"), 32).lower() or "complete"
     if status not in {"complete", "incomplete", "ambiguous"}:
@@ -252,6 +293,200 @@ def normalize_execution_brief_snapshot(raw: Any) -> Dict[str, Any]:
         snapshot["offdesk_allowed"] = _normalize_bool(raw.get("offdesk_allowed"), False)
 
     return snapshot
+
+
+def _contract_field_rows(
+    fields: Dict[str, Any],
+    *aliases: str,
+    limit: int = 8,
+    text_limit: int = 160,
+) -> List[str]:
+    if not isinstance(fields, dict):
+        return []
+    field_map = {str(key or "").strip().lower(): value for key, value in fields.items() if str(key or "").strip()}
+    rows: List[str] = []
+    for alias in aliases:
+        value = field_map.get(str(alias or "").strip().lower())
+        if isinstance(value, list):
+            rows.extend(_dedupe_rows(list(value), limit=limit, text_limit=text_limit))
+        elif isinstance(value, dict):
+            for child_key in sorted(value.keys()):
+                child_value = value.get(child_key)
+                token = _trim(child_value, text_limit)
+                if token:
+                    rows.append(f"{child_key}={token}"[:text_limit])
+        else:
+            token = _trim(value, text_limit)
+            if token:
+                rows.append(token)
+    return _dedupe_rows(rows, limit=limit, text_limit=text_limit)
+
+
+def normalize_job_contract_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+
+    meaningful_keys = (
+        "status",
+        "planning_mode",
+        "summary",
+        "goal",
+        "rollback_hint",
+        "scope",
+        "non_goals",
+        "risks",
+        "acceptance_checks",
+        "artifacts_to_touch",
+    )
+    has_meaningful_value = False
+    for key in meaningful_keys:
+        value = raw.get(key)
+        if isinstance(value, list):
+            if any(_trim(item, 160) for item in value):
+                has_meaningful_value = True
+                break
+        elif _trim(value, 320):
+            has_meaningful_value = True
+            break
+    if not has_meaningful_value:
+        return {}
+
+    status = _trim(raw.get("status", "ready"), 32).lower() or "ready"
+    if status not in JOB_CONTRACT_STATUSES:
+        status = "ready"
+    planning_mode = _trim(raw.get("planning_mode", "standard"), 32).lower() or "standard"
+    if planning_mode not in JOB_CONTRACT_PLANNING_MODES:
+        planning_mode = "standard"
+
+    snapshot: Dict[str, Any] = {
+        "version": _trim(raw.get("version", JOB_CONTRACT_VERSION), 48) or JOB_CONTRACT_VERSION,
+        "status": status,
+        "planning_mode": planning_mode,
+    }
+    for key in ("summary", "goal", "rollback_hint"):
+        token = _trim(raw.get(key, ""), 320 if key == "summary" else 240)
+        if token:
+            snapshot[key] = token
+
+    for key in ("scope", "non_goals", "risks", "acceptance_checks", "artifacts_to_touch"):
+        value = raw.get(key)
+        rows = _dedupe_rows(
+            list(value) if isinstance(value, list) else ([value] if _trim(value, 160) else []),
+            limit=12,
+            text_limit=160,
+        )
+        if rows:
+            snapshot[key] = rows
+
+    if not snapshot.get("summary"):
+        summary_parts = [
+            f"status={status}",
+            f"plan={planning_mode}",
+            f"scope={len(snapshot.get('scope') or [])}",
+            f"checks={len(snapshot.get('acceptance_checks') or [])}",
+            f"artifacts={len(snapshot.get('artifacts_to_touch') or [])}",
+        ]
+        snapshot["summary"] = " | ".join(summary_parts)[:320]
+    return snapshot
+
+
+def build_job_contract(contract: Dict[str, Any], brief: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    snapshot = normalize_request_contract_snapshot(contract)
+    if not snapshot:
+        return {}
+    brief_snapshot = normalize_execution_brief_snapshot(brief or {})
+    fields = snapshot.get("fields") if isinstance(snapshot.get("fields"), dict) else {}
+    artifact_contracts = snapshot.get("artifact_contracts") if isinstance(snapshot.get("artifact_contracts"), dict) else {}
+    required_outputs = [str(item).strip() for item in (snapshot.get("required_outputs") or []) if str(item).strip()]
+    required_evidence = [str(item).strip() for item in (snapshot.get("required_evidence") or []) if str(item).strip()]
+    missing_fields = [str(item).strip() for item in (snapshot.get("missing_fields") or []) if str(item).strip()]
+    ambiguity_notes = [str(item).strip() for item in (snapshot.get("ambiguity_notes") or []) if str(item).strip()]
+
+    goal = _trim(snapshot.get("objective", ""), 240) or _trim(snapshot.get("summary", ""), 240)
+    scope = list(required_outputs)
+    if not scope:
+        scope = _contract_field_rows(fields, "scope", "in_scope", "deliverables", "outputs", limit=12)
+    non_goals = _contract_field_rows(fields, "non_goals", "out_of_scope", "do_not_touch", "constraints", limit=8)
+    if not non_goals:
+        if snapshot.get("readonly") is True:
+            non_goals = ["avoid source mutations outside declared review evidence"]
+        elif artifact_contracts:
+            non_goals = ["avoid mutations outside declared artifact targets"]
+
+    risks: List[str] = []
+    risks.extend(missing_fields[:6])
+    for item in ambiguity_notes[:4]:
+        if item and item not in risks:
+            risks.append(item)
+    for item in _contract_field_rows(fields, "risks", "open_questions", "ambiguities", "dependencies", limit=8):
+        if item not in risks:
+            risks.append(item)
+    risks = _dedupe_rows(risks, limit=8, text_limit=160)
+
+    acceptance_checks: List[str] = list(required_evidence)
+    acceptance_checks.extend(_contract_field_rows(fields, "acceptance", "acceptance_checks", "quality_gate", limit=12))
+    for alias in sorted(artifact_contracts.keys()):
+        row = artifact_contracts.get(alias) if isinstance(artifact_contracts.get(alias), dict) else {}
+        for note in list(row.get("acceptance_notes") or [])[:3]:
+            token = str(note or "").strip()
+            if token:
+                acceptance_checks.append(token)
+    acceptance_checks = _dedupe_rows(acceptance_checks, limit=12, text_limit=160)
+
+    artifacts_to_touch: List[str] = []
+    for alias in sorted(artifact_contracts.keys()):
+        row = artifact_contracts.get(alias) if isinstance(artifact_contracts.get(alias), dict) else {}
+        path = _trim(row.get("path", ""), 200)
+        artifacts_to_touch.append(path or alias)
+    artifacts_to_touch.extend(_contract_field_rows(fields, "artifacts_to_touch", "write_targets", "touch_paths", limit=12, text_limit=200))
+    artifacts_to_touch = _dedupe_rows(artifacts_to_touch, limit=12, text_limit=200)
+
+    contract_status = str(snapshot.get("status", "")).strip().lower()
+    brief_status = str(brief_snapshot.get("status", "")).strip().lower()
+    status = "ready"
+    if contract_status in {"incomplete", "ambiguous"} or brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
+        status = "blocked"
+    elif snapshot.get("readonly") is True:
+        status = "review"
+
+    depth_score = len(scope) + len(risks) + len(acceptance_checks) + len(artifacts_to_touch)
+    planning_mode = "light"
+    if status == "blocked" or depth_score >= 10 or len(artifact_contracts) >= 3:
+        planning_mode = "deep"
+    elif depth_score >= 5 or len(artifact_contracts) >= 2:
+        planning_mode = "standard"
+
+    rollback_hint = ""
+    if snapshot.get("readonly") is True:
+        rollback_hint = "readonly flow; keep changes inside declared review evidence and reviewer notes"
+    elif artifacts_to_touch:
+        rollback_hint = "limit mutations to declared artifact targets and verify acceptance checks before apply"
+    else:
+        rollback_hint = "keep scope limited to declared outputs and review touched artifacts before apply"
+
+    return normalize_job_contract_snapshot(
+        {
+            "version": JOB_CONTRACT_VERSION,
+            "status": status,
+            "planning_mode": planning_mode,
+            "summary": " | ".join(
+                [
+                    f"status={status}",
+                    f"plan={planning_mode}",
+                    f"scope={len(scope)}",
+                    f"checks={len(acceptance_checks)}",
+                    f"artifacts={len(artifacts_to_touch)}",
+                ]
+            )[:320],
+            "goal": goal,
+            "scope": scope,
+            "non_goals": non_goals,
+            "risks": risks,
+            "acceptance_checks": acceptance_checks,
+            "artifacts_to_touch": artifacts_to_touch,
+            "rollback_hint": rollback_hint,
+        }
+    )
 
 
 def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
@@ -1347,6 +1582,29 @@ def request_contract_planning_appendix(contract: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def job_contract_planning_appendix(contract: Dict[str, Any]) -> str:
+    snapshot = normalize_job_contract_snapshot(contract)
+    if not snapshot:
+        return ""
+    lines = ["[Job Contract]"]
+    lines.append(f"- status: {snapshot.get('status', '-')}")
+    lines.append(f"- planning_mode: {snapshot.get('planning_mode', '-')}")
+    summary = _trim(snapshot.get("summary", ""), 320)
+    if summary:
+        lines.append(f"- summary: {summary}")
+    goal = _trim(snapshot.get("goal", ""), 240)
+    if goal:
+        lines.append(f"- goal: {goal}")
+    for key in ("scope", "non_goals", "risks", "acceptance_checks", "artifacts_to_touch"):
+        rows = [str(item).strip() for item in (snapshot.get(key) or []) if str(item).strip()]
+        if rows:
+            lines.append(f"- {key}: " + ", ".join(rows[:8]))
+    rollback_hint = _trim(snapshot.get("rollback_hint", ""), 240)
+    if rollback_hint:
+        lines.append(f"- rollback_hint: {rollback_hint}")
+    return "\n".join(lines)
+
+
 def request_contract_metadata(contract: Dict[str, Any]) -> Dict[str, Any]:
     snapshot = normalize_request_contract_snapshot(contract)
     if not snapshot:
@@ -1362,6 +1620,27 @@ def request_contract_metadata(contract: Dict[str, Any]) -> Dict[str, Any]:
             "request_contract_required_outputs": list(snapshot.get("required_outputs") or []),
             "request_contract_fields": dict(snapshot.get("fields") or {}),
             "request_contract_artifact_contracts": dict(snapshot.get("artifact_contracts") or {}),
+        }
+    )
+
+
+def job_contract_metadata(contract: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_job_contract_snapshot(contract)
+    if not snapshot:
+        return {}
+    return deepcopy(
+        {
+            "job_contract_version": snapshot.get("version", JOB_CONTRACT_VERSION),
+            "job_contract_status": snapshot.get("status", ""),
+            "job_contract_planning_mode": snapshot.get("planning_mode", ""),
+            "job_contract_summary": snapshot.get("summary", ""),
+            "job_contract_goal": snapshot.get("goal", ""),
+            "job_contract_scope": list(snapshot.get("scope") or []),
+            "job_contract_non_goals": list(snapshot.get("non_goals") or []),
+            "job_contract_risks": list(snapshot.get("risks") or []),
+            "job_contract_acceptance_checks": list(snapshot.get("acceptance_checks") or []),
+            "job_contract_artifacts_to_touch": list(snapshot.get("artifacts_to_touch") or []),
+            "job_contract_rollback_hint": snapshot.get("rollback_hint", ""),
         }
     )
 
@@ -1469,6 +1748,18 @@ def apply_request_contract_snapshot(target: Dict[str, Any], contract: Dict[str, 
     if not isinstance(target, dict):
         return {}
     metadata = request_contract_metadata(contract)
+    for key, value in metadata.items():
+        if value in ("", None, [], {}):
+            target.pop(key, None)
+            continue
+        target[key] = deepcopy(value)
+    return target
+
+
+def apply_job_contract_snapshot(target: Dict[str, Any], contract: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict):
+        return {}
+    metadata = job_contract_metadata(contract)
     for key, value in metadata.items():
         if value in ("", None, [], {}):
             target.pop(key, None)

@@ -13,13 +13,17 @@ from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_act
 from aoe_tg_request_contract import (
     apply_background_run_ticket_snapshot,
     apply_execution_brief_snapshot,
+    apply_job_contract_snapshot,
     apply_request_contract_snapshot,
     build_execution_brief,
+    build_job_contract,
     normalize_background_run_ticket_snapshot,
     normalize_execution_brief_snapshot,
+    normalize_job_contract_snapshot,
     normalize_request_contract_snapshot,
 )
 from aoe_tg_team_observatory import observatory_monitor_line, task_team_observatory_snapshot
+import aoe_tg_worker_task_contract as worker_task_contract
 
 
 LANE_STATES = ("pending", "running", "done", "failed", "waiting_on_dependencies")
@@ -27,6 +31,10 @@ LANE_VERDICTS = ("success", "retry", "fail", "intervention")
 PLAN_CONVERGENCE_STATUSES = ("ready", "blocked", "stalled", "failed", "pending")
 FOLLOWUP_BRIEF_VERSION = "2026-04-06.v1"
 FOLLOWUP_BRIEF_STATUSES = ("preview_only", "executable", "partially_executable")
+DEBUG_PACKET_VERSION = "2026-04-16.v1"
+DEBUG_PACKET_STATES = ("clean", "watch", "blocked", "active")
+PHASE_CHECKPOINT_VERSION = "2026-04-16.v1"
+PHASE_CHECKPOINT_STATUSES = ("ready", "active", "blocked", "done")
 _BRIEF_BLOCKED_STATUSES = {"underspecified", "operator_decision_required", "infeasible"}
 _EXTERNAL_BACKGROUND_RUNNERS = {"github_runner", "remote_worker"}
 
@@ -84,6 +92,16 @@ def _normalize_followup_lane_ids(raw: Any, *, limit: int = 8) -> List[str]:
     out: List[str] = []
     for row in rows:
         token = str(row or "").strip()[:32]
+        if token and token not in out:
+            out.append(token)
+    return out[: max(1, int(limit or 1))]
+
+
+def _normalize_small_rows(raw: Any, *, limit: int = 8, text_limit: int = 160) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    out: List[str] = []
+    for row in rows:
+        token = str(row or "").strip()[: max(1, int(text_limit or 1))]
         if token and token not in out:
             out.append(token)
     return out[: max(1, int(limit or 1))]
@@ -149,6 +167,338 @@ def apply_followup_brief_snapshot(target: Dict[str, Any], brief: Dict[str, Any])
     target["followup_brief_review_lane_ids"] = list(snapshot.get("review_lane_ids") or [])
     target["followup_brief_reason"] = snapshot.get("reason", "")
     return target
+
+
+def normalize_debug_packet_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    state = str(raw.get("state", "")).strip().lower()
+    if state not in DEBUG_PACKET_STATES:
+        return {}
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", DEBUG_PACKET_VERSION)).strip() or DEBUG_PACKET_VERSION,
+        "state": state,
+    }
+    for key in ("summary", "symptom", "root_cause", "failed_attempt", "next_step"):
+        token = str(raw.get(key, "")).strip()
+        if token:
+            snapshot[key] = token[:320 if key == "summary" else 240]
+    evidence = _normalize_small_rows(raw.get("evidence"), limit=10, text_limit=160)
+    if evidence:
+        snapshot["evidence"] = evidence
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [
+                f"state={state}",
+                f"symptom={snapshot.get('symptom', '-')}",
+                f"evidence={len(snapshot.get('evidence') or [])}",
+                f"next={snapshot.get('next_step', '-')}",
+            ]
+        )[:320]
+    return snapshot
+
+
+def apply_debug_packet_snapshot(target: Dict[str, Any], packet: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_debug_packet_snapshot(packet)
+    if not snapshot or not isinstance(target, dict):
+        return target
+    target["debug_packet_version"] = snapshot.get("version", DEBUG_PACKET_VERSION)
+    target["debug_packet_state"] = snapshot.get("state", "")
+    target["debug_packet_summary"] = snapshot.get("summary", "")
+    target["debug_packet_symptom"] = snapshot.get("symptom", "")
+    target["debug_packet_root_cause"] = snapshot.get("root_cause", "")
+    target["debug_packet_evidence"] = list(snapshot.get("evidence") or [])
+    target["debug_packet_failed_attempt"] = snapshot.get("failed_attempt", "")
+    target["debug_packet_next_step"] = snapshot.get("next_step", "")
+    return target
+
+
+def _task_ref_label(task: Dict[str, Any]) -> str:
+    for key in ("short_id", "alias", "request_id"):
+        token = str(task.get(key, "")).strip()
+        if token:
+            return token
+    return "task"
+
+
+def build_debug_packet_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    task_ref = _task_ref_label(task)
+    execution_brief_status = str(task.get("execution_brief_status", "")).strip().lower()
+    blocked_slice = _normalize_small_rows(task.get("execution_brief_blocked_slice"), limit=8, text_limit=120)
+    missing_fields = _normalize_small_rows(task.get("request_contract_missing_fields"), limit=8, text_limit=120)
+    worker_preflight_rows = _normalize_small_rows(task.get("background_run_worker_preflight_rows"), limit=8, text_limit=160)
+    worker_result_cautions = _normalize_small_rows(task.get("background_run_worker_result_cautions"), limit=6, text_limit=160)
+    evidence: List[str] = []
+    evidence.extend(blocked_slice)
+    evidence.extend(missing_fields)
+    evidence.extend(worker_preflight_rows)
+    evidence.extend(worker_result_cautions)
+    evidence.extend(_normalize_small_rows(task.get("background_run_evidence_artifacts"), limit=6, text_limit=160))
+    if isinstance(task.get("result"), dict):
+        evidence.extend(_normalize_small_rows((task.get("result") or {}).get("degraded_by"), limit=6, text_limit=120))
+    evidence = _normalize_small_rows(evidence, limit=10, text_limit=160)
+
+    worker_blocker: Dict[str, Any] = {}
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_kind and module_kind != "general":
+        worker_blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+            {
+                "module_kind": module_kind,
+                "rows_kind": str(task.get("background_run_worker_preflight_rows_summary", "")).strip().split(" | ", 1)[0] or "",
+                "rows": worker_preflight_rows,
+                "summary_line": str(task.get("background_run_worker_preflight_rows_summary", "")).strip() or "-",
+                "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+            },
+            mode="apply",
+        )
+
+    status = str(task.get("status", "")).strip().lower()
+    followup_status = str(task.get("followup_brief_status", "")).strip().lower()
+    rate_limit = task.get("rate_limit") if isinstance(task.get("rate_limit"), dict) else {}
+    state = "clean"
+    symptom = ""
+    root_cause = ""
+    next_step = "-"
+
+    if execution_brief_status in _BRIEF_BLOCKED_STATUSES:
+        state = "blocked"
+        symptom = "execution_brief_blocked"
+        root_cause = (
+            str(task.get("execution_brief_operator_decision", "")).strip()
+            or ", ".join(blocked_slice[:4])
+            or str(task.get("plan_gate_reason", "")).strip()
+            or str(task.get("execution_brief_summary", "")).strip()
+        )
+        next_step = "/offdesk review"
+    elif str(worker_blocker.get("summary_line", "")).strip():
+        state = "blocked"
+        symptom = "worker_gate_blocked"
+        root_cause = (
+            str(worker_blocker.get("remediation", "")).strip()
+            or str(worker_blocker.get("summary_line", "")).strip()
+        )
+        next_step = str(worker_blocker.get("next_step", "")).strip() or f"/task {task_ref}"
+        evidence = _normalize_small_rows(
+            list(worker_blocker.get("blocked_rows") or []) + evidence,
+            limit=10,
+            text_limit=160,
+        )
+    elif status == "failed" or any(
+        str(((task.get("stages") or {}).get(name, ""))).strip().lower() == "failed"
+        for name in ("execution", "verification", "integration", "close")
+    ):
+        state = "blocked"
+        symptom = "task_failed"
+        root_cause = (
+            str(task.get("backend_contract_note", "")).strip()
+            or str(((task.get("exec_critic") or {}).get("reason", ""))).strip()
+            or "task entered failed state"
+        )
+        next_step = f"/retry {task_ref}"
+    elif followup_status == "preview_only":
+        state = "watch"
+        symptom = "followup_preview_only"
+        root_cause = str(task.get("followup_brief_reason", "")).strip() or "operator-owned follow-up remains"
+        next_step = f"/followup {task_ref}"
+    elif rate_limit:
+        state = "watch"
+        symptom = "rate_limited"
+        providers = ",".join(str(item).strip() for item in (rate_limit.get("limited_providers") or []) if str(item).strip()) or "-"
+        root_cause = f"providers={providers} retry_at={str(rate_limit.get('retry_at', '')).strip() or '-'}"
+        next_step = f"/check {task_ref}"
+    elif str(task.get("background_run_status", "")).strip().lower() in {"queued", "dispatching", "running"}:
+        state = "active"
+        symptom = "background_run_inflight"
+        root_cause = str(task.get("background_run_runtime_summary", "")).strip() or str(task.get("background_run_status", "")).strip()
+        next_step = f"/task {task_ref}"
+
+    failed_attempt_parts: List[str] = []
+    exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
+    critic_verdict = str(exec_critic.get("verdict", "")).strip()
+    critic_action = str(exec_critic.get("action", "")).strip()
+    if critic_verdict:
+        try:
+            attempt = int(exec_critic.get("attempt", 0) or 0)
+            max_attempts = int(exec_critic.get("max_attempts", 0) or 0)
+        except Exception:
+            attempt = 0
+            max_attempts = 0
+        critic_text = critic_verdict
+        if critic_action:
+            critic_text += f"/{critic_action}"
+        if attempt and max_attempts:
+            critic_text += f" {attempt}/{max_attempts}"
+        failed_attempt_parts.append("critic=" + critic_text)
+    backend = str(task.get("backend", "")).strip()
+    backend_verdict = str(task.get("backend_verdict", "")).strip()
+    if backend or backend_verdict:
+        failed_attempt_parts.append("backend=" + "/".join(part for part in (backend, backend_verdict) if part))
+    background_status = str(task.get("background_run_status", "")).strip()
+    if background_status:
+        failed_attempt_parts.append("background=" + background_status)
+
+    return normalize_debug_packet_snapshot(
+        {
+            "version": DEBUG_PACKET_VERSION,
+            "state": state,
+            "symptom": symptom or "none",
+            "root_cause": root_cause or ("no immediate debug focus" if state == "clean" else "-"),
+            "failed_attempt": " | ".join(part for part in failed_attempt_parts if part)[:240],
+            "next_step": next_step,
+            "evidence": evidence,
+        }
+    )
+
+
+def normalize_phase_checkpoint_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = str(raw.get("status", "")).strip().lower()
+    if status not in PHASE_CHECKPOINT_STATUSES:
+        return {}
+    current_phase = str(raw.get("current_phase", "")).strip().lower() or "plan"
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", PHASE_CHECKPOINT_VERSION)).strip() or PHASE_CHECKPOINT_VERSION,
+        "status": status,
+        "current_phase": current_phase,
+    }
+    summary = str(raw.get("summary", "")).strip()
+    if summary:
+        snapshot["summary"] = summary[:320]
+    rows = _normalize_small_rows(raw.get("rows"), limit=8, text_limit=200)
+    if rows:
+        snapshot["rows"] = rows
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [f"status={status}", f"current={current_phase}", *list(snapshot.get("rows") or [])[:4]]
+        )[:320]
+    return snapshot
+
+
+def apply_phase_checkpoint_snapshot(target: Dict[str, Any], checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_phase_checkpoint_snapshot(checkpoint)
+    if not snapshot or not isinstance(target, dict):
+        return target
+    target["phase_checkpoint_version"] = snapshot.get("version", PHASE_CHECKPOINT_VERSION)
+    target["phase_checkpoint_status"] = snapshot.get("status", "")
+    target["phase_checkpoint_current_phase"] = snapshot.get("current_phase", "")
+    target["phase_checkpoint_summary"] = snapshot.get("summary", "")
+    target["phase_checkpoint_rows"] = list(snapshot.get("rows") or [])
+    return target
+
+
+def build_phase_checkpoint_snapshot(task: Dict[str, Any], debug_packet: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    debug_snapshot = normalize_debug_packet_snapshot(debug_packet or build_debug_packet_snapshot(task))
+    job_status = str(task.get("job_contract_status", "")).strip().lower() or "ready"
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    stages = task.get("stages") if isinstance(task.get("stages"), dict) else {}
+    planning_stage = str(stages.get("planning", "")).strip().lower()
+    staffing_stage = str(stages.get("staffing", "")).strip().lower()
+    execution_stage = str(stages.get("execution", "")).strip().lower()
+    verification_stage = str(stages.get("verification", "")).strip().lower()
+    integration_stage = str(stages.get("integration", "")).strip().lower()
+    close_stage = str(stages.get("close", "")).strip().lower()
+    background_status = str(task.get("background_run_status", "")).strip().lower()
+    followup_status = str(task.get("followup_brief_status", "")).strip().lower()
+
+    rows: List[str] = []
+    row_states: Dict[str, str] = {}
+
+    def _append_row(kind: str, state: str, note: str) -> None:
+        row_states[kind] = state
+        token = f"{kind}={state}"
+        if note:
+            token += f"|note={note[:120]}"
+        rows.append(token[:200])
+
+    plan_note = (
+        str(task.get("plan_gate_reason", "")).strip()
+        or str(task.get("execution_brief_summary", "")).strip()
+        or str(task.get("job_contract_summary", "")).strip()
+    )
+    if execution_stage in {"running", "done"} or staffing_stage == "done":
+        _append_row("plan", "done", plan_note or "execution started")
+    elif job_status == "blocked" or str(task.get("execution_brief_status", "")).strip().lower() in _BRIEF_BLOCKED_STATUSES or task.get("plan_gate_passed") is False:
+        _append_row("plan", "blocked", plan_note or "plan contract blocked")
+    elif planning_stage == "running" or tf_phase == "planning":
+        _append_row("plan", "active", plan_note or "plan review in progress")
+    else:
+        _append_row("plan", "ready", plan_note or "plan contract ready")
+
+    implement_note = (
+        str(task.get("lane_summary", "")).strip()
+        or str(task.get("background_run_runtime_summary", "")).strip()
+        or str(task.get("backend_contract_note", "")).strip()
+    )
+    if execution_stage == "failed" or str(task.get("status", "")).strip().lower() == "failed":
+        _append_row("implement", "blocked", implement_note or "execution failed")
+    elif execution_stage == "done":
+        _append_row("implement", "done", implement_note or "execution complete")
+    elif execution_stage == "running" or background_status in {"queued", "dispatching", "running"} or staffing_stage in {"running", "done"}:
+        _append_row("implement", "active", implement_note or "execution in progress")
+    else:
+        _append_row("implement", "ready", implement_note or "implementation lane ready")
+
+    verify_note = (
+        str(task.get("followup_brief_reason", "")).strip()
+        or str(task.get("background_run_worker_preflight_summary", "")).strip()
+        or str(debug_snapshot.get("root_cause", "")).strip()
+    )
+    if verification_stage == "failed" or str(debug_snapshot.get("symptom", "")).strip() in {"worker_gate_blocked", "followup_preview_only"}:
+        _append_row("verify", "blocked", verify_note or "verification blocked")
+    elif verification_stage == "done":
+        _append_row("verify", "done", verify_note or "verification complete")
+    elif verification_stage == "running" or followup_status in {"executable", "partially_executable"} or integration_stage == "running":
+        _append_row("verify", "active", verify_note or "verification in progress")
+    else:
+        _append_row("verify", "ready", verify_note or "verification lane ready")
+
+    handoff_note = (
+        str(task.get("background_run_canonical_writeback_summary", "")).strip()
+        or str(task.get("background_run_canonical_mutation_summary", "")).strip()
+        or str(task.get("background_run_worker_syncback_summary", "")).strip()
+        or str(task.get("background_run_status", "")).strip()
+    )
+    if close_stage == "failed":
+        _append_row("handoff", "blocked", handoff_note or "handoff failed")
+    elif close_stage == "done" or str(task.get("status", "")).strip().lower() == "completed":
+        _append_row("handoff", "done", handoff_note or "handoff complete")
+    elif close_stage == "running" or integration_stage == "running" or background_status in {"queued", "dispatching", "running"}:
+        _append_row("handoff", "active", handoff_note or "handoff in progress")
+    else:
+        _append_row("handoff", "ready", handoff_note or "handoff ready")
+
+    overall = "ready"
+    if all(row_states.get(kind) == "done" for kind in ("plan", "implement", "verify", "handoff")):
+        overall = "done"
+    elif any(state == "blocked" for state in row_states.values()):
+        overall = "blocked"
+    elif any(state == "active" for state in row_states.values()):
+        overall = "active"
+    current_phase = "done"
+    for kind in ("plan", "implement", "verify", "handoff"):
+        if row_states.get(kind) != "done":
+            current_phase = kind
+            break
+    return normalize_phase_checkpoint_snapshot(
+        {
+            "version": PHASE_CHECKPOINT_VERSION,
+            "status": overall,
+            "current_phase": current_phase,
+            "summary": " | ".join(
+                [
+                    f"status={overall}",
+                    f"current={current_phase}",
+                    *[f"{kind}={row_states.get(kind, '-')}" for kind in ("plan", "implement", "verify", "handoff")],
+                ]
+            )[:320],
+            "rows": rows,
+        }
+    )
 
 
 def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
@@ -1129,6 +1479,79 @@ def sanitize_task_record(
         ):
             task.pop(key, None)
 
+    job_contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
+    if not job_contract_snapshot and request_contract_snapshot:
+        job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
+    if not job_contract_snapshot and execution_brief_snapshot:
+        fallback_outputs = [
+            str(item).strip()
+            for item in (
+                list(execution_brief_snapshot.get("executable_slice") or [])
+                + list(task.get("background_run_worker_update_stub_targets") or [])
+            )
+            if str(item).strip()
+        ]
+        fallback_evidence = [
+            str(item).strip()
+            for item in (
+                list(task.get("background_run_worker_result_evidence_refs") or [])
+                + list(task.get("background_run_evidence_artifacts") or [])
+            )
+            if str(item).strip()
+        ]
+        fallback_artifact_contracts: Dict[str, Dict[str, Any]] = {}
+        for token in fallback_outputs[:8]:
+            fallback_artifact_contracts[token] = {"path": token}
+        job_contract_snapshot = build_job_contract(
+            {
+                "version": task.get("request_contract_version"),
+                "contract_type": str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip() or "general",
+                "preset": str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip() or "general",
+                "status": "complete" if str(execution_brief_snapshot.get("status", "")).strip().lower() not in _BRIEF_BLOCKED_STATUSES else "incomplete",
+                "objective": str(task.get("prompt", "")).strip(),
+                "summary": str(task.get("execution_brief_summary", "")).strip() or str(task.get("prompt", "")).strip(),
+                "required_outputs": fallback_outputs,
+                "required_evidence": fallback_evidence,
+                "missing_fields": list(execution_brief_snapshot.get("blocked_slice") or []),
+                "artifact_contracts": fallback_artifact_contracts,
+                "readonly": bool((task.get("plan") or {}).get("meta", {}).get("phase2_execution_plan", {}).get("readonly", False))
+                if isinstance((task.get("plan") or {}).get("meta"), dict)
+                else False,
+            },
+            execution_brief_snapshot,
+        )
+    if job_contract_snapshot:
+        apply_job_contract_snapshot(task, job_contract_snapshot)
+    else:
+        for key in (
+            "job_contract_version",
+            "job_contract_status",
+            "job_contract_planning_mode",
+            "job_contract_summary",
+            "job_contract_goal",
+            "job_contract_scope",
+            "job_contract_non_goals",
+            "job_contract_risks",
+            "job_contract_acceptance_checks",
+            "job_contract_artifacts_to_touch",
+            "job_contract_rollback_hint",
+        ):
+            task.pop(key, None)
+
     followup_brief_snapshot = normalize_followup_brief_snapshot(
         {
             "version": task.get("followup_brief_version"),
@@ -1451,6 +1874,62 @@ def sanitize_task_record(
             dedupe_roles=dedupe_roles,
         )
         result.update(role_snapshot)
+        if str(task.get("job_contract_summary", "")).strip():
+            result["job_contract_summary"] = str(task.get("job_contract_summary", "")).strip()
+        if str(task.get("execution_brief_summary", "")).strip():
+            result["execution_brief_summary"] = str(task.get("execution_brief_summary", "")).strip()
+
+    debug_packet_snapshot = normalize_debug_packet_snapshot(
+        {
+            "version": task.get("debug_packet_version"),
+            "state": task.get("debug_packet_state"),
+            "summary": task.get("debug_packet_summary"),
+            "symptom": task.get("debug_packet_symptom"),
+            "root_cause": task.get("debug_packet_root_cause"),
+            "evidence": task.get("debug_packet_evidence"),
+            "failed_attempt": task.get("debug_packet_failed_attempt"),
+            "next_step": task.get("debug_packet_next_step"),
+        }
+    )
+    if not debug_packet_snapshot:
+        debug_packet_snapshot = build_debug_packet_snapshot(task)
+    if debug_packet_snapshot:
+        apply_debug_packet_snapshot(task, debug_packet_snapshot)
+    else:
+        for key in (
+            "debug_packet_version",
+            "debug_packet_state",
+            "debug_packet_summary",
+            "debug_packet_symptom",
+            "debug_packet_root_cause",
+            "debug_packet_evidence",
+            "debug_packet_failed_attempt",
+            "debug_packet_next_step",
+        ):
+            task.pop(key, None)
+
+    phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
+        {
+            "version": task.get("phase_checkpoint_version"),
+            "status": task.get("phase_checkpoint_status"),
+            "current_phase": task.get("phase_checkpoint_current_phase"),
+            "summary": task.get("phase_checkpoint_summary"),
+            "rows": task.get("phase_checkpoint_rows"),
+        }
+    )
+    if not phase_checkpoint_snapshot:
+        phase_checkpoint_snapshot = build_phase_checkpoint_snapshot(task, debug_packet_snapshot)
+    if phase_checkpoint_snapshot:
+        apply_phase_checkpoint_snapshot(task, phase_checkpoint_snapshot)
+    else:
+        for key in (
+            "phase_checkpoint_version",
+            "phase_checkpoint_status",
+            "phase_checkpoint_current_phase",
+            "phase_checkpoint_summary",
+            "phase_checkpoint_rows",
+        ):
+            task.pop(key, None)
 
     refresh_task_tf_state(task)
 
@@ -2310,7 +2789,9 @@ def sync_task_lifecycle(
     )
     if request_contract_snapshot:
         apply_request_contract_snapshot(task, request_contract_snapshot)
-        apply_execution_brief_snapshot(task, build_execution_brief(request_contract_snapshot))
+        brief_snapshot = build_execution_brief(request_contract_snapshot)
+        apply_execution_brief_snapshot(task, brief_snapshot)
+        apply_job_contract_snapshot(task, build_job_contract(request_contract_snapshot, brief_snapshot))
 
     assignments = int(snap.get("assignments", 0) or 0)
     replies = int(snap.get("replies", 0) or 0)
@@ -2417,6 +2898,9 @@ def sync_task_lifecycle(
             task["result"]["execution_brief_status"] = str(brief.get("status", "")).strip()
         if str(brief.get("summary", "")).strip():
             task["result"]["execution_brief_summary"] = str(brief.get("summary", "")).strip()
+        job_contract = build_job_contract(request_contract_snapshot, brief)
+        if str(job_contract.get("summary", "")).strip():
+            task["result"]["job_contract_summary"] = str(job_contract.get("summary", "")).strip()
     rate_limit = request_data.get("rate_limit") if isinstance(request_data.get("rate_limit"), dict) else {}
     if rate_limit:
         task["rate_limit"] = dict(rate_limit)

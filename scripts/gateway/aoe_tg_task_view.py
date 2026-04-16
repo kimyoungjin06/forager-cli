@@ -576,6 +576,51 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     operator_decision = str(task.get("execution_brief_operator_decision", "")).strip()
     if operator_decision:
         lines.append("execution_brief_decision: " + operator_decision[:240])
+    job_contract_summary = str(task.get("job_contract_summary", "")).strip()
+    if job_contract_summary:
+        lines.append("job_contract: " + job_contract_summary[:240])
+    job_goal = str(task.get("job_contract_goal", "")).strip()
+    if job_goal:
+        lines.append("job_goal: " + job_goal[:240])
+    job_scope = [str(item).strip() for item in (task.get("job_contract_scope") or []) if str(item).strip()]
+    if job_scope:
+        lines.append("job_scope: " + ", ".join(job_scope[:6]))
+    job_non_goals = [str(item).strip() for item in (task.get("job_contract_non_goals") or []) if str(item).strip()]
+    if job_non_goals:
+        lines.append("job_non_goals: " + ", ".join(job_non_goals[:4]))
+    job_acceptance = [str(item).strip() for item in (task.get("job_contract_acceptance_checks") or []) if str(item).strip()]
+    if job_acceptance:
+        lines.append("job_acceptance: " + " | ".join(job_acceptance[:4])[:240])
+    job_artifacts = [str(item).strip() for item in (task.get("job_contract_artifacts_to_touch") or []) if str(item).strip()]
+    if job_artifacts:
+        lines.append("job_artifacts: " + ", ".join(job_artifacts[:6])[:240])
+    job_rollback = str(task.get("job_contract_rollback_hint", "")).strip()
+    if job_rollback:
+        lines.append("job_rollback: " + job_rollback[:240])
+    debug_packet_summary = str(task.get("debug_packet_summary", "")).strip()
+    if debug_packet_summary:
+        lines.append("debug_packet: " + debug_packet_summary[:240])
+    debug_symptom = str(task.get("debug_packet_symptom", "")).strip()
+    if debug_symptom:
+        lines.append("debug_symptom: " + debug_symptom[:240])
+    debug_root = str(task.get("debug_packet_root_cause", "")).strip()
+    if debug_root:
+        lines.append("debug_root_cause: " + debug_root[:240])
+    debug_evidence = [str(item).strip() for item in (task.get("debug_packet_evidence") or []) if str(item).strip()]
+    if debug_evidence:
+        lines.append("debug_evidence: " + ", ".join(debug_evidence[:6])[:240])
+    debug_next = str(task.get("debug_packet_next_step", "")).strip()
+    if debug_next:
+        lines.append("debug_next_step: " + debug_next[:240])
+    phase_checkpoint_summary = str(task.get("phase_checkpoint_summary", "")).strip()
+    if phase_checkpoint_summary:
+        lines.append("phase_checkpoint: " + phase_checkpoint_summary[:240])
+    phase_checkpoint_current = str(task.get("phase_checkpoint_current_phase", "")).strip()
+    if phase_checkpoint_current:
+        lines.append("phase_checkpoint_current: " + phase_checkpoint_current[:240])
+    phase_checkpoint_rows = [str(item).strip() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()]
+    if phase_checkpoint_rows:
+        lines.append("phase_checkpoint_rows: " + " | ".join(phase_checkpoint_rows[:4])[:240])
 
     background_run_status = str(task.get("background_run_status", "")).strip().lower()
     background_runner = str(task.get("background_run_runner_target", "")).strip()

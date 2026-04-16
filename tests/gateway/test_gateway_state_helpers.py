@@ -1404,6 +1404,47 @@ def test_task_lifecycle_summary_includes_phase1_planning_metadata() -> None:
     assert "phase2_evidence: Findings are summarized with concrete evidence. | Open questions or weak spots are called out explicitly." in summary
 
 
+def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkpoint() -> None:
+    task = gw.sanitize_task_record(
+        {
+            "request_id": "REQ-JOB",
+            "short_id": "T-350",
+            "prompt": "Summarize findings and close the acceptance gap.",
+            "status": "running",
+            "mode": "dispatch",
+            "roles": ["Codex-Analyst"],
+            "verifier_roles": ["Codex-Reviewer"],
+            "phase1_role_preset": "analysis",
+            "phase2_team_preset": "analysis",
+            "execution_brief_status": "underspecified",
+            "execution_brief_summary": "underspecified | do=reports/summary.md | blocked=acceptance_gap",
+            "execution_brief_executable_slice": ["reports/summary.md"],
+            "execution_brief_blocked_slice": ["acceptance_gap"],
+            "execution_brief_operator_decision": "confirm acceptance scope before off-desk execution",
+            "background_run_status": "running",
+            "background_run_runtime_summary": "tmux_session=aoe_bg_req_job",
+            "background_run_worker_result_cautions": ["keep review lane open"],
+            "background_run_worker_result_evidence_refs": ["reports/summary.md"],
+        },
+        "REQ-JOB",
+    )
+
+    assert task["job_contract_status"] == "blocked"
+    assert task["job_contract_planning_mode"] == "deep"
+    assert "reports/summary.md" in task["job_contract_scope"]
+    assert task["debug_packet_state"] == "blocked"
+    assert task["debug_packet_symptom"] == "execution_brief_blocked"
+    assert task["debug_packet_next_step"] == "/offdesk review"
+    assert task["phase_checkpoint_status"] == "blocked"
+    assert task["phase_checkpoint_current_phase"] == "plan"
+    assert any(str(row).startswith("plan=blocked") for row in (task.get("phase_checkpoint_rows") or []))
+
+    summary = gw.summarize_task_lifecycle("Demo", task)
+    assert "job_contract: status=blocked" in summary
+    assert "debug_packet: state=blocked | symptom=execution_brief_blocked" in summary
+    assert "phase_checkpoint: status=blocked | current=plan" in summary
+
+
 def test_task_lifecycle_summary_includes_external_background_phase() -> None:
     task = gw.sanitize_task_record(
         {

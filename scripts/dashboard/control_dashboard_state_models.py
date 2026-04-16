@@ -272,6 +272,22 @@ class TaskDetailDTO:
     execution_brief_executable_slice: str = ""
     execution_brief_blocked_slice: str = ""
     execution_brief_operator_decision: str = ""
+    job_contract_summary: str = ""
+    job_contract_goal: str = ""
+    job_contract_scope: str = ""
+    job_contract_non_goals: str = ""
+    job_contract_acceptance_checks: str = ""
+    job_contract_artifacts_to_touch: str = ""
+    job_contract_rollback_hint: str = ""
+    debug_packet_summary: str = ""
+    debug_packet_symptom: str = ""
+    debug_packet_root_cause: str = ""
+    debug_packet_evidence: str = ""
+    debug_packet_failed_attempt: str = ""
+    debug_packet_next_step: str = ""
+    phase_checkpoint_summary: str = ""
+    phase_checkpoint_current_phase: str = ""
+    phase_checkpoint_rows: str = ""
     background_run_status: str = ""
     background_run_runner_target: str = ""
     background_run_ticket_id: str = ""
@@ -380,6 +396,22 @@ class RuntimeDetailDTO:
     active_task_execution_brief_executable_slice: str
     active_task_execution_brief_blocked_slice: str
     active_task_execution_brief_operator_decision: str
+    active_task_job_contract_summary: str
+    active_task_job_contract_goal: str
+    active_task_job_contract_scope: str
+    active_task_job_contract_non_goals: str
+    active_task_job_contract_acceptance_checks: str
+    active_task_job_contract_artifacts_to_touch: str
+    active_task_job_contract_rollback_hint: str
+    active_task_debug_packet_summary: str
+    active_task_debug_packet_symptom: str
+    active_task_debug_packet_root_cause: str
+    active_task_debug_packet_evidence: str
+    active_task_debug_packet_failed_attempt: str
+    active_task_debug_packet_next_step: str
+    active_task_phase_checkpoint_summary: str
+    active_task_phase_checkpoint_current_phase: str
+    active_task_phase_checkpoint_rows: str
     active_task_followup_brief_status: str
     active_task_followup_brief_summary: str
     active_task_followup_brief_execution_lanes: str

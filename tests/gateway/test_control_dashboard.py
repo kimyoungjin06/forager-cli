@@ -1270,6 +1270,15 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "conclusion is supported by inspectable evidence and explicit caveats" in text
     assert "execution_brief" in text
     assert "brief_summary" in text
+    assert "job_contract" in text
+    assert "job_goal" in text
+    assert "job_scope" in text
+    assert "job_acceptance" in text
+    assert "debug_packet" in text
+    assert "debug_symptom" in text
+    assert "debug_next" in text
+    assert "phase_checkpoint" in text
+    assert "checkpoint_current" in text
     assert "followup_brief" in text
     assert "preview_only" in text
     assert "followup_exec_lanes" in text
@@ -1560,6 +1569,15 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "execution_brief" in text
     assert "underspecified" in text
     assert "brief_summary" in text
+    assert "job_contract" in text
+    assert "job_goal" in text
+    assert "job_scope" in text
+    assert "job_acceptance" in text
+    assert "debug_packet" in text
+    assert "debug_symptom" in text
+    assert "debug_next" in text
+    assert "phase_checkpoint" in text
+    assert "checkpoint_current" in text
     assert "brief_do" in text
     assert "reports/summary.md" in text
     assert "brief_blocked" in text

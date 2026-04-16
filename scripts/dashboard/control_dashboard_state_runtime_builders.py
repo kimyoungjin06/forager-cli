@@ -1701,6 +1701,60 @@ def _build_runtime_detail(
         active_task_execution_brief_operator_decision=(
             str((active_task or {}).get("execution_brief_operator_decision", "")).strip() or "-"
         ),
+        active_task_job_contract_summary=str((active_task or {}).get("job_contract_summary", "")).strip() or "-",
+        active_task_job_contract_goal=str((active_task or {}).get("job_contract_goal", "")).strip() or "-",
+        active_task_job_contract_scope=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("job_contract_scope") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_job_contract_non_goals=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("job_contract_non_goals") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_job_contract_acceptance_checks=" | ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("job_contract_acceptance_checks") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_job_contract_artifacts_to_touch=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("job_contract_artifacts_to_touch") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_job_contract_rollback_hint=(
+            str((active_task or {}).get("job_contract_rollback_hint", "")).strip() or "-"
+        ),
+        active_task_debug_packet_summary=str((active_task or {}).get("debug_packet_summary", "")).strip() or "-",
+        active_task_debug_packet_symptom=str((active_task or {}).get("debug_packet_symptom", "")).strip() or "-",
+        active_task_debug_packet_root_cause=str((active_task or {}).get("debug_packet_root_cause", "")).strip() or "-",
+        active_task_debug_packet_evidence=", ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("debug_packet_evidence") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_debug_packet_failed_attempt=(
+            str((active_task or {}).get("debug_packet_failed_attempt", "")).strip() or "-"
+        ),
+        active_task_debug_packet_next_step=str((active_task or {}).get("debug_packet_next_step", "")).strip() or "-",
+        active_task_phase_checkpoint_summary=(
+            str((active_task or {}).get("phase_checkpoint_summary", "")).strip() or "-"
+        ),
+        active_task_phase_checkpoint_current_phase=(
+            str((active_task or {}).get("phase_checkpoint_current_phase", "")).strip() or "-"
+        ),
+        active_task_phase_checkpoint_rows=" | ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("phase_checkpoint_rows") or [])
+            if str(item).strip()
+        )
+        or "-",
         active_task_followup_brief_status=str((active_task or {}).get("followup_brief_status", "")).strip() or "-",
         active_task_followup_brief_summary=(
             str((active_task or {}).get("followup_brief_summary", "")).strip() or "-"

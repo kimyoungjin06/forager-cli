@@ -7,12 +7,15 @@ from typing import Any, Callable, Dict, List, Optional
 from aoe_tg_orch_roles import classify_dispatch_role_preset
 from aoe_tg_request_contract import (
     apply_execution_brief_snapshot,
+    apply_job_contract_snapshot,
     apply_request_contract_snapshot,
     build_execution_brief,
+    build_job_contract,
     execution_brief_block_reason,
     execution_brief_is_offdesk_allowed,
     execution_brief_summary,
     build_request_contract,
+    job_contract_planning_appendix,
     request_contract_block_reason,
     request_contract_is_blocking,
     request_contract_planning_appendix,
@@ -233,6 +236,7 @@ def execute_run_command_flow(
         else {}
     )
     execution_brief = build_execution_brief(request_contract) if dispatch_mode else {}
+    job_contract = build_job_contract(request_contract, execution_brief) if dispatch_mode else {}
     selected_role_preset = (
         str(request_contract.get("preset", "")).strip().lower()
         or classify_dispatch_role_preset(source_prompt, selected_roles=selected_dispatch_roles)
@@ -241,6 +245,9 @@ def execute_run_command_flow(
     contract_appendix = request_contract_planning_appendix(request_contract)
     if contract_appendix:
         planning_prompt = f"{source_prompt}\n\n{contract_appendix}"
+    job_contract_appendix = job_contract_planning_appendix(job_contract)
+    if job_contract_appendix:
+        planning_prompt = f"{planning_prompt}\n\n{job_contract_appendix}"
     provisional_req_id = ""
     provisional_task: Optional[Dict[str, Any]] = None
     if dispatch_mode and planning_requested and (not args.dry_run):
@@ -270,6 +277,7 @@ def execute_run_command_flow(
             request_contract=request_contract,
         )
         if isinstance(provisional_task, dict):
+            apply_job_contract_snapshot(provisional_task, job_contract)
             apply_execution_brief_snapshot(provisional_task, execution_brief)
         save_manager_state(args.manager_state_file, manager_state)
 
@@ -280,6 +288,7 @@ def execute_run_command_flow(
         block_context = "contract-incomplete" if request_contract_is_blocking(request_contract) else "execution-brief-blocked"
         if isinstance(provisional_task, dict):
             apply_request_contract_snapshot(provisional_task, request_contract)
+            apply_job_contract_snapshot(provisional_task, job_contract)
             apply_execution_brief_snapshot(provisional_task, execution_brief)
             helpers.finalize_provisional_task(
                 task=provisional_task,
