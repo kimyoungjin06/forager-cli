@@ -184,7 +184,7 @@
               badgeList.className = "diff-badge-list";
               tokens.forEach((token) => {
                 const badge = document.createElement("span");
-                badge.className = "diff-badge";
+                badge.className = `diff-badge ${token === "no change" ? "unchanged" : "changed"}`;
                 badge.textContent = token;
                 badgeList.appendChild(badge);
               });

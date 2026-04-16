@@ -567,12 +567,21 @@ strong {
   align-items: center;
   padding: 0.22rem 0.58rem;
   border-radius: 999px;
-  border: 1px solid rgba(173, 123, 22, 0.32);
-  background: rgba(247, 236, 209, 0.95);
-  color: #8b5f0d;
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1.2;
+}
+
+.diff-badge.changed {
+  border: 1px solid rgba(173, 123, 22, 0.32);
+  background: rgba(247, 236, 209, 0.95);
+  color: #8b5f0d;
+}
+
+.diff-badge.unchanged {
+  border: 1px solid rgba(110, 120, 128, 0.24);
+  background: rgba(230, 233, 236, 0.92);
+  color: #51606c;
 }
 
 .action-result .command-list {

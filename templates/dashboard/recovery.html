@@ -51,6 +51,10 @@
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
   {% endif %}
+  <p><strong>server_guard_threads</strong></p>
+  {% with threads=snapshot.control_summary.server_guard_threads, compact=true, show_empty=false %}
+    {% include 'dashboard/_server_guard_threads.html' %}
+  {% endwith %}
   {% with
     section_title='control_actions',
     safe_hints=[],

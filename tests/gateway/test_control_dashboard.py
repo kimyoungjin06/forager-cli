@@ -6229,11 +6229,16 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
 
     audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard&chat=123456&limit=20", config)
+    recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
     audit_text = audit_body.decode("utf-8")
+    recovery_text = recovery_body.decode("utf-8")
     assert audit_status == 200
     assert "chat_filter" in audit_text
     assert "123456" in audit_text
     assert "Apply Global Direct | completed" in audit_text
+    assert recovery_status == 200
+    assert "server_guard_threads" in recovery_text
+    assert "Apply Global Direct | completed" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
