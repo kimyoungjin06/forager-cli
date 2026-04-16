@@ -486,6 +486,12 @@ def _build_server_guard_thread_cards(
         "tmux_process_pressure_preview": "Tmux Pressure",
         "process_pressure_preview": "Process Pressure",
     }
+    pressure_keys = {
+        "codex_process_pressure_preview": "codex",
+        "python_process_pressure_preview": "python",
+        "tmux_process_pressure_preview": "tmux",
+        "process_pressure_preview": "process",
+    }
     cards: list[ServerGuardThreadDTO] = []
     seen_pairs: set[tuple[str, str, str]] = set()
     for index, action in enumerate(recent_chat_actions):
@@ -513,12 +519,18 @@ def _build_server_guard_thread_cards(
             if pair_key in seen_pairs:
                 break
             seen_pairs.add(pair_key)
+            pressure_kind_key = pressure_keys.get(str(older.outcome_kind or "").strip(), "")
+            pressure_policy = server_guard_pressure_policy(pressure_kind_key)
             cards.append(
                 ServerGuardThreadDTO(
                     exists=True,
                     preview_headline=str(older.headline or "-").strip() or "-",
                     apply_headline=str(action.headline or "-").strip() or "-",
+                    pressure_kind_key=pressure_kind_key,
                     pressure_kind_label=pressure_labels.get(str(older.outcome_kind or "").strip(), ""),
+                    action_sentence=str(pressure_policy.get("action_sentence", "")).strip(),
+                    priority_link_label=str(pressure_policy.get("priority_link_label", "")).strip(),
+                    priority_link_note=str(pressure_policy.get("priority_link_note", "")).strip(),
                     preset_diff_summary=str(action.chat_preset_diff_summary or "-").strip() or "-",
                     chat_id=str(action.chat_id or "").strip(),
                     at=str(action.at or "-").strip() or "-",

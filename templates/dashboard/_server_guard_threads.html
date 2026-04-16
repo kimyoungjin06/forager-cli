@@ -1,7 +1,4 @@
 {% if threads %}
-{% set live_group = snapshot.control_summary.server_guard_preview_groups[0] if snapshot is defined and snapshot.control_summary.server_guard_preview_groups else none %}
-{% set priority_label = live_group.priority_link_label if live_group else '' %}
-{% set priority_note = live_group.priority_link_note if live_group else '' %}
 <div class="server-guard-thread-list{% if compact %} compact{% endif %}">
   {% for row in threads %}
   <article class="server-guard-thread-card{% if compact %} compact{% endif %}">
@@ -15,6 +12,9 @@
     {% endif %}
     {% if row.next_step and row.next_step != '-' %}
     <p><strong>next</strong> <span class="action-history-badge">{{ row.next_step }}</span></p>
+    {% endif %}
+    {% if row.action_sentence %}
+    <p class="muted"><strong>action_copy</strong> {{ row.action_sentence }}</p>
     {% endif %}
     <p><strong>preset_diff</strong></p>
     <div class="diff-badge-list">
@@ -32,16 +32,16 @@
     {% if compact %}
     <div class="chat-hints server-guard-mini-links">
       {% if row.chat_href %}
-        <a class="action-history-badge server-guard-mini-link chat{% if priority_label == 'Chat' %} priority{% endif %}" href="{{ row.chat_href }}">Chat</a>
-        {% if priority_label == 'Chat' and priority_note %}<span class="muted server-guard-mini-note">{{ priority_note }}</span>{% endif %}
+        <a class="action-history-badge server-guard-mini-link chat{% if row.priority_link_label == 'Chat' %} priority{% endif %}" href="{{ row.chat_href }}">Chat</a>
+        {% if row.priority_link_label == 'Chat' and row.action_sentence %}<span class="muted server-guard-mini-note">{{ row.action_sentence }}</span>{% endif %}
       {% endif %}
       {% if row.audit_href %}
-        <a class="action-history-badge server-guard-mini-link audit{% if priority_label == 'Audit' %} priority{% endif %}" href="{{ row.audit_href }}">Audit</a>
-        {% if priority_label == 'Audit' and priority_note %}<span class="muted server-guard-mini-note">{{ priority_note }}</span>{% endif %}
+        <a class="action-history-badge server-guard-mini-link audit{% if row.priority_link_label == 'Audit' %} priority{% endif %}" href="{{ row.audit_href }}">Audit</a>
+        {% if row.priority_link_label == 'Audit' and row.action_sentence %}<span class="muted server-guard-mini-note">{{ row.action_sentence }}</span>{% endif %}
       {% endif %}
       {% if row.health_href %}
-        <a class="action-history-badge server-guard-mini-link health{% if priority_label == 'Health' %} priority{% endif %}" href="{{ row.health_href }}">Health</a>
-        {% if priority_label == 'Health' and priority_note %}<span class="muted server-guard-mini-note">{{ priority_note }}</span>{% endif %}
+        <a class="action-history-badge server-guard-mini-link health{% if row.priority_link_label == 'Health' %} priority{% endif %}" href="{{ row.health_href }}">Health</a>
+        {% if row.priority_link_label == 'Health' and row.action_sentence %}<span class="muted server-guard-mini-note">{{ row.action_sentence }}</span>{% endif %}
       {% endif %}
     </div>
     {% endif %}

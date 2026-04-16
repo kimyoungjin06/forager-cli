@@ -219,7 +219,11 @@ def _execute_chat_session_update_action(
         }
         action_map = {"chat": chat_action, "health": health_action, "audit": audit_action}
         order = tuple(policy.get("followup_order", ("chat", "health", "audit")))
-        primary_note = str(policy.get("operator_sentence", "")).strip() or str(policy.get("priority_link_note", "")).strip()
+        primary_note = (
+            str(policy.get("action_sentence", "")).strip()
+            or str(policy.get("operator_sentence", "")).strip()
+            or str(policy.get("priority_link_note", "")).strip()
+        )
         first_key = next((token for token in order if token in action_map), "")
         for token in order:
             if token not in action_map:

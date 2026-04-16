@@ -727,7 +727,11 @@ class ServerGuardThreadDTO:
     exists: bool = False
     preview_headline: str = ""
     apply_headline: str = ""
+    pressure_kind_key: str = ""
     pressure_kind_label: str = ""
+    action_sentence: str = ""
+    priority_link_label: str = ""
+    priority_link_note: str = ""
     preset_diff_summary: str = ""
     chat_id: str = ""
     at: str = ""

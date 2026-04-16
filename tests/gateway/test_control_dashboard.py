@@ -6311,7 +6311,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         "Codex Pressure",
     ]
     assert [row.get("note") for row in (apply_payload.get("actions") or [])][:3] == [
-        "trim chat fanout first, then widen operator surfaces",
+        "start with Chat, then keep Global Direct narrow",
         "inspect the full server-guard action trail",
         "inspect host pressure after switching the chat rail",
     ]
@@ -6423,7 +6423,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
                 "Python Pressure",
             ]
             assert [row.get("note") for row in (apply_payload.get("actions") or [])][:3] == [
-                "check host churn first, then revisit package and worker rails",
+                "start with Health, then keep Package Rail narrow",
                 "inspect the selected chat session after applying the server-guard preset",
                 "inspect the full server-guard action trail",
             ]
@@ -6452,7 +6452,9 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "server-guard-mini-link audit" in recovery_text
     assert "server-guard-mini-link health" in recovery_text
     assert "server-guard-mini-link chat priority" in recovery_text
-    assert "trim chat fanout first" in recovery_text
+    assert "action_copy" in recovery_text
+    assert "start with Chat, then keep Global Direct narrow" in recovery_text
+    assert "start with Health, then keep Package Rail narrow" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
