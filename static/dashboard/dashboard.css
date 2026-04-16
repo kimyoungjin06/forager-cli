@@ -1248,6 +1248,11 @@ strong {
   transform: translateY(-1px);
 }
 
+.server-guard-mini-note {
+  font-size: 0.77rem;
+  line-height: 1.35;
+}
+
 .live-preview-preset-form {
   margin-top: 0.45rem;
 }

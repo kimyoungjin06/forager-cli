@@ -6273,6 +6273,11 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert apply_payload["server_guard_preset_label"] == "Apply Global Direct"
     assert apply_payload["next_step"] == "/control/chat?chat=123456&preset=global-direct"
     assert "room:O2/analysis->global" in apply_payload["chat_preset_diff_summary"]
+    assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
+        "Open Chat Console",
+        "Open Server Guard Audit",
+        "Open Health View",
+    ]
     assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
     assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
 
@@ -6356,8 +6361,15 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
             content_type="application/json",
             config=config,
         )
+        apply_payload = json.loads(_apply_body.decode("utf-8"))
         assert preview_status == 200
         assert apply_status == 200
+        if pressure_kind == "python":
+            assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
+                "Open Health View",
+                "Open Chat Console",
+                "Open Server Guard Audit",
+            ]
 
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
     recovery_text = recovery_body.decode("utf-8")
@@ -6378,6 +6390,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "server-guard-mini-link audit" in recovery_text
     assert "server-guard-mini-link health" in recovery_text
     assert "server-guard-mini-link chat priority" in recovery_text
+    assert "trim chat fanout first" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:

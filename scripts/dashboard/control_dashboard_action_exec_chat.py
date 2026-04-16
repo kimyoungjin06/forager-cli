@@ -193,23 +193,59 @@ def _execute_chat_session_update_action(
     preset_diff_summary = " | ".join(diff_parts) if diff_parts else "no change"
     followup_actions = []
     if focus_badge == "server-guard" and server_guard_preset_label:
-        followup_actions = [
-            {
-                "label": "Open Chat Console",
-                "href": effective_next_step if effective_next_step.startswith("/control/chat") else f"/control/chat?chat={chat_id}",
-                "note": "inspect the selected chat session after applying the server-guard preset",
-            },
-            {
-                "label": "Open Health View",
-                "href": "/control/health/view",
-                "note": "inspect host pressure after switching the chat rail",
-            },
-            {
-                "label": "Open Server Guard Audit",
-                "href": "/control/audit?focus=server-guard",
-                "note": "inspect the full server-guard action trail",
-            },
-        ]
+        chat_action = {
+            "label": "Open Chat Console",
+            "href": effective_next_step if effective_next_step.startswith("/control/chat") else f"/control/chat?chat={chat_id}",
+            "note": "inspect the selected chat session after applying the server-guard preset",
+        }
+        health_action = {
+            "label": "Open Health View",
+            "href": "/control/health/view",
+            "note": "inspect host pressure after switching the chat rail",
+        }
+        audit_action = {
+            "label": "Open Server Guard Audit",
+            "href": "/control/audit?focus=server-guard",
+            "note": "inspect the full server-guard action trail",
+        }
+        ordered_actions = {
+            "codex": [
+                {
+                    **chat_action,
+                    "note": "trim duplicated chat sessions first, then widen operator surfaces",
+                },
+                audit_action,
+                health_action,
+            ],
+            "python": [
+                {
+                    **health_action,
+                    "note": "inspect host churn first before revisiting package and worker rails",
+                },
+                chat_action,
+                audit_action,
+            ],
+            "tmux": [
+                {
+                    **audit_action,
+                    "note": "inspect detached runtime handles first before reopening tmux-backed rails",
+                },
+                chat_action,
+                health_action,
+            ],
+            "process": [
+                {
+                    **audit_action,
+                    "note": "inspect broad process churn first before widening runtime fanout",
+                },
+                health_action,
+                chat_action,
+            ],
+        }
+        followup_actions = ordered_actions.get(
+            server_guard_pressure_kind,
+            [chat_action, health_action, audit_action],
+        )
 
     return _json(
         {
