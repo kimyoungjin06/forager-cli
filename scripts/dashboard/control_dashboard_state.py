@@ -228,6 +228,7 @@ def load_dashboard_snapshot_result(
     )
     server_guard_latest_action_summary, server_guard_latest_action_path = _latest_server_guard_action(action_audit_rows)
     server_guard_latest_result_summary, server_guard_latest_result_path = _latest_server_guard_result(action_audit_rows)
+    server_guard_preview_actions = [row for row in server_guard.recommended_actions if str(row.path or "").strip()]
     server_guard_threads = _build_server_guard_thread_cards(action_audit_rows, limit=2)
 
     summary = ControlSummaryDTO(
@@ -254,6 +255,7 @@ def load_dashboard_snapshot_result(
         server_guard_latest_action_path=server_guard_latest_action_path,
         server_guard_latest_result_summary=server_guard_latest_result_summary,
         server_guard_latest_result_path=server_guard_latest_result_path,
+        server_guard_preview_actions=server_guard_preview_actions,
         server_guard_threads=server_guard_threads,
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
@@ -504,6 +506,7 @@ def _build_server_guard_thread_cards(
                     preview_headline=str(older.headline or "-").strip() or "-",
                     apply_headline=str(action.headline or "-").strip() or "-",
                     preset_diff_summary=str(action.chat_preset_diff_summary or "-").strip() or "-",
+                    chat_id=str(action.chat_id or "").strip(),
                     at=str(action.at or "-").strip() or "-",
                     command=str(action.source_command or "-").strip() or "-",
                     next_step=str(action.next_step or "-").strip() or "-",

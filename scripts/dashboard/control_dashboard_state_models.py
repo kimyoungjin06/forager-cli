@@ -91,6 +91,7 @@ class ControlSummaryDTO:
     server_guard_latest_action_path: str
     server_guard_latest_result_summary: str
     server_guard_latest_result_path: str
+    server_guard_preview_actions: List["ServerGuardActionDTO"]
     server_guard_threads: List["ServerGuardThreadDTO"]
     active_runtime_count: int
     attention_runtime_count: int
@@ -713,6 +714,7 @@ class ServerGuardThreadDTO:
     preview_headline: str = ""
     apply_headline: str = ""
     preset_diff_summary: str = ""
+    chat_id: str = ""
     at: str = ""
     command: str = ""
     next_step: str = ""

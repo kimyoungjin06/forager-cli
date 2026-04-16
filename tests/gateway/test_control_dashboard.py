@@ -6140,6 +6140,8 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
 
     assert overview_status == 200
     assert "Preview Codex Pressure" in overview_text
+    assert "live_preview_actions" in overview_text
+    assert "No recent server guard preset thread yet." in overview_text
     assert "server_guard_latest_result" in overview_text
     assert "Codex Pressure Preview | preview" in overview_text
     assert health_status == 200
@@ -6224,6 +6226,8 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Latest Server Guard Thread" in chat_text
     assert "Apply Global Direct | completed" in chat_text
     assert "Codex Pressure Preview | preview -&gt; Apply Global Direct | completed" in chat_text
+    assert "chat_session" in chat_text
+    assert ">123456<" in chat_text
     assert "preset_diff" in chat_text
     assert "room:O2/analysis-&gt;global" in chat_text
     assert "Open Thread Detail" in chat_text
@@ -6246,6 +6250,8 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Server Guard Preset Threads" in recovery_text
     assert "Latest Server Guard Thread" in recovery_text
     assert "Apply Global Direct | completed" in recovery_text
+    assert "chat_session" in recovery_text
+    assert ">123456<" in recovery_text
     assert "/control/chat?chat=123456" in recovery_text
     assert "/control/audit?focus=server-guard" in recovery_text
     assert "/control/health/view" in recovery_text

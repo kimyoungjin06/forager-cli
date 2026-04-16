@@ -12,6 +12,9 @@
   <div class="server-guard-thread-highlight-grid">
     <p><strong>preview</strong> {{ thread.preview_headline }}</p>
     <p><strong>apply</strong> {{ thread.apply_headline }}</p>
+    {% if thread.chat_id %}
+    <p><strong>chat_session</strong> {% if thread.chat_href %}<a class="mono" href="{{ thread.chat_href }}">{{ thread.chat_id }}</a>{% else %}<span class="mono">{{ thread.chat_id }}</span>{% endif %}</p>
+    {% endif %}
     <p><strong>at</strong> <span class="mono">{{ thread.at }}</span></p>
     {% if thread.next_step and thread.next_step != '-' %}
     <p><strong>next</strong> {{ thread.next_step }}</p>
