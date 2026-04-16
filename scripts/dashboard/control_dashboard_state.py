@@ -230,7 +230,10 @@ def load_dashboard_snapshot_result(
     server_guard_latest_action_summary, server_guard_latest_action_path = _latest_server_guard_action(action_audit_rows)
     server_guard_latest_result_summary, server_guard_latest_result_path = _latest_server_guard_result(action_audit_rows)
     server_guard_preview_actions = [row for row in server_guard.recommended_actions if str(row.path or "").strip()]
-    server_guard_preview_groups = _build_server_guard_preview_groups(server_guard_preview_actions)
+    server_guard_preview_groups = _build_server_guard_preview_groups(
+        server_guard_preview_actions,
+        reason_summary=server_guard.reason_summary,
+    )
     server_guard_threads = _build_server_guard_thread_cards(action_audit_rows, limit=2)
 
     summary = ControlSummaryDTO(
@@ -530,8 +533,12 @@ def _build_server_guard_thread_cards(
     return cards[: max(1, int(limit))]
 
 
-def _build_server_guard_preview_groups(actions: list[Any]) -> list[ServerGuardActionGroupDTO]:
-    order = [
+def _build_server_guard_preview_groups(
+    actions: list[Any],
+    *,
+    reason_summary: str = "",
+) -> list[ServerGuardActionGroupDTO]:
+    canonical_order = [
         ("codex", "Codex Pressure"),
         ("python", "Python Pressure"),
         ("tmux", "Tmux Pressure"),
@@ -539,7 +546,7 @@ def _build_server_guard_preview_groups(actions: list[Any]) -> list[ServerGuardAc
         ("queue", "Queue Cleanup"),
         ("other", "Other Preview"),
     ]
-    buckets: dict[str, list[Any]] = {key: [] for key, _label in order}
+    buckets: dict[str, list[Any]] = {key: [] for key, _label in canonical_order}
     for row in list(actions or []):
         path = str(getattr(row, "path", "") or "").strip()
         payload_json = str(getattr(row, "payload_json", "") or "").strip()
@@ -555,12 +562,28 @@ def _build_server_guard_preview_groups(actions: list[Any]) -> list[ServerGuardAc
         elif path == "/control/actions/runtime/background-queue-clean-preview":
             key = "queue"
         buckets.setdefault(key, []).append(row)
+    reason_tokens = [str(token or "").strip() for token in str(reason_summary or "").split(" | ") if str(token or "").strip()]
+    reason_to_group = (
+        ("queue", "queue"),
+        ("codex_process", "codex"),
+        ("python_process", "python"),
+        ("tmux_process", "tmux"),
+        ("total_process", "process"),
+    )
+    dominant_key = "other"
+    for token in reason_tokens:
+        matched = next((group for prefix, group in reason_to_group if token.startswith(prefix)), "")
+        if matched and buckets.get(matched):
+            dominant_key = matched
+            break
+    ordered_keys = [dominant_key] + [key for key, _label in canonical_order if key != dominant_key]
     groups: list[ServerGuardActionGroupDTO] = []
-    for key, label in order:
+    label_map = {key: label for key, label in canonical_order}
+    for key in ordered_keys:
         rows = [row for row in buckets.get(key, []) if getattr(row, "path", "") or getattr(row, "href", "")]
         if not rows:
             continue
-        groups.append(ServerGuardActionGroupDTO(key=key, label=label, actions=rows))
+        groups.append(ServerGuardActionGroupDTO(key=key, label=label_map.get(key, key.title()), actions=rows))
     return groups
 
 

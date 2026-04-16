@@ -6162,6 +6162,23 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     )
 
 
+def test_control_dashboard_server_guard_preview_groups_follow_dominant_reason(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 420, "python": 120, "tmux": 3, "codex": 12})
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    assert "python_process_warn" in snapshot.control_summary.server_guard.reason_summary
+    assert snapshot.control_summary.server_guard_preview_groups
+    assert snapshot.control_summary.server_guard_preview_groups[0].key == "python"
+    assert snapshot.control_summary.server_guard_preview_groups[0].label == "Python Pressure"
+
+
 def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_chat_timeline(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -6311,6 +6328,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "Apply Global Direct | completed" in recovery_text
     assert recovery_text.count("chat_session") >= 2
     assert recovery_text.count(">123456<") >= 2
+    assert "/control/chat?chat=123456&amp;preset=package-rail" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:

@@ -7,6 +7,9 @@
     {% if row.chat_id %}
     <p><strong>chat_session</strong> {% if row.chat_href %}<a class="mono" href="{{ row.chat_href }}">{{ row.chat_id }}</a>{% else %}<span class="mono">{{ row.chat_id }}</span>{% endif %}</p>
     {% endif %}
+    {% if row.next_step and row.next_step != '-' %}
+    <p><strong>next</strong> <span class="action-history-badge">{{ row.next_step }}</span></p>
+    {% endif %}
     <p><strong>preset_diff</strong></p>
     <div class="diff-badge-list">
       {% for token in row.preset_diff_summary.split(' | ') if token %}
@@ -15,7 +18,6 @@
     </div>
     {% if not compact %}
     <p><strong>command</strong> <code>{{ row.command }}</code></p>
-    <p><strong>next</strong> {{ row.next_step }}</p>
     {% endif %}
     <p><strong>at</strong> <span class="mono">{{ row.at }}</span></p>
     {% if row.detail_href %}
