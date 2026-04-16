@@ -65,6 +65,7 @@ from control_dashboard_state_models import (
     RuntimeCardDTO,
     RuntimeDetailDTO,
     ServerGuardThreadDTO,
+    ServerGuardActionGroupDTO,
     TaskDetailDTO,
 )
 
@@ -229,6 +230,7 @@ def load_dashboard_snapshot_result(
     server_guard_latest_action_summary, server_guard_latest_action_path = _latest_server_guard_action(action_audit_rows)
     server_guard_latest_result_summary, server_guard_latest_result_path = _latest_server_guard_result(action_audit_rows)
     server_guard_preview_actions = [row for row in server_guard.recommended_actions if str(row.path or "").strip()]
+    server_guard_preview_groups = _build_server_guard_preview_groups(server_guard_preview_actions)
     server_guard_threads = _build_server_guard_thread_cards(action_audit_rows, limit=2)
 
     summary = ControlSummaryDTO(
@@ -256,6 +258,7 @@ def load_dashboard_snapshot_result(
         server_guard_latest_result_summary=server_guard_latest_result_summary,
         server_guard_latest_result_path=server_guard_latest_result_path,
         server_guard_preview_actions=server_guard_preview_actions,
+        server_guard_preview_groups=server_guard_preview_groups,
         server_guard_threads=server_guard_threads,
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
@@ -525,6 +528,40 @@ def _build_server_guard_thread_cards(
         if len(cards) >= max(1, int(limit)):
             break
     return cards[: max(1, int(limit))]
+
+
+def _build_server_guard_preview_groups(actions: list[Any]) -> list[ServerGuardActionGroupDTO]:
+    order = [
+        ("codex", "Codex Pressure"),
+        ("python", "Python Pressure"),
+        ("tmux", "Tmux Pressure"),
+        ("process", "Process Pressure"),
+        ("queue", "Queue Cleanup"),
+        ("other", "Other Preview"),
+    ]
+    buckets: dict[str, list[Any]] = {key: [] for key, _label in order}
+    for row in list(actions or []):
+        path = str(getattr(row, "path", "") or "").strip()
+        payload_json = str(getattr(row, "payload_json", "") or "").strip()
+        key = "other"
+        if path == "/control/actions/runtime/server-guard-pressure-preview":
+            try:
+                payload = json.loads(payload_json or "{}")
+            except Exception:
+                payload = {}
+            pressure_kind = str(payload.get("pressure_kind", "")).strip().lower()
+            if pressure_kind in {"codex", "python", "tmux", "process"}:
+                key = pressure_kind
+        elif path == "/control/actions/runtime/background-queue-clean-preview":
+            key = "queue"
+        buckets.setdefault(key, []).append(row)
+    groups: list[ServerGuardActionGroupDTO] = []
+    for key, label in order:
+        rows = [row for row in buckets.get(key, []) if getattr(row, "path", "") or getattr(row, "href", "")]
+        if not rows:
+            continue
+        groups.append(ServerGuardActionGroupDTO(key=key, label=label, actions=rows))
+    return groups
 
 
 def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[str]) -> list[str]:

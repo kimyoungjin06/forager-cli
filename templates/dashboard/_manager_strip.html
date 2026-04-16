@@ -36,10 +36,14 @@
         <div class="server-guard-thread-empty">
           <p><strong>server_guard_threads</strong></p>
           <p class="muted">No recent server guard preset thread yet. Run one of the server guard actions above, or move into chat/audit rails to start an operator thread.</p>
-          {% if snapshot.control_summary.server_guard_preview_actions %}
-            {% with title='live_preview_actions', actions=snapshot.control_summary.server_guard_preview_actions %}
-              {% include 'dashboard/_server_guard_actions.html' %}
-            {% endwith %}
+          {% if snapshot.control_summary.server_guard_preview_groups %}
+            <div class="server-guard-preview-groups">
+            {% for group in snapshot.control_summary.server_guard_preview_groups %}
+              {% with title='live_preview_actions · ' ~ group.label, actions=group.actions %}
+                {% include 'dashboard/_server_guard_actions.html' %}
+              {% endwith %}
+            {% endfor %}
+            </div>
           {% endif %}
           <div class="chat-hints">
             <a class="action-history-badge" href="/control/chat">Open Chat Console</a>

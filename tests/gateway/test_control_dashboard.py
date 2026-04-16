@@ -6141,6 +6141,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert overview_status == 200
     assert "Preview Codex Pressure" in overview_text
     assert "live_preview_actions" in overview_text
+    assert "live_preview_actions · Codex Pressure" in overview_text
     assert "No recent server guard preset thread yet." in overview_text
     assert "server_guard_latest_result" in overview_text
     assert "Codex Pressure Preview | preview" in overview_text
@@ -6255,6 +6256,61 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "/control/chat?chat=123456" in recovery_text
     assert "/control/audit?focus=server-guard" in recovery_text
     assert "/control/health/view" in recovery_text
+
+
+def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guard_history(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "on",
+            "pending_mode": "direct",
+            "lang": "ko",
+            "report_level": "full",
+            "room": "O2/analysis",
+            "selected_task_refs": {"active": "REQ-1"},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
+
+    for pressure_kind in ("codex", "python"):
+        preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+            "/control/actions/runtime/server-guard-pressure-preview",
+            body=json.dumps({"pressure_kind": pressure_kind}).encode("utf-8"),
+            content_type="application/json",
+            config=config,
+        )
+        preview_payload = json.loads(preview_body.decode("utf-8"))
+        preset_payload = json.loads((preview_payload.get("actions") or [])[0]["payload_json"])
+        apply_status, _apply_headers, _apply_body = dashboard_app.build_dashboard_action_response(
+            "/control/actions/chat/session-update",
+            body=json.dumps(preset_payload).encode("utf-8"),
+            content_type="application/json",
+            config=config,
+        )
+        assert preview_status == 200
+        assert apply_status == 200
+
+    recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    recovery_text = recovery_body.decode("utf-8")
+
+    assert recovery_status == 200
+    assert "Server Guard Preset Threads" in recovery_text
+    assert "Apply Package Rail | completed" in recovery_text
+    assert "Apply Global Direct | completed" in recovery_text
+    assert recovery_text.count("chat_session") >= 2
+    assert recovery_text.count(">123456<") >= 2
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:

@@ -39,6 +39,13 @@ class ServerGuardActionDTO:
 
 
 @dataclass(frozen=True)
+class ServerGuardActionGroupDTO:
+    key: str
+    label: str
+    actions: List["ServerGuardActionDTO"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ActionButtonDTO:
     label: str
     command: str
@@ -92,6 +99,7 @@ class ControlSummaryDTO:
     server_guard_latest_result_summary: str
     server_guard_latest_result_path: str
     server_guard_preview_actions: List["ServerGuardActionDTO"]
+    server_guard_preview_groups: List["ServerGuardActionGroupDTO"]
     server_guard_threads: List["ServerGuardThreadDTO"]
     active_runtime_count: int
     attention_runtime_count: int
