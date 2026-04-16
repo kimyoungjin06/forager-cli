@@ -140,6 +140,11 @@ def _execute_chat_session_update_action(
     remediation = str(payload.get("remediation", "")).strip()
 
     paths, manager_state = _load_dashboard_manager_state(config)
+    previous_default_mode = chat_state.get_default_mode(manager_state, chat_id) or "off"
+    previous_pending_mode = chat_state.get_pending_mode(manager_state, chat_id) or "none"
+    previous_room = chat_state.get_chat_room(manager_state, chat_id) or "-"
+    previous_lang = chat_state.get_chat_lang(manager_state, chat_id) or "-"
+    previous_report_level = chat_state.get_chat_report_level(manager_state, chat_id) or "-"
     if default_mode in {"dispatch", "direct"}:
         chat_state.set_default_mode(manager_state, chat_id, default_mode)
     else:
@@ -174,6 +179,18 @@ def _execute_chat_session_update_action(
     detail = f"default={current_default_mode} pending={current_pending_mode} room={current_room}"
     if focus_badge == "server-guard" and server_guard_preset_label:
         detail = f"{server_guard_preset_label} | {detail}"
+    diff_parts = []
+    if previous_default_mode != current_default_mode:
+        diff_parts.append(f"default:{previous_default_mode}->{current_default_mode}")
+    if previous_pending_mode != current_pending_mode:
+        diff_parts.append(f"pending:{previous_pending_mode}->{current_pending_mode}")
+    if previous_room != current_room:
+        diff_parts.append(f"room:{previous_room}->{current_room}")
+    if previous_lang != current_lang:
+        diff_parts.append(f"lang:{previous_lang}->{current_lang}")
+    if previous_report_level != current_report_level:
+        diff_parts.append(f"report:{previous_report_level}->{current_report_level}")
+    preset_diff_summary = " | ".join(diff_parts) if diff_parts else "no change"
     followup_actions = []
     if focus_badge == "server-guard" and server_guard_preset_label:
         followup_actions = [
@@ -209,6 +226,7 @@ def _execute_chat_session_update_action(
             "focus_badge": focus_badge,
             "server_guard_preset_label": server_guard_preset_label,
             "server_guard_pressure_kind": server_guard_pressure_kind,
+            "chat_preset_diff_summary": preset_diff_summary,
             "actions": followup_actions,
             "reply_text": (
                 f"{server_guard_preset_label + chr(10) if focus_badge == 'server-guard' and server_guard_preset_label else ''}"

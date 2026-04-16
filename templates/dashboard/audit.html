@@ -12,6 +12,10 @@
       </select>
     </label>
     <label>
+      <span>Chat</span>
+      <input type="text" name="chat" value="{{ audit.chat_filter }}" placeholder="123456">
+    </label>
+    <label>
       <span>Limit</span>
       <input type="number" name="limit" min="1" max="100" value="{{ audit.limit }}">
     </label>
@@ -25,6 +29,7 @@
     <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
     <li><span>focus_summary</span><strong>{{ audit.focus_summary }}</strong></li>
     <li><span>focus_filter</span><strong>{{ audit.focus_filter }}</strong></li>
+    <li><span>chat_filter</span><strong>{{ audit.chat_filter or '-' }}</strong></li>
     <li><span>server_guard_latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
     <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
     {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
@@ -37,7 +42,7 @@
       {% if audit.focus_filter == value %}
       <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
       {% else %}
-      <a class="action-history-badge" href="/control/audit{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}={{ count }}</a>
+      <a class="action-history-badge" href="/control/audit?focus={{ value }}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">{{ value }}={{ count }}</a>
       {% endif %}
     {% endfor %}
   </p>

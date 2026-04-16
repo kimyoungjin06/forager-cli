@@ -632,6 +632,7 @@ class ActionAuditPageDTO:
     status_summary: str
     focus_summary: str
     focus_filter: str
+    chat_filter: str
     focus_counts: Dict[str, int]
     rows: List[ActionAuditRowDTO] = field(default_factory=list)
 
@@ -701,6 +702,8 @@ class ChatTimelineEntryDTO:
     command: str = ""
     next_step: str = ""
     room: str = ""
+    detail_href: str = ""
+    detail_label: str = ""
 
 
 @dataclass(frozen=True)

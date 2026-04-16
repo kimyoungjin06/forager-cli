@@ -399,6 +399,7 @@
             ["runtime", runtimeLabel],
             ["next_step", asText(payload?.next_step)],
             ["remediation", asText(payload?.remediation)],
+            ["preset_diff", asText(payload?.chat_preset_diff_summary)],
             ["task_state", payload?.task ? `${asText(payload.task.status)}/${asText(payload.task.tf_phase)}` : "-"],
             ["followup", asText(payload?.preview?.followup_summary || payload?.preview?.completion_followup_when)],
             ["sync", asText(payload?.preview?.sync_summary)],

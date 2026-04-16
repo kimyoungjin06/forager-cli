@@ -242,6 +242,9 @@
           {% if row.next_step and row.next_step != '-' %}
           <p><strong>next</strong> {{ row.next_step }}</p>
           {% endif %}
+          {% if row.detail_href %}
+          <p><a href="{{ row.detail_href }}">{{ row.detail_label or 'detail' }}</a></p>
+          {% endif %}
           {% if row.room %}
           <p class="muted"><strong>room</strong> {{ row.room }}</p>
           {% endif %}

@@ -64,6 +64,8 @@ class ActionAuditRowDTO:
     focus_badge: str
     chat_id: str = ""
     transcript_preview: str = ""
+    thread_href: str = ""
+    thread_label: str = ""
 
 
 @dataclass(frozen=True)

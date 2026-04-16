@@ -220,6 +220,7 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
             focus=str((query.get("focus") or ["all"])[0]),
+            chat_id=str((query.get("chat") or [""])[0]).strip(),
             limit=limit,
         )
         return _html(render_template("dashboard/audit.html", page_title="Action Audit", snapshot=snapshot, audit=audit, current_path=path))

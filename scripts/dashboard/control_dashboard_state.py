@@ -414,6 +414,12 @@ def _build_chat_timeline_entries(
                         command=str(action.source_command or "").strip(),
                         next_step=str(action.next_step or "").strip(),
                         room=room,
+                        detail_href=(
+                            f"/control/audit?focus=server-guard&chat={action.chat_id}&limit=20"
+                            if str(action.chat_id or "").strip()
+                            else "/control/audit?focus=server-guard&limit=20"
+                        ),
+                        detail_label="Open Thread Detail",
                     )
                 )
                 consumed.add(index)
@@ -700,6 +706,12 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             focus_badge=focus_badge,
             chat_id=str(raw.get("chat_id", "")).strip(),
             transcript_preview=str(raw.get("transcript_preview", "")).strip(),
+            thread_href=(
+                f"/control/audit?focus=server-guard&chat={str(raw.get('chat_id', '')).strip()}&limit=20"
+                if focus_badge == "server-guard" and str(raw.get("chat_id", "")).strip()
+                else ""
+            ),
+            thread_label="Open Thread Detail" if focus_badge == "server-guard" and str(raw.get("chat_id", "")).strip() else "",
         )
         if chat_id and row.chat_id and row.chat_id != chat_id:
             continue
@@ -979,6 +991,7 @@ def load_dashboard_action_audit_page(
     team_dir: Path | str | None = None,
     manager_state_file: Path | str | None = None,
     focus: str = "",
+    chat_id: str = "",
     limit: int = 50,
 ) -> Tuple[DashboardSnapshotDTO, ActionAuditPageDTO]:
     loaded = load_dashboard_snapshot_result(
@@ -989,11 +1002,14 @@ def load_dashboard_action_audit_page(
     paths = resolve_control_paths(control_root=control_root, team_dir=team_dir, manager_state_file=manager_state_file)
     rows, freshness = _load_recent_action_audit(paths.action_audit_file, limit=max(1, int(limit)))
     focus_filter = str(focus or "").strip().lower() or "all"
-    if focus_filter not in {"all", "auto-route", "judge", "retry"}:
+    chat_filter = str(chat_id or "").strip()
+    if focus_filter not in {"all", "auto-route", "judge", "retry", "server-guard"}:
         focus_filter = "all"
     filtered_rows = rows
     if focus_filter != "all":
         filtered_rows = [row for row in rows if str(getattr(row, "focus_badge", "")).strip() == focus_filter]
+    if chat_filter:
+        filtered_rows = [row for row in filtered_rows if str(getattr(row, "chat_id", "")).strip() == chat_filter]
     focus_counts: Dict[str, int] = {}
     for row in rows:
         badge = str(getattr(row, "focus_badge", "")).strip()
@@ -1014,6 +1030,7 @@ def load_dashboard_action_audit_page(
         status_summary=_action_audit_status_summary(filtered_rows),
         focus_summary=focus_summary,
         focus_filter=focus_filter,
+        chat_filter=chat_filter,
         focus_counts={"all": len(rows), **focus_counts},
         rows=filtered_rows,
     )

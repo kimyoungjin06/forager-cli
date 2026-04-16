@@ -6210,6 +6210,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert apply_payload["focus_badge"] == "server-guard"
     assert apply_payload["server_guard_preset_label"] == "Apply Global Direct"
     assert apply_payload["next_step"] == "/control/chat?chat=123456&preset=global-direct"
+    assert "room:O2/analysis->global" in apply_payload["chat_preset_diff_summary"]
     assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
     assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
 
@@ -6219,9 +6220,17 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Apply Global Direct | completed" in chat_text
     assert "Server Guard Preset Thread" in chat_text
     assert "Codex Pressure Preview | preview -&gt; Apply Global Direct | completed" in chat_text
+    assert "/control/audit?focus=server-guard&amp;chat=123456&amp;limit=20" in chat_text
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
+
+    audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard&chat=123456&limit=20", config)
+    audit_text = audit_body.decode("utf-8")
+    assert audit_status == 200
+    assert "chat_filter" in audit_text
+    assert "123456" in audit_text
+    assert "Apply Global Direct | completed" in audit_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
