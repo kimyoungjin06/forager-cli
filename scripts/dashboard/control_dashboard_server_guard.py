@@ -17,6 +17,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "label": "Codex Pressure",
         "group_note": "codex process pressure is elevated; consolidate chat and operator sessions before widening worker fanout",
         "operator_sentence": "trim chat fanout first, then widen operator surfaces",
+        "action_sentence": "start with Chat, then keep Global Direct narrow",
         "focus_preset_label": "Global Direct",
         "priority_link_label": "Chat",
         "priority_link_note": "trim chat fanout first",
@@ -26,6 +27,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "label": "Python Pressure",
         "group_note": "python worker pressure is elevated; inspect local background churn before launching more package or worker rails",
         "operator_sentence": "check host churn first, then revisit package and worker rails",
+        "action_sentence": "start with Health, then keep Package Rail narrow",
         "focus_preset_label": "Package Rail",
         "priority_link_label": "Health",
         "priority_link_note": "check host churn first",
@@ -35,6 +37,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "label": "Tmux Pressure",
         "group_note": "tmux session pressure is elevated; inspect detached runtime handles before starting more off-desk workers",
         "operator_sentence": "inspect detached actions first, then reopen tmux-backed rails",
+        "action_sentence": "start with Audit, then reopen Review Rail carefully",
         "focus_preset_label": "Review Rail",
         "priority_link_label": "Audit",
         "priority_link_note": "inspect detached actions first",
@@ -44,6 +47,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "label": "Process Pressure",
         "group_note": "overall process pressure is elevated; reduce broad worker churn before adding more concurrency",
         "operator_sentence": "inspect broad churn first, then widen runtime fanout",
+        "action_sentence": "start with Audit, then keep Analysis Rail narrow",
         "focus_preset_label": "Analysis Rail",
         "priority_link_label": "Audit",
         "priority_link_note": "inspect broad churn first",
@@ -53,6 +57,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "label": "Queue Cleanup",
         "group_note": "stale queue pressure is present; inspect cleanup preview before mutating queue state",
         "operator_sentence": "inspect cleanup pressure first, then mutate queue state",
+        "action_sentence": "start with Health, then keep cleanup and Package Rail narrow",
         "focus_preset_label": "Package Rail",
         "priority_link_label": "Health",
         "priority_link_note": "inspect cleanup pressure first",
@@ -62,6 +67,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "label": "Other Preview",
         "group_note": "",
         "operator_sentence": "inspect guard snapshot first",
+        "action_sentence": "start with Health before widening host activity",
         "focus_preset_label": "",
         "priority_link_label": "Health",
         "priority_link_note": "inspect guard snapshot first",
@@ -150,6 +156,22 @@ def _dominant_next_step(reasons: List[str]) -> str:
     return "/control"
 
 
+def _dominant_pressure_key(reasons: Iterable[str]) -> str:
+    ordered_prefixes = (
+        ("queue", "queue"),
+        ("codex_process", "codex"),
+        ("python_process", "python"),
+        ("tmux_process", "tmux"),
+        ("total_process", "process"),
+    )
+    for reason in list(reasons or []):
+        token = str(reason or "").strip()
+        matched = next((group for prefix, group in ordered_prefixes if token.startswith(prefix)), "")
+        if matched:
+            return matched
+    return "other"
+
+
 def _server_guard_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir) / "control" / "server_guard.json"
 
@@ -181,6 +203,8 @@ def _recommended_actions(
 ) -> list[ServerGuardActionDTO]:
     actions: list[ServerGuardActionDTO] = []
     cleanup_target = _server_guard_cleanup_target(runtime_cards)
+    dominant_key = _dominant_pressure_key(reasons)
+    dominant_policy = server_guard_pressure_policy(dominant_key)
 
     def _add_link(label: str, href: str, note: str) -> None:
         if any(str(row.href).strip() == href and not str(row.path).strip() for row in actions):
@@ -203,7 +227,10 @@ def _recommended_actions(
             )
         )
 
-    _add_link("Open Health View", "/control/health/view", "inspect the operator-facing host health card view")
+    health_view_note = "inspect the operator-facing host health card view"
+    if str(dominant_policy.get("priority_link_label", "")).strip().lower() == "health":
+        health_view_note = str(dominant_policy.get("action_sentence", "")).strip() or health_view_note
+    _add_link("Open Health View", "/control/health/view", health_view_note)
     _add_link("Open Health JSON", "/control/health", "inspect the raw host and queue snapshot")
     if next_step == "/control/recovery":
         _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review stale queue, retries, and blocked runtimes first")
@@ -227,42 +254,42 @@ def _recommended_actions(
             "Preview Codex Pressure",
             "/control/actions/runtime/server-guard-pressure-preview",
             {"pressure_kind": "codex"},
-            "inspect codex session pressure before trimming or consolidating interactive surfaces",
+            str(server_guard_pressure_policy("codex").get("operator_sentence", "")).strip(),
             command="/ops pressure codex preview",
         )
-        _add_link("Review Codex Pressure", "/control/history?q=codex&scope=control", "inspect codex session churn and trim duplicated interactive runs")
-        _add_link("Open Chat Console", "/control/chat?preset=global-direct", "consolidate chat-bound codex sessions before opening more worker surfaces")
+        _add_link("Review Codex Pressure", "/control/history?q=codex&scope=control", "trim chat fanout first via recent codex history")
+        _add_link("Open Chat Console", "/control/chat?preset=global-direct", str(server_guard_pressure_policy("codex").get("action_sentence", "")).strip())
     if _has_reason(reasons, "python_process"):
         _add_action(
             "Preview Python Pressure",
             "/control/actions/runtime/server-guard-pressure-preview",
             {"pressure_kind": "python"},
-            "inspect python worker pressure before launching more local background tasks",
+            str(server_guard_pressure_policy("python").get("operator_sentence", "")).strip(),
             command="/ops pressure python preview",
         )
-        _add_link("Review Python Pressure", "/control/history?q=python&scope=control", "inspect python worker churn and repeated local background launches")
-        _add_link("Open Package Rail", "/control/chat?preset=package-rail", "open the package-oriented chat rail before revisiting python-backed worker activity")
+        _add_link("Review Python Pressure", "/control/history?q=python&scope=control", "check host churn first via recent python history")
+        _add_link("Open Package Rail", "/control/chat?preset=package-rail", str(server_guard_pressure_policy("python").get("action_sentence", "")).strip())
         _add_link("Open Recovery", "/control/recovery?focus=server-guard", "review worker and queue rails before starting more python-backed jobs")
     if _has_reason(reasons, "tmux_process"):
         _add_action(
             "Preview Tmux Pressure",
             "/control/actions/runtime/server-guard-pressure-preview",
             {"pressure_kind": "tmux"},
-            "inspect detached tmux runtime pressure before starting more off-desk workers",
+            str(server_guard_pressure_policy("tmux").get("operator_sentence", "")).strip(),
             command="/ops pressure tmux preview",
         )
-        _add_link("Review Tmux Pressure", "/control/history?q=tmux&scope=control", "inspect detached runtime sessions and stale tmux-backed workers")
-        _add_link("Open Review Rail", "/control/chat?preset=review-rail", "open the review chat rail before restarting detached tmux-backed workers")
+        _add_link("Review Tmux Pressure", "/control/history?q=tmux&scope=control", "inspect detached actions first via tmux history")
+        _add_link("Open Review Rail", "/control/chat?preset=review-rail", str(server_guard_pressure_policy("tmux").get("action_sentence", "")).strip())
     if _has_reason(reasons, "total_process"):
         _add_action(
             "Preview Process Pressure",
             "/control/actions/runtime/server-guard-pressure-preview",
             {"pressure_kind": "process"},
-            "inspect total process pressure before widening worker fanout",
+            str(server_guard_pressure_policy("process").get("operator_sentence", "")).strip(),
             command="/ops pressure process preview",
         )
-        _add_link("Review Process Pressure", "/control/history?q=process&scope=control", "inspect broad process churn before launching additional work")
-        _add_link("Open Analysis Rail", "/control/chat?preset=analysis-rail", "open the analysis rail for lower-fanout triage while total process pressure is elevated")
+        _add_link("Review Process Pressure", "/control/history?q=process&scope=control", "inspect broad churn first via process history")
+        _add_link("Open Analysis Rail", "/control/chat?preset=analysis-rail", str(server_guard_pressure_policy("process").get("action_sentence", "")).strip())
     if any(reason.startswith("memory") or reason.startswith("load") for reason in reasons):
         _add_link("Open Offdesk", "/control/offdesk", "pause and review host pressure before running more work")
     if cleanup_target is not None:
@@ -272,7 +299,7 @@ def _recommended_actions(
                 "Preview Queue Cleanup",
                 "/control/actions/runtime/background-queue-clean-preview",
                 {"project_ref": project_ref},
-                "inspect stale queue tickets before mutating background queue state",
+                str(server_guard_pressure_policy("queue").get("operator_sentence", "")).strip(),
                 command=f"/orch bgq-clean {project_ref} preview",
             )
     return actions[:12]

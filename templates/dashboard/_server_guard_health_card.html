@@ -18,6 +18,7 @@
     <li><span>focus_preset</span><strong>{{ live_group.focus_preset_label or '-' }}</strong></li>
     <li><span>priority_link</span><strong>{{ live_group.priority_link_label or '-' }}{% if live_group.priority_link_note %} | {{ live_group.priority_link_note }}{% endif %}</strong></li>
     <li><span>operator_sentence</span><strong>{{ live_group.operator_sentence or '-' }}</strong></li>
+    <li><span>action_copy</span><strong>{{ live_group.action_sentence or '-' }}</strong></li>
     {% endif %}
     <li><span>snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
     <li><span>{% if label_prefix %}{{ label_prefix }}_latest_action{% else %}latest_action{% endif %}</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>

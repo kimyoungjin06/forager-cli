@@ -624,6 +624,11 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "next_step" in health["server_guard"]
     assert "snapshot_path" in health["server_guard"]
     assert "recommended_actions" in health["server_guard"]
+    assert any(
+        str(row.get("note") or "").strip()
+        for row in (health["server_guard"].get("recommended_actions") or [])
+        if row.get("href") == "/control/health/view"
+    )
 
 
 def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp_path: Path, monkeypatch) -> None:
@@ -6174,6 +6179,11 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
         for row in (health.get("server_guard", {}).get("recommended_actions") or [])
     )
     assert any(
+        row.get("href") == "/control/chat?preset=global-direct"
+        and row.get("note") == "start with Chat, then keep Global Direct narrow"
+        for row in (health.get("server_guard", {}).get("recommended_actions") or [])
+    )
+    assert any(
         row.get("href") == "/control/health/view"
         for row in (health.get("server_guard", {}).get("recommended_actions") or [])
     )
@@ -6195,6 +6205,7 @@ def test_control_dashboard_server_guard_preview_groups_follow_dominant_reason(tm
     assert snapshot.control_summary.server_guard_preview_groups[0].key == "python"
     assert snapshot.control_summary.server_guard_preview_groups[0].label == "Python Pressure"
     assert snapshot.control_summary.server_guard_preview_groups[0].operator_sentence == "check host churn first, then revisit package and worker rails"
+    assert snapshot.control_summary.server_guard_preview_groups[0].action_sentence == "start with Health, then keep Package Rail narrow"
     assert snapshot.control_summary.server_guard_preview_groups[0].focus_preset_label == "Package Rail"
     assert snapshot.control_summary.server_guard_preview_groups[0].priority_link_label == "Health"
     assert snapshot.control_summary.server_guard_preview_groups[0].priority_link_note == "check host churn first"
@@ -6312,6 +6323,8 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Latest Server Guard Thread" in overview_text
     assert "priority_link" in overview_text
     assert "Chat · trim chat fanout first" in overview_text
+    assert "action_copy" in overview_text
+    assert "start with Chat, then keep Global Direct narrow" in overview_text
     assert "pressure-kind-badge" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
@@ -6513,7 +6526,9 @@ def test_control_dashboard_health_view_renders_operator_health_card(tmp_path: Pa
     assert "focus_preset" in text
     assert "priority_link" in text
     assert "operator_sentence" in text
+    assert "action_copy" in text
     assert "trim chat fanout first, then widen operator surfaces" in text
+    assert "start with Chat, then keep Global Direct narrow" in text
     assert "Open Health JSON" in text
 
 
