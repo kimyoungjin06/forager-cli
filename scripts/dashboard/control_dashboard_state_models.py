@@ -21,6 +21,10 @@ class ServerGuardDTO:
     load_summary: str
     process_summary: str
     queue_summary: str
+    focus_label: str = ""
+    action_copy: str = ""
+    priority_link_label: str = ""
+    priority_link_note: str = ""
     snapshot_path: str = ""
     snapshot_updated_at: str = ""
     recommended_actions: List["ServerGuardActionDTO"] = field(default_factory=list)
@@ -672,6 +676,8 @@ class HistorySearchRowDTO:
     detail: str
     followup_hint: str
     raw_ref: str
+    pressure_kind_label: str = ""
+    pressure_kind_note: str = ""
 
 
 @dataclass(frozen=True)

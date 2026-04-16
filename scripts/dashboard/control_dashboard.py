@@ -114,6 +114,10 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                     "load_summary": server_guard.load_summary,
                     "process_summary": server_guard.process_summary,
                     "queue_summary": server_guard.queue_summary,
+                    "focus_label": server_guard.focus_label,
+                    "action_copy": server_guard.action_copy,
+                    "priority_link_label": server_guard.priority_link_label,
+                    "priority_link_note": server_guard.priority_link_note,
                     "snapshot_path": server_guard.snapshot_path,
                     "snapshot_updated_at": server_guard.snapshot_updated_at,
                     "recommended_actions": [

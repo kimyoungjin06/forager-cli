@@ -396,6 +396,10 @@ def build_nightly_session_summary(
                 "load_summary": snapshot.control_summary.server_guard.load_summary,
                 "process_summary": snapshot.control_summary.server_guard.process_summary,
                 "queue_summary": snapshot.control_summary.server_guard.queue_summary,
+                "focus_label": snapshot.control_summary.server_guard.focus_label,
+                "action_copy": snapshot.control_summary.server_guard.action_copy,
+                "priority_link_label": snapshot.control_summary.server_guard.priority_link_label,
+                "priority_link_note": snapshot.control_summary.server_guard.priority_link_note,
                 "snapshot_path": snapshot.control_summary.server_guard.snapshot_path,
                 "snapshot_updated_at": snapshot.control_summary.server_guard.snapshot_updated_at,
                 "recommended_actions": [asdict(row) for row in snapshot.control_summary.server_guard.recommended_actions],
@@ -409,6 +413,13 @@ def build_nightly_session_summary(
 
 def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
     control = summary.get("control_summary") if isinstance(summary.get("control_summary"), dict) else {}
+    server_guard = control.get("server_guard") if isinstance(control.get("server_guard"), dict) else {}
+    priority_link = "-"
+    if server_guard:
+        priority_link = str(server_guard.get("priority_link_label", "")).strip() or "-"
+        priority_note = str(server_guard.get("priority_link_note", "")).strip()
+        if priority_note:
+            priority_link = f"{priority_link} | {priority_note}"
     runtimes = summary.get("runtimes") if isinstance(summary.get("runtimes"), list) else []
     lines: List[str] = [
         "# Nightly Session Summary",
@@ -430,11 +441,14 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         f"- latest_intent_action: {control.get('latest_intent_action', '-')}",
         f"- latest_intent_trace: {control.get('latest_intent_trace', '-')}",
         f"- first_focus: {control.get('latest_intent_focus', '-')}",
-        f"- server_guard: {(control.get('server_guard') or {}).get('summary', '-') if isinstance(control.get('server_guard'), dict) else '-'}",
-        f"- server_guard_reasons: {(control.get('server_guard') or {}).get('reason_summary', '-') if isinstance(control.get('server_guard'), dict) else '-'}",
-        f"- server_guard_note: {(control.get('server_guard') or {}).get('note', '-') if isinstance(control.get('server_guard'), dict) else '-'}",
-        f"- server_guard_next: {(control.get('server_guard') or {}).get('next_step', '-') if isinstance(control.get('server_guard'), dict) else '-'}",
-        f"- server_guard_snapshot: {(control.get('server_guard') or {}).get('snapshot_path', '-') if isinstance(control.get('server_guard'), dict) else '-'}",
+        f"- server_guard: {server_guard.get('summary', '-') if server_guard else '-'}",
+        f"- server_guard_reasons: {server_guard.get('reason_summary', '-') if server_guard else '-'}",
+        f"- server_guard_note: {server_guard.get('note', '-') if server_guard else '-'}",
+        f"- server_guard_next: {server_guard.get('next_step', '-') if server_guard else '-'}",
+        f"- server_guard_focus: {server_guard.get('focus_label', '-') if server_guard else '-'}",
+        f"- server_guard_action_copy: {server_guard.get('action_copy', '-') if server_guard else '-'}",
+        f"- server_guard_priority_link: {priority_link}",
+        f"- server_guard_snapshot: {server_guard.get('snapshot_path', '-') if server_guard else '-'}",
         "",
     ]
     recent_action_audit = summary.get("recent_action_audit") if isinstance(summary.get("recent_action_audit"), list) else []

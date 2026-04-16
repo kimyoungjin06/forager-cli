@@ -1264,6 +1264,11 @@ def load_dashboard_history_page(
         manager_state=loaded.manager_state,
         options=options,
     )
+    fallback_pressure_key = (
+        str(loaded.snapshot.control_summary.server_guard_preview_groups[0].key).strip().lower()
+        if loaded.snapshot.control_summary.server_guard_preview_groups
+        else "other"
+    )
     return loaded.snapshot, HistorySearchPageDTO(
         query=options.query,
         project_filter=options.project_filter,
@@ -1290,7 +1295,45 @@ def load_dashboard_history_page(
                 detail=row.detail,
                 followup_hint=row.followup_hint,
                 raw_ref=row.raw_ref,
+                pressure_kind_label=_history_row_pressure_label(row, fallback_key=fallback_pressure_key),
+                pressure_kind_note=_history_row_pressure_note(row, fallback_key=fallback_pressure_key),
             )
             for row in rows
         ],
     )
+
+
+def _history_row_pressure_key(row: history_search.HistoryRow, *, fallback_key: str = "other") -> str:
+    blob = " ".join(
+        str(token or "").strip().lower()
+        for token in (
+            getattr(row, "summary", ""),
+            getattr(row, "detail", ""),
+            getattr(row, "action", ""),
+            getattr(row, "reason_code", ""),
+            getattr(row, "followup_hint", ""),
+            getattr(row, "raw_ref", ""),
+        )
+        if str(token or "").strip()
+    )
+    patterns = (
+        ("queue", ("queue", "cleanup", "bgq-clean", "stale runtime", "stale queue")),
+        ("codex", ("codex", "global-direct")),
+        ("python", ("python", "package-rail", "package rail")),
+        ("tmux", ("tmux", "review-rail", "review rail")),
+        ("process", ("process", "analysis-rail", "analysis rail")),
+    )
+    for key, tokens in patterns:
+        if any(token in blob for token in tokens):
+            return key
+    return str(fallback_key or "other").strip().lower() or "other"
+
+
+def _history_row_pressure_label(row: history_search.HistoryRow, *, fallback_key: str = "other") -> str:
+    policy = server_guard_pressure_policy(_history_row_pressure_key(row, fallback_key=fallback_key))
+    return str(policy.get("label", "")).strip()
+
+
+def _history_row_pressure_note(row: history_search.HistoryRow, *, fallback_key: str = "other") -> str:
+    policy = server_guard_pressure_policy(_history_row_pressure_key(row, fallback_key=fallback_key))
+    return str(policy.get("action_sentence", "")).strip() or str(policy.get("priority_link_note", "")).strip()

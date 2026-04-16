@@ -68,6 +68,8 @@
         </td>
         <td>
           {{ row.summary }}
+          {% if row.pressure_kind_label %}<br><span class="action-history-badge pressure-kind-badge">{{ row.pressure_kind_label }}</span>{% endif %}
+          {% if row.pressure_kind_note %}<br><span class="muted">{{ row.pressure_kind_note }}</span>{% endif %}
           {% if row.reason_code %}<br><span class="muted">reason: {{ row.reason_code }}</span>{% endif %}
           {% if row.detail %}<br><span class="muted">{{ row.detail }}</span>{% endif %}
         </td>

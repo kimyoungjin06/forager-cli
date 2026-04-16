@@ -1153,6 +1153,7 @@ def test_control_dashboard_history_route_renders_query_results(tmp_path: Path, m
     assert "Python Pressure" in text
     assert "action_copy" in text
     assert "start with Health, then keep Package Rail narrow" in text
+    assert "pressure-kind-badge" in text
 
 
 def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_path: Path) -> None:
@@ -2061,6 +2062,9 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "server_guard_reasons" in text
     assert "server_guard_note" in text
     assert "server_guard_next" in text
+    assert "server_guard_focus" in text
+    assert "server_guard_action_copy" in text
+    assert "server_guard_priority_link" in text
     assert "server_guard_snapshot" in text
     assert "server_guard_latest_action" in text
     assert "server_guard_latest_result" in text

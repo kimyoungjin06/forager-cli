@@ -320,6 +320,10 @@ def write_server_guard_snapshot(*, team_dir: Path | str, snapshot_taken_at: str,
         "load_summary": guard.load_summary,
         "process_summary": guard.process_summary,
         "queue_summary": guard.queue_summary,
+        "focus_label": guard.focus_label,
+        "action_copy": guard.action_copy,
+        "priority_link_label": guard.priority_link_label,
+        "priority_link_note": guard.priority_link_note,
         "recommended_actions": [
             {
                 "label": row.label,
@@ -437,6 +441,7 @@ def build_server_guard(
 
     next_step = _dominant_next_step(reasons)
     recommended_actions = _recommended_actions(reasons=reasons, next_step=next_step, runtime_cards=cards)
+    dominant_policy = server_guard_pressure_policy(_dominant_pressure_key(reasons), fallback_note="")
     if not reasons:
         reason_summary = "-"
         note = "server guard is stable; continue with normal operator flow"
@@ -481,5 +486,9 @@ def build_server_guard(
         load_summary=load_summary,
         process_summary=process_summary,
         queue_summary=queue_summary,
+        focus_label=str(dominant_policy.get("label", "")).strip(),
+        action_copy=str(dominant_policy.get("action_sentence", "")).strip(),
+        priority_link_label=str(dominant_policy.get("priority_link_label", "")).strip(),
+        priority_link_note=str(dominant_policy.get("priority_link_note", "")).strip(),
         recommended_actions=recommended_actions,
     )
