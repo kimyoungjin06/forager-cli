@@ -32,6 +32,16 @@
             {% include 'dashboard/_server_guard_threads.html' %}
           {% endwith %}
         {% endif %}
+      {% else %}
+        <div class="server-guard-thread-empty">
+          <p><strong>server_guard_threads</strong></p>
+          <p class="muted">No recent server guard preset thread yet. Preview pressure or open chat/recovery rails to start an operator thread.</p>
+          <div class="chat-hints">
+            <a class="action-history-badge" href="/control/chat">Open Chat Console</a>
+            <a class="action-history-badge" href="/control/health/view">Open Health View</a>
+            <a class="action-history-badge" href="/control/audit?focus=server-guard">Server Guard Audit</a>
+          </div>
+        </div>
       {% endif %}
       <div class="chat-hints">
         <a class="action-history-badge" href="/control/chat">Open Chat Console</a>

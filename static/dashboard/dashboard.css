@@ -1176,6 +1176,19 @@ strong {
   margin: 0;
 }
 
+.server-guard-thread-empty {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem 0.95rem;
+  border: 1px dashed rgba(33, 78, 90, 0.28);
+  border-radius: 15px;
+  background: rgba(255, 250, 241, 0.76);
+}
+
+.server-guard-thread-empty p {
+  margin: 0;
+}
+
 .server-guard-thread-list {
   display: grid;
   gap: 0.75rem;

@@ -553,6 +553,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "Server Guard Health Card" in overview_text
     assert "Server Guard Audit" in overview_text
     assert "Open Health JSON" in overview_text
+    assert "No recent server guard preset thread yet." in overview_text
     assert "server-guard" in overview_text
     assert "execution_brief" in overview_text
     assert "underspecified" in overview_text
@@ -6242,6 +6243,9 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Server Guard Preset Threads" in recovery_text
     assert "Latest Server Guard Thread" in recovery_text
     assert "Apply Global Direct | completed" in recovery_text
+    assert "/control/chat" in recovery_text
+    assert "/control/audit?focus=server-guard" in recovery_text
+    assert "/control/health/view" in recovery_text
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
