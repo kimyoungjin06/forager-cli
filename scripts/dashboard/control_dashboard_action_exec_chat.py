@@ -197,22 +197,26 @@ def _execute_chat_session_update_action(
             "label": "Open Chat Console",
             "href": effective_next_step if effective_next_step.startswith("/control/chat") else f"/control/chat?chat={chat_id}",
             "note": "inspect the selected chat session after applying the server-guard preset",
+            "priority": "secondary",
         }
         health_action = {
             "label": "Open Health View",
             "href": "/control/health/view",
             "note": "inspect host pressure after switching the chat rail",
+            "priority": "secondary",
         }
         audit_action = {
             "label": "Open Server Guard Audit",
             "href": "/control/audit?focus=server-guard",
             "note": "inspect the full server-guard action trail",
+            "priority": "secondary",
         }
         ordered_actions = {
             "codex": [
                 {
                     **chat_action,
                     "note": "trim duplicated chat sessions first, then widen operator surfaces",
+                    "priority": "primary",
                 },
                 audit_action,
                 health_action,
@@ -221,6 +225,7 @@ def _execute_chat_session_update_action(
                 {
                     **health_action,
                     "note": "inspect host churn first before revisiting package and worker rails",
+                    "priority": "primary",
                 },
                 chat_action,
                 audit_action,
@@ -229,6 +234,7 @@ def _execute_chat_session_update_action(
                 {
                     **audit_action,
                     "note": "inspect detached runtime handles first before reopening tmux-backed rails",
+                    "priority": "primary",
                 },
                 chat_action,
                 health_action,
@@ -237,6 +243,7 @@ def _execute_chat_session_update_action(
                 {
                     **audit_action,
                     "note": "inspect broad process churn first before widening runtime fanout",
+                    "priority": "primary",
                 },
                 health_action,
                 chat_action,

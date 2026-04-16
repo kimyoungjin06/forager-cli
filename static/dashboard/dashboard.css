@@ -747,6 +747,19 @@ strong {
   background: rgba(255, 250, 241, 0.92);
 }
 
+.action-form.priority-followup {
+  border-color: rgba(33, 78, 90, 0.34);
+  background: linear-gradient(180deg, rgba(214, 229, 232, 0.5), rgba(255, 250, 241, 0.94));
+}
+
+.action-form.secondary-followup {
+  border-color: rgba(215, 202, 177, 0.82);
+}
+
+.action-button.priority-followup-button {
+  box-shadow: 0 0 0 2px rgba(33, 78, 90, 0.1);
+}
+
 .action-meta {
   display: grid;
   gap: 0.24rem;
@@ -1182,6 +1195,10 @@ strong {
 
 .server-guard-thread-highlight-grid p,
 .server-guard-thread-highlight > p {
+  margin: 0;
+}
+
+.server-guard-thread-priority-note {
   margin: 0;
 }
 

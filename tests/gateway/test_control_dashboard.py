@@ -556,6 +556,8 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "No recent server guard preset thread yet." in overview_text
     assert "Run one of the server guard actions above" in overview_text
     assert "server-guard" in overview_text
+    assert "priority-followup" in overview_text
+    assert "secondary-followup" in overview_text
     assert "execution_brief" in overview_text
     assert "underspecified" in overview_text
     assert "brief_summary" in overview_text
@@ -6278,12 +6280,19 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         "Open Server Guard Audit",
         "Open Health View",
     ]
+    assert [row.get("priority") for row in (apply_payload.get("actions") or [])][:3] == [
+        "primary",
+        "secondary",
+        "secondary",
+    ]
     assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
     assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
 
     assert overview_status == 200
     assert "Apply Global Direct | completed" in overview_text
     assert "Latest Server Guard Thread" in overview_text
+    assert "priority_link" in overview_text
+    assert "Chat · trim chat fanout first" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
     assert "Latest Server Guard Thread" in chat_text
@@ -6369,6 +6378,11 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
                 "Open Health View",
                 "Open Chat Console",
                 "Open Server Guard Audit",
+            ]
+            assert [row.get("priority") for row in (apply_payload.get("actions") or [])][:3] == [
+                "primary",
+                "secondary",
+                "secondary",
             ]
 
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)

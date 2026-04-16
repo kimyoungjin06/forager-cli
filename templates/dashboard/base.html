@@ -263,7 +263,8 @@
             const command = asText(row.command || row.path || row.href);
             if (path !== "-") {
               const form = document.createElement("form");
-              form.className = "action-form";
+              const priority = asText(row.priority || "secondary");
+              form.className = `action-form ${priority === "primary" ? "priority-followup" : "secondary-followup"}`;
               form.setAttribute("data-dashboard-action", "");
               form.dataset.actionLabel = label;
               form.dataset.actionCommand = command;
@@ -276,13 +277,17 @@
               input.value = asText(row.payload_json || "{}");
               const button = document.createElement("button");
               button.type = "submit";
-              button.className = `action-button ${asText(row.mode || "safe")}`;
+              button.className = `action-button ${asText(row.mode || "safe")} ${priority === "primary" ? "priority-followup-button" : "secondary-followup-button"}`;
               button.textContent = label;
               const meta = document.createElement("div");
               meta.className = "action-meta";
               const code = document.createElement("code");
               code.textContent = command;
               meta.appendChild(code);
+              const rank = document.createElement("span");
+              rank.className = `action-history-badge ${priority === "primary" ? "preview" : ""}`;
+              rank.textContent = priority;
+              meta.appendChild(rank);
               if (note !== "-") {
                 const span = document.createElement("span");
                 span.className = "muted";
