@@ -554,6 +554,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "Server Guard Audit" in overview_text
     assert "Open Health JSON" in overview_text
     assert "No recent server guard preset thread yet." in overview_text
+    assert "Run one of the server guard actions above" in overview_text
     assert "server-guard" in overview_text
     assert "execution_brief" in overview_text
     assert "underspecified" in overview_text
@@ -6226,7 +6227,9 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "preset_diff" in chat_text
     assert "room:O2/analysis-&gt;global" in chat_text
     assert "Open Thread Detail" in chat_text
+    assert "/control/chat?chat=123456" in chat_text
     assert "/control/audit?focus=server-guard&amp;chat=123456&amp;limit=20" in chat_text
+    assert "/control/health/view" in chat_text
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
@@ -6243,7 +6246,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Server Guard Preset Threads" in recovery_text
     assert "Latest Server Guard Thread" in recovery_text
     assert "Apply Global Direct | completed" in recovery_text
-    assert "/control/chat" in recovery_text
+    assert "/control/chat?chat=123456" in recovery_text
     assert "/control/audit?focus=server-guard" in recovery_text
     assert "/control/health/view" in recovery_text
 

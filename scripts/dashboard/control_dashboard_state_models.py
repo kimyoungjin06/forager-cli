@@ -718,6 +718,9 @@ class ServerGuardThreadDTO:
     next_step: str = ""
     detail_href: str = ""
     detail_label: str = ""
+    chat_href: str = ""
+    audit_href: str = ""
+    health_href: str = "/control/health/view"
 
 
 @dataclass(frozen=True)

@@ -509,6 +509,13 @@ def _build_server_guard_thread_cards(
                     next_step=str(action.next_step or "-").strip() or "-",
                     detail_href=detail_href,
                     detail_label="Open Thread Detail",
+                    chat_href=(
+                        f"/control/chat?chat={action.chat_id}"
+                        if str(action.chat_id or "").strip()
+                        else "/control/chat"
+                    ),
+                    audit_href=detail_href,
+                    health_href="/control/health/view",
                 )
             )
             break

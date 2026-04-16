@@ -26,5 +26,10 @@
   {% if not compact and thread.command and thread.command != '-' %}
   <p><strong>command</strong> <code>{{ thread.command }}</code></p>
   {% endif %}
+  <div class="chat-hints">
+    {% if thread.chat_href %}<a class="action-history-badge" href="{{ thread.chat_href }}">Open Chat Console</a>{% endif %}
+    {% if thread.audit_href %}<a class="action-history-badge" href="{{ thread.audit_href }}">Open Thread Audit</a>{% endif %}
+    {% if thread.health_href %}<a class="action-history-badge" href="{{ thread.health_href }}">Open Health View</a>{% endif %}
+  </div>
 </article>
 {% endif %}
