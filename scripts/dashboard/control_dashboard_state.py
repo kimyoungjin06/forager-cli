@@ -228,6 +228,7 @@ def load_dashboard_snapshot_result(
     )
     server_guard_latest_action_summary, server_guard_latest_action_path = _latest_server_guard_action(action_audit_rows)
     server_guard_latest_result_summary, server_guard_latest_result_path = _latest_server_guard_result(action_audit_rows)
+    server_guard_threads = _build_server_guard_thread_cards(action_audit_rows, limit=2)
 
     summary = ControlSummaryDTO(
         auto_mode=auto_mode,
@@ -253,6 +254,7 @@ def load_dashboard_snapshot_result(
         server_guard_latest_action_path=server_guard_latest_action_path,
         server_guard_latest_result_summary=server_guard_latest_result_summary,
         server_guard_latest_result_path=server_guard_latest_result_path,
+        server_guard_threads=server_guard_threads,
         active_runtime_count=len(runtime_cards),
         attention_runtime_count=len(attention_cards),
         snapshot_taken_at=snapshot_taken_at,
@@ -454,12 +456,23 @@ def _build_chat_timeline_entries(
 
 
 def _build_server_guard_thread_card(recent_chat_actions: list[ActionAuditRowDTO]) -> ServerGuardThreadDTO:
+    cards = _build_server_guard_thread_cards(recent_chat_actions, limit=1)
+    return cards[0] if cards else ServerGuardThreadDTO()
+
+
+def _build_server_guard_thread_cards(
+    recent_chat_actions: list[ActionAuditRowDTO],
+    *,
+    limit: int = 3,
+) -> list[ServerGuardThreadDTO]:
     pressure_preview_kinds = {
         "codex_process_pressure_preview",
         "python_process_pressure_preview",
         "tmux_process_pressure_preview",
         "process_pressure_preview",
     }
+    cards: list[ServerGuardThreadDTO] = []
+    seen_pairs: set[tuple[str, str, str]] = set()
     for index, action in enumerate(recent_chat_actions):
         if str(action.outcome_kind or "").strip() != "chat_session_update":
             continue
@@ -477,18 +490,31 @@ def _build_server_guard_thread_card(recent_chat_actions: list[ActionAuditRowDTO]
                 if str(action.chat_id or "").strip()
                 else "/control/audit?focus=server-guard&limit=20"
             )
-            return ServerGuardThreadDTO(
-                exists=True,
-                preview_headline=str(older.headline or "-").strip() or "-",
-                apply_headline=str(action.headline or "-").strip() or "-",
-                preset_diff_summary=str(action.chat_preset_diff_summary or "-").strip() or "-",
-                at=str(action.at or "-").strip() or "-",
-                command=str(action.source_command or "-").strip() or "-",
-                next_step=str(action.next_step or "-").strip() or "-",
-                detail_href=detail_href,
-                detail_label="Open Thread Detail",
+            pair_key = (
+                str(action.chat_id or "").strip(),
+                str(older.headline or "").strip(),
+                str(action.headline or "").strip(),
             )
-    return ServerGuardThreadDTO()
+            if pair_key in seen_pairs:
+                break
+            seen_pairs.add(pair_key)
+            cards.append(
+                ServerGuardThreadDTO(
+                    exists=True,
+                    preview_headline=str(older.headline or "-").strip() or "-",
+                    apply_headline=str(action.headline or "-").strip() or "-",
+                    preset_diff_summary=str(action.chat_preset_diff_summary or "-").strip() or "-",
+                    at=str(action.at or "-").strip() or "-",
+                    command=str(action.source_command or "-").strip() or "-",
+                    next_step=str(action.next_step or "-").strip() or "-",
+                    detail_href=detail_href,
+                    detail_label="Open Thread Detail",
+                )
+            )
+            break
+        if len(cards) >= max(1, int(limit)):
+            break
+    return cards[: max(1, int(limit))]
 
 
 def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[str]) -> list[str]:
@@ -864,6 +890,7 @@ def load_dashboard_chat_page(
     )
     recent_chat_actions = _load_recent_chat_action_rows(paths, chat_id=selected_token, limit=8)
     server_guard_thread = _build_server_guard_thread_card(recent_chat_actions)
+    server_guard_threads = _build_server_guard_thread_cards(recent_chat_actions, limit=3)
     timeline_entries = _build_chat_timeline_entries(
         room=selected_room,
         room_tail=room_tail,
@@ -902,6 +929,7 @@ def load_dashboard_chat_page(
         sessions=sessions,
         room_tail=room_tail,
         server_guard_thread=server_guard_thread,
+        server_guard_threads=server_guard_threads,
         timeline_entries=timeline_entries,
         recent_chat_actions=recent_chat_actions,
         send_mode_options={

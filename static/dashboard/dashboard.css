@@ -1124,6 +1124,20 @@ strong {
   margin: 0;
 }
 
+.server-guard-thread-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.server-guard-thread-list.compact {
+  margin-top: 0.8rem;
+}
+
+.server-guard-thread-card.compact {
+  gap: 0.45rem;
+  padding: 0.75rem 0.82rem;
+}
+
 @media (max-width: 1100px) {
   .runtime-card > p,
   .fold-stack > p {

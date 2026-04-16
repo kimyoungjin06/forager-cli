@@ -91,6 +91,7 @@ class ControlSummaryDTO:
     server_guard_latest_action_path: str
     server_guard_latest_result_summary: str
     server_guard_latest_result_path: str
+    server_guard_threads: List["ServerGuardThreadDTO"]
     active_runtime_count: int
     attention_runtime_count: int
     snapshot_taken_at: str
@@ -757,6 +758,7 @@ class ChatConsolePageDTO:
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)
     server_guard_thread: ServerGuardThreadDTO = field(default_factory=ServerGuardThreadDTO)
+    server_guard_threads: List[ServerGuardThreadDTO] = field(default_factory=list)
     timeline_entries: List[ChatTimelineEntryDTO] = field(default_factory=list)
     send_action_path: str = "/control/actions/chat/send"
     session_action_path: str = "/control/actions/chat/session-update"

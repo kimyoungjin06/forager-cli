@@ -1,0 +1,26 @@
+{% if threads %}
+<div class="server-guard-thread-list{% if compact %} compact{% endif %}">
+  {% for row in threads %}
+  <article class="server-guard-thread-card{% if compact %} compact{% endif %}">
+    <p><strong>preview</strong> {{ row.preview_headline }}</p>
+    <p><strong>apply</strong> {{ row.apply_headline }}</p>
+    <p><strong>preset_diff</strong></p>
+    <div class="diff-badge-list">
+      {% for token in row.preset_diff_summary.split(' | ') if token %}
+      <span class="diff-badge">{{ token }}</span>
+      {% endfor %}
+    </div>
+    {% if not compact %}
+    <p><strong>command</strong> <code>{{ row.command }}</code></p>
+    <p><strong>next</strong> {{ row.next_step }}</p>
+    {% endif %}
+    <p><strong>at</strong> <span class="mono">{{ row.at }}</span></p>
+    {% if row.detail_href %}
+    <p><a href="{{ row.detail_href }}">{{ row.detail_label or 'detail' }}</a></p>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% elif show_empty is not defined or show_empty %}
+<p class="muted">server guard preset thread history가 없습니다.</p>
+{% endif %}

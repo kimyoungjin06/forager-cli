@@ -18,6 +18,9 @@
       {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
         {% include 'dashboard/_server_guard_actions.html' %}
       {% endwith %}
+      {% with threads=snapshot.control_summary.server_guard_threads, compact=true, show_empty=false %}
+        {% include 'dashboard/_server_guard_threads.html' %}
+      {% endwith %}
       <div class="chat-hints">
         <a class="action-history-badge" href="/control/chat">Open Chat Console</a>
         <a class="action-history-badge" href="/control/recovery">Open Recovery</a>

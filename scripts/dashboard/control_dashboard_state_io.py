@@ -311,6 +311,9 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
                 "link_href": row.link_href,
                 "source_command": row.source_command,
                 "focus_badge": row.focus_badge,
+                "chat_id": row.chat_id,
+                "transcript_preview": row.transcript_preview,
+                "chat_preset_diff_summary": row.chat_preset_diff_summary,
             }
             for row in rows
         ]
