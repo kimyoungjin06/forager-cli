@@ -77,6 +77,11 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         room = str(payload.get("room", "")).strip()
         lang = str(payload.get("lang", "")).strip().lower()
         report_level = str(payload.get("report_level", "")).strip().lower()
+        focus_badge = str(payload.get("focus_badge", "")).strip()
+        server_guard_preset_label = str(payload.get("server_guard_preset_label", "")).strip()
+        server_guard_pressure_kind = str(payload.get("server_guard_pressure_kind", "")).strip().lower()
+        next_step = str(payload.get("next_step", "")).strip()
+        remediation = str(payload.get("remediation", "")).strip()
         if default_mode not in {"", "direct", "dispatch"}:
             raise ValueError("default_mode must be one of direct, dispatch, or blank")
         if pending_mode not in {"", "direct", "dispatch"}:
@@ -85,6 +90,10 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
             raise ValueError("lang must be one of ko, en, or blank")
         if report_level not in {"", "short", "normal", "long"}:
             raise ValueError("report_level must be one of short, normal, long, or blank")
+        if focus_badge not in {"", "server-guard"}:
+            raise ValueError("focus_badge must be blank or server-guard")
+        if server_guard_pressure_kind not in {"", "codex", "python", "tmux", "process"}:
+            raise ValueError("server_guard_pressure_kind must be one of codex, python, tmux, process, or blank")
         return {
             "path": path,
             "method": "POST",
@@ -98,6 +107,11 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
                 "room": room,
                 "lang": lang,
                 "report_level": report_level,
+                "focus_badge": focus_badge,
+                "server_guard_preset_label": server_guard_preset_label,
+                "server_guard_pressure_kind": server_guard_pressure_kind,
+                "next_step": next_step,
+                "remediation": remediation,
             },
         }
 

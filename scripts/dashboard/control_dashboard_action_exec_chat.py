@@ -133,6 +133,11 @@ def _execute_chat_session_update_action(
     room = str(payload.get("room", "")).strip()
     lang = str(payload.get("lang", "")).strip().lower()
     report_level = str(payload.get("report_level", "")).strip().lower()
+    focus_badge = str(payload.get("focus_badge", "")).strip()
+    server_guard_preset_label = str(payload.get("server_guard_preset_label", "")).strip()
+    server_guard_pressure_kind = str(payload.get("server_guard_pressure_kind", "")).strip().lower()
+    next_step = str(payload.get("next_step", "")).strip()
+    remediation = str(payload.get("remediation", "")).strip()
 
     paths, manager_state = _load_dashboard_manager_state(config)
     if default_mode in {"dispatch", "direct"}:
@@ -157,23 +162,36 @@ def _execute_chat_session_update_action(
     current_pending_mode = chat_state.get_pending_mode(manager_state, chat_id) or "none"
     current_lang = chat_state.get_chat_lang(manager_state, chat_id)
     current_report_level = chat_state.get_chat_report_level(manager_state, chat_id)
+    effective_next_step = next_step or f"/control/chat?chat={chat_id}"
+    effective_source_command = (
+        f"server-guard-preset:{server_guard_pressure_kind or '-'}:{chat_id}:{server_guard_preset_label}"
+        if focus_badge == "server-guard" and server_guard_preset_label
+        else (
+            f"chat-session {chat_id} default={current_default_mode} pending={current_pending_mode} "
+            f"room={current_room} lang={current_lang} report={current_report_level}"
+        )
+    )
+    detail = f"default={current_default_mode} pending={current_pending_mode} room={current_room}"
+    if focus_badge == "server-guard" and server_guard_preset_label:
+        detail = f"{server_guard_preset_label} | {detail}"
 
     return _json(
         {
             "ok": True,
             "status": "completed",
             "path": str(spec.get("path", "")).strip() or "/control/actions/chat/session-update",
-            "source_command": (
-                f"chat-session {chat_id} default={current_default_mode} pending={current_pending_mode} "
-                f"room={current_room} lang={current_lang} report={current_report_level}"
-            ),
+            "source_command": effective_source_command,
             "chat_id": chat_id,
             "default_mode": current_default_mode,
             "pending_mode": current_pending_mode,
             "room": current_room,
             "lang": current_lang,
             "report_level": current_report_level,
+            "focus_badge": focus_badge,
+            "server_guard_preset_label": server_guard_preset_label,
+            "server_guard_pressure_kind": server_guard_pressure_kind,
             "reply_text": (
+                f"{server_guard_preset_label + chr(10) if focus_badge == 'server-guard' and server_guard_preset_label else ''}"
                 f"session updated\n"
                 f"- default_mode: {current_default_mode}\n"
                 f"- pending_mode: {current_pending_mode}\n"
@@ -181,13 +199,13 @@ def _execute_chat_session_update_action(
                 f"- lang: {current_lang}\n"
                 f"- report: {current_report_level}"
             ),
-            "next_step": f"/control/chat?chat={chat_id}",
-            "remediation": "-",
+            "next_step": effective_next_step,
+            "remediation": remediation or "-",
             "outcome": {
                 "kind": "chat_session_update",
                 "status": "completed",
                 "reason_code": "-",
-                "detail": f"default={current_default_mode} pending={current_pending_mode} room={current_room}",
+                "detail": detail,
             },
         },
         status=200,

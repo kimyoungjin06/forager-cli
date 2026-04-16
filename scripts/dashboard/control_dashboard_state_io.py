@@ -234,14 +234,14 @@ def _load_latest_command_resolution(
 
 def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
     outcome_kind = str(raw.get("outcome_kind", "")).strip() or "-"
-    focus_badge = ""
+    focus_badge = str(raw.get("focus_badge", "")).strip()
     if outcome_kind == "replan_auto_route":
         focus_badge = "auto-route"
     elif outcome_kind == "offdesk_judge":
         focus_badge = "judge"
     elif outcome_kind == "retry_run":
         focus_badge = "retry"
-    elif outcome_kind in {
+    elif not focus_badge and outcome_kind in {
         "background_queue_cleanup",
         "background_queue_cleanup_preview",
         "auto_recover",

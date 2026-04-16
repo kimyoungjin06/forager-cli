@@ -1,5 +1,7 @@
 <div class="action-block">
+  {% if show_title is not defined or show_title %}
   {% if title %}<p><strong>{{ title }}</strong></p>{% endif %}
+  {% endif %}
   <ul class="kv-list">
     <li><span>server_guard</span><strong>{{ snapshot.control_summary.server_guard.summary }}</strong></li>
     <li><span>reasons</span><strong>{{ snapshot.control_summary.server_guard.reason_summary }}</strong></li>
@@ -11,8 +13,8 @@
     <li><span>process</span><strong>{{ snapshot.control_summary.server_guard.process_summary }}</strong></li>
     <li><span>queue</span><strong>{{ snapshot.control_summary.server_guard.queue_summary }}</strong></li>
     <li><span>snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
-    <li><span>latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
-    <li><span>latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
+    <li><span>{% if label_prefix %}{{ label_prefix }}_latest_action{% else %}latest_action{% endif %}</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
+    <li><span>{% if label_prefix %}{{ label_prefix }}_latest_result{% else %}latest_result{% endif %}</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
   </ul>
   {% if include_actions %}
   {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}

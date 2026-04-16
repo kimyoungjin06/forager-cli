@@ -55,6 +55,7 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
     path = str(payload.get("path", "")).strip()
     status = str(payload.get("status", "")).strip() or "unknown"
     source_command = str(payload.get("source_command", "")).strip() or "-"
+    focus_badge = str(payload.get("focus_badge", "")).strip()
     if path == "/control/actions/task/followup":
         return f"Follow-up Preview | {status}"
     if path == "/control/actions/task/followup-execute":
@@ -70,6 +71,9 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
     if path == "/control/actions/chat/send":
         return f"Chat Send | {status}"
     if path == "/control/actions/chat/session-update":
+        preset_label = str(payload.get("server_guard_preset_label", "")).strip()
+        if focus_badge == "server-guard" and preset_label:
+            return f"{preset_label} | {status}"
         return f"Chat Session Update | {status}"
     if path == "/control/actions/chat/session-select-task":
         return f"Chat Session Task | {status}"
@@ -111,6 +115,13 @@ def _action_audit_link(payload: Dict[str, Any]) -> Tuple[str, str]:
     path = str(payload.get("path", "")).strip()
     if path == "/control/actions/runtime/server-guard-pressure-preview":
         return "health", "/control/health"
+    if path == "/control/actions/chat/session-update":
+        next_step = str(payload.get("next_step", "")).strip()
+        if next_step.startswith("/control/chat"):
+            return "chat console", next_step
+        chat_id = str(payload.get("chat_id", "")).strip()
+        if chat_id:
+            return "chat console", f"/control/chat?chat={chat_id}"
     task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
     preview = payload.get("preview") if isinstance(payload.get("preview"), dict) else {}
     task_href = str(task.get("detail_path", "")).strip() or str(preview.get("detail_path", "")).strip()
@@ -207,6 +218,7 @@ def _append_action_audit(
         "link_label": link_label,
         "link_href": link_href,
         "source_command": source_command,
+        "focus_badge": str(payload.get("focus_badge", "")).strip(),
         "chat_id": str(payload.get("chat_id", "")).strip() or "",
         "transcript_preview": str(payload.get("reply_text", "")).strip()[:4000],
     }

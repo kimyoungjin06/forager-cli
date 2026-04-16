@@ -6156,6 +6156,69 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     )
 
 
+def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_chat_timeline(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "on",
+            "pending_mode": "direct",
+            "lang": "ko",
+            "report_level": "full",
+            "room": "O2/analysis",
+            "selected_task_refs": {"active": "REQ-1"},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/server-guard-pressure-preview",
+        body=b'{"pressure_kind":"codex"}',
+        content_type="application/json",
+        config=config,
+    )
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    preset_payload = json.loads((preview_payload.get("actions") or [])[0]["payload_json"])
+
+    apply_status, _apply_headers, apply_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/chat/session-update",
+        body=json.dumps(preset_payload).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    apply_payload = json.loads(apply_body.decode("utf-8"))
+    overview_status, _overview_headers, overview_body = dashboard_app.build_dashboard_response("/control", config)
+    chat_status, _chat_headers, chat_body = dashboard_app.build_dashboard_response("/control/chat?chat=123456", config)
+    health_status, _health_headers, health_body = dashboard_app.build_dashboard_response("/control/health", config)
+    overview_text = overview_body.decode("utf-8")
+    chat_text = chat_body.decode("utf-8")
+    health = json.loads(health_body.decode("utf-8"))
+
+    assert preview_status == 200
+    assert apply_status == 200
+    assert apply_payload["focus_badge"] == "server-guard"
+    assert apply_payload["server_guard_preset_label"] == "Apply Global Direct"
+    assert apply_payload["next_step"] == "/control/chat?chat=123456&preset=global-direct"
+
+    assert overview_status == 200
+    assert "Apply Global Direct | completed" in overview_text
+    assert chat_status == 200
+    assert "Apply Global Direct | completed" in chat_text
+    assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
+    assert health_status == 200
+    assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
+
+
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

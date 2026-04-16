@@ -197,6 +197,11 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             "pending_mode": preset_spec["pending_mode"],
             "lang": preset_spec["lang"],
             "report_level": preset_spec["report_level"],
+            "focus_badge": "server-guard",
+            "server_guard_preset_label": preset_spec["label"],
+            "server_guard_pressure_kind": pressure_kind,
+            "next_step": chat_preset_href,
+            "remediation": preset_spec["note"],
         }
         preset_action = {
             "label": preset_spec["label"],

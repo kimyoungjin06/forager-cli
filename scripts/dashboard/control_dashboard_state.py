@@ -579,6 +579,7 @@ def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str
         "python_process_pressure_preview",
         "tmux_process_pressure_preview",
         "process_pressure_preview",
+        "chat_session_update",
     }
     for row in rows:
         if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
