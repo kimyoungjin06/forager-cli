@@ -173,7 +173,28 @@
           const key = document.createElement("span");
           const val = document.createElement("strong");
           key.textContent = label;
-          val.textContent = value;
+          if (label === "preset_diff") {
+            item.classList.add("diff-badge-row");
+            const tokens = String(value)
+              .split(" | ")
+              .map((row) => row.trim())
+              .filter((row) => row && row !== "-");
+            if (tokens.length) {
+              const badgeList = document.createElement("span");
+              badgeList.className = "diff-badge-list";
+              tokens.forEach((token) => {
+                const badge = document.createElement("span");
+                badge.className = "diff-badge";
+                badge.textContent = token;
+                badgeList.appendChild(badge);
+              });
+              val.appendChild(badgeList);
+            } else {
+              val.textContent = value;
+            }
+          } else {
+            val.textContent = value;
+          }
           item.appendChild(key);
           item.appendChild(val);
           rows.appendChild(item);

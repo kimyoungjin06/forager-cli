@@ -64,6 +64,7 @@ from control_dashboard_state_models import (
     RecoverySummaryDTO,
     RuntimeCardDTO,
     RuntimeDetailDTO,
+    ServerGuardThreadDTO,
     TaskDetailDTO,
 )
 
@@ -452,6 +453,44 @@ def _build_chat_timeline_entries(
     return rows[: max(1, int(limit))]
 
 
+def _build_server_guard_thread_card(recent_chat_actions: list[ActionAuditRowDTO]) -> ServerGuardThreadDTO:
+    pressure_preview_kinds = {
+        "codex_process_pressure_preview",
+        "python_process_pressure_preview",
+        "tmux_process_pressure_preview",
+        "process_pressure_preview",
+    }
+    for index, action in enumerate(recent_chat_actions):
+        if str(action.outcome_kind or "").strip() != "chat_session_update":
+            continue
+        if str(action.focus_badge or "").strip() != "server-guard":
+            continue
+        for older in recent_chat_actions[index + 1 :]:
+            if str(older.focus_badge or "").strip() != "server-guard":
+                continue
+            if str(older.outcome_kind or "").strip() not in pressure_preview_kinds:
+                continue
+            if action.chat_id and older.chat_id and action.chat_id != older.chat_id:
+                continue
+            detail_href = (
+                f"/control/audit?focus=server-guard&chat={action.chat_id}&limit=20"
+                if str(action.chat_id or "").strip()
+                else "/control/audit?focus=server-guard&limit=20"
+            )
+            return ServerGuardThreadDTO(
+                exists=True,
+                preview_headline=str(older.headline or "-").strip() or "-",
+                apply_headline=str(action.headline or "-").strip() or "-",
+                preset_diff_summary=str(action.chat_preset_diff_summary or "-").strip() or "-",
+                at=str(action.at or "-").strip() or "-",
+                command=str(action.source_command or "-").strip() or "-",
+                next_step=str(action.next_step or "-").strip() or "-",
+                detail_href=detail_href,
+                detail_label="Open Thread Detail",
+            )
+    return ServerGuardThreadDTO()
+
+
 def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[str]) -> list[str]:
     tokens: list[str] = []
     def _add(token: str) -> None:
@@ -706,6 +745,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             focus_badge=focus_badge,
             chat_id=str(raw.get("chat_id", "")).strip(),
             transcript_preview=str(raw.get("transcript_preview", "")).strip(),
+            chat_preset_diff_summary=str(raw.get("chat_preset_diff_summary", "")).strip(),
             thread_href=(
                 f"/control/audit?focus=server-guard&chat={str(raw.get('chat_id', '')).strip()}&limit=20"
                 if focus_badge == "server-guard" and str(raw.get("chat_id", "")).strip()
@@ -823,6 +863,7 @@ def load_dashboard_chat_page(
         )
     )
     recent_chat_actions = _load_recent_chat_action_rows(paths, chat_id=selected_token, limit=8)
+    server_guard_thread = _build_server_guard_thread_card(recent_chat_actions)
     timeline_entries = _build_chat_timeline_entries(
         room=selected_room,
         room_tail=room_tail,
@@ -860,6 +901,7 @@ def load_dashboard_chat_page(
         selected_recent_task_refs=selected_recent_task_refs,
         sessions=sessions,
         room_tail=room_tail,
+        server_guard_thread=server_guard_thread,
         timeline_entries=timeline_entries,
         recent_chat_actions=recent_chat_actions,
         send_mode_options={

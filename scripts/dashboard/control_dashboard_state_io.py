@@ -64,6 +64,7 @@ class ActionAuditRowDTO:
     focus_badge: str
     chat_id: str = ""
     transcript_preview: str = ""
+    chat_preset_diff_summary: str = ""
     thread_href: str = ""
     thread_label: str = ""
 

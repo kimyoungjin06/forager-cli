@@ -707,6 +707,19 @@ class ChatTimelineEntryDTO:
 
 
 @dataclass(frozen=True)
+class ServerGuardThreadDTO:
+    exists: bool = False
+    preview_headline: str = ""
+    apply_headline: str = ""
+    preset_diff_summary: str = ""
+    at: str = ""
+    command: str = ""
+    next_step: str = ""
+    detail_href: str = ""
+    detail_label: str = ""
+
+
+@dataclass(frozen=True)
 class ChatSessionPresetDTO:
     label: str
     room: str
@@ -743,6 +756,7 @@ class ChatConsolePageDTO:
     selected_recent_task_refs: List[str] = field(default_factory=list)
     sessions: List[ChatSessionDTO] = field(default_factory=list)
     room_tail: List[ChatRoomLineDTO] = field(default_factory=list)
+    server_guard_thread: ServerGuardThreadDTO = field(default_factory=ServerGuardThreadDTO)
     timeline_entries: List[ChatTimelineEntryDTO] = field(default_factory=list)
     send_action_path: str = "/control/actions/chat/send"
     session_action_path: str = "/control/actions/chat/session-update"

@@ -221,6 +221,7 @@ def _append_action_audit(
         "focus_badge": str(payload.get("focus_badge", "")).strip(),
         "chat_id": str(payload.get("chat_id", "")).strip() or "",
         "transcript_preview": str(payload.get("reply_text", "")).strip()[:4000],
+        "chat_preset_diff_summary": str(payload.get("chat_preset_diff_summary", "")).strip(),
     }
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:

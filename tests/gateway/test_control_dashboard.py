@@ -6217,9 +6217,12 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert overview_status == 200
     assert "Apply Global Direct | completed" in overview_text
     assert chat_status == 200
-    assert "Apply Global Direct | completed" in chat_text
     assert "Server Guard Preset Thread" in chat_text
+    assert "Apply Global Direct | completed" in chat_text
     assert "Codex Pressure Preview | preview -&gt; Apply Global Direct | completed" in chat_text
+    assert "preset_diff" in chat_text
+    assert "room:O2/analysis-&gt;global" in chat_text
+    assert "Open Thread Detail" in chat_text
     assert "/control/audit?focus=server-guard&amp;chat=123456&amp;limit=20" in chat_text
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert health_status == 200

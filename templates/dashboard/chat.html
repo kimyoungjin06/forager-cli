@@ -222,6 +222,35 @@
     <section class="panel chat-panel">
       <div class="panel-heading">
         <div>
+          <p class="section-kicker">Thread</p>
+          <h2>Server Guard Preset Thread</h2>
+        </div>
+      </div>
+      {% if chat.server_guard_thread.exists %}
+      <article class="server-guard-thread-card">
+        <p><strong>preview</strong> {{ chat.server_guard_thread.preview_headline }}</p>
+        <p><strong>apply</strong> {{ chat.server_guard_thread.apply_headline }}</p>
+        <p><strong>preset_diff</strong></p>
+        <div class="diff-badge-list">
+          {% for token in chat.server_guard_thread.preset_diff_summary.split(' | ') if token %}
+          <span class="diff-badge">{{ token }}</span>
+          {% endfor %}
+        </div>
+        <p><strong>command</strong> <code>{{ chat.server_guard_thread.command }}</code></p>
+        <p><strong>next</strong> {{ chat.server_guard_thread.next_step }}</p>
+        <p><strong>at</strong> <span class="mono">{{ chat.server_guard_thread.at }}</span></p>
+        {% if chat.server_guard_thread.detail_href %}
+        <p><a href="{{ chat.server_guard_thread.detail_href }}">{{ chat.server_guard_thread.detail_label or 'detail' }}</a></p>
+        {% endif %}
+      </article>
+      {% else %}
+      <p class="muted">현재 선택된 session에 server guard preset thread가 없습니다.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel chat-panel">
+      <div class="panel-heading">
+        <div>
           <p class="section-kicker">Session Timeline</p>
           <h2>Chat Timeline</h2>
         </div>
