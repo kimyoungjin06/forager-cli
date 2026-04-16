@@ -22,7 +22,7 @@ import aoe_tg_chat_state as chat_state
 import aoe_tg_room_handlers as room_handlers
 import aoe_tg_task_state as task_state
 
-from control_dashboard_server_guard import build_server_guard, write_server_guard_snapshot
+from control_dashboard_server_guard import build_server_guard, server_guard_pressure_policy, write_server_guard_snapshot
 from control_dashboard_state_builders import (
     _build_active_task_rows,
     _build_recovery_summary,
@@ -586,31 +586,21 @@ def _build_server_guard_preview_groups(
             dominant_key = matched
             break
     ordered_keys = [dominant_key] + [key for key, _label in canonical_order if key != dominant_key]
-    def _group_note(key: str) -> str:
-        if key == "codex":
-            return "codex process pressure is elevated; consolidate chat and operator sessions before widening worker fanout"
-        if key == "python":
-            return "python worker pressure is elevated; inspect local background churn before launching more package or worker rails"
-        if key == "tmux":
-            return "tmux session pressure is elevated; inspect detached runtime handles before starting more off-desk workers"
-        if key == "process":
-            return "overall process pressure is elevated; reduce broad worker churn before adding more concurrency"
-        if key == "queue":
-            return "stale queue pressure is present; inspect cleanup preview before mutating queue state"
-        return note
-
     groups: list[ServerGuardActionGroupDTO] = []
-    label_map = {key: label for key, label in canonical_order}
     for key in ordered_keys:
         rows = [row for row in buckets.get(key, []) if getattr(row, "path", "") or getattr(row, "href", "")]
         if not rows:
             continue
-        group_note = _group_note(key) if key == dominant_key else ""
+        policy = server_guard_pressure_policy(key, fallback_note=note)
+        group_note = str(policy.get("group_note", "")).strip() if key == dominant_key else ""
         groups.append(
             ServerGuardActionGroupDTO(
                 key=key,
-                label=label_map.get(key, key.title()),
+                label=str(policy.get("label", "")).strip() or dict(canonical_order).get(key, key.title()),
                 note=group_note,
+                focus_preset_label=str(policy.get("focus_preset_label", "")).strip(),
+                priority_link_label=str(policy.get("priority_link_label", "")).strip(),
+                priority_link_note=str(policy.get("priority_link_note", "")).strip(),
                 actions=rows,
             )
         )
@@ -735,14 +725,7 @@ def _chat_live_preview_preset(
 ) -> ChatSessionPresetDTO | None:
     if not preview_groups or not session_presets:
         return None
-    dominant_key = str(preview_groups[0].key or "").strip().lower()
-    preferred_label = {
-        "codex": "Global Direct",
-        "python": "Package Rail",
-        "tmux": "Review Rail",
-        "process": "Analysis Rail",
-        "queue": "Package Rail",
-    }.get(dominant_key, "")
+    preferred_label = str(preview_groups[0].focus_preset_label or "").strip()
     if not preferred_label:
         return None
     return _chat_select_preset(session_presets, token=preferred_label)

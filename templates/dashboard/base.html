@@ -288,6 +288,13 @@
               rank.className = `action-history-badge ${priority === "primary" ? "preview" : ""}`;
               rank.textContent = priority;
               meta.appendChild(rank);
+              const pressureKind = asText(row.pressure_kind_label);
+              if (pressureKind !== "-") {
+                const pressure = document.createElement("span");
+                pressure.className = "action-history-badge pressure-kind-badge";
+                pressure.textContent = pressureKind;
+                meta.appendChild(pressure);
+              }
               if (note !== "-") {
                 const span = document.createElement("span");
                 span.className = "muted";

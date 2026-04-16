@@ -12,6 +12,7 @@ import aoe_tg_task_state as task_state
 
 from control_dashboard_action_exec_shared import _load_dashboard_manager_state, _load_gateway_main_module
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths, _json
+from control_dashboard_server_guard import server_guard_pressure_policy
 
 
 def _resolve_chat_project(manager_state: Dict[str, object], project_ref: str) -> tuple[str, str, Dict[str, object]]:
@@ -193,66 +194,44 @@ def _execute_chat_session_update_action(
     preset_diff_summary = " | ".join(diff_parts) if diff_parts else "no change"
     followup_actions = []
     if focus_badge == "server-guard" and server_guard_preset_label:
+        policy = server_guard_pressure_policy(server_guard_pressure_kind)
+        pressure_kind_label = str(policy.get("label", "")).strip()
         chat_action = {
             "label": "Open Chat Console",
             "href": effective_next_step if effective_next_step.startswith("/control/chat") else f"/control/chat?chat={chat_id}",
             "note": "inspect the selected chat session after applying the server-guard preset",
             "priority": "secondary",
+            "pressure_kind_label": pressure_kind_label,
         }
         health_action = {
             "label": "Open Health View",
             "href": "/control/health/view",
             "note": "inspect host pressure after switching the chat rail",
             "priority": "secondary",
+            "pressure_kind_label": pressure_kind_label,
         }
         audit_action = {
             "label": "Open Server Guard Audit",
             "href": "/control/audit?focus=server-guard",
             "note": "inspect the full server-guard action trail",
             "priority": "secondary",
+            "pressure_kind_label": pressure_kind_label,
         }
-        ordered_actions = {
-            "codex": [
-                {
-                    **chat_action,
-                    "note": "trim duplicated chat sessions first, then widen operator surfaces",
-                    "priority": "primary",
-                },
-                audit_action,
-                health_action,
-            ],
-            "python": [
-                {
-                    **health_action,
-                    "note": "inspect host churn first before revisiting package and worker rails",
-                    "priority": "primary",
-                },
-                chat_action,
-                audit_action,
-            ],
-            "tmux": [
-                {
-                    **audit_action,
-                    "note": "inspect detached runtime handles first before reopening tmux-backed rails",
-                    "priority": "primary",
-                },
-                chat_action,
-                health_action,
-            ],
-            "process": [
-                {
-                    **audit_action,
-                    "note": "inspect broad process churn first before widening runtime fanout",
-                    "priority": "primary",
-                },
-                health_action,
-                chat_action,
-            ],
-        }
-        followup_actions = ordered_actions.get(
-            server_guard_pressure_kind,
-            [chat_action, health_action, audit_action],
-        )
+        action_map = {"chat": chat_action, "health": health_action, "audit": audit_action}
+        order = tuple(policy.get("followup_order", ("chat", "health", "audit")))
+        primary_note = str(policy.get("priority_link_note", "")).strip()
+        first_key = next((token for token in order if token in action_map), "")
+        for token in order:
+            if token not in action_map:
+                continue
+            row = dict(action_map[token])
+            if token == first_key:
+                row["priority"] = "primary"
+                if primary_note:
+                    row["note"] = primary_note
+            followup_actions.append(row)
+        if not followup_actions:
+            followup_actions = [chat_action, health_action, audit_action]
 
     return _json(
         {

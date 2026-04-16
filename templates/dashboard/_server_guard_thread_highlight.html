@@ -1,7 +1,7 @@
 {% if thread is defined and thread.exists %}
-{% set dominant_group_key = snapshot.control_summary.server_guard_preview_groups[0].key if snapshot is defined and snapshot.control_summary.server_guard_preview_groups else '' %}
-{% set priority_link_label = 'Chat' if dominant_group_key == 'codex' else ('Health' if dominant_group_key in ['python', 'queue', 'other'] else ('Audit' if dominant_group_key in ['tmux', 'process'] else '')) %}
-{% set priority_link_note = 'trim chat fanout first' if dominant_group_key == 'codex' else ('check host churn first' if dominant_group_key == 'python' else ('inspect cleanup pressure first' if dominant_group_key == 'queue' else ('inspect guard snapshot first' if dominant_group_key == 'other' else ('inspect detached actions first' if dominant_group_key == 'tmux' else ('inspect broad churn first' if dominant_group_key == 'process' else ''))))) %}
+{% set live_group = snapshot.control_summary.server_guard_preview_groups[0] if snapshot is defined and snapshot.control_summary.server_guard_preview_groups else none %}
+{% set priority_link_label = live_group.priority_link_label if live_group else '' %}
+{% set priority_link_note = live_group.priority_link_note if live_group else '' %}
 <article class="server-guard-thread-highlight{% if compact %} compact{% endif %}">
   <div class="server-guard-thread-highlight-head">
     <div>

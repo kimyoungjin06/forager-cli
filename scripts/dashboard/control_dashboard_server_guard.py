@@ -12,6 +12,66 @@ from typing import Any, Dict, Iterable, List
 from control_dashboard_state_models import RuntimeCardDTO, ServerGuardActionDTO, ServerGuardDTO
 
 
+_SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
+    "codex": {
+        "label": "Codex Pressure",
+        "group_note": "codex process pressure is elevated; consolidate chat and operator sessions before widening worker fanout",
+        "focus_preset_label": "Global Direct",
+        "priority_link_label": "Chat",
+        "priority_link_note": "trim chat fanout first",
+        "followup_order": ("chat", "audit", "health"),
+    },
+    "python": {
+        "label": "Python Pressure",
+        "group_note": "python worker pressure is elevated; inspect local background churn before launching more package or worker rails",
+        "focus_preset_label": "Package Rail",
+        "priority_link_label": "Health",
+        "priority_link_note": "check host churn first",
+        "followup_order": ("health", "chat", "audit"),
+    },
+    "tmux": {
+        "label": "Tmux Pressure",
+        "group_note": "tmux session pressure is elevated; inspect detached runtime handles before starting more off-desk workers",
+        "focus_preset_label": "Review Rail",
+        "priority_link_label": "Audit",
+        "priority_link_note": "inspect detached actions first",
+        "followup_order": ("audit", "chat", "health"),
+    },
+    "process": {
+        "label": "Process Pressure",
+        "group_note": "overall process pressure is elevated; reduce broad worker churn before adding more concurrency",
+        "focus_preset_label": "Analysis Rail",
+        "priority_link_label": "Audit",
+        "priority_link_note": "inspect broad churn first",
+        "followup_order": ("audit", "health", "chat"),
+    },
+    "queue": {
+        "label": "Queue Cleanup",
+        "group_note": "stale queue pressure is present; inspect cleanup preview before mutating queue state",
+        "focus_preset_label": "Package Rail",
+        "priority_link_label": "Health",
+        "priority_link_note": "inspect cleanup pressure first",
+        "followup_order": ("health", "chat", "audit"),
+    },
+    "other": {
+        "label": "Other Preview",
+        "group_note": "",
+        "focus_preset_label": "",
+        "priority_link_label": "Health",
+        "priority_link_note": "inspect guard snapshot first",
+        "followup_order": ("health", "chat", "audit"),
+    },
+}
+
+
+def server_guard_pressure_policy(key: str, *, fallback_note: str = "") -> Dict[str, Any]:
+    token = str(key or "").strip().lower()
+    base = dict(_SERVER_GUARD_PRESSURE_POLICIES.get(token, _SERVER_GUARD_PRESSURE_POLICIES["other"]))
+    if token not in _SERVER_GUARD_PRESSURE_POLICIES and fallback_note and not str(base.get("group_note", "")).strip():
+        base["group_note"] = fallback_note
+    return base
+
+
 def _fmt_percent(value: float) -> str:
     return f"{value:.0f}%"
 

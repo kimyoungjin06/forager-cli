@@ -1,8 +1,7 @@
 {% if threads %}
-{% set dominant_group_key = snapshot.control_summary.server_guard_preview_groups[0].key if snapshot is defined and snapshot.control_summary.server_guard_preview_groups else '' %}
-{% set priority_chat_note = 'trim chat fanout first' if dominant_group_key == 'codex' else '' %}
-{% set priority_audit_note = 'inspect detached actions first' if dominant_group_key == 'tmux' else ('inspect broad churn first' if dominant_group_key == 'process' else '') %}
-{% set priority_health_note = 'check host churn first' if dominant_group_key == 'python' else ('inspect cleanup pressure first' if dominant_group_key == 'queue' else ('inspect guard snapshot first' if dominant_group_key == 'other' else '')) %}
+{% set live_group = snapshot.control_summary.server_guard_preview_groups[0] if snapshot is defined and snapshot.control_summary.server_guard_preview_groups else none %}
+{% set priority_label = live_group.priority_link_label if live_group else '' %}
+{% set priority_note = live_group.priority_link_note if live_group else '' %}
 <div class="server-guard-thread-list{% if compact %} compact{% endif %}">
   {% for row in threads %}
   <article class="server-guard-thread-card{% if compact %} compact{% endif %}">
@@ -33,16 +32,16 @@
     {% if compact %}
     <div class="chat-hints server-guard-mini-links">
       {% if row.chat_href %}
-        <a class="action-history-badge server-guard-mini-link chat{% if dominant_group_key == 'codex' %} priority{% endif %}" href="{{ row.chat_href }}">Chat</a>
-        {% if dominant_group_key == 'codex' and priority_chat_note %}<span class="muted server-guard-mini-note">{{ priority_chat_note }}</span>{% endif %}
+        <a class="action-history-badge server-guard-mini-link chat{% if priority_label == 'Chat' %} priority{% endif %}" href="{{ row.chat_href }}">Chat</a>
+        {% if priority_label == 'Chat' and priority_note %}<span class="muted server-guard-mini-note">{{ priority_note }}</span>{% endif %}
       {% endif %}
       {% if row.audit_href %}
-        <a class="action-history-badge server-guard-mini-link audit{% if dominant_group_key in ['tmux', 'process'] %} priority{% endif %}" href="{{ row.audit_href }}">Audit</a>
-        {% if dominant_group_key in ['tmux', 'process'] and priority_audit_note %}<span class="muted server-guard-mini-note">{{ priority_audit_note }}</span>{% endif %}
+        <a class="action-history-badge server-guard-mini-link audit{% if priority_label == 'Audit' %} priority{% endif %}" href="{{ row.audit_href }}">Audit</a>
+        {% if priority_label == 'Audit' and priority_note %}<span class="muted server-guard-mini-note">{{ priority_note }}</span>{% endif %}
       {% endif %}
       {% if row.health_href %}
-        <a class="action-history-badge server-guard-mini-link health{% if dominant_group_key in ['python', 'queue', 'other'] %} priority{% endif %}" href="{{ row.health_href }}">Health</a>
-        {% if dominant_group_key in ['python', 'queue', 'other'] and priority_health_note %}<span class="muted server-guard-mini-note">{{ priority_health_note }}</span>{% endif %}
+        <a class="action-history-badge server-guard-mini-link health{% if priority_label == 'Health' %} priority{% endif %}" href="{{ row.health_href }}">Health</a>
+        {% if priority_label == 'Health' and priority_note %}<span class="muted server-guard-mini-note">{{ priority_note }}</span>{% endif %}
       {% endif %}
     </div>
     {% endif %}

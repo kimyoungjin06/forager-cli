@@ -6189,6 +6189,9 @@ def test_control_dashboard_server_guard_preview_groups_follow_dominant_reason(tm
     assert snapshot.control_summary.server_guard_preview_groups
     assert snapshot.control_summary.server_guard_preview_groups[0].key == "python"
     assert snapshot.control_summary.server_guard_preview_groups[0].label == "Python Pressure"
+    assert snapshot.control_summary.server_guard_preview_groups[0].focus_preset_label == "Package Rail"
+    assert snapshot.control_summary.server_guard_preview_groups[0].priority_link_label == "Health"
+    assert snapshot.control_summary.server_guard_preview_groups[0].priority_link_note == "check host churn first"
 
 
 def test_control_dashboard_chat_live_preview_preset_follows_dominant_reason(tmp_path: Path, monkeypatch) -> None:
@@ -6285,6 +6288,11 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         "secondary",
         "secondary",
     ]
+    assert [row.get("pressure_kind_label") for row in (apply_payload.get("actions") or [])][:3] == [
+        "Codex Pressure",
+        "Codex Pressure",
+        "Codex Pressure",
+    ]
     assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
     assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
 
@@ -6293,6 +6301,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Latest Server Guard Thread" in overview_text
     assert "priority_link" in overview_text
     assert "Chat · trim chat fanout first" in overview_text
+    assert "pressure-kind-badge" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
     assert "Latest Server Guard Thread" in chat_text
@@ -6383,6 +6392,11 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
                 "primary",
                 "secondary",
                 "secondary",
+            ]
+            assert [row.get("pressure_kind_label") for row in (apply_payload.get("actions") or [])][:3] == [
+                "Python Pressure",
+                "Python Pressure",
+                "Python Pressure",
             ]
 
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)

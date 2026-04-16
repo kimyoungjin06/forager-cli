@@ -43,6 +43,9 @@ class ServerGuardActionGroupDTO:
     key: str
     label: str
     note: str = ""
+    focus_preset_label: str = ""
+    priority_link_label: str = ""
+    priority_link_note: str = ""
     actions: List["ServerGuardActionDTO"] = field(default_factory=list)
 
 

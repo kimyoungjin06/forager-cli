@@ -760,6 +760,12 @@ strong {
   box-shadow: 0 0 0 2px rgba(33, 78, 90, 0.1);
 }
 
+.pressure-kind-badge {
+  border-color: rgba(33, 78, 90, 0.28);
+  background: rgba(214, 229, 232, 0.74);
+  color: var(--accent);
+}
+
 .action-meta {
   display: grid;
   gap: 0.24rem;
