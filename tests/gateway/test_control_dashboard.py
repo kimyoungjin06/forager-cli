@@ -6143,6 +6143,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert "live_preview_actions" in overview_text
     assert "live_preview_actions · Codex Pressure" in overview_text
     assert "No recent server guard preset thread yet." in overview_text
+    assert "codex process pressure is elevated" in overview_text
     assert "server_guard_latest_result" in overview_text
     assert "Codex Pressure Preview | preview" in overview_text
     assert health_status == 200
@@ -6326,6 +6327,8 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "Server Guard Preset Threads" in recovery_text
     assert "Apply Package Rail | completed" in recovery_text
     assert "Apply Global Direct | completed" in recovery_text
+    assert "Codex Pressure" in recovery_text
+    assert "Python Pressure" in recovery_text
     assert recovery_text.count("chat_session") >= 2
     assert recovery_text.count(">123456<") >= 2
     assert "/control/chat?chat=123456&amp;preset=package-rail" in recovery_text

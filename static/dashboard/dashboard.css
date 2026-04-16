@@ -1194,6 +1194,10 @@ strong {
   gap: 0.65rem;
 }
 
+.server-guard-preview-note {
+  margin: 0;
+}
+
 .server-guard-thread-list {
   display: grid;
   gap: 0.75rem;

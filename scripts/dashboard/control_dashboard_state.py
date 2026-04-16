@@ -233,6 +233,7 @@ def load_dashboard_snapshot_result(
     server_guard_preview_groups = _build_server_guard_preview_groups(
         server_guard_preview_actions,
         reason_summary=server_guard.reason_summary,
+        note=server_guard.note,
     )
     server_guard_threads = _build_server_guard_thread_cards(action_audit_rows, limit=2)
 
@@ -479,6 +480,12 @@ def _build_server_guard_thread_cards(
         "tmux_process_pressure_preview",
         "process_pressure_preview",
     }
+    pressure_labels = {
+        "codex_process_pressure_preview": "Codex Pressure",
+        "python_process_pressure_preview": "Python Pressure",
+        "tmux_process_pressure_preview": "Tmux Pressure",
+        "process_pressure_preview": "Process Pressure",
+    }
     cards: list[ServerGuardThreadDTO] = []
     seen_pairs: set[tuple[str, str, str]] = set()
     for index, action in enumerate(recent_chat_actions):
@@ -511,6 +518,7 @@ def _build_server_guard_thread_cards(
                     exists=True,
                     preview_headline=str(older.headline or "-").strip() or "-",
                     apply_headline=str(action.headline or "-").strip() or "-",
+                    pressure_kind_label=pressure_labels.get(str(older.outcome_kind or "").strip(), ""),
                     preset_diff_summary=str(action.chat_preset_diff_summary or "-").strip() or "-",
                     chat_id=str(action.chat_id or "").strip(),
                     at=str(action.at or "-").strip() or "-",
@@ -537,6 +545,7 @@ def _build_server_guard_preview_groups(
     actions: list[Any],
     *,
     reason_summary: str = "",
+    note: str = "",
 ) -> list[ServerGuardActionGroupDTO]:
     canonical_order = [
         ("codex", "Codex Pressure"),
@@ -577,13 +586,34 @@ def _build_server_guard_preview_groups(
             dominant_key = matched
             break
     ordered_keys = [dominant_key] + [key for key, _label in canonical_order if key != dominant_key]
+    def _group_note(key: str) -> str:
+        if key == "codex":
+            return "codex process pressure is elevated; consolidate chat and operator sessions before widening worker fanout"
+        if key == "python":
+            return "python worker pressure is elevated; inspect local background churn before launching more package or worker rails"
+        if key == "tmux":
+            return "tmux session pressure is elevated; inspect detached runtime handles before starting more off-desk workers"
+        if key == "process":
+            return "overall process pressure is elevated; reduce broad worker churn before adding more concurrency"
+        if key == "queue":
+            return "stale queue pressure is present; inspect cleanup preview before mutating queue state"
+        return note
+
     groups: list[ServerGuardActionGroupDTO] = []
     label_map = {key: label for key, label in canonical_order}
     for key in ordered_keys:
         rows = [row for row in buckets.get(key, []) if getattr(row, "path", "") or getattr(row, "href", "")]
         if not rows:
             continue
-        groups.append(ServerGuardActionGroupDTO(key=key, label=label_map.get(key, key.title()), actions=rows))
+        group_note = _group_note(key) if key == dominant_key else ""
+        groups.append(
+            ServerGuardActionGroupDTO(
+                key=key,
+                label=label_map.get(key, key.title()),
+                note=group_note,
+                actions=rows,
+            )
+        )
     return groups
 
 

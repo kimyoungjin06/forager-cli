@@ -42,6 +42,7 @@ class ServerGuardActionDTO:
 class ServerGuardActionGroupDTO:
     key: str
     label: str
+    note: str = ""
     actions: List["ServerGuardActionDTO"] = field(default_factory=list)
 
 
@@ -721,6 +722,7 @@ class ServerGuardThreadDTO:
     exists: bool = False
     preview_headline: str = ""
     apply_headline: str = ""
+    pressure_kind_label: str = ""
     preset_diff_summary: str = ""
     chat_id: str = ""
     at: str = ""

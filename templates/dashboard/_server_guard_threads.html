@@ -4,6 +4,9 @@
   <article class="server-guard-thread-card{% if compact %} compact{% endif %}">
     <p><strong>preview</strong> {{ row.preview_headline }}</p>
     <p><strong>apply</strong> {{ row.apply_headline }}</p>
+    {% if row.pressure_kind_label %}
+    <p><strong>pressure</strong> <span class="action-history-badge">{{ row.pressure_kind_label }}</span></p>
+    {% endif %}
     {% if row.chat_id %}
     <p><strong>chat_session</strong> {% if row.chat_href %}<a class="mono" href="{{ row.chat_href }}">{{ row.chat_id }}</a>{% else %}<span class="mono">{{ row.chat_id }}</span>{% endif %}</p>
     {% endif %}

@@ -39,6 +39,7 @@
           {% if snapshot.control_summary.server_guard_preview_groups %}
             <div class="server-guard-preview-groups">
             {% for group in snapshot.control_summary.server_guard_preview_groups %}
+              {% if group.note %}<p class="muted server-guard-preview-note">{{ group.note }}</p>{% endif %}
               {% with title='live_preview_actions · ' ~ group.label, actions=group.actions %}
                 {% include 'dashboard/_server_guard_actions.html' %}
               {% endwith %}
