@@ -501,6 +501,204 @@ def build_phase_checkpoint_snapshot(task: Dict[str, Any], debug_packet: Optional
     )
 
 
+def refresh_task_planning_primitives(
+    task: Dict[str, Any],
+    *,
+    request_contract: Optional[Dict[str, Any]] = None,
+    execution_brief: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        request_contract
+        if isinstance(request_contract, dict)
+        else {
+            "version": task.get("request_contract_version"),
+            "contract_type": task.get("request_contract_type"),
+            "preset": task.get("request_contract_preset"),
+            "status": task.get("request_contract_status"),
+            "summary": task.get("request_contract_summary"),
+            "missing_fields": task.get("request_contract_missing_fields"),
+            "required_outputs": task.get("request_contract_required_outputs"),
+            "fields": task.get("request_contract_fields"),
+            "artifact_contracts": task.get("request_contract_artifact_contracts"),
+        }
+    )
+    if request_contract_snapshot:
+        apply_request_contract_snapshot(task, request_contract_snapshot)
+
+    execution_brief_snapshot = normalize_execution_brief_snapshot(
+        execution_brief
+        if isinstance(execution_brief, dict)
+        else {
+            "version": task.get("execution_brief_version"),
+            "status": task.get("execution_brief_status"),
+            "summary": task.get("execution_brief_summary"),
+            "executable_slice": task.get("execution_brief_executable_slice"),
+            "blocked_slice": task.get("execution_brief_blocked_slice"),
+            "operator_decision": task.get("execution_brief_operator_decision"),
+            "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
+        }
+    )
+    if not execution_brief_snapshot and request_contract_snapshot:
+        execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
+    if execution_brief_snapshot:
+        apply_execution_brief_snapshot(task, execution_brief_snapshot)
+    else:
+        for key in (
+            "execution_brief_version",
+            "execution_brief_status",
+            "execution_brief_summary",
+            "execution_brief_executable_slice",
+            "execution_brief_blocked_slice",
+            "execution_brief_operator_decision",
+            "execution_brief_offdesk_allowed",
+        ):
+            task.pop(key, None)
+
+    job_contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
+    if not job_contract_snapshot and request_contract_snapshot:
+        job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
+    if not job_contract_snapshot and execution_brief_snapshot:
+        fallback_outputs = [
+            str(item).strip()
+            for item in (
+                list(execution_brief_snapshot.get("executable_slice") or [])
+                + list(task.get("background_run_worker_update_stub_targets") or [])
+            )
+            if str(item).strip()
+        ]
+        fallback_evidence = [
+            str(item).strip()
+            for item in (
+                list(task.get("background_run_worker_result_evidence_refs") or [])
+                + list(task.get("background_run_evidence_artifacts") or [])
+            )
+            if str(item).strip()
+        ]
+        fallback_artifact_contracts: Dict[str, Dict[str, Any]] = {}
+        for token in fallback_outputs[:8]:
+            fallback_artifact_contracts[token] = {"path": token}
+        readonly = False
+        plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+        meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+        phase2_execution_plan = (
+            meta.get("phase2_execution_plan")
+            if isinstance(meta.get("phase2_execution_plan"), dict)
+            else {}
+        )
+        if isinstance(phase2_execution_plan, dict):
+            readonly = bool(phase2_execution_plan.get("readonly", False))
+        job_contract_snapshot = build_job_contract(
+            {
+                "version": task.get("request_contract_version"),
+                "contract_type": str(task.get("phase2_team_preset", "")).strip()
+                or str(task.get("phase1_role_preset", "")).strip()
+                or "general",
+                "preset": str(task.get("phase2_team_preset", "")).strip()
+                or str(task.get("phase1_role_preset", "")).strip()
+                or "general",
+                "status": "complete"
+                if str(execution_brief_snapshot.get("status", "")).strip().lower() not in _BRIEF_BLOCKED_STATUSES
+                else "incomplete",
+                "objective": str(task.get("prompt", "")).strip(),
+                "summary": str(task.get("execution_brief_summary", "")).strip()
+                or str(task.get("prompt", "")).strip(),
+                "required_outputs": fallback_outputs,
+                "required_evidence": fallback_evidence,
+                "missing_fields": list(execution_brief_snapshot.get("blocked_slice") or []),
+                "artifact_contracts": fallback_artifact_contracts,
+                "readonly": readonly,
+            },
+            execution_brief_snapshot,
+        )
+    if job_contract_snapshot:
+        apply_job_contract_snapshot(task, job_contract_snapshot)
+    else:
+        for key in (
+            "job_contract_version",
+            "job_contract_status",
+            "job_contract_planning_mode",
+            "job_contract_summary",
+            "job_contract_goal",
+            "job_contract_scope",
+            "job_contract_non_goals",
+            "job_contract_risks",
+            "job_contract_acceptance_checks",
+            "job_contract_artifacts_to_touch",
+            "job_contract_rollback_hint",
+        ):
+            task.pop(key, None)
+
+    debug_packet_snapshot = normalize_debug_packet_snapshot(
+        {
+            "version": task.get("debug_packet_version"),
+            "state": task.get("debug_packet_state"),
+            "summary": task.get("debug_packet_summary"),
+            "symptom": task.get("debug_packet_symptom"),
+            "root_cause": task.get("debug_packet_root_cause"),
+            "evidence": task.get("debug_packet_evidence"),
+            "failed_attempt": task.get("debug_packet_failed_attempt"),
+            "next_step": task.get("debug_packet_next_step"),
+        }
+    )
+    if not debug_packet_snapshot:
+        debug_packet_snapshot = build_debug_packet_snapshot(task)
+    if debug_packet_snapshot:
+        apply_debug_packet_snapshot(task, debug_packet_snapshot)
+    else:
+        for key in (
+            "debug_packet_version",
+            "debug_packet_state",
+            "debug_packet_summary",
+            "debug_packet_symptom",
+            "debug_packet_root_cause",
+            "debug_packet_evidence",
+            "debug_packet_failed_attempt",
+            "debug_packet_next_step",
+        ):
+            task.pop(key, None)
+
+    phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
+        {
+            "version": task.get("phase_checkpoint_version"),
+            "status": task.get("phase_checkpoint_status"),
+            "current_phase": task.get("phase_checkpoint_current_phase"),
+            "summary": task.get("phase_checkpoint_summary"),
+            "rows": task.get("phase_checkpoint_rows"),
+        }
+    )
+    if not phase_checkpoint_snapshot:
+        phase_checkpoint_snapshot = build_phase_checkpoint_snapshot(task, debug_packet_snapshot)
+    if phase_checkpoint_snapshot:
+        apply_phase_checkpoint_snapshot(task, phase_checkpoint_snapshot)
+    else:
+        for key in (
+            "phase_checkpoint_version",
+            "phase_checkpoint_status",
+            "phase_checkpoint_current_phase",
+            "phase_checkpoint_summary",
+            "phase_checkpoint_rows",
+        ):
+            task.pop(key, None)
+    return task
+
+
 def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
     if not isinstance(task, dict):
         return ""
@@ -1452,106 +1650,6 @@ def sanitize_task_record(
         ):
             task.pop(key, None)
 
-    execution_brief_snapshot = normalize_execution_brief_snapshot(
-        {
-            "version": task.get("execution_brief_version"),
-            "status": task.get("execution_brief_status"),
-            "summary": task.get("execution_brief_summary"),
-            "executable_slice": task.get("execution_brief_executable_slice"),
-            "blocked_slice": task.get("execution_brief_blocked_slice"),
-            "operator_decision": task.get("execution_brief_operator_decision"),
-            "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
-        }
-    )
-    if not execution_brief_snapshot and request_contract_snapshot:
-        execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
-    if execution_brief_snapshot:
-        apply_execution_brief_snapshot(task, execution_brief_snapshot)
-    else:
-        for key in (
-            "execution_brief_version",
-            "execution_brief_status",
-            "execution_brief_summary",
-            "execution_brief_executable_slice",
-            "execution_brief_blocked_slice",
-            "execution_brief_operator_decision",
-            "execution_brief_offdesk_allowed",
-        ):
-            task.pop(key, None)
-
-    job_contract_snapshot = normalize_job_contract_snapshot(
-        {
-            "version": task.get("job_contract_version"),
-            "status": task.get("job_contract_status"),
-            "planning_mode": task.get("job_contract_planning_mode"),
-            "summary": task.get("job_contract_summary"),
-            "goal": task.get("job_contract_goal"),
-            "scope": task.get("job_contract_scope"),
-            "non_goals": task.get("job_contract_non_goals"),
-            "risks": task.get("job_contract_risks"),
-            "acceptance_checks": task.get("job_contract_acceptance_checks"),
-            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
-            "rollback_hint": task.get("job_contract_rollback_hint"),
-        }
-    )
-    if not job_contract_snapshot and request_contract_snapshot:
-        job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
-    if not job_contract_snapshot and execution_brief_snapshot:
-        fallback_outputs = [
-            str(item).strip()
-            for item in (
-                list(execution_brief_snapshot.get("executable_slice") or [])
-                + list(task.get("background_run_worker_update_stub_targets") or [])
-            )
-            if str(item).strip()
-        ]
-        fallback_evidence = [
-            str(item).strip()
-            for item in (
-                list(task.get("background_run_worker_result_evidence_refs") or [])
-                + list(task.get("background_run_evidence_artifacts") or [])
-            )
-            if str(item).strip()
-        ]
-        fallback_artifact_contracts: Dict[str, Dict[str, Any]] = {}
-        for token in fallback_outputs[:8]:
-            fallback_artifact_contracts[token] = {"path": token}
-        job_contract_snapshot = build_job_contract(
-            {
-                "version": task.get("request_contract_version"),
-                "contract_type": str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip() or "general",
-                "preset": str(task.get("phase2_team_preset", "")).strip() or str(task.get("phase1_role_preset", "")).strip() or "general",
-                "status": "complete" if str(execution_brief_snapshot.get("status", "")).strip().lower() not in _BRIEF_BLOCKED_STATUSES else "incomplete",
-                "objective": str(task.get("prompt", "")).strip(),
-                "summary": str(task.get("execution_brief_summary", "")).strip() or str(task.get("prompt", "")).strip(),
-                "required_outputs": fallback_outputs,
-                "required_evidence": fallback_evidence,
-                "missing_fields": list(execution_brief_snapshot.get("blocked_slice") or []),
-                "artifact_contracts": fallback_artifact_contracts,
-                "readonly": bool((task.get("plan") or {}).get("meta", {}).get("phase2_execution_plan", {}).get("readonly", False))
-                if isinstance((task.get("plan") or {}).get("meta"), dict)
-                else False,
-            },
-            execution_brief_snapshot,
-        )
-    if job_contract_snapshot:
-        apply_job_contract_snapshot(task, job_contract_snapshot)
-    else:
-        for key in (
-            "job_contract_version",
-            "job_contract_status",
-            "job_contract_planning_mode",
-            "job_contract_summary",
-            "job_contract_goal",
-            "job_contract_scope",
-            "job_contract_non_goals",
-            "job_contract_risks",
-            "job_contract_acceptance_checks",
-            "job_contract_artifacts_to_touch",
-            "job_contract_rollback_hint",
-        ):
-            task.pop(key, None)
-
     followup_brief_snapshot = normalize_followup_brief_snapshot(
         {
             "version": task.get("followup_brief_version"),
@@ -1879,57 +1977,7 @@ def sanitize_task_record(
         if str(task.get("execution_brief_summary", "")).strip():
             result["execution_brief_summary"] = str(task.get("execution_brief_summary", "")).strip()
 
-    debug_packet_snapshot = normalize_debug_packet_snapshot(
-        {
-            "version": task.get("debug_packet_version"),
-            "state": task.get("debug_packet_state"),
-            "summary": task.get("debug_packet_summary"),
-            "symptom": task.get("debug_packet_symptom"),
-            "root_cause": task.get("debug_packet_root_cause"),
-            "evidence": task.get("debug_packet_evidence"),
-            "failed_attempt": task.get("debug_packet_failed_attempt"),
-            "next_step": task.get("debug_packet_next_step"),
-        }
-    )
-    if not debug_packet_snapshot:
-        debug_packet_snapshot = build_debug_packet_snapshot(task)
-    if debug_packet_snapshot:
-        apply_debug_packet_snapshot(task, debug_packet_snapshot)
-    else:
-        for key in (
-            "debug_packet_version",
-            "debug_packet_state",
-            "debug_packet_summary",
-            "debug_packet_symptom",
-            "debug_packet_root_cause",
-            "debug_packet_evidence",
-            "debug_packet_failed_attempt",
-            "debug_packet_next_step",
-        ):
-            task.pop(key, None)
-
-    phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
-        {
-            "version": task.get("phase_checkpoint_version"),
-            "status": task.get("phase_checkpoint_status"),
-            "current_phase": task.get("phase_checkpoint_current_phase"),
-            "summary": task.get("phase_checkpoint_summary"),
-            "rows": task.get("phase_checkpoint_rows"),
-        }
-    )
-    if not phase_checkpoint_snapshot:
-        phase_checkpoint_snapshot = build_phase_checkpoint_snapshot(task, debug_packet_snapshot)
-    if phase_checkpoint_snapshot:
-        apply_phase_checkpoint_snapshot(task, phase_checkpoint_snapshot)
-    else:
-        for key in (
-            "phase_checkpoint_version",
-            "phase_checkpoint_status",
-            "phase_checkpoint_current_phase",
-            "phase_checkpoint_summary",
-            "phase_checkpoint_rows",
-        ):
-            task.pop(key, None)
+    refresh_task_planning_primitives(task, request_contract=request_contract_snapshot)
 
     refresh_task_tf_state(task)
 
@@ -2789,9 +2837,6 @@ def sync_task_lifecycle(
     )
     if request_contract_snapshot:
         apply_request_contract_snapshot(task, request_contract_snapshot)
-        brief_snapshot = build_execution_brief(request_contract_snapshot)
-        apply_execution_brief_snapshot(task, brief_snapshot)
-        apply_job_contract_snapshot(task, build_job_contract(request_contract_snapshot, brief_snapshot))
 
     assignments = int(snap.get("assignments", 0) or 0)
     replies = int(snap.get("replies", 0) or 0)
@@ -2966,6 +3011,7 @@ def sync_task_lifecycle(
         apply_review_lane_verdicts(task)
     else:
         task.pop("lane_states", None)
+    refresh_task_planning_primitives(task, request_contract=request_contract_snapshot)
     refresh_task_tf_state(task)
     sync_task_exec_context(entry, task)
     return task

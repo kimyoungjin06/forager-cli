@@ -267,6 +267,30 @@ def normalize_execution_brief_snapshot(raw: Any) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
 
+    meaningful_keys = (
+        "status",
+        "summary",
+        "executable_slice",
+        "blocked_slice",
+        "operator_decision",
+        "offdesk_allowed",
+    )
+    has_meaningful_value = False
+    for key in meaningful_keys:
+        value = raw.get(key)
+        if isinstance(value, list):
+            if any(_trim(item, 160) for item in value):
+                has_meaningful_value = True
+                break
+        elif isinstance(value, bool):
+            has_meaningful_value = True
+            break
+        elif _trim(value, 320):
+            has_meaningful_value = True
+            break
+    if not has_meaningful_value:
+        return {}
+
     status = _trim(raw.get("status", ""), 48).lower()
     if status not in EXECUTION_BRIEF_STATUSES:
         status = ""

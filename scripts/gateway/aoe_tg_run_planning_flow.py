@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_exec_pipeline import project_alias as exec_project_alias
 from aoe_tg_request_contract import apply_request_contract_snapshot
+from aoe_tg_task_state import refresh_task_planning_primitives
 
 
 def _provision_planning_task(
@@ -72,6 +73,7 @@ def _provision_planning_task(
     if phase2_team_preset:
         task["phase2_team_preset"] = str(phase2_team_preset).strip()
     apply_request_contract_snapshot(task, request_contract or {})
+    refresh_task_planning_primitives(task, request_contract=request_contract or {})
     task["updated_at"] = now_iso()
     entry["last_request_id"] = request_id
     entry["updated_at"] = now_iso()
@@ -125,6 +127,7 @@ def _update_provisional_planning_task(
         task["phase1_current_planner"] = planner_match.group(1)
     if critic_match:
         task["phase1_current_critic"] = critic_match.group(1)
+    refresh_task_planning_primitives(task)
     task["updated_at"] = now_iso()
 
 
@@ -165,6 +168,7 @@ def _finalize_provisional_task(
         task["status"] = "failed"
         task["tf_phase"] = "manual_intervention"
         task["tf_phase_reason"] = note or "dispatch failed"
+    refresh_task_planning_primitives(task)
     task["updated_at"] = now_iso()
 
 

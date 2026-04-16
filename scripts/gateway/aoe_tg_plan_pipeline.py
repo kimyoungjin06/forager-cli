@@ -16,6 +16,7 @@ from aoe_tg_schema import (
     plan_critic_primary_issue,
     plan_payload_approval_mode,
 )
+from aoe_tg_task_state import refresh_task_planning_primitives
 
 
 @dataclass
@@ -706,6 +707,7 @@ def apply_plan_and_lineage(
         lifecycle_set_stage(task, "planning", "done", note=f"fallback_no_plan: {plan_error}")
 
     if run_control_mode not in {"retry", "replan", "followup"} or (not run_source_request_id):
+        refresh_task_planning_primitives(task)
         task["tf_phase"] = normalize_tf_phase(derive_tf_phase(task), "queued")
         tf_phase_reason = derive_tf_phase_reason(task)
         if tf_phase_reason:
@@ -749,6 +751,7 @@ def apply_plan_and_lineage(
             source_context["last_child_request_id"] = req_id
         source_context["last_child_at"] = lineage_ts
 
+    refresh_task_planning_primitives(task)
     task["tf_phase"] = normalize_tf_phase(derive_tf_phase(task), "queued")
     tf_phase_reason = derive_tf_phase_reason(task)
     if tf_phase_reason:

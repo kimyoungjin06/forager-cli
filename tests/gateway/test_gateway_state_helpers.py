@@ -1074,9 +1074,15 @@ def test_sync_task_lifecycle_persists_request_contract_snapshot(tmp_path: Path) 
     assert task["request_contract_artifact_contracts"]["schema_report"]["path"] == "schema_report.json"
     assert task["execution_brief_status"] == "executable"
     assert task["execution_brief_executable_slice"] == ["schema_report.json", "null_summary.md", "sample_5.csv"]
+    assert task["job_contract_status"] == "ready"
+    assert "schema_report.json" in (task.get("job_contract_scope") or [])
+    assert task["debug_packet_state"] == "clean"
+    assert task["phase_checkpoint_status"] == "done"
+    assert task["phase_checkpoint_current_phase"] == "done"
     assert task["result"]["request_contract_type"] == "data"
     assert task["result"]["request_contract_status"] == "complete"
     assert task["result"]["execution_brief_status"] == "executable"
+    assert task["result"]["job_contract_summary"].startswith("status=ready")
 
 
 def test_sanitize_task_record_preserves_context_and_lineage_fields() -> None:
