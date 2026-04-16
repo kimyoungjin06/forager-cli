@@ -619,9 +619,10 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "recommended_actions" in health["server_guard"]
 
 
-def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp_path: Path) -> None:
+def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     state["chat_sessions"] = {
         "123456": {
@@ -758,6 +759,9 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "Review Rail" in text
     assert "Global Direct" in text
     assert "short direct replies on the global rail" in text
+    assert "live_preview_focus" in text
+    assert "Codex Pressure" in text
+    assert "consolidate chat and operator sessions" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -6332,6 +6336,9 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert recovery_text.count("chat_session") >= 2
     assert recovery_text.count(">123456<") >= 2
     assert "/control/chat?chat=123456&amp;preset=package-rail" in recovery_text
+    assert recovery_text.count(">Chat<") >= 1
+    assert recovery_text.count(">Audit<") >= 1
+    assert recovery_text.count(">Health<") >= 1
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:

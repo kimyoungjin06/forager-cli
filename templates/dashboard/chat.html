@@ -25,6 +25,14 @@
   {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
+  {% if snapshot.control_summary.server_guard_preview_groups %}
+  {% set live_group = snapshot.control_summary.server_guard_preview_groups[0] %}
+  <p><strong>live_preview_focus</strong> {{ live_group.label }}</p>
+  {% if live_group.note %}<p class="muted">{{ live_group.note }}</p>{% endif %}
+  {% with title='live_preview_actions · ' ~ live_group.label, actions=live_group.actions %}
+    {% include 'dashboard/_server_guard_actions.html' %}
+  {% endwith %}
+  {% endif %}
   {% if chat.selected_chat_id and chat.deep_link_preset_label %}
   <p><strong>deep_link_preset</strong></p>
   <form class="action-form chat-room-chip-form" data-dashboard-action data-action-label="Apply {{ chat.deep_link_preset_label }}" data-action-command="chat-session-preset:{{ chat.deep_link_preset_label }}" data-action-mode="safe" method="post" action="{{ chat.session_action_path }}">

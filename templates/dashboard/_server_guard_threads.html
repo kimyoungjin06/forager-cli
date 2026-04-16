@@ -26,6 +26,13 @@
     {% if row.detail_href %}
     <p><a href="{{ row.detail_href }}">{{ row.detail_label or 'detail' }}</a></p>
     {% endif %}
+    {% if compact %}
+    <div class="chat-hints">
+      {% if row.chat_href %}<a class="action-history-badge" href="{{ row.chat_href }}">Chat</a>{% endif %}
+      {% if row.audit_href %}<a class="action-history-badge" href="{{ row.audit_href }}">Audit</a>{% endif %}
+      {% if row.health_href %}<a class="action-history-badge" href="{{ row.health_href }}">Health</a>{% endif %}
+    </div>
+    {% endif %}
   </article>
   {% endfor %}
 </div>
