@@ -43,6 +43,7 @@ class ServerGuardActionGroupDTO:
     key: str
     label: str
     note: str = ""
+    operator_sentence: str = ""
     focus_preset_label: str = ""
     priority_link_label: str = ""
     priority_link_note: str = ""

@@ -550,6 +550,9 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "server_guard_snapshot" in overview_text
     assert "server_guard_latest_action" in overview_text
     assert "server_guard_latest_result" in overview_text
+    assert "focus_preset" in overview_text
+    assert "priority_link" in overview_text
+    assert "operator_sentence" in overview_text
     assert "Server Guard Health Card" in overview_text
     assert "Server Guard Audit" in overview_text
     assert "Open Health JSON" in overview_text
@@ -766,6 +769,8 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "live_preview_focus" in text
     assert "Codex Pressure" in text
     assert "consolidate chat and operator sessions" in text
+    assert "operator_sentence" in text
+    assert "trim chat fanout first, then widen operator surfaces" in text
     assert "live_preview_preset" in text
     assert "Apply Global Direct" in text
     assert "server-guard-live-preview:codex:123456:Global Direct" in text
@@ -6189,6 +6194,7 @@ def test_control_dashboard_server_guard_preview_groups_follow_dominant_reason(tm
     assert snapshot.control_summary.server_guard_preview_groups
     assert snapshot.control_summary.server_guard_preview_groups[0].key == "python"
     assert snapshot.control_summary.server_guard_preview_groups[0].label == "Python Pressure"
+    assert snapshot.control_summary.server_guard_preview_groups[0].operator_sentence == "check host churn first, then revisit package and worker rails"
     assert snapshot.control_summary.server_guard_preview_groups[0].focus_preset_label == "Package Rail"
     assert snapshot.control_summary.server_guard_preview_groups[0].priority_link_label == "Health"
     assert snapshot.control_summary.server_guard_preview_groups[0].priority_link_note == "check host churn first"
@@ -6292,6 +6298,11 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         "Codex Pressure",
         "Codex Pressure",
         "Codex Pressure",
+    ]
+    assert [row.get("note") for row in (apply_payload.get("actions") or [])][:3] == [
+        "trim chat fanout first, then widen operator surfaces",
+        "inspect the full server-guard action trail",
+        "inspect host pressure after switching the chat rail",
     ]
     assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
     assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
@@ -6398,6 +6409,16 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
                 "Python Pressure",
                 "Python Pressure",
             ]
+            assert [row.get("note") for row in (apply_payload.get("actions") or [])][:3] == [
+                "check host churn first, then revisit package and worker rails",
+                "inspect the selected chat session after applying the server-guard preset",
+                "inspect the full server-guard action trail",
+            ]
+            assert [row.get("pressure_kind_label") for row in (apply_payload.get("actions") or [])][:3] == [
+                "Python Pressure",
+                "Python Pressure",
+                "Python Pressure",
+            ]
 
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
     recovery_text = recovery_body.decode("utf-8")
@@ -6489,6 +6510,10 @@ def test_control_dashboard_health_view_renders_operator_health_card(tmp_path: Pa
     assert "Recommended Actions" in text
     assert "latest_action" in text
     assert "latest_result" in text
+    assert "focus_preset" in text
+    assert "priority_link" in text
+    assert "operator_sentence" in text
+    assert "trim chat fanout first, then widen operator surfaces" in text
     assert "Open Health JSON" in text
 
 

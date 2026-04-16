@@ -598,6 +598,7 @@ def _build_server_guard_preview_groups(
                 key=key,
                 label=str(policy.get("label", "")).strip() or dict(canonical_order).get(key, key.title()),
                 note=group_note,
+                operator_sentence=str(policy.get("operator_sentence", "")).strip(),
                 focus_preset_label=str(policy.get("focus_preset_label", "")).strip(),
                 priority_link_label=str(policy.get("priority_link_label", "")).strip(),
                 priority_link_note=str(policy.get("priority_link_note", "")).strip(),

@@ -29,6 +29,7 @@
   {% set live_group = snapshot.control_summary.server_guard_preview_groups[0] %}
   <p><strong>live_preview_focus</strong> {{ live_group.label }}</p>
   {% if live_group.note %}<p class="muted">{{ live_group.note }}</p>{% endif %}
+  {% if live_group.operator_sentence %}<p class="muted"><strong>operator_sentence</strong> {{ live_group.operator_sentence }}</p>{% endif %}
   {% with title='live_preview_actions · ' ~ live_group.label, actions=live_group.actions %}
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}

@@ -16,6 +16,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
     "codex": {
         "label": "Codex Pressure",
         "group_note": "codex process pressure is elevated; consolidate chat and operator sessions before widening worker fanout",
+        "operator_sentence": "trim chat fanout first, then widen operator surfaces",
         "focus_preset_label": "Global Direct",
         "priority_link_label": "Chat",
         "priority_link_note": "trim chat fanout first",
@@ -24,6 +25,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
     "python": {
         "label": "Python Pressure",
         "group_note": "python worker pressure is elevated; inspect local background churn before launching more package or worker rails",
+        "operator_sentence": "check host churn first, then revisit package and worker rails",
         "focus_preset_label": "Package Rail",
         "priority_link_label": "Health",
         "priority_link_note": "check host churn first",
@@ -32,6 +34,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
     "tmux": {
         "label": "Tmux Pressure",
         "group_note": "tmux session pressure is elevated; inspect detached runtime handles before starting more off-desk workers",
+        "operator_sentence": "inspect detached actions first, then reopen tmux-backed rails",
         "focus_preset_label": "Review Rail",
         "priority_link_label": "Audit",
         "priority_link_note": "inspect detached actions first",
@@ -40,6 +43,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
     "process": {
         "label": "Process Pressure",
         "group_note": "overall process pressure is elevated; reduce broad worker churn before adding more concurrency",
+        "operator_sentence": "inspect broad churn first, then widen runtime fanout",
         "focus_preset_label": "Analysis Rail",
         "priority_link_label": "Audit",
         "priority_link_note": "inspect broad churn first",
@@ -48,6 +52,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
     "queue": {
         "label": "Queue Cleanup",
         "group_note": "stale queue pressure is present; inspect cleanup preview before mutating queue state",
+        "operator_sentence": "inspect cleanup pressure first, then mutate queue state",
         "focus_preset_label": "Package Rail",
         "priority_link_label": "Health",
         "priority_link_note": "inspect cleanup pressure first",
@@ -56,6 +61,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
     "other": {
         "label": "Other Preview",
         "group_note": "",
+        "operator_sentence": "inspect guard snapshot first",
         "focus_preset_label": "",
         "priority_link_label": "Health",
         "priority_link_note": "inspect guard snapshot first",
