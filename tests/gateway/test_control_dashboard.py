@@ -1047,9 +1047,10 @@ def test_control_dashboard_audit_route_filters_by_focus_badge(tmp_path: Path) ->
     assert "<span>total_rows</span><strong>1</strong>" in text
 
 
-def test_control_dashboard_audit_route_surfaces_server_guard_focus_badge(tmp_path: Path) -> None:
+def test_control_dashboard_audit_route_surfaces_server_guard_focus_badge(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Background Queue Cleanup Preview | preview",
@@ -1081,11 +1082,16 @@ def test_control_dashboard_audit_route_surfaces_server_guard_focus_badge(tmp_pat
     assert "server-guard=1" in text
     assert "focus_filter" in text
     assert "Background Queue Cleanup Preview | preview" in text
+    assert "server_guard_focus" in text
+    assert "Codex Pressure" in text
+    assert "action_copy" in text
+    assert "start with Chat, then keep Global Direct narrow" in text
 
 
-def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path: Path) -> None:
+def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 420, "python": 120, "tmux": 3, "codex": 12})
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Replan Auto Route | applied",
@@ -1122,9 +1128,10 @@ def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path:
     assert "/control/audit?focus=judge&amp;limit=1" in text
 
 
-def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -> None:
+def test_control_dashboard_history_route_renders_query_results(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 420, "python": 120, "tmux": 3, "codex": 12})
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -1142,6 +1149,10 @@ def test_control_dashboard_history_route_renders_query_results(tmp_path: Path) -
     assert "offdesk_prepare" in text
     assert "latest intent | offdesk | offdesk_prepare" in text
     assert "/offdesk review" in text
+    assert "history_focus" in text
+    assert "Python Pressure" in text
+    assert "action_copy" in text
+    assert "start with Health, then keep Package Rail narrow" in text
 
 
 def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_path: Path) -> None:

@@ -34,6 +34,12 @@
     <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
     {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
     {% if audit.error %}<li><span>audit_error</span><strong>{{ audit.error }}</strong></li>{% endif %}
+    {% if audit.focus_filter == 'server-guard' and snapshot.control_summary.server_guard_preview_groups %}
+      {% set live_group = snapshot.control_summary.server_guard_preview_groups[0] %}
+      <li><span>server_guard_focus</span><strong>{{ live_group.label }}</strong></li>
+      <li><span>action_copy</span><strong>{{ live_group.action_sentence or live_group.operator_sentence or '-' }}</strong></li>
+      <li><span>priority_link</span><strong>{{ live_group.priority_link_label or '-' }}{% if live_group.priority_link_note %} | {{ live_group.priority_link_note }}{% endif %}</strong></li>
+    {% endif %}
   </ul>
   <p class="muted">
     filter:
