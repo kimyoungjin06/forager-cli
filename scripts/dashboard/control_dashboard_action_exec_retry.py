@@ -114,6 +114,44 @@ def _retry_blocked_remediation(contexts: List[str]) -> str:
     return "run /orch judge for the runtime first, then inspect planning or critic blockers in /offdesk review before re-running retry"
 
 
+def _dispatch_gate_block_response(
+    *,
+    spec: Dict[str, object],
+    payload: Dict[str, Any],
+    source_command: str,
+    source_task: Dict[str, Any],
+    task_ref: str,
+) -> Tuple[int, Dict[str, str], bytes]:
+    gate = gateway_task_state.derive_task_dispatch_gate(source_task)
+    next_step = str(gate.get("next_step", "")).strip() or f"/task {task_ref}"
+    remediation = str(gate.get("remediation", "")).strip() or "inspect the task contract and debug packet before dispatching another run"
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "blocked",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "phase2",
+            "source_command": source_command,
+            "payload": payload,
+            "next_step": next_step,
+            "remediation": remediation,
+            "outcome": {
+                "kind": "retry_run",
+                "status": "blocked",
+                "reason_code": str(gate.get("reason_code", "")).strip() or "dispatch_gate_blocked",
+                "detail": str(gate.get("detail", "")).strip() or "-",
+            },
+            "job_contract": str(gate.get("job_contract_summary", "")).strip() or "-",
+            "debug_packet": str(gate.get("debug_packet_summary", "")).strip() or "-",
+            "phase_checkpoint": str(gate.get("phase_checkpoint_summary", "")).strip() or "-",
+        },
+        status=409,
+    )
+
+
 def _latest_judge_summary_payload(*, team_dir: Path, entry: Dict[str, Any]) -> Dict[str, str]:
     alias = _project_status_ref(str(entry.get("name", "")).strip(), entry)
     row = load_latest_action_audit_for_runtime_kind(
@@ -1348,6 +1386,16 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
     entry = projects.get(project_key) if isinstance(projects.get(project_key), dict) else {}
     source_request_id = gateway_task_state.resolve_task_request_id(entry, task_ref) if isinstance(entry, dict) else ""
     source_task = gateway_task_state.get_task_record(entry, source_request_id) if isinstance(entry, dict) and source_request_id else None
+    if isinstance(source_task, dict):
+        dispatch_gate = gateway_task_state.derive_task_dispatch_gate(source_task)
+        if str(dispatch_gate.get("status", "")).strip() == "blocked":
+            return _dispatch_gate_block_response(
+                spec=spec,
+                payload=payload,
+                source_command=command_text or ("/replan" if is_replan else "/retry"),
+                source_task=source_task,
+                task_ref=task_ref,
+            )
 
     messages: List[Dict[str, Any]] = []
     transition = retry_handlers.resolve_retry_replan_transition(
@@ -1556,6 +1604,16 @@ def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
     entry = projects.get(project_key) if project_key and isinstance(projects.get(project_key), dict) else {}
     source_request_id = gateway_task_state.resolve_task_request_id(entry, task_ref) if isinstance(entry, dict) else ""
     source_task = gateway_task_state.get_task_record(entry, source_request_id) if isinstance(entry, dict) and source_request_id else None
+    if isinstance(source_task, dict):
+        dispatch_gate = gateway_task_state.derive_task_dispatch_gate(source_task)
+        if str(dispatch_gate.get("status", "")).strip() == "blocked":
+            return _dispatch_gate_block_response(
+                spec=spec,
+                payload=payload,
+                source_command=command_text or "/followup-exec",
+                source_task=source_task,
+                task_ref=task_ref,
+            )
     task_payload = None
     if isinstance(source_task, dict) and source_request_id:
         task_payload = {

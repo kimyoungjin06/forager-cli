@@ -19,6 +19,7 @@ from control_dashboard_state_common import (
     _background_scheduler_note,
     _chat_console_target,
     _detail_path,
+    _filter_dispatch_phase2_action_buttons,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
     _runtime_action_buttons,
@@ -143,6 +144,10 @@ def _build_recovery_task_rows(
             label=label,
             request_id=request_id,
             phase2_commands=list(action_contract.get("phase2") or []),
+        )
+        phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            phase2_action_buttons,
+            task=row,
         )
         worker_apply_applied = _worker_apply_applied(row, "background_run_worker_apply_accept_status")
         worker_syncback_applied = _worker_syncback_applied(
@@ -335,6 +340,10 @@ def _build_recovery_runtime_rows(
         runtime_safe_action_buttons, runtime_phase2_action_buttons = _runtime_action_buttons(
             project_alias=alias,
             phase2_commands=list(runtime_action_contract.get("phase2") or []),
+        )
+        runtime_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            runtime_phase2_action_buttons,
+            task=active_task_row or {},
         )
         runtime_manual_route_button = _replan_manual_route_action_button(
             project_alias=alias,
@@ -585,6 +594,14 @@ def _build_recovery_runtime_rows(
                 active_task_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
             )
+        active_task_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            active_task_phase2_action_buttons,
+            task=active_task_row or {},
+        )
+        runtime_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            runtime_phase2_action_buttons,
+            task=active_task_row or {},
+        )
         built.append(
             RecoveryRuntimeDTO(
                 project_key=str(row.get("project_key", "")).strip() or alias,

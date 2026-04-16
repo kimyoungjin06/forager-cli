@@ -33,6 +33,7 @@ from control_dashboard_state_common import (
     _compose_task_quality,
     _completion_contract_for_preset,
     _detail_path,
+    _filter_dispatch_phase2_action_buttons,
     _replan_manual_route_action_button,
     _replan_auto_route_action_button,
     _task_action_buttons,
@@ -878,6 +879,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             request_id=rid,
             phase2_commands=list(action_contract.get("phase2") or []),
         )
+        phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            phase2_action_buttons,
+            task=task,
+        )
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _replan_auto_route_action_button(
@@ -989,6 +994,10 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
             )
+        phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            phase2_action_buttons,
+            task=task,
+        )
         backend_summary = _compose_backend_summary(
             str(task.get("backend", "") or result.get("backend", "")).strip(),
             str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),

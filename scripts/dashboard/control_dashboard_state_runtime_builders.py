@@ -34,6 +34,7 @@ from control_dashboard_state_common import (
     _compose_phase2_shape,
     _completion_contract_for_preset,
     _detail_path,
+    _filter_dispatch_phase2_action_buttons,
     _provider_repeat_counts,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
@@ -875,6 +876,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             project_alias=alias,
             phase2_commands=list(runtime_action_contract.get("phase2") or []),
         )
+        runtime_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            runtime_phase2_action_buttons,
+            task=active_task or {},
+        )
         runtime_phase2_action_buttons = _append_unique_action_button(
             runtime_phase2_action_buttons,
             _replan_auto_route_action_button(
@@ -992,6 +997,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 runtime_phase2_action_buttons,
                 _worker_apply_syncback_apply_button(project_alias=alias),
             )
+        runtime_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+            runtime_phase2_action_buttons,
+            task=active_task or {},
+        )
         chat_console_path, chat_console_label = _chat_console_target(
             manager_state,
             root_team_dir=root_team_dir,
@@ -1496,6 +1505,10 @@ def _build_runtime_detail(
         project_alias=target_alias,
         phase2_commands=list(runtime_action_contract.get("phase2") or []),
     )
+    runtime_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+        runtime_phase2_action_buttons,
+        task=active_task or {},
+    )
     runtime_phase2_action_buttons = _append_unique_action_button(
         runtime_phase2_action_buttons,
         _replan_auto_route_action_button(
@@ -1525,6 +1538,10 @@ def _build_runtime_detail(
         request_id=active_request_id,
         phase2_commands=list(active_task_action_contract.get("phase2") or []),
         include_followup_preview=bool(active_request_id),
+    )
+    active_task_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+        active_task_phase2_action_buttons,
+        task=active_task or {},
     )
     active_task_phase2_action_buttons = _append_unique_action_button(
         active_task_phase2_action_buttons,
@@ -1643,6 +1660,10 @@ def _build_runtime_detail(
             active_task_phase2_action_buttons,
             _worker_apply_syncback_apply_button(project_alias=target_alias),
         )
+    active_task_phase2_action_buttons = _filter_dispatch_phase2_action_buttons(
+        active_task_phase2_action_buttons,
+        task=active_task or {},
+    )
     chat_console_path, chat_console_label = _chat_console_target(
         manager_state,
         root_team_dir=root_team_dir,

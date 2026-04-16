@@ -699,6 +699,147 @@ def refresh_task_planning_primitives(
     return task
 
 
+def derive_task_dispatch_gate(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    refresh_task_planning_primitives(task)
+    task_ref = _task_ref_label(task)
+    contract_status = str(task.get("job_contract_status", "")).strip().lower()
+    contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
+    contract_scope = [
+        str(item).strip()
+        for item in (task.get("job_contract_scope") or [])
+        if str(item).strip()
+    ]
+    contract_checks = [
+        str(item).strip()
+        for item in (task.get("job_contract_acceptance_checks") or [])
+        if str(item).strip()
+    ]
+    contract_artifacts = [
+        str(item).strip()
+        for item in (task.get("job_contract_artifacts_to_touch") or [])
+        if str(item).strip()
+    ]
+    has_contract_body = bool(contract_scope or contract_checks or contract_artifacts)
+    debug_state = str(task.get("debug_packet_state", "")).strip().lower()
+    debug_summary = str(task.get("debug_packet_summary", "")).strip() or "-"
+    phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
+    phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
+    phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    status = "ready"
+    reason_code = "ready"
+    remediation = "dispatch contract is ready"
+    next_step = f"/task {task_ref}"
+    detail = contract_summary
+    if contract_status in {"", "-"} or not has_contract_body:
+        status = "blocked"
+        reason_code = "job_contract_missing"
+        remediation = "capture the job contract goal, scope, acceptance checks, and rollback hint before dispatching a new run"
+        detail = "job contract missing"
+    elif debug_state in {"", "-"} or debug_summary in {"", "-"}:
+        status = "blocked"
+        reason_code = "debug_packet_missing"
+        remediation = "derive and review the debug packet before retrying, replanning, or dispatching another execution step"
+        detail = "debug packet missing"
+    elif debug_state == "clean":
+        status = "blocked"
+        reason_code = "debug_packet_not_ready"
+        remediation = "capture the current symptom, failed attempt, and next debug step before retrying, replanning, or dispatching another execution step"
+        detail = debug_summary
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "detail": detail,
+        "summary": "dispatch_gate | contract={contract} | debug={debug} | phase={phase}/{current}".format(
+            contract=contract_status or "-",
+            debug=debug_state or "-",
+            phase=phase_status or "-",
+            current=phase_current or "-",
+        )[:320],
+        "remediation": remediation,
+        "next_step": next_step,
+        "job_contract_status": contract_status or "-",
+        "job_contract_summary": contract_summary,
+        "debug_packet_state": debug_state or "-",
+        "debug_packet_summary": debug_summary,
+        "debug_packet_next_step": str(task.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": phase_status or "-",
+        "phase_checkpoint_current_phase": phase_current or "-",
+        "phase_checkpoint_summary": phase_summary,
+    }
+
+
+def derive_task_apply_gate(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    refresh_task_planning_primitives(task)
+    task_ref = _task_ref_label(task)
+    contract_status = str(task.get("job_contract_status", "")).strip().lower()
+    contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
+    contract_scope = [
+        str(item).strip()
+        for item in (task.get("job_contract_scope") or [])
+        if str(item).strip()
+    ]
+    contract_checks = [
+        str(item).strip()
+        for item in (task.get("job_contract_acceptance_checks") or [])
+        if str(item).strip()
+    ]
+    contract_artifacts = [
+        str(item).strip()
+        for item in (task.get("job_contract_artifacts_to_touch") or [])
+        if str(item).strip()
+    ]
+    has_contract_body = bool(contract_scope or contract_checks or contract_artifacts)
+    phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
+    phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
+    phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    status = "ready"
+    reason_code = "ready"
+    remediation = "apply contract is ready"
+    next_step = f"/task {task_ref}"
+    detail = phase_summary
+    if contract_status in {"", "-"} or not has_contract_body:
+        status = "blocked"
+        reason_code = "job_contract_missing"
+        remediation = "capture the job contract goal, scope, acceptance checks, and rollback hint before applying worker artifacts"
+        detail = "job contract missing"
+    elif contract_status == "blocked":
+        status = "blocked"
+        reason_code = "job_contract_blocked"
+        remediation = "resolve the blocked job contract scope or acceptance gaps before applying worker artifacts"
+        detail = contract_summary
+    elif phase_status == "blocked":
+        status = "blocked"
+        reason_code = "phase_checkpoint_blocked"
+        remediation = "clear the current checkpoint blocker before applying worker artifacts"
+        detail = phase_summary
+    elif phase_current in {"", "-", "plan", "implement"}:
+        status = "blocked"
+        reason_code = "phase_checkpoint_not_apply_ready"
+        remediation = "wait until the task reaches verify or handoff before applying worker artifacts"
+        detail = phase_summary
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "detail": detail,
+        "summary": "apply_gate | contract={contract} | phase={phase}/{current}".format(
+            contract=contract_status or "-",
+            phase=phase_status or "-",
+            current=phase_current or "-",
+        )[:320],
+        "remediation": remediation,
+        "next_step": next_step,
+        "job_contract_status": contract_status or "-",
+        "job_contract_summary": contract_summary,
+        "phase_checkpoint_status": phase_status or "-",
+        "phase_checkpoint_current_phase": phase_current or "-",
+        "phase_checkpoint_summary": phase_summary,
+    }
+
+
 def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
     if not isinstance(task, dict):
         return ""

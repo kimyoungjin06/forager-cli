@@ -4132,6 +4132,94 @@ def test_dashboard_surfaces_replan_auto_route_action_buttons(tmp_path: Path) -> 
     assert task_detail.latest_replan_auto_route_status_summary == "ready=/retry T-001 | waiting_for_apply"
 
 
+def test_dashboard_gates_dispatch_phase2_actions_when_job_contract_body_is_missing(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["prompt"] = ""
+    task["request_contract_type"] = ""
+    task["request_contract_preset"] = ""
+    task["request_contract_status"] = ""
+    task["request_contract_summary"] = ""
+    task["request_contract_missing_fields"] = []
+    task["request_contract_required_outputs"] = []
+    task["request_contract_fields"] = {}
+    task["request_contract_artifact_contracts"] = {}
+    task["execution_brief_status"] = ""
+    task["execution_brief_summary"] = ""
+    task["execution_brief_executable_slice"] = []
+    task["execution_brief_blocked_slice"] = []
+    task["execution_brief_operator_decision"] = ""
+    task["job_contract_status"] = ""
+    task["job_contract_planning_mode"] = ""
+    task["job_contract_summary"] = ""
+    task["job_contract_goal"] = ""
+    task["job_contract_scope"] = []
+    task["job_contract_non_goals"] = []
+    task["job_contract_risks"] = []
+    task["job_contract_acceptance_checks"] = []
+    task["job_contract_artifacts_to_touch"] = []
+    task["job_contract_rollback_hint"] = ""
+    task["background_run_worker_update_stub_targets"] = []
+    task["background_run_worker_result_evidence_refs"] = []
+    task["background_run_evidence_artifacts"] = []
+    gw.save_manager_state(manager_state_file, state)
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    blocked_paths = {
+        "/control/actions/task/retry",
+        "/control/actions/task/replan",
+        "/control/actions/task/followup-execute",
+    }
+    assert all(btn.path not in blocked_paths for btn in runtime_card.runtime_phase2_action_buttons)
+    assert all(btn.path not in blocked_paths for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert task_detail is not None
+    assert all(btn.path not in blocked_paths for btn in task_detail.phase2_action_buttons)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    for action_path in ("/control/actions/task/retry", "/control/actions/task/replan"):
+        status, headers, body = dashboard_app.build_dashboard_action_response(
+            action_path,
+            body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+            content_type="application/json",
+            config=config,
+        )
+        payload = json.loads(body.decode("utf-8"))
+        assert status == 409
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["status"] == "blocked"
+        assert payload["outcome"]["reason_code"] == "job_contract_missing"
+        assert payload["next_step"] == "/task T-001"
+        assert "job_contract" in payload
+        assert "debug_packet" in payload
+        assert "phase_checkpoint" in payload
+
+
 def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -4744,6 +4832,114 @@ def test_control_dashboard_post_task_worker_apply_preview_route_returns_preview(
     assert payload["preview"]["proposal_ids"] == ["PROP-001"]
     assert payload["preview"]["proposal_payloads"][0]["summary"] == "apply worker artifact update for T-001: reports/summary.md"
     assert payload["preview"]["target_artifacts"] == ["reports/summary.md"]
+
+
+def test_dashboard_blocks_worker_apply_until_phase_checkpoint_reaches_verify_or_handoff(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_task_contract_module"] = "analysis"
+    task["background_run_task_contract_module_summary"] = "analysis | findings_evidence_gate"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update reports/summary.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["reports/summary.md"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    task["background_run_worker_update_proposal_summary"] = (
+        "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    )
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    task["background_run_worker_record_rows_summary"] = (
+        "analysis_record_rows | finding_row=update reports/summary.md|state=stable | "
+        "evidence_row=reports/summary.md|state=attached | caveat_row=-|state=clear|note=findings_stable"
+    )
+    task["background_run_worker_record_rows"] = [
+        "finding_row=update reports/summary.md|state=stable",
+        "evidence_row=reports/summary.md|state=attached",
+        "caveat_row=-|state=clear|note=findings_stable",
+    ]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "standard"
+    task["job_contract_summary"] = "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1"
+    task["job_contract_goal"] = "Summarize findings with supporting evidence"
+    task["job_contract_scope"] = ["reports/summary.md"]
+    task["job_contract_non_goals"] = ["avoid unrelated source mutations"]
+    task["job_contract_risks"] = ["review wording before handoff"]
+    task["job_contract_acceptance_checks"] = ["attach evidence to the summary update"]
+    task["job_contract_artifacts_to_touch"] = ["reports/summary.md"]
+    task["job_contract_rollback_hint"] = "limit mutations to declared artifact targets and verify acceptance checks before apply"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "implement"
+    task["phase_checkpoint_summary"] = (
+        "status=active | current=implement | plan=ready|note=contract_captured | "
+        "implement=running|note=worker_apply_pending"
+    )
+    task["phase_checkpoint_rows"] = [
+        "plan=ready|note=contract_captured",
+        "implement=running|note=worker_apply_pending",
+    ]
+    gw.save_manager_state(manager_state_file, state)
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    blocked_apply_paths = {
+        "/control/actions/task/worker-apply-preview",
+        "/control/actions/task/worker-apply-propose",
+        "/control/actions/task/worker-apply-accept",
+    }
+    assert all(btn.path not in blocked_apply_paths for btn in runtime_card.runtime_safe_action_buttons)
+    assert all(btn.path not in blocked_apply_paths for btn in runtime_card.runtime_phase2_action_buttons)
+    assert all(btn.path not in blocked_apply_paths for btn in runtime_detail.active_task_safe_action_buttons)
+    assert all(btn.path not in blocked_apply_paths for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert task_detail is not None
+    assert all(btn.path not in blocked_apply_paths for btn in task_detail.safe_action_buttons)
+    assert all(btn.path not in blocked_apply_paths for btn in task_detail.phase2_action_buttons)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 409
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "blocked"
+    assert payload["outcome"]["reason_code"] == "phase_checkpoint_not_apply_ready"
+    assert payload["next_step"] == "/task T-001"
+    assert payload["job_contract"] == "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1"
+    assert payload["phase_checkpoint"] == (
+        "status=active | current=implement | plan=ready|note=contract_captured | "
+        "implement=running|note=worker_apply_pending"
+    )
 
 
 def test_control_dashboard_post_task_worker_apply_accept_route_promotes_apply_proposal(tmp_path: Path) -> None:

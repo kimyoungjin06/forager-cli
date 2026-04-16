@@ -334,6 +334,9 @@ def _worker_preflight_rows_payload(task: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _worker_apply_ready(task: Dict[str, Any]) -> bool:
+    apply_gate = gateway_task_state.derive_task_apply_gate(task)
+    if str(apply_gate.get("status", "")).strip() == "blocked":
+        return False
     payload = _worker_record_rows_payload(task)
     if list(payload.get("rows") or []):
         return worker_task_contract.worker_task_module_apply_ready(payload)
@@ -351,6 +354,7 @@ def _worker_apply_not_ready_response(
     mode: str,
     outcome_kind: str,
 ) -> Tuple[int, Dict[str, str], bytes]:
+    apply_gate = gateway_task_state.derive_task_apply_gate(task)
     record_rows_payload = _worker_record_rows_payload(task)
     row_detail = str(record_rows_payload.get("summary_line", "")).strip()
     preflight_rows_payload = _worker_preflight_rows_payload(task)
@@ -386,6 +390,18 @@ def _worker_apply_not_ready_response(
     remediation = str(blocker.get("remediation", "")).strip() or (
         "wait until the module-specific worker gate reports apply-ready rows before promoting or accepting artifact apply"
     )
+    reason_code = str(blocker.get("reason_code", "")).strip() or "worker_apply_not_ready"
+    apply_gate_reason = str(apply_gate.get("reason_code", "")).strip()
+    blocker_reason = str(blocker.get("reason_code", "")).strip()
+    gate_preempts_blocker = str(apply_gate.get("status", "")).strip() == "blocked" and (
+        not blocker_reason
+        or apply_gate_reason in {"job_contract_missing", "phase_checkpoint_blocked", "phase_checkpoint_not_apply_ready"}
+    )
+    if gate_preempts_blocker:
+        detail = str(apply_gate.get("detail", "")).strip() or detail
+        next_step = str(apply_gate.get("next_step", "")).strip() or next_step
+        remediation = str(apply_gate.get("remediation", "")).strip() or remediation
+        reason_code = apply_gate_reason or reason_code
     return _json(
         {
             "ok": False,
@@ -402,7 +418,7 @@ def _worker_apply_not_ready_response(
             "outcome": {
                 "kind": outcome_kind,
                 "status": "blocked",
-                "reason_code": str(blocker.get("reason_code", "")).strip() or "worker_apply_not_ready",
+                "reason_code": reason_code,
                 "detail": detail,
             },
             "task": {
@@ -416,6 +432,8 @@ def _worker_apply_not_ready_response(
             "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
             "worker_recommended_action": suggested_action or "task_review",
             "worker_recommended_lane_ids": suggested_lane_ids,
+            "job_contract": str(apply_gate.get("job_contract_summary", "")).strip() or "-",
+            "phase_checkpoint": str(apply_gate.get("phase_checkpoint_summary", "")).strip() or "-",
             "preview": {
                 "kind": "worker_apply_preview",
                 "project_alias": alias,

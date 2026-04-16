@@ -19,6 +19,7 @@ import aoe_tg_operator_action_contract as operator_action_contract
 import aoe_tg_orch_contract as orch_contract
 import aoe_tg_ops_policy as ops_policy
 import aoe_tg_runtime_core as runtime_core
+import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as task_view
 import aoe_tg_chat_aliases as chat_aliases
 import aoe_tg_chat_state as chat_state
@@ -439,6 +440,9 @@ def _worker_apply_ready(
     record_rows_summary_key: str = "background_run_worker_record_rows_summary",
     record_rows_key: str = "background_run_worker_record_rows",
 ) -> bool:
+    apply_gate = gateway_task_state.derive_task_apply_gate(task)
+    if str(apply_gate.get("status", "")).strip() == "blocked":
+        return False
     payload = _worker_record_rows_payload(
         task,
         module_key=module_key,
@@ -448,6 +452,26 @@ def _worker_apply_ready(
     if list(payload.get("rows") or []):
         return worker_task_contract.worker_task_module_apply_ready(payload)
     return str(payload.get("module_kind", "")).strip().lower() in {"", "-", "general"}
+
+
+def _filter_dispatch_phase2_action_buttons(
+    buttons: Iterable[ActionButtonDTO],
+    *,
+    task: Dict[str, Any],
+) -> List[ActionButtonDTO]:
+    dispatch_gate = gateway_task_state.derive_task_dispatch_gate(task)
+    if str(dispatch_gate.get("status", "")).strip() != "blocked":
+        return [row for row in buttons if isinstance(row, ActionButtonDTO)]
+    blocked_paths = {
+        "/control/actions/task/retry",
+        "/control/actions/task/replan",
+        "/control/actions/task/followup-execute",
+    }
+    return [
+        row
+        for row in buttons
+        if isinstance(row, ActionButtonDTO) and str(row.path).strip() not in blocked_paths
+    ]
 
 
 def _worker_preflight_rows_payload(
