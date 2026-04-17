@@ -26,8 +26,10 @@ import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
 from aoe_tg_action_audit import (
     append_action_audit_row,
+    compact_action_text,
     load_latest_action_audit_for_runtime_kind,
     load_latest_offdesk_judge_decision_for_runtime,
+    summarize_planning_handoff_snapshot,
 )
 
 from control_dashboard_action_exec_shared import (
@@ -581,6 +583,28 @@ def _append_blocked_retry_replan_audit(
         return
     label = "Replan" if command_head == "/replan" else "Retry"
     outcome_kind = "replan" if command_head == "/replan" else "retry_run"
+    debug_packet = (
+        (planning_handoff or {}).get("debug_packet")
+        if isinstance((planning_handoff or {}).get("debug_packet"), dict)
+        else {}
+    )
+    debug_parts: List[str] = []
+    debug_state = str(debug_packet.get("state", "")).strip() or "-"
+    debug_symptom = str(debug_packet.get("symptom", "")).strip() or "-"
+    debug_failed_attempt = compact_action_text(str(debug_packet.get("failed_attempt", "")).strip() or "-", limit=96)
+    debug_next_step = str(debug_packet.get("next_step", "")).strip() or "-"
+    if debug_state not in {"", "-"}:
+        debug_parts.append(f"debug={debug_state}")
+    if debug_symptom not in {"", "-"}:
+        debug_parts.append(f"symptom={debug_symptom}")
+    if debug_failed_attempt not in {"", "-"}:
+        debug_parts.append(f"attempt={debug_failed_attempt}")
+    if debug_next_step not in {"", "-"}:
+        debug_parts.append(f"next={debug_next_step}")
+    debug_handoff_summary = " | ".join(debug_parts) if debug_parts else "-"
+    outcome_detail = str(detail or "").strip() or "-"
+    if debug_handoff_summary not in {"", "-"} and debug_handoff_summary not in outcome_detail:
+        outcome_detail = f"{outcome_detail} | {debug_handoff_summary}" if outcome_detail != "-" else debug_handoff_summary
     append_action_audit_row(
         team_dir,
         headline=f"{label} | blocked",
@@ -588,7 +612,7 @@ def _append_blocked_retry_replan_audit(
         outcome_kind=outcome_kind,
         outcome_status="blocked",
         outcome_reason_code=str(reason_code or "").strip() or "-",
-        outcome_detail=str(detail or "").strip() or "-",
+        outcome_detail=outcome_detail,
         next_step=str(next_step or "").strip() or "-",
         remediation=str(remediation or "").strip() or "-",
         source_command=str(source_command or "").strip() or f"{command_head} {alias}",
@@ -602,6 +626,8 @@ def _append_blocked_retry_replan_audit(
             "job_contract_summary": str((planning_primitives or {}).get("job_contract_summary", "")).strip() or "-",
             "debug_packet_summary": str((planning_primitives or {}).get("debug_packet_summary", "")).strip() or "-",
             "phase_checkpoint_summary": str((planning_primitives or {}).get("phase_checkpoint_summary", "")).strip() or "-",
+            "debug_packet_handoff_summary": debug_handoff_summary,
+            "planning_handoff_summary": summarize_planning_handoff_snapshot(planning_handoff),
             "planning_handoff": dict(planning_handoff or {}),
         },
     )

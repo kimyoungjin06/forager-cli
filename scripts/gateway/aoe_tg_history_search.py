@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from aoe_tg_action_audit import normalize_planning_handoff_snapshot
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_project_state import project_alias_for_key
 from aoe_tg_runtime_core import (
@@ -76,6 +77,29 @@ def _safe_json_loads(raw: str) -> Dict[str, Any]:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _action_audit_debug_handoff_detail(row: Dict[str, Any]) -> str:
+    handoff = normalize_planning_handoff_snapshot(row.get("planning_handoff"), row=row)
+    if not handoff:
+        return ""
+    debug_packet = handoff.get("debug_packet") if isinstance(handoff.get("debug_packet"), dict) else {}
+    if not debug_packet:
+        return ""
+    parts: List[str] = []
+    state = str(debug_packet.get("state", "")).strip()
+    symptom = str(debug_packet.get("symptom", "")).strip()
+    failed_attempt = str(debug_packet.get("failed_attempt", "")).strip()
+    next_step = str(debug_packet.get("next_step", "")).strip()
+    if state and state != "-":
+        parts.append(f"debug={state}")
+    if symptom and symptom != "-":
+        parts.append(f"symptom={symptom}")
+    if failed_attempt and failed_attempt != "-":
+        parts.append(f"attempt={failed_attempt}")
+    if next_step and next_step != "-":
+        parts.append(f"next={next_step}")
+    return " | ".join(parts)
 
 
 def _parse_iso_dt(raw: Any) -> Optional[datetime]:
@@ -396,6 +420,19 @@ def _action_audit_rows(
                 summary = _normalize_text(parsed.get("headline", ""))
                 if summary and reason_code and "reason=" not in summary:
                     summary = f"{summary} | reason={reason_code}"
+                debug_handoff_detail = _action_audit_debug_handoff_detail(parsed)
+                detail = _normalize_text(
+                    " ".join(
+                        str(item).strip()
+                        for item in (
+                            parsed.get("outcome_detail", ""),
+                            "" if debug_handoff_detail and debug_handoff_detail in str(parsed.get("outcome_detail", "")) else debug_handoff_detail,
+                            parsed.get("remediation", ""),
+                            parsed.get("source_command", ""),
+                        )
+                        if str(item).strip()
+                    )
+                )
                 rows.append(
                     HistoryRow(
                         at=str(parsed.get("at", "")).strip(),
@@ -410,17 +447,7 @@ def _action_audit_rows(
                         reason_code=reason_code,
                         status=str(parsed.get("status", "")).strip() or str(parsed.get("outcome_status", "")).strip(),
                         summary=summary or "-",
-                        detail=_normalize_text(
-                            " ".join(
-                                str(item).strip()
-                                for item in (
-                                    parsed.get("outcome_detail", ""),
-                                    parsed.get("remediation", ""),
-                                    parsed.get("source_command", ""),
-                                )
-                                if str(item).strip()
-                            )
-                        ),
+                        detail=detail,
                         followup_hint=str(parsed.get("next_step", "")).strip() or (f"/task {task_short_id}" if task_short_id else ""),
                         raw_ref=f"{path}:{str(parsed.get('at', '')).strip()}",
                     )

@@ -72,7 +72,7 @@
       {% for row in audit.rows %}
       <tr>
         <td>{{ row.at }}</td>
-        <td>{% if row.focus_badge %}<span class="action-history-badge{% if audit.focus_filter != 'all' and audit.focus_filter == row.focus_badge %} active-focus{% endif %}">{{ row.focus_badge }}</span> {% endif %}{{ row.headline }}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
+        <td>{% if row.focus_badge %}<span class="action-history-badge{% if audit.focus_filter != 'all' and audit.focus_filter == row.focus_badge %} active-focus{% endif %}">{{ row.focus_badge }}</span> {% endif %}{{ row.headline }}{% if row.outcome_detail and row.outcome_detail != '-' %}<br><span class="muted">{{ row.outcome_detail }}</span>{% endif %}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
         <td>{{ row.status }}</td>
         <td>{{ row.next_step }}</td>
         <td><code>{{ row.source_command }}</code></td>

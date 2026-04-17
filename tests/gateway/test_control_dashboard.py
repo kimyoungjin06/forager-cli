@@ -1004,9 +1004,70 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
     assert "all=2" in text
     assert "Sync Preview | preview" in text
     assert "Replan Auto Route | applied" in text
+    assert "retry_command=/retry T-001" in text
     assert "/sync preview O2 24h" in text
     assert "/control/runtimes/O2" in text
     assert "auto-route" in text
+
+
+def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan | blocked",
+        status="blocked",
+        outcome_kind="replan",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked replan",
+        next_step="/task T-001",
+        remediation="inspect planning primitives before rerouting",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T11:07:00+09:00",
+        extra={
+            "planning_handoff": {
+                "job_contract": {
+                    "status": "ready",
+                    "summary": "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1",
+                },
+                "debug_packet": {
+                    "state": "blocked",
+                    "summary": "state=blocked | symptom=background_run_inflight | evidence=1 | next=/task T-001",
+                    "symptom": "background_run_inflight",
+                    "failed_attempt": "/retry T-001 lane L1",
+                    "next_step": "/task T-001",
+                },
+                "phase_checkpoint": {
+                    "status": "blocked",
+                    "current_phase": "verify",
+                    "summary": "status=blocked | current=verify | verify=blocked|note=verification_gap",
+                },
+            }
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/history?q=background_run_inflight&scope=dashboard",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Replan | blocked | reason=planning_gate" in text
+    assert "background_run_inflight" in text
+    assert "attempt=/retry T-001 lane L1" in text
+    assert "next=/task T-001" in text
 
 
 def test_control_dashboard_audit_route_filters_by_focus_badge(tmp_path: Path) -> None:
@@ -3049,6 +3110,11 @@ def test_control_dashboard_post_replan_route_terminal_block_reuses_job_contract_
     assert latest_policy["planning_handoff"]["debug_packet"]["state"] == "blocked"
     assert latest_policy["planning_handoff"]["debug_packet"]["failed_attempt"] != "-"
     assert latest_policy["planning_handoff_summary"].startswith("contract=status=blocked")
+    latest_blocked_row = action_audit.load_latest_action_audit_for_runtime_kind(team_dir, project_alias="O2", outcome_kind="replan")
+    assert "debug=blocked" in latest_blocked_row["outcome_detail"]
+    assert "symptom=" in latest_blocked_row["outcome_detail"]
+    assert "attempt=" in latest_blocked_row["outcome_detail"]
+    assert "next=" in latest_blocked_row["outcome_detail"]
 
 
 def test_control_dashboard_post_replan_route_reuses_phase_checkpoint_feedback(tmp_path: Path, monkeypatch) -> None:
