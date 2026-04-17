@@ -679,6 +679,15 @@ def _latest_replan_auto_route_summary(team_dir: Path, *, project_alias: str) -> 
     )
 
 
+def _latest_planning_handoff_summary(team_dir: Path, *, project_alias: str) -> str:
+    policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+    )
+    summary = action_audit.summarize_planning_handoff_snapshot(policy.get("planning_handoff"))
+    return summary if summary not in {"", "-"} else "-"
+
+
 def _latest_manual_step_summary(team_dir: Path, *, project_alias: str, active_task: Dict[str, Any] | None = None) -> str:
     policy_summary = action_audit.load_latest_manual_step_summary_for_runtime(
         team_dir,
@@ -744,6 +753,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         latest_replan_auto_route_summary = "-"
         latest_replan_auto_route_status_summary = "-"
         latest_replan_auto_operator_summary = "-"
+        latest_planning_handoff_summary = "-"
         latest_manual_step_summary = "-"
         latest_canonical_writeback_summary = "-"
         latest_canonical_mutation_summary = "-"
@@ -834,6 +844,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                         root_team_dir,
                         project_alias=str(entry.get("project_alias", "")).strip(),
                     )
+                )
+                latest_planning_handoff_summary = _latest_planning_handoff_summary(
+                    root_team_dir,
+                    project_alias=str(entry.get("project_alias", "")).strip(),
                 )
                 latest_manual_step_summary = _latest_manual_step_summary(
                     root_team_dir,
@@ -1141,6 +1155,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_replan_auto_route_summary=latest_replan_auto_route_summary,
                 latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
                 latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
+                latest_planning_handoff_summary=latest_planning_handoff_summary,
                 latest_manual_step_summary=latest_manual_step_summary,
                 latest_canonical_writeback_summary=latest_canonical_writeback_summary,
                 latest_canonical_mutation_summary=latest_canonical_mutation_summary,
@@ -1385,6 +1400,14 @@ def _build_runtime_detail(
     )
     latest_replan_auto_operator_summary = (
         action_audit.load_latest_replan_auto_operator_summary_for_runtime(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+        )
+        if str(root_team_dir or "").strip()
+        else "-"
+    )
+    latest_planning_handoff_summary = (
+        _latest_planning_handoff_summary(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
         )
@@ -1943,6 +1966,7 @@ def _build_runtime_detail(
         latest_replan_auto_route_summary=latest_replan_auto_route_summary,
         latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
         latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
+        latest_planning_handoff_summary=latest_planning_handoff_summary,
         latest_manual_step_summary=latest_manual_step_summary,
         latest_canonical_writeback_summary=latest_canonical_writeback_summary,
         latest_canonical_mutation_summary=latest_canonical_mutation_summary,

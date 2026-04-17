@@ -106,6 +106,25 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
                 "requires_operator_confirmation": True,
                 "confidence": "medium",
             },
+            "planning_handoff": {
+                "job_contract": {
+                    "status": "blocked",
+                    "planning_mode": "standard",
+                    "summary": "status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0",
+                },
+                "debug_packet": {
+                    "state": "blocked",
+                    "summary": "state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review",
+                    "symptom": "execution_brief_blocked",
+                    "failed_attempt": "critic=planning_gate",
+                    "next_step": "/offdesk review",
+                },
+                "phase_checkpoint": {
+                    "status": "blocked",
+                    "current_phase": "plan",
+                    "summary": "status=blocked | current=plan | plan=blocked|note=contract_gap",
+                },
+            },
         },
     )
     assert action_audit.append_action_audit_row(
@@ -208,6 +227,11 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["latest_judge_decision_bridge_summary"] == "mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes"
     assert runtimes[0]["latest_replan_auto_decision_summary"] == "from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes"
     assert runtimes[0]["latest_replan_auto_routing_policy_summary"] == "status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
+    assert runtimes[0]["latest_planning_handoff_summary"] == (
+        "contract=status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0"
+        " | debug=state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review"
+        " | phase=status=blocked | current=plan | plan=blocked|note=contract_gap"
+    )
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"
     assert runtimes[0]["latest_canonical_writeback_summary"].startswith(
@@ -314,6 +338,25 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
                 "requires_operator_confirmation": True,
                 "confidence": "medium",
             },
+            "planning_handoff": {
+                "job_contract": {
+                    "status": "blocked",
+                    "planning_mode": "standard",
+                    "summary": "status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0",
+                },
+                "debug_packet": {
+                    "state": "blocked",
+                    "summary": "state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review",
+                    "symptom": "execution_brief_blocked",
+                    "failed_attempt": "critic=planning_gate",
+                    "next_step": "/offdesk review",
+                },
+                "phase_checkpoint": {
+                    "status": "blocked",
+                    "current_phase": "plan",
+                    "summary": "status=blocked | current=plan | plan=blocked|note=contract_gap",
+                },
+            },
         },
     )
     assert action_audit.append_action_audit_row(
@@ -387,6 +430,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes" in markdown
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes" in markdown
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in markdown
+    assert "planning_handoff: contract=status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0 | debug=state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review | phase=status=blocked | current=plan | plan=blocked|note=contract_gap" in markdown
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in markdown
     assert "auto_route_status: ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in markdown
     assert "canonical_writeback: Syncback Apply | executed | state=executed | next=/sync preview O2 24h | at=2026-04-09T11:07:00+09:00 | path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0" in markdown

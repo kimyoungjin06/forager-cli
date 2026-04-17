@@ -315,6 +315,15 @@ def build_nightly_session_summary(
                     snapshot.team_dir,
                     project_alias=detail.project_alias,
                 ),
+                "latest_planning_handoff_summary": action_audit.summarize_planning_handoff_snapshot(
+                    (
+                        action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+                            snapshot.team_dir,
+                            project_alias=detail.project_alias,
+                        )
+                        or {}
+                    ).get("planning_handoff")
+                ),
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
                     snapshot.team_dir,
@@ -493,6 +502,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
+                f"- planning_handoff: {runtime.get('latest_planning_handoff_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
                 f"- manual_step: {runtime.get('latest_manual_step_summary', '-')}",

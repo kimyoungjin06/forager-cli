@@ -790,6 +790,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         latest_replan_auto_route_summary = "-"
         latest_replan_auto_route_status_summary = "-"
         latest_replan_auto_operator_summary = "-"
+        latest_planning_handoff_summary = "-"
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             team_dir = Path(team_dir_raw)
@@ -851,6 +852,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             latest_replan_auto_operator_summary = action_audit.load_latest_replan_auto_operator_summary_for_runtime(
                 root_team_dir,
                 project_alias=alias,
+            )
+            latest_planning_handoff_summary = action_audit.summarize_planning_handoff_snapshot(
+                latest_replan_auto_routing_policy.get("planning_handoff")
             )
             latest_replan_auto_route = action_audit.load_latest_action_audit_for_runtime_kind(
                 root_team_dir,
@@ -1214,6 +1218,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             latest_replan_auto_route_summary=latest_replan_auto_route_summary,
             latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
             latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
+            latest_planning_handoff_summary=latest_planning_handoff_summary,
             backend_summary=backend_summary,
             backend_note=str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
             rate_limit_summary=rate_limit_summary,

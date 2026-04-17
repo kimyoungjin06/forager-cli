@@ -181,6 +181,7 @@ class RuntimeCardDTO:
     latest_replan_auto_route_summary: str
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
+    latest_planning_handoff_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str
@@ -341,6 +342,7 @@ class TaskDetailDTO:
     latest_replan_auto_route_summary: str = ""
     latest_replan_auto_route_status_summary: str = ""
     latest_replan_auto_operator_summary: str = ""
+    latest_planning_handoff_summary: str = ""
     backend_summary: str = ""
     backend_note: str = ""
     rate_limit_summary: str = ""
@@ -484,6 +486,7 @@ class RuntimeDetailDTO:
     latest_replan_auto_route_summary: str
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
+    latest_planning_handoff_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str

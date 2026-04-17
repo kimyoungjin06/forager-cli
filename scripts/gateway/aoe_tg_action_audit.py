@@ -276,10 +276,194 @@ def summarize_latest_judge_decision_bridge(bridge: Any) -> str:
     return " | ".join(parts)
 
 
+def _normalize_debug_packet_snapshot_for_audit(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    state = str(raw.get("state", "")).strip().lower()
+    if state not in {"clean", "watch", "blocked", "active"}:
+        return {}
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", "")).strip() or "2026-04-16.v1",
+        "state": state,
+    }
+    for key in ("summary", "symptom", "root_cause", "failed_attempt", "next_step"):
+        token = str(raw.get(key, "")).strip()
+        if token:
+            snapshot[key] = token[:320 if key == "summary" else 240]
+    evidence = [
+        str(item).strip()[:160]
+        for item in (raw.get("evidence") or [])
+        if str(item).strip()
+    ]
+    if evidence:
+        snapshot["evidence"] = evidence[:10]
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [
+                f"state={state}",
+                f"symptom={snapshot.get('symptom', '-')}",
+                f"evidence={len(snapshot.get('evidence') or [])}",
+                f"next={snapshot.get('next_step', '-')}",
+            ]
+        )[:320]
+    return snapshot
+
+
+def _normalize_job_contract_snapshot_for_audit(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = str(raw.get("status", "")).strip().lower()
+    planning_mode = str(raw.get("planning_mode", "")).strip().lower()
+    summary = str(raw.get("summary", "")).strip()
+    goal = str(raw.get("goal", "")).strip()
+    rollback_hint = str(raw.get("rollback_hint", "")).strip()
+    rows = {
+        "scope": [str(item).strip()[:160] for item in (raw.get("scope") or []) if str(item).strip()],
+        "non_goals": [str(item).strip()[:160] for item in (raw.get("non_goals") or []) if str(item).strip()],
+        "risks": [str(item).strip()[:160] for item in (raw.get("risks") or []) if str(item).strip()],
+        "acceptance_checks": [
+            str(item).strip()[:160] for item in (raw.get("acceptance_checks") or []) if str(item).strip()
+        ],
+        "artifacts_to_touch": [
+            str(item).strip()[:160] for item in (raw.get("artifacts_to_touch") or []) if str(item).strip()
+        ],
+    }
+    if not any(
+        (
+            status,
+            planning_mode,
+            summary,
+            goal,
+            rollback_hint,
+            *rows.values(),
+        )
+    ):
+        return {}
+    if status not in {"ready", "blocked"}:
+        status = "ready"
+    if planning_mode not in {"standard", "lightweight", "full"}:
+        planning_mode = "standard"
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", "")).strip() or "2026-04-16.v1",
+        "status": status or "ready",
+        "planning_mode": planning_mode or "standard",
+    }
+    if summary:
+        snapshot["summary"] = summary[:320]
+    if goal:
+        snapshot["goal"] = goal[:240]
+    if rollback_hint:
+        snapshot["rollback_hint"] = rollback_hint[:240]
+    for key, value in rows.items():
+        if value:
+            snapshot[key] = value[:12]
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [
+                f"status={snapshot.get('status', 'ready')}",
+                f"plan={snapshot.get('planning_mode', 'standard')}",
+                f"scope={len(snapshot.get('scope') or [])}",
+                f"checks={len(snapshot.get('acceptance_checks') or [])}",
+                f"artifacts={len(snapshot.get('artifacts_to_touch') or [])}",
+            ]
+        )[:320]
+    return snapshot
+
+
+def _normalize_phase_checkpoint_snapshot_for_audit(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = str(raw.get("status", "")).strip().lower()
+    if status not in {"ready", "active", "blocked", "done"}:
+        return {}
+    current_phase = str(raw.get("current_phase", "")).strip().lower() or "plan"
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", "")).strip() or "2026-04-16.v1",
+        "status": status,
+        "current_phase": current_phase,
+    }
+    summary = str(raw.get("summary", "")).strip()
+    if summary:
+        snapshot["summary"] = summary[:320]
+    rows = [
+        str(item).strip()[:200]
+        for item in (raw.get("rows") or [])
+        if str(item).strip()
+    ]
+    if rows:
+        snapshot["rows"] = rows[:8]
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [f"status={status}", f"current={current_phase}", *list(snapshot.get("rows") or [])[:4]]
+        )[:320]
+    return snapshot
+
+
+def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(payload, dict):
+        payload = {}
+    source = row if isinstance(row, dict) else {}
+    job_contract = _normalize_job_contract_snapshot_for_audit(payload.get("job_contract"))
+    if not job_contract:
+        job_contract = _normalize_job_contract_snapshot_for_audit(
+            {
+                "status": source.get("job_contract_status"),
+                "summary": source.get("job_contract_summary"),
+            }
+        )
+    debug_packet = _normalize_debug_packet_snapshot_for_audit(payload.get("debug_packet"))
+    if not debug_packet:
+        debug_packet = _normalize_debug_packet_snapshot_for_audit(
+            {
+                "state": source.get("debug_packet_state"),
+                "summary": source.get("debug_packet_summary"),
+                "next_step": source.get("debug_packet_next_step"),
+            }
+        )
+    phase_checkpoint = _normalize_phase_checkpoint_snapshot_for_audit(payload.get("phase_checkpoint"))
+    if not phase_checkpoint:
+        phase_checkpoint = _normalize_phase_checkpoint_snapshot_for_audit(
+            {
+                "status": source.get("phase_checkpoint_status"),
+                "current_phase": source.get("phase_checkpoint_current_phase"),
+                "summary": source.get("phase_checkpoint_summary"),
+            }
+        )
+    if not any((job_contract, debug_packet, phase_checkpoint)):
+        return {}
+    return {
+        "job_contract": job_contract,
+        "debug_packet": debug_packet,
+        "phase_checkpoint": phase_checkpoint,
+    }
+
+
+def summarize_planning_handoff_snapshot(raw: Any) -> str:
+    handoff = raw if isinstance(raw, dict) else normalize_planning_handoff_snapshot(raw)
+    if not isinstance(handoff, dict) or not handoff:
+        return "-"
+    parts: List[str] = []
+    job_contract = handoff.get("job_contract") if isinstance(handoff.get("job_contract"), dict) else {}
+    debug_packet = handoff.get("debug_packet") if isinstance(handoff.get("debug_packet"), dict) else {}
+    phase_checkpoint = handoff.get("phase_checkpoint") if isinstance(handoff.get("phase_checkpoint"), dict) else {}
+    if job_contract:
+        parts.append("contract=" + (str(job_contract.get("summary", "")).strip() or "-"))
+    if debug_packet:
+        parts.append("debug=" + (str(debug_packet.get("summary", "")).strip() or "-"))
+    if phase_checkpoint:
+        parts.append("phase=" + (str(phase_checkpoint.get("summary", "")).strip() or "-"))
+    return " | ".join(parts) if parts else "-"
+
+
 def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
         return {}
+    planning_handoff = normalize_planning_handoff_snapshot(
+        row.get("planning_handoff"),
+        row=row,
+    )
     return {
         "source": str(row.get("source", "")).strip() or "latest_offdesk_judge",
         "current_action": str(row.get("current_action", "")).strip() or "-",
@@ -321,6 +505,8 @@ def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
         "phase_checkpoint_status": str(row.get("phase_checkpoint_status", "")).strip() or "-",
         "phase_checkpoint_current_phase": str(row.get("phase_checkpoint_current_phase", "")).strip() or "-",
         "phase_checkpoint_summary": str(row.get("phase_checkpoint_summary", "")).strip() or "-",
+        "planning_handoff": planning_handoff,
+        "planning_handoff_summary": summarize_planning_handoff_snapshot(planning_handoff),
     }
 
 
@@ -361,6 +547,10 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
         return {}
+    planning_handoff = normalize_planning_handoff_snapshot(
+        row.get("planning_handoff"),
+        row=row,
+    )
     return {
         "source": str(row.get("source", "")).strip() or "latest_offdesk_judge",
         "status": str(row.get("status", "")).strip() or "-",
@@ -398,6 +588,8 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
         "phase_checkpoint_status": str(row.get("phase_checkpoint_status", "")).strip() or "-",
         "phase_checkpoint_current_phase": str(row.get("phase_checkpoint_current_phase", "")).strip() or "-",
         "phase_checkpoint_summary": str(row.get("phase_checkpoint_summary", "")).strip() or "-",
+        "planning_handoff": planning_handoff,
+        "planning_handoff_summary": summarize_planning_handoff_snapshot(planning_handoff),
     }
 
 
@@ -426,6 +618,30 @@ def summarize_replan_auto_routing_policy(policy: Any) -> str:
     elif bool(row.get("planning_feedback_applied", False)):
         parts.append(f"gate={str(row.get('planning_feedback_source', '')).strip() or '-'}")
     return " | ".join(parts)
+
+
+def _merge_replan_audit_context(payload: Any, row: Dict[str, Any]) -> Dict[str, Any]:
+    merged = payload if isinstance(payload, dict) else _parse_json_object_from_text(payload)
+    if not isinstance(merged, dict):
+        merged = {}
+    enriched = dict(merged)
+    for key in (
+        "job_contract_status",
+        "job_contract_summary",
+        "debug_packet_state",
+        "debug_packet_summary",
+        "debug_packet_next_step",
+        "phase_checkpoint_status",
+        "phase_checkpoint_current_phase",
+        "phase_checkpoint_summary",
+    ):
+        if str(enriched.get(key, "")).strip():
+            continue
+        if key in row:
+            enriched[key] = row.get(key)
+    if "planning_handoff" not in enriched and "planning_handoff" in row:
+        enriched["planning_handoff"] = row.get("planning_handoff")
+    return enriched
 
 
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
@@ -663,7 +879,9 @@ def load_latest_replan_auto_decision_for_runtime(
     for row in reversed(rows):
         if str(row.get("link_href", "")).strip() != runtime_path:
             continue
-        decision = normalize_replan_auto_decision(row.get("replan_auto_decision"))
+        decision = normalize_replan_auto_decision(
+            _merge_replan_audit_context(row.get("replan_auto_decision"), row)
+        )
         if not decision:
             continue
         decision["at"] = str(row.get("at", "")).strip() or "-"
@@ -696,7 +914,9 @@ def load_latest_replan_auto_routing_policy_for_runtime(
     for row in reversed(rows):
         if str(row.get("link_href", "")).strip() != runtime_path:
             continue
-        policy = normalize_replan_auto_routing_policy(row.get("replan_auto_routing_policy"))
+        policy = normalize_replan_auto_routing_policy(
+            _merge_replan_audit_context(row.get("replan_auto_routing_policy"), row)
+        )
         if not policy:
             continue
         policy["at"] = str(row.get("at", "")).strip() or "-"

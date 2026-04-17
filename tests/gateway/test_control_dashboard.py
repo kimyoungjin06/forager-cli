@@ -1279,6 +1279,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "debug_next" in text
     assert "phase_checkpoint" in text
     assert "checkpoint_current" in text
+    assert "planning_handoff" in text
     assert "followup_brief" in text
     assert "preview_only" in text
     assert "followup_exec_lanes" in text
@@ -1578,6 +1579,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "debug_next" in text
     assert "phase_checkpoint" in text
     assert "checkpoint_current" in text
+    assert "planning_handoff" in text
     assert "brief_do" in text
     assert "reports/summary.md" in text
     assert "brief_blocked" in text
@@ -3043,6 +3045,10 @@ def test_control_dashboard_post_replan_route_terminal_block_reuses_job_contract_
         action_audit.load_latest_replan_auto_routing_policy_summary_for_runtime(team_dir, project_alias="O2")
         == "status=contract_review_ready | from=replan | to=task_review | confidence=medium | next=/task T-001 | mode=planning_primitive_reuse | gate=job_contract"
     )
+    latest_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias="O2")
+    assert latest_policy["planning_handoff"]["debug_packet"]["state"] == "blocked"
+    assert latest_policy["planning_handoff"]["debug_packet"]["failed_attempt"] != "-"
+    assert latest_policy["planning_handoff_summary"].startswith("contract=status=blocked")
 
 
 def test_control_dashboard_post_replan_route_reuses_phase_checkpoint_feedback(tmp_path: Path, monkeypatch) -> None:

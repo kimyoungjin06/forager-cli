@@ -671,6 +671,7 @@ def _build_recovery_runtime_rows(
                     or str(row.get("latest_replan_auto_route_status_summary", "")).strip()
                     or "-"
                 ),
+                latest_planning_handoff_summary=str(row.get("latest_planning_handoff_summary", "")).strip() or "-",
                 latest_manual_step_summary=str(row.get("latest_manual_step_summary", "")).strip() or "-",
                 latest_canonical_writeback_summary=(
                     str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"
