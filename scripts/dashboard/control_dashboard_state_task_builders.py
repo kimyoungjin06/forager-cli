@@ -1101,6 +1101,15 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             job_contract_rollback_hint=str(task.get("job_contract_rollback_hint", "")).strip() or "-",
             planner_lane_summary=str(task.get("planner_lane_summary", "")).strip() or "-",
             critic_lane_summary=str(task.get("critic_lane_summary", "")).strip() or "-",
+            critic_review_summary=str(task.get("critic_review_summary", "")).strip() or "-",
+            critic_review_blocking_issues=" | ".join(
+                str(item).strip() for item in (task.get("critic_review_blocking_issues") or []) if str(item).strip()
+            )
+            or "-",
+            critic_review_required_fixes=" | ".join(
+                str(item).strip() for item in (task.get("critic_review_required_fixes") or []) if str(item).strip()
+            )
+            or "-",
             approved_plan_summary=str(task.get("approved_plan_summary", "")).strip() or "-",
             approved_plan_artifact_rows=" | ".join(
                 str(item).strip() for item in (task.get("approved_plan_artifact_rows") or []) if str(item).strip()

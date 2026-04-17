@@ -1788,6 +1788,19 @@ def _build_runtime_detail(
         ),
         active_task_planner_lane_summary=str((active_task or {}).get("planner_lane_summary", "")).strip() or "-",
         active_task_critic_lane_summary=str((active_task or {}).get("critic_lane_summary", "")).strip() or "-",
+        active_task_critic_review_summary=str((active_task or {}).get("critic_review_summary", "")).strip() or "-",
+        active_task_critic_review_blocking_issues=" | ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("critic_review_blocking_issues") or [])
+            if str(item).strip()
+        )
+        or "-",
+        active_task_critic_review_required_fixes=" | ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("critic_review_required_fixes") or [])
+            if str(item).strip()
+        )
+        or "-",
         active_task_approved_plan_summary=str((active_task or {}).get("approved_plan_summary", "")).strip() or "-",
         active_task_approved_plan_artifact_rows=" | ".join(
             str(item).strip()

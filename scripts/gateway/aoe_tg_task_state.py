@@ -39,6 +39,8 @@ PHASE_CHECKPOINT_VERSION = "2026-04-16.v1"
 PHASE_CHECKPOINT_STATUSES = ("ready", "active", "blocked", "done")
 PLANNING_LANE_VERSION = "2026-04-17.v1"
 PLANNING_LANE_STATUSES = ("pending", "active", "ready", "blocked", "done")
+CRITIC_REVIEW_VERSION = "2026-04-17.v1"
+CRITIC_REVIEW_STATUSES = ("pending", "active", "blocked", "approved")
 APPROVED_PLAN_VERSION = "2026-04-17.v1"
 APPROVED_PLAN_STATUSES = ("missing", "pending", "blocked", "approved")
 _BRIEF_BLOCKED_STATUSES = {"underspecified", "operator_decision_required", "infeasible"}
@@ -599,6 +601,75 @@ def _clear_approved_plan_snapshot(target: Dict[str, Any]) -> None:
         target.pop(key, None)
 
 
+def _clear_critic_review_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "critic_review_version",
+        "critic_review_status",
+        "critic_review_summary",
+        "critic_review_mode",
+        "critic_review_provider",
+        "critic_review_planner_provider",
+        "critic_review_primary_issue",
+        "critic_review_blocking_issues",
+        "critic_review_required_fixes",
+    ):
+        target.pop(key, None)
+
+
+def normalize_critic_review_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = str(raw.get("status", "")).strip().lower()
+    if status not in CRITIC_REVIEW_STATUSES:
+        return {}
+    blocking_issues = _normalize_small_rows(raw.get("blocking_issues"), limit=8, text_limit=240)
+    required_fixes = _normalize_small_rows(raw.get("required_fixes"), limit=8, text_limit=240)
+    provider = str(raw.get("provider", "")).strip()[:64]
+    planner_provider = str(raw.get("planner_provider", "")).strip()[:64]
+    review_mode = str(raw.get("review_mode", "")).strip()[:64] or "native_review"
+    primary_issue = str(raw.get("primary_issue", "")).strip()[:240]
+    summary = str(raw.get("summary", "")).strip()
+    if not summary:
+        summary_parts = [f"critic_review={status}", f"mode={review_mode}"]
+        if provider:
+            summary_parts.append(f"provider={provider}")
+        if planner_provider:
+            summary_parts.append(f"planner={planner_provider}")
+        if primary_issue:
+            summary_parts.append(f"issue={primary_issue[:120]}")
+        summary = " | ".join(summary_parts)[:320]
+    return {
+        "version": str(raw.get("version", CRITIC_REVIEW_VERSION)).strip() or CRITIC_REVIEW_VERSION,
+        "status": status,
+        "summary": summary[:320],
+        "review_mode": review_mode,
+        "provider": provider,
+        "planner_provider": planner_provider,
+        "primary_issue": primary_issue,
+        "blocking_issues": blocking_issues,
+        "required_fixes": required_fixes,
+    }
+
+
+def apply_critic_review_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = normalize_critic_review_snapshot(snapshot)
+    if not isinstance(target, dict):
+        return target
+    if not normalized:
+        _clear_critic_review_snapshot(target)
+        return target
+    target["critic_review_version"] = normalized.get("version", CRITIC_REVIEW_VERSION)
+    target["critic_review_status"] = normalized.get("status", "")
+    target["critic_review_summary"] = normalized.get("summary", "")
+    target["critic_review_mode"] = normalized.get("review_mode", "")
+    target["critic_review_provider"] = normalized.get("provider", "")
+    target["critic_review_planner_provider"] = normalized.get("planner_provider", "")
+    target["critic_review_primary_issue"] = normalized.get("primary_issue", "")
+    target["critic_review_blocking_issues"] = list(normalized.get("blocking_issues") or [])
+    target["critic_review_required_fixes"] = list(normalized.get("required_fixes") or [])
+    return target
+
+
 def build_planner_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     if not _task_has_planning_context(task):
         return {}
@@ -695,18 +766,79 @@ def build_critic_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def build_critic_review_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    critic = task.get("plan_critic") if isinstance(task.get("plan_critic"), dict) else {}
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    current_phase = str(task.get("phase1_current_phase", "")).strip().lower()
+    provider = str(task.get("phase1_current_critic", "")).strip()
+    planner_provider = (
+        str(task.get("phase1_current_planner", "")).strip()
+        or str(task.get("phase1_current_provider", "")).strip()
+    )
+    review_mode = "native_review" if str(task.get("phase1_mode", "")).strip() == "ensemble" else "plan_review"
+    blocking_issues = _normalize_small_rows((critic or {}).get("issues"), limit=8, text_limit=240)
+    required_fixes = _normalize_small_rows((critic or {}).get("recommendations"), limit=8, text_limit=240)
+    primary_issue = _latest_plan_issue(task)
+    status = "pending"
+    if blocking_issues or task.get("plan_gate_passed") is False:
+        status = "blocked"
+    elif isinstance(critic, dict) and critic:
+        status = "approved"
+    elif tf_phase == "planning" or current_phase in {"critic", "verification", "repair"}:
+        status = "active"
+    summary_parts = [f"critic_review={status}", f"mode={review_mode}"]
+    if provider:
+        summary_parts.append(f"provider={provider}")
+    if planner_provider:
+        summary_parts.append(f"planner={planner_provider}")
+    if blocking_issues:
+        summary_parts.append(f"issue={blocking_issues[0][:120]}")
+    elif required_fixes:
+        summary_parts.append(f"fix={required_fixes[0][:120]}")
+    return normalize_critic_review_snapshot(
+        {
+            "version": CRITIC_REVIEW_VERSION,
+            "status": status,
+            "summary": " | ".join(summary_parts)[:320],
+            "review_mode": review_mode,
+            "provider": provider,
+            "planner_provider": planner_provider,
+            "primary_issue": primary_issue,
+            "blocking_issues": blocking_issues,
+            "required_fixes": required_fixes,
+        }
+    )
+
+
 def build_approved_plan_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     if not _task_has_planning_context(task):
         return {}
     plan_data = task.get("plan") if isinstance(task.get("plan"), dict) else {}
-    critic = task.get("plan_critic") if isinstance(task.get("plan_critic"), dict) else {}
+    critic_review = normalize_critic_review_snapshot(
+        {
+            "version": task.get("critic_review_version"),
+            "status": task.get("critic_review_status"),
+            "summary": task.get("critic_review_summary"),
+            "review_mode": task.get("critic_review_mode"),
+            "provider": task.get("critic_review_provider"),
+            "planner_provider": task.get("critic_review_planner_provider"),
+            "primary_issue": task.get("critic_review_primary_issue"),
+            "blocking_issues": task.get("critic_review_blocking_issues"),
+            "required_fixes": task.get("critic_review_required_fixes"),
+        }
+    ) or build_critic_review_snapshot(task)
     review_count = max(0, int(task.get("plan_review_count", 0) or 0))
     convergence = str(task.get("plan_convergence_status", "")).strip().lower()
-    blockers = _plan_critic_has_blockers(critic) or task.get("plan_gate_passed") is False
+    critic_status = str(critic_review.get("status", "")).strip().lower()
+    blockers = critic_status == "blocked"
     status = "missing"
     if not plan_data:
         if str(task.get("tf_phase", "")).strip().lower() == "planning":
             status = "pending"
+    elif critic_status in {"pending", "active"}:
+        status = "pending"
     elif blockers:
         status = "blocked"
     else:
@@ -720,7 +852,7 @@ def build_approved_plan_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     if convergence:
         summary_parts.append(f"convergence={convergence}")
     if blockers:
-        primary_issue = _latest_plan_issue(task)
+        primary_issue = str(critic_review.get("primary_issue", "")).strip() or _latest_plan_issue(task)
         if primary_issue:
             summary_parts.append(f"issue={primary_issue[:120]}")
     elif isinstance(plan_data, dict):
@@ -1019,6 +1151,12 @@ def refresh_task_planning_primitives(
         apply_critic_lane_snapshot(task, critic_lane_snapshot)
     else:
         _clear_critic_lane_snapshot(task)
+
+    critic_review_snapshot = build_critic_review_snapshot(task)
+    if critic_review_snapshot:
+        apply_critic_review_snapshot(task, critic_review_snapshot)
+    else:
+        _clear_critic_review_snapshot(task)
 
     approved_plan_snapshot = build_approved_plan_snapshot(task)
     if approved_plan_snapshot:

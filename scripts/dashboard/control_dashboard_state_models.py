@@ -282,6 +282,9 @@ class TaskDetailDTO:
     job_contract_rollback_hint: str = ""
     planner_lane_summary: str = ""
     critic_lane_summary: str = ""
+    critic_review_summary: str = ""
+    critic_review_blocking_issues: str = ""
+    critic_review_required_fixes: str = ""
     approved_plan_summary: str = ""
     approved_plan_artifact_rows: str = ""
     debug_packet_summary: str = ""
@@ -411,6 +414,9 @@ class RuntimeDetailDTO:
     active_task_job_contract_rollback_hint: str
     active_task_planner_lane_summary: str
     active_task_critic_lane_summary: str
+    active_task_critic_review_summary: str
+    active_task_critic_review_blocking_issues: str
+    active_task_critic_review_required_fixes: str
     active_task_approved_plan_summary: str
     active_task_approved_plan_artifact_rows: str
     active_task_debug_packet_summary: str

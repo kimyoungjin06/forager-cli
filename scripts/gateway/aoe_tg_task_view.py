@@ -603,6 +603,15 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     critic_lane_summary = str(task.get("critic_lane_summary", "")).strip()
     if critic_lane_summary:
         lines.append("critic_lane: " + critic_lane_summary[:240])
+    critic_review_summary = str(task.get("critic_review_summary", "")).strip()
+    if critic_review_summary:
+        lines.append("critic_review: " + critic_review_summary[:240])
+    critic_review_issues = [str(item).strip() for item in (task.get("critic_review_blocking_issues") or []) if str(item).strip()]
+    if critic_review_issues:
+        lines.append("critic_review_issues: " + " | ".join(critic_review_issues[:4])[:240])
+    critic_review_fixes = [str(item).strip() for item in (task.get("critic_review_required_fixes") or []) if str(item).strip()]
+    if critic_review_fixes:
+        lines.append("critic_review_fixes: " + " | ".join(critic_review_fixes[:4])[:240])
     approved_plan_summary = str(task.get("approved_plan_summary", "")).strip()
     if approved_plan_summary:
         lines.append("approved_plan: " + approved_plan_summary[:240])

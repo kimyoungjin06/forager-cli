@@ -1403,6 +1403,9 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "job_acceptance" in text
     assert "planner_lane" in text
     assert "critic_lane" in text
+    assert "critic_review" in text
+    assert "native_review" in text
+    assert "ready for execution" in text
     assert "approved_plan" in text
     assert "approved analysis plan" in text
     assert "Re-check evidence links" in text
@@ -1728,6 +1731,9 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "job_acceptance" in text
     assert "planner_lane" in text
     assert "critic_lane" in text
+    assert "critic_review" in text
+    assert "native_review" in text
+    assert "ready for execution" in text
     assert "approved_plan" in text
     assert "approved analysis plan" in text
     assert "Re-check evidence links" in text
@@ -4728,6 +4734,7 @@ def test_dashboard_gates_dispatch_phase2_actions_when_approved_plan_is_blocked(t
         assert payload["status"] == "blocked"
         assert payload["outcome"]["reason_code"] == "approved_plan_blocked"
         assert payload["next_step"] == "/task T-001"
+        assert payload["outcome"]["detail"].startswith("approved_plan=blocked")
 
 
 def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_path: Path) -> None:
@@ -5492,6 +5499,23 @@ def test_dashboard_blocks_manual_routes_until_phase_checkpoint_reaches_verify_or
     task["debug_packet_evidence"] = ["runtime handle still attached"]
     task["debug_packet_failed_attempt"] = "/retry T-001 lane L1"
     task["debug_packet_next_step"] = "/task T-001"
+    task["phase1_mode"] = "ensemble"
+    task["phase1_rounds"] = 3
+    task["phase1_current_round"] = 3
+    task["phase1_current_total_rounds"] = 3
+    task["phase1_current_phase"] = "verification"
+    task["phase1_current_provider"] = "codex"
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_providers"] = ["codex", "claude"]
+    task["plan"] = {
+        "summary": "approved manual followup plan",
+        "subtasks": [{"id": "S1", "owner_role": "Codex-Analyst", "title": "Prepare manual handoff"}],
+    }
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": ["ready for manual followup"]}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
     task["phase_checkpoint_status"] = "active"
     task["phase_checkpoint_current_phase"] = "implement"
     task["phase_checkpoint_summary"] = (

@@ -1442,6 +1442,8 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
     assert task["planner_lane_status"] == "pending"
     assert "planner=pending" in task["planner_lane_summary"]
     assert task["critic_lane_status"] == "pending"
+    assert task["critic_review_status"] == "pending"
+    assert "critic_review=pending" in task["critic_review_summary"]
     assert task["approved_plan_status"] == "missing"
     assert task["debug_packet_state"] == "blocked"
     assert task["debug_packet_symptom"] == "execution_brief_blocked"
@@ -1452,6 +1454,7 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
 
     summary = gw.summarize_task_lifecycle("Demo", task)
     assert "job_contract: status=blocked" in summary
+    assert "critic_review: critic_review=pending" in summary
     assert "approved_plan: approved_plan=missing" in summary
     assert "debug_packet: state=blocked | symptom=execution_brief_blocked" in summary
     assert "phase_checkpoint: status=blocked | current=plan" in summary
