@@ -1040,6 +1040,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             verifier_roles=task_view.dedupe_roles(task.get("verifier_roles") or []),
             phase1_summary=_task_phase1_summary(task),
             phase1_progress=_task_phase1_progress(task),
+            planning_lanes_summary=task_view.planning_lane_operator_summary(task),
+            approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(task),
             phase1_candidate_roles=task_view.dedupe_roles(task.get("phase1_candidate_roles") or []),
             phase1_role_preset=str(task.get("phase1_role_preset", "")).strip(),
             phase2_team_preset=str(task.get("phase2_team_preset", "")).strip(),

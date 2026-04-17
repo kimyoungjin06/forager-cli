@@ -89,6 +89,65 @@ def dedupe_roles(roles: Iterable[str]) -> List[str]:
     return out
 
 
+def planning_lane_operator_summary(task: Dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return "-"
+    planners = dedupe_roles(task.get("phase1_planner_providers") or task.get("phase1_providers") or [])
+    critics = dedupe_roles(task.get("phase1_critic_providers") or task.get("phase1_providers") or [])
+    current_planner = (
+        str(task.get("phase1_current_planner", "")).strip()
+        or str(task.get("phase1_current_provider", "")).strip()
+        or (planners[0] if planners else "")
+    )
+    current_critic = str(task.get("phase1_current_critic", "")).strip() or (critics[0] if critics else "")
+    has_context = any(
+        (
+            planners,
+            critics,
+            str(task.get("phase1_mode", "")).strip(),
+            isinstance(task.get("plan"), dict),
+            str(task.get("approved_plan_status", "")).strip(),
+        )
+    )
+    if not has_context:
+        return "-"
+    parts = [
+        "draft via " + (", ".join(planners) if planners else "-"),
+        "review via " + (", ".join(critics) if critics else "-"),
+    ]
+    current_parts: List[str] = []
+    if current_planner:
+        current_parts.append(f"planner={current_planner}")
+    if current_critic:
+        current_parts.append(f"critic={current_critic}")
+    if current_parts:
+        parts.append("active " + " ".join(current_parts))
+    return " | ".join(parts)[:240]
+
+
+def approved_plan_gate_operator_summary(task: Dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return "-"
+    critics = dedupe_roles(task.get("phase1_critic_providers") or task.get("phase1_providers") or [])
+    status = str(task.get("approved_plan_status", "")).strip().lower()
+    if status not in {"missing", "pending", "blocked", "approved"}:
+        if isinstance(task.get("plan"), dict) or critics or str(task.get("phase1_mode", "")).strip():
+            status = "pending"
+        else:
+            return "-"
+    if status == "approved":
+        base = "dispatch unlocked after critic approval"
+    elif status == "blocked":
+        base = "dispatch blocked until critic clears issues"
+    elif status == "pending":
+        base = "dispatch waits for critic-approved plan"
+    else:
+        base = "dispatch waits for approved plan artifact"
+    if critics:
+        base = f"{base} | review via {', '.join(critics)}"
+    return base[:240]
+
+
 def critic_has_blockers(critic: Dict[str, Any]) -> bool:
     approved = bool(critic.get("approved", True))
     issues = critic.get("issues") or []
@@ -637,6 +696,12 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     approved_plan_rows = [str(item).strip() for item in (task.get("approved_plan_artifact_rows") or []) if str(item).strip()]
     if approved_plan_rows:
         lines.append("approved_plan_artifact: " + " | ".join(approved_plan_rows[:4])[:240])
+    planning_lanes = planning_lane_operator_summary(task)
+    if planning_lanes and planning_lanes != "-":
+        lines.append("planning_lanes: " + planning_lanes[:240])
+    approved_plan_gate = approved_plan_gate_operator_summary(task)
+    if approved_plan_gate and approved_plan_gate != "-":
+        lines.append("approved_plan_gate: " + approved_plan_gate[:240])
     debug_packet_summary = str(task.get("debug_packet_summary", "")).strip()
     if debug_packet_summary:
         lines.append("debug_packet: " + debug_packet_summary[:240])

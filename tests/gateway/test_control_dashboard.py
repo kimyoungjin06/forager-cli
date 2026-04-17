@@ -1291,6 +1291,8 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["phase1_current_planner"] = "codex"
     task["phase1_current_critic"] = "claude"
     task["phase1_providers"] = ["codex", "claude"]
+    task["phase1_planner_providers"] = ["codex"]
+    task["phase1_critic_providers"] = ["claude"]
     task["plan"] = {
         "summary": "approved analysis plan",
         "subtasks": [
@@ -1410,10 +1412,14 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "job_goal" in text
     assert "job_scope" in text
     assert "job_acceptance" in text
+    assert "planning_lanes" in text
+    assert "draft via codex | review via claude" in text
     assert "planner_lane" in text
     assert "critic_lane" in text
     assert "critic_review" in text
     assert "native_review" in text
+    assert "approved_plan_gate" in text
+    assert "dispatch unlocked after critic approval | review via claude" in text
     assert "ready for execution" in text
     assert "approved_plan" in text
     assert "approved analysis plan" in text
@@ -1618,6 +1624,8 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["phase1_current_planner"] = "codex"
     task["phase1_current_critic"] = "claude"
     task["phase1_providers"] = ["codex", "claude"]
+    task["phase1_planner_providers"] = ["codex"]
+    task["phase1_critic_providers"] = ["claude"]
     task["plan"] = {
         "summary": "approved analysis plan",
         "subtasks": [
@@ -1738,10 +1746,14 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "job_goal" in text
     assert "job_scope" in text
     assert "job_acceptance" in text
+    assert "planning_lanes" in text
+    assert "draft via codex | review via claude" in text
     assert "planner_lane" in text
     assert "critic_lane" in text
     assert "critic_review" in text
     assert "native_review" in text
+    assert "approved_plan_gate" in text
+    assert "dispatch unlocked after critic approval | review via claude" in text
     assert "ready for execution" in text
     assert "approved_plan" in text
     assert "approved analysis plan" in text

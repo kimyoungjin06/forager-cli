@@ -239,6 +239,8 @@ class TaskDetailDTO:
     verifier_roles: List[str] = field(default_factory=list)
     phase1_summary: str = ""
     phase1_progress: str = ""
+    planning_lanes_summary: str = ""
+    approved_plan_gate_summary: str = ""
     phase1_candidate_roles: List[str] = field(default_factory=list)
     phase1_role_preset: str = ""
     phase2_team_preset: str = ""
@@ -412,6 +414,8 @@ class RuntimeDetailDTO:
     active_task_job_contract_acceptance_checks: str
     active_task_job_contract_artifacts_to_touch: str
     active_task_job_contract_rollback_hint: str
+    active_task_planning_lanes_summary: str
+    active_task_approved_plan_gate_summary: str
     active_task_planner_lane_summary: str
     active_task_critic_lane_summary: str
     active_task_critic_review_summary: str

@@ -22,6 +22,7 @@ import aoe_tg_document_registry as document_registry
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
+import aoe_tg_task_view as task_view
 import aoe_tg_worker_task_contract as worker_task_contract
 import aoe_tg_workspace_brief as workspace_brief
 
@@ -1786,6 +1787,8 @@ def _build_runtime_detail(
         active_task_job_contract_rollback_hint=(
             str((active_task or {}).get("job_contract_rollback_hint", "")).strip() or "-"
         ),
+        active_task_planning_lanes_summary=task_view.planning_lane_operator_summary(active_task or {}),
+        active_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(active_task or {}),
         active_task_planner_lane_summary=str((active_task or {}).get("planner_lane_summary", "")).strip() or "-",
         active_task_critic_lane_summary=str((active_task or {}).get("critic_lane_summary", "")).strip() or "-",
         active_task_critic_review_summary=str((active_task or {}).get("critic_review_summary", "")).strip() or "-",
