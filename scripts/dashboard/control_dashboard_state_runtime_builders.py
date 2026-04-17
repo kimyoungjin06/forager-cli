@@ -1786,6 +1786,15 @@ def _build_runtime_detail(
         active_task_job_contract_rollback_hint=(
             str((active_task or {}).get("job_contract_rollback_hint", "")).strip() or "-"
         ),
+        active_task_planner_lane_summary=str((active_task or {}).get("planner_lane_summary", "")).strip() or "-",
+        active_task_critic_lane_summary=str((active_task or {}).get("critic_lane_summary", "")).strip() or "-",
+        active_task_approved_plan_summary=str((active_task or {}).get("approved_plan_summary", "")).strip() or "-",
+        active_task_approved_plan_artifact_rows=" | ".join(
+            str(item).strip()
+            for item in ((active_task or {}).get("approved_plan_artifact_rows") or [])
+            if str(item).strip()
+        )
+        or "-",
         active_task_debug_packet_summary=str((active_task or {}).get("debug_packet_summary", "")).strip() or "-",
         active_task_debug_packet_symptom=str((active_task or {}).get("debug_packet_symptom", "")).strip() or "-",
         active_task_debug_packet_root_cause=str((active_task or {}).get("debug_packet_root_cause", "")).strip() or "-",

@@ -1420,6 +1420,7 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
             "mode": "dispatch",
             "roles": ["Codex-Analyst"],
             "verifier_roles": ["Codex-Reviewer"],
+            "phase1_mode": "single",
             "phase1_role_preset": "analysis",
             "phase2_team_preset": "analysis",
             "execution_brief_status": "underspecified",
@@ -1438,6 +1439,10 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
     assert task["job_contract_status"] == "blocked"
     assert task["job_contract_planning_mode"] == "deep"
     assert "reports/summary.md" in task["job_contract_scope"]
+    assert task["planner_lane_status"] == "pending"
+    assert "planner=pending" in task["planner_lane_summary"]
+    assert task["critic_lane_status"] == "pending"
+    assert task["approved_plan_status"] == "missing"
     assert task["debug_packet_state"] == "blocked"
     assert task["debug_packet_symptom"] == "execution_brief_blocked"
     assert task["debug_packet_next_step"] == "/offdesk review"
@@ -1447,6 +1452,7 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
 
     summary = gw.summarize_task_lifecycle("Demo", task)
     assert "job_contract: status=blocked" in summary
+    assert "approved_plan: approved_plan=missing" in summary
     assert "debug_packet: state=blocked | symptom=execution_brief_blocked" in summary
     assert "phase_checkpoint: status=blocked | current=plan" in summary
 

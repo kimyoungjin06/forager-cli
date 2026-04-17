@@ -37,6 +37,10 @@ DEBUG_PACKET_VERSION = "2026-04-16.v1"
 DEBUG_PACKET_STATES = ("clean", "watch", "blocked", "active")
 PHASE_CHECKPOINT_VERSION = "2026-04-16.v1"
 PHASE_CHECKPOINT_STATUSES = ("ready", "active", "blocked", "done")
+PLANNING_LANE_VERSION = "2026-04-17.v1"
+PLANNING_LANE_STATUSES = ("pending", "active", "ready", "blocked", "done")
+APPROVED_PLAN_VERSION = "2026-04-17.v1"
+APPROVED_PLAN_STATUSES = ("missing", "pending", "blocked", "approved")
 _BRIEF_BLOCKED_STATUSES = {"underspecified", "operator_decision_required", "infeasible"}
 _EXTERNAL_BACKGROUND_RUNNERS = {"github_runner", "remote_worker"}
 
@@ -503,6 +507,284 @@ def build_phase_checkpoint_snapshot(task: Dict[str, Any], debug_packet: Optional
     )
 
 
+def _task_has_planning_context(task: Dict[str, Any]) -> bool:
+    if not isinstance(task, dict):
+        return False
+    return bool(
+        isinstance(task.get("plan"), dict)
+        or isinstance(task.get("plan_critic"), dict)
+        or isinstance(task.get("plan_replans"), list)
+        or bool(task.get("plan_issue_history"))
+        or bool(task.get("plan_issue_codes"))
+        or isinstance(task.get("plan_gate_passed"), bool)
+        or str(task.get("phase1_mode", "")).strip()
+        or int(task.get("phase1_rounds", 0) or 0) > 0
+        or str(task.get("phase1_current_phase", "")).strip()
+    )
+
+
+def _plan_critic_has_blockers(critic: Any) -> bool:
+    if not isinstance(critic, dict):
+        return False
+    issues = critic.get("issues")
+    if not isinstance(issues, list):
+        return False
+    return any(str(item or "").strip() for item in issues)
+
+
+def _latest_plan_issue(task: Dict[str, Any]) -> str:
+    history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
+    for row in reversed(history):
+        if not isinstance(row, dict):
+            continue
+        token = str(row.get("primary_issue", "")).strip()
+        if token:
+            return token[:240]
+    return str(task.get("plan_gate_reason", "")).strip()[:240]
+
+
+def _approved_plan_artifact_rows(plan_data: Dict[str, Any], *, limit: int = 8) -> List[str]:
+    subtasks = plan_data.get("subtasks") if isinstance(plan_data.get("subtasks"), list) else []
+    rows: List[str] = []
+    for row in subtasks:
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id", "")).strip() or "S"
+        role = str(row.get("owner_role", "")).strip() or "Worker"
+        title = (
+            str(row.get("title", "")).strip()
+            or str(row.get("goal", "")).strip()
+            or str(row.get("summary", "")).strip()
+            or "subtask"
+        )
+        token = f"{sid} [{role}] {title[:120]}".strip()
+        if token and token not in rows:
+            rows.append(token[:200])
+    return rows[: max(1, int(limit or 1))]
+
+
+def _clear_planner_lane_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "planner_lane_version",
+        "planner_lane_status",
+        "planner_lane_summary",
+        "planner_lane_actor",
+        "planner_lane_mode",
+        "planner_lane_preset",
+    ):
+        target.pop(key, None)
+
+
+def _clear_critic_lane_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "critic_lane_version",
+        "critic_lane_status",
+        "critic_lane_summary",
+        "critic_lane_actor",
+        "critic_lane_convergence",
+        "critic_lane_primary_issue",
+    ):
+        target.pop(key, None)
+
+
+def _clear_approved_plan_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "approved_plan_version",
+        "approved_plan_status",
+        "approved_plan_summary",
+        "approved_plan_artifact_rows",
+        "approved_plan_subtask_count",
+        "approved_plan_review_count",
+    ):
+        target.pop(key, None)
+
+
+def build_planner_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    current_phase = str(task.get("phase1_current_phase", "")).strip().lower()
+    current_round = max(0, int(task.get("phase1_current_round", 0) or 0))
+    total_rounds = max(
+        0,
+        int(task.get("phase1_current_total_rounds", 0) or task.get("phase1_rounds", 0) or task.get("plan_last_round", 0) or 0),
+    )
+    mode = str(task.get("phase1_mode", "")).strip() or "single"
+    preset = str(task.get("phase1_role_preset", "")).strip() or "-"
+    providers = [str(item).strip() for item in (task.get("phase1_providers") or []) if str(item).strip()]
+    actor = (
+        str(task.get("phase1_current_planner", "")).strip()
+        or str(task.get("phase1_current_provider", "")).strip()
+        or (providers[0] if providers else "")
+    )
+    has_plan = isinstance(task.get("plan"), dict)
+    status = "pending"
+    if has_plan:
+        status = "done"
+    elif tf_phase == "planning" or current_phase in {"planner", "planning", "reuse", "repair"}:
+        status = "active"
+    elif isinstance(task.get("plan_gate_passed"), bool):
+        status = "ready"
+    summary_parts = [f"planner={status}", f"mode={mode}"]
+    if actor:
+        summary_parts.append(f"actor={actor}")
+    if current_phase:
+        summary_parts.append(f"step={current_phase}")
+    if current_round and total_rounds:
+        summary_parts.append(f"round={current_round}/{total_rounds}")
+    elif total_rounds:
+        summary_parts.append(f"rounds={total_rounds}")
+    if preset and preset != "-":
+        summary_parts.append(f"preset={preset}")
+    return {
+        "version": PLANNING_LANE_VERSION,
+        "status": status,
+        "summary": " | ".join(summary_parts)[:320],
+        "actor": actor[:64],
+        "mode": mode[:32],
+        "preset": preset[:64],
+    }
+
+
+def build_critic_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    current_phase = str(task.get("phase1_current_phase", "")).strip().lower()
+    critic = task.get("plan_critic") if isinstance(task.get("plan_critic"), dict) else {}
+    convergence = str(task.get("plan_convergence_status", "")).strip().lower() or "-"
+    review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    blockers = _plan_critic_has_blockers(critic) or task.get("plan_gate_passed") is False
+    primary_issue = _latest_plan_issue(task)
+    actor = str(task.get("phase1_current_critic", "")).strip()
+    if not actor:
+        history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
+        for row in reversed(history):
+            if not isinstance(row, dict):
+                continue
+            actor = (
+                str(row.get("critic_provider", "")).strip()
+                or str(row.get("provider", "")).strip()
+                or str(row.get("planner_provider", "")).strip()
+            )
+            if actor:
+                break
+    status = "pending"
+    if blockers:
+        status = "blocked"
+    elif isinstance(critic, dict) and critic:
+        status = "done"
+    elif tf_phase == "planning" or current_phase in {"critic", "verification", "repair"}:
+        status = "active"
+    elif isinstance(task.get("plan_gate_passed"), bool):
+        status = "ready"
+    summary_parts = [f"critic={status}", f"reviews={review_count}"]
+    if actor:
+        summary_parts.append(f"actor={actor}")
+    if convergence and convergence != "-":
+        summary_parts.append(f"convergence={convergence}")
+    if primary_issue:
+        summary_parts.append(f"issue={primary_issue[:120]}")
+    return {
+        "version": PLANNING_LANE_VERSION,
+        "status": status,
+        "summary": " | ".join(summary_parts)[:320],
+        "actor": actor[:64],
+        "convergence": convergence[:32],
+        "primary_issue": primary_issue[:240],
+    }
+
+
+def build_approved_plan_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    plan_data = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    critic = task.get("plan_critic") if isinstance(task.get("plan_critic"), dict) else {}
+    review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    convergence = str(task.get("plan_convergence_status", "")).strip().lower()
+    blockers = _plan_critic_has_blockers(critic) or task.get("plan_gate_passed") is False
+    status = "missing"
+    if not plan_data:
+        if str(task.get("tf_phase", "")).strip().lower() == "planning":
+            status = "pending"
+    elif blockers:
+        status = "blocked"
+    else:
+        status = "approved"
+    subtasks = plan_data.get("subtasks") if isinstance(plan_data.get("subtasks"), list) else []
+    summary_parts = [
+        f"approved_plan={status}",
+        f"subtasks={len(subtasks)}",
+        f"reviews={review_count}",
+    ]
+    if convergence:
+        summary_parts.append(f"convergence={convergence}")
+    if blockers:
+        primary_issue = _latest_plan_issue(task)
+        if primary_issue:
+            summary_parts.append(f"issue={primary_issue[:120]}")
+    elif isinstance(plan_data, dict):
+        plan_summary = str(plan_data.get("summary", "")).strip()
+        if plan_summary:
+            summary_parts.append(f"summary={plan_summary[:120]}")
+    return {
+        "version": APPROVED_PLAN_VERSION,
+        "status": status,
+        "summary": " | ".join(summary_parts)[:320],
+        "artifact_rows": _approved_plan_artifact_rows(plan_data, limit=8) if plan_data else [],
+        "subtask_count": len(subtasks),
+        "review_count": review_count,
+    }
+
+
+def apply_planner_lane_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict) or not isinstance(snapshot, dict):
+        return target
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status not in PLANNING_LANE_STATUSES:
+        _clear_planner_lane_snapshot(target)
+        return target
+    target["planner_lane_version"] = str(snapshot.get("version", PLANNING_LANE_VERSION)).strip() or PLANNING_LANE_VERSION
+    target["planner_lane_status"] = status
+    target["planner_lane_summary"] = str(snapshot.get("summary", "")).strip()[:320]
+    target["planner_lane_actor"] = str(snapshot.get("actor", "")).strip()[:64]
+    target["planner_lane_mode"] = str(snapshot.get("mode", "")).strip()[:32]
+    target["planner_lane_preset"] = str(snapshot.get("preset", "")).strip()[:64]
+    return target
+
+
+def apply_critic_lane_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict) or not isinstance(snapshot, dict):
+        return target
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status not in PLANNING_LANE_STATUSES:
+        _clear_critic_lane_snapshot(target)
+        return target
+    target["critic_lane_version"] = str(snapshot.get("version", PLANNING_LANE_VERSION)).strip() or PLANNING_LANE_VERSION
+    target["critic_lane_status"] = status
+    target["critic_lane_summary"] = str(snapshot.get("summary", "")).strip()[:320]
+    target["critic_lane_actor"] = str(snapshot.get("actor", "")).strip()[:64]
+    target["critic_lane_convergence"] = str(snapshot.get("convergence", "")).strip()[:32]
+    target["critic_lane_primary_issue"] = str(snapshot.get("primary_issue", "")).strip()[:240]
+    return target
+
+
+def apply_approved_plan_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict) or not isinstance(snapshot, dict):
+        return target
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status not in APPROVED_PLAN_STATUSES:
+        _clear_approved_plan_snapshot(target)
+        return target
+    target["approved_plan_version"] = str(snapshot.get("version", APPROVED_PLAN_VERSION)).strip() or APPROVED_PLAN_VERSION
+    target["approved_plan_status"] = status
+    target["approved_plan_summary"] = str(snapshot.get("summary", "")).strip()[:320]
+    target["approved_plan_artifact_rows"] = _normalize_small_rows(snapshot.get("artifact_rows"), limit=8, text_limit=200)
+    target["approved_plan_subtask_count"] = max(0, int(snapshot.get("subtask_count", 0) or 0))
+    target["approved_plan_review_count"] = max(0, int(snapshot.get("review_count", 0) or 0))
+    return target
+
+
 def refresh_task_planning_primitives(
     task: Dict[str, Any],
     *,
@@ -725,6 +1007,24 @@ def refresh_task_planning_primitives(
             "phase_checkpoint_rows",
         ):
             task.pop(key, None)
+
+    planner_lane_snapshot = build_planner_lane_snapshot(task)
+    if planner_lane_snapshot:
+        apply_planner_lane_snapshot(task, planner_lane_snapshot)
+    else:
+        _clear_planner_lane_snapshot(task)
+
+    critic_lane_snapshot = build_critic_lane_snapshot(task)
+    if critic_lane_snapshot:
+        apply_critic_lane_snapshot(task, critic_lane_snapshot)
+    else:
+        _clear_critic_lane_snapshot(task)
+
+    approved_plan_snapshot = build_approved_plan_snapshot(task)
+    if approved_plan_snapshot:
+        apply_approved_plan_snapshot(task, approved_plan_snapshot)
+    else:
+        _clear_approved_plan_snapshot(task)
     return task
 
 
@@ -756,6 +1056,9 @@ def derive_task_dispatch_gate(task: Dict[str, Any]) -> Dict[str, Any]:
     phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
     phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
     phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    approved_plan_status = str(task.get("approved_plan_status", "")).strip().lower()
+    approved_plan_summary = str(task.get("approved_plan_summary", "")).strip() or "-"
+    planning_context = _task_has_planning_context(task)
     status = "ready"
     reason_code = "ready"
     remediation = "dispatch contract is ready"
@@ -766,6 +1069,16 @@ def derive_task_dispatch_gate(task: Dict[str, Any]) -> Dict[str, Any]:
         reason_code = "job_contract_missing"
         remediation = "capture the job contract goal, scope, acceptance checks, and rollback hint before dispatching a new run"
         detail = "job contract missing"
+    elif planning_context and approved_plan_status in {"missing", "pending"}:
+        status = "blocked"
+        reason_code = "approved_plan_missing"
+        remediation = "materialize and approve the planning artifact before dispatching execution lanes"
+        detail = approved_plan_summary
+    elif planning_context and approved_plan_status == "blocked":
+        status = "blocked"
+        reason_code = "approved_plan_blocked"
+        remediation = "clear critic issues and approve the planning artifact before dispatching execution lanes"
+        detail = approved_plan_summary
     elif debug_state in {"", "-"} or debug_summary in {"", "-"}:
         status = "blocked"
         reason_code = "debug_packet_missing"
@@ -790,6 +1103,8 @@ def derive_task_dispatch_gate(task: Dict[str, Any]) -> Dict[str, Any]:
         "next_step": next_step,
         "job_contract_status": contract_status or "-",
         "job_contract_summary": contract_summary,
+        "approved_plan_status": approved_plan_status or "-",
+        "approved_plan_summary": approved_plan_summary,
         "debug_packet_state": debug_state or "-",
         "debug_packet_summary": debug_summary,
         "debug_packet_next_step": str(task.get("debug_packet_next_step", "")).strip() or "-",

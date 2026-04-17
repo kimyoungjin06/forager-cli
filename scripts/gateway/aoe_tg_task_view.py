@@ -597,6 +597,18 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     job_rollback = str(task.get("job_contract_rollback_hint", "")).strip()
     if job_rollback:
         lines.append("job_rollback: " + job_rollback[:240])
+    planner_lane_summary = str(task.get("planner_lane_summary", "")).strip()
+    if planner_lane_summary:
+        lines.append("planner_lane: " + planner_lane_summary[:240])
+    critic_lane_summary = str(task.get("critic_lane_summary", "")).strip()
+    if critic_lane_summary:
+        lines.append("critic_lane: " + critic_lane_summary[:240])
+    approved_plan_summary = str(task.get("approved_plan_summary", "")).strip()
+    if approved_plan_summary:
+        lines.append("approved_plan: " + approved_plan_summary[:240])
+    approved_plan_rows = [str(item).strip() for item in (task.get("approved_plan_artifact_rows") or []) if str(item).strip()]
+    if approved_plan_rows:
+        lines.append("approved_plan_artifact: " + " | ".join(approved_plan_rows[:4])[:240])
     debug_packet_summary = str(task.get("debug_packet_summary", "")).strip()
     if debug_packet_summary:
         lines.append("debug_packet: " + debug_packet_summary[:240])

@@ -1273,6 +1273,26 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["followup_brief_execution_lane_ids"] = ["L2"]
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
+    task["phase1_mode"] = "ensemble"
+    task["phase1_rounds"] = 3
+    task["phase1_current_round"] = 3
+    task["phase1_current_total_rounds"] = 3
+    task["phase1_current_phase"] = "verification"
+    task["phase1_current_provider"] = "codex"
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_providers"] = ["codex", "claude"]
+    task["plan"] = {
+        "summary": "approved analysis plan",
+        "subtasks": [
+            {"id": "S1", "owner_role": "Codex-Analyst", "title": "Re-check evidence links"},
+            {"id": "S2", "owner_role": "Codex-Reviewer", "title": "Validate caveats"},
+        ],
+    }
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": ["ready for execution"]}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
     task["background_run_task_contract_module"] = "analysis"
     task["background_run_task_contract_module_summary"] = "analysis | analysis/review signals"
@@ -1381,6 +1401,11 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "job_goal" in text
     assert "job_scope" in text
     assert "job_acceptance" in text
+    assert "planner_lane" in text
+    assert "critic_lane" in text
+    assert "approved_plan" in text
+    assert "approved analysis plan" in text
+    assert "Re-check evidence links" in text
     assert "debug_packet" in text
     assert "debug_symptom" in text
     assert "debug_next" in text
@@ -1572,6 +1597,26 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["followup_brief_execution_lane_ids"] = ["L2"]
     task["followup_brief_review_lane_ids"] = ["R1"]
     task["followup_brief_reason"] = "operator must decide the analysis handoff wording"
+    task["phase1_mode"] = "ensemble"
+    task["phase1_rounds"] = 3
+    task["phase1_current_round"] = 3
+    task["phase1_current_total_rounds"] = 3
+    task["phase1_current_phase"] = "verification"
+    task["phase1_current_provider"] = "codex"
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_providers"] = ["codex", "claude"]
+    task["plan"] = {
+        "summary": "approved analysis plan",
+        "subtasks": [
+            {"id": "S1", "owner_role": "Codex-Analyst", "title": "Re-check evidence links"},
+            {"id": "S2", "owner_role": "Codex-Reviewer", "title": "Validate caveats"},
+        ],
+    }
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": ["ready for execution"]}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
     task["background_run_task_contract_module"] = "analysis"
     task["background_run_task_contract_module_summary"] = "analysis | analysis/review signals"
@@ -1681,6 +1726,11 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "job_goal" in text
     assert "job_scope" in text
     assert "job_acceptance" in text
+    assert "planner_lane" in text
+    assert "critic_lane" in text
+    assert "approved_plan" in text
+    assert "approved analysis plan" in text
+    assert "Re-check evidence links" in text
     assert "debug_packet" in text
     assert "debug_symptom" in text
     assert "debug_next" in text
@@ -4580,6 +4630,104 @@ def test_dashboard_gates_dispatch_phase2_actions_when_job_contract_body_is_missi
         assert "job_contract" in payload
         assert "debug_packet" in payload
         assert "phase_checkpoint" in payload
+
+
+def test_dashboard_gates_dispatch_phase2_actions_when_approved_plan_is_blocked(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=reports/summary.md"
+    task["job_contract_goal"] = "close the acceptance gap"
+    task["job_contract_scope"] = ["reports/summary.md"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["reports/summary.md"]
+    task["job_contract_rollback_hint"] = "revert summary wording if the evidence check fails"
+    task["debug_packet_state"] = "active"
+    task["debug_packet_summary"] = "state=active | symptom=background_run_inflight | next=/task T-001"
+    task["debug_packet_symptom"] = "background_run_inflight"
+    task["debug_packet_next_step"] = "/task T-001"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["phase1_mode"] = "ensemble"
+    task["phase1_rounds"] = 3
+    task["phase1_current_round"] = 3
+    task["phase1_current_total_rounds"] = 3
+    task["phase1_current_phase"] = "verification"
+    task["phase1_current_provider"] = "codex"
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_providers"] = ["codex", "claude"]
+    task["plan"] = {
+        "summary": "needs one more critic pass",
+        "subtasks": [{"id": "S1", "owner_role": "Codex-Analyst", "title": "Re-check evidence links"}],
+    }
+    task["plan_critic"] = {"approved": False, "issues": ["missing acceptance"], "recommendations": []}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "blocked"
+    task["plan_gate_passed"] = False
+    task["plan_gate_reason"] = "missing acceptance"
+    gw.save_manager_state(manager_state_file, state)
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    blocked_paths = {
+        "/control/actions/task/retry",
+        "/control/actions/task/replan",
+        "/control/actions/task/followup-execute",
+    }
+    assert all(btn.path not in blocked_paths for btn in runtime_card.runtime_phase2_action_buttons)
+    assert all(btn.path not in blocked_paths for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert task_detail is not None
+    assert all(btn.path not in blocked_paths for btn in task_detail.phase2_action_buttons)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    for action_path in ("/control/actions/task/retry", "/control/actions/task/replan"):
+        status, headers, body = dashboard_app.build_dashboard_action_response(
+            action_path,
+            body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+            content_type="application/json",
+            config=config,
+        )
+        payload = json.loads(body.decode("utf-8"))
+        assert status == 409
+        assert headers["Content-Type"].startswith("application/json")
+        assert payload["status"] == "blocked"
+        assert payload["outcome"]["reason_code"] == "approved_plan_blocked"
+        assert payload["next_step"] == "/task T-001"
 
 
 def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_path: Path) -> None:

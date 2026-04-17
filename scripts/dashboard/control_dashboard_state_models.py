@@ -280,6 +280,10 @@ class TaskDetailDTO:
     job_contract_acceptance_checks: str = ""
     job_contract_artifacts_to_touch: str = ""
     job_contract_rollback_hint: str = ""
+    planner_lane_summary: str = ""
+    critic_lane_summary: str = ""
+    approved_plan_summary: str = ""
+    approved_plan_artifact_rows: str = ""
     debug_packet_summary: str = ""
     debug_packet_symptom: str = ""
     debug_packet_root_cause: str = ""
@@ -405,6 +409,10 @@ class RuntimeDetailDTO:
     active_task_job_contract_acceptance_checks: str
     active_task_job_contract_artifacts_to_touch: str
     active_task_job_contract_rollback_hint: str
+    active_task_planner_lane_summary: str
+    active_task_critic_lane_summary: str
+    active_task_approved_plan_summary: str
+    active_task_approved_plan_artifact_rows: str
     active_task_debug_packet_summary: str
     active_task_debug_packet_symptom: str
     active_task_debug_packet_root_cause: str
