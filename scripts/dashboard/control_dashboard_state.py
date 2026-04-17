@@ -811,6 +811,27 @@ def _chat_live_preview_preset(
     return _chat_select_preset(session_presets, token=preferred_label)
 
 
+def _chat_live_preview_preset_note(
+    *,
+    preview_groups: list[ServerGuardActionGroupDTO],
+    preset: ChatSessionPresetDTO | None,
+    selected_task: Dict[str, Any] | None = None,
+) -> str:
+    row = preset if isinstance(preset, ChatSessionPresetDTO) else None
+    if row is None:
+        return ""
+    pressure_note = ""
+    if preview_groups:
+        lead = preview_groups[0]
+        pressure_note = str(lead.action_sentence or lead.operator_sentence or "").strip()
+    return task_view.planning_preset_operator_note(
+        selected_task,
+        base_note=" | ".join(
+            token for token in [pressure_note, str(row.note or "").strip()] if token and token != "-"
+        ),
+    )
+
+
 def _chat_recommended_session_presets(
     *,
     server_guard: ControlSummaryDTO | None,
@@ -942,6 +963,10 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             at=str(raw.get("at", "")).strip() or "-",
             headline=str(raw.get("headline", "")).strip() or "-",
             headline_summary=action_audit.summarize_action_audit_headline(raw),
+            planning_review_summary=action_audit.summarize_retry_replan_planning_review_handoff(
+                raw.get("planning_handoff"),
+                row=raw,
+            ),
             status=str(raw.get("status", "")).strip() or "unknown",
             outcome_kind=outcome_kind or "-",
             outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",
@@ -1150,7 +1175,11 @@ def load_dashboard_chat_page(
         deep_link_preset_lang=deep_link_preset.lang if deep_link_preset is not None else "",
         deep_link_preset_report_level=deep_link_preset.report_level if deep_link_preset is not None else "",
         live_preview_preset_label=live_preview_preset.label if live_preview_preset is not None else "",
-        live_preview_preset_note=live_preview_preset.note if live_preview_preset is not None else "",
+        live_preview_preset_note=_chat_live_preview_preset_note(
+            preview_groups=snapshot_result.snapshot.control_summary.server_guard_preview_groups,
+            preset=live_preview_preset,
+            selected_task=selected_task,
+        ),
         live_preview_preset_room=live_preview_preset.room if live_preview_preset is not None else "",
         live_preview_preset_default_mode=live_preview_preset.default_mode if live_preview_preset is not None else "",
         live_preview_preset_pending_mode=live_preview_preset.pending_mode if live_preview_preset is not None else "",

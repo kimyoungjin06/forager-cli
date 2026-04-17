@@ -620,6 +620,7 @@ def summarize_action_audit_headline(raw: Any) -> str:
         debug_summary = summarize_retry_replan_debug_handoff(row.get("planning_handoff"), row=row)
         if debug_summary not in {"", "-"} and debug_summary not in headline:
             headline = f"{headline} | {debug_summary}"
+    if status == "blocked":
         planning_review_summary = summarize_retry_replan_planning_review_handoff(row.get("planning_handoff"), row=row)
         if planning_review_summary not in {"", "-"} and planning_review_summary not in headline:
             headline = f"{headline} | {planning_review_summary}"

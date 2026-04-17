@@ -53,6 +53,7 @@ class ActionAuditRowDTO:
     at: str
     headline: str
     headline_summary: str
+    planning_review_summary: str
     status: str
     outcome_kind: str
     outcome_status: str
@@ -260,6 +261,10 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         headline_summary=action_audit.summarize_action_audit_headline(raw),
+        planning_review_summary=action_audit.summarize_retry_replan_planning_review_handoff(
+            raw.get("planning_handoff"),
+            row=raw,
+        ),
         status=str(raw.get("status", "")).strip() or "unknown",
         outcome_kind=outcome_kind,
         outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",

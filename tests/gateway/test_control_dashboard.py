@@ -822,11 +822,15 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
         "outcome_status": "blocked",
         "outcome_reason_code": "approved_plan_blocked",
         "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+        "planning_handoff": {
+            "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+        },
     }
 
     summary = action_audit.summarize_action_audit_headline(row)
 
     assert "reason=approved_plan_blocked" in summary
+    assert "planning=draft via codex | review via claude | dispatch waits for critic-approved plan" in summary
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
 
 

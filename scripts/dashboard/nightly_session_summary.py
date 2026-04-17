@@ -483,6 +483,9 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     next_step=row.get("next_step", "-"),
                 )
             )
+            planning_review = str(row.get("planning_review_summary", "")).strip()
+            if planning_review and planning_review != "-":
+                lines.append(f"  - planning_review: {planning_review}")
             if str(row.get("link_href", "")).strip():
                 lines.append(
                     "  - link: {label} -> {href}".format(
