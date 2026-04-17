@@ -400,6 +400,50 @@ def _planning_primitives_snapshot(source_task: Dict[str, Any]) -> Dict[str, str]
     }
 
 
+def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(source_task, dict):
+        return {"job_contract": {}, "debug_packet": {}, "phase_checkpoint": {}}
+    gateway_task_state.refresh_task_planning_primitives(source_task)
+    return {
+        "job_contract": {
+            "version": str(source_task.get("job_contract_version", "")).strip() or "-",
+            "status": str(source_task.get("job_contract_status", "")).strip() or "-",
+            "planning_mode": str(source_task.get("job_contract_planning_mode", "")).strip() or "-",
+            "summary": str(source_task.get("job_contract_summary", "")).strip() or "-",
+            "goal": str(source_task.get("job_contract_goal", "")).strip() or "-",
+            "scope": [str(item).strip() for item in (source_task.get("job_contract_scope") or []) if str(item).strip()],
+            "acceptance_checks": [
+                str(item).strip()
+                for item in (source_task.get("job_contract_acceptance_checks") or [])
+                if str(item).strip()
+            ],
+            "artifacts_to_touch": [
+                str(item).strip()
+                for item in (source_task.get("job_contract_artifacts_to_touch") or [])
+                if str(item).strip()
+            ],
+            "rollback_hint": str(source_task.get("job_contract_rollback_hint", "")).strip() or "-",
+        },
+        "debug_packet": {
+            "version": str(source_task.get("debug_packet_version", "")).strip() or "-",
+            "state": str(source_task.get("debug_packet_state", "")).strip() or "-",
+            "summary": str(source_task.get("debug_packet_summary", "")).strip() or "-",
+            "symptom": str(source_task.get("debug_packet_symptom", "")).strip() or "-",
+            "root_cause": str(source_task.get("debug_packet_root_cause", "")).strip() or "-",
+            "evidence": [str(item).strip() for item in (source_task.get("debug_packet_evidence") or []) if str(item).strip()],
+            "failed_attempt": str(source_task.get("debug_packet_failed_attempt", "")).strip() or "-",
+            "next_step": str(source_task.get("debug_packet_next_step", "")).strip() or "-",
+        },
+        "phase_checkpoint": {
+            "version": str(source_task.get("phase_checkpoint_version", "")).strip() or "-",
+            "status": str(source_task.get("phase_checkpoint_status", "")).strip() or "-",
+            "current_phase": str(source_task.get("phase_checkpoint_current_phase", "")).strip() or "-",
+            "summary": str(source_task.get("phase_checkpoint_summary", "")).strip() or "-",
+            "rows": [str(item).strip() for item in (source_task.get("phase_checkpoint_rows") or []) if str(item).strip()],
+        },
+    }
+
+
 def _select_planning_task(*candidates: Any) -> Dict[str, Any]:
     planning_keys = (
         "job_contract_status",
@@ -526,6 +570,7 @@ def _append_blocked_retry_replan_audit(
     replan_auto_decision: Dict[str, Any],
     replan_auto_routing_policy: Dict[str, Any],
     planning_primitives: Dict[str, Any],
+    planning_handoff: Dict[str, Any],
     now_iso: Any,
 ) -> None:
     if not blocked or not isinstance(entry, dict):
@@ -557,6 +602,7 @@ def _append_blocked_retry_replan_audit(
             "job_contract_summary": str((planning_primitives or {}).get("job_contract_summary", "")).strip() or "-",
             "debug_packet_summary": str((planning_primitives or {}).get("debug_packet_summary", "")).strip() or "-",
             "phase_checkpoint_summary": str((planning_primitives or {}).get("phase_checkpoint_summary", "")).strip() or "-",
+            "planning_handoff": dict(planning_handoff or {}),
         },
     )
 
@@ -1379,6 +1425,7 @@ def _execute_retry_run_transition(
     latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     planning_task = _select_planning_task(source_task, executed_task)
     planning_primitives = _planning_primitives_snapshot(planning_task)
+    planning_handoff = _planning_handoff_packet(planning_task)
     latest_judge_decision_bridge: Dict[str, Any] = {}
     replan_auto_decision: Dict[str, Any] = {}
     replan_auto_routing_policy: Dict[str, Any] = {}
@@ -1429,6 +1476,7 @@ def _execute_retry_run_transition(
             replan_auto_decision=replan_auto_decision,
             replan_auto_routing_policy=replan_auto_routing_policy,
             planning_primitives=planning_primitives,
+            planning_handoff=planning_handoff,
             now_iso=_now_iso,
         )
     return _json(
@@ -1470,6 +1518,7 @@ def _execute_retry_run_transition(
             "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
             "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
             "phase_checkpoint": str(planning_primitives.get("phase_checkpoint_summary", "")).strip() or "-",
+            "planning_handoff": planning_handoff,
         },
         status=409 if blocked else 200,
     )
@@ -1687,6 +1736,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if isinstance(entry, dict) else {}
         planning_task = _select_planning_task(source_task)
         planning_primitives = _planning_primitives_snapshot(planning_task)
+        planning_handoff = _planning_handoff_packet(planning_task)
         error_code = (
             "followup_execute_brief_required"
             if "orch-followup-exec blocked" in blocked_contexts
@@ -1790,6 +1840,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             replan_auto_decision=replan_auto_decision,
             replan_auto_routing_policy=replan_auto_routing_policy,
             planning_primitives=planning_primitives,
+            planning_handoff=planning_handoff,
             now_iso=_now_iso,
         )
         return _json(
@@ -1815,6 +1866,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
                 "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
                 "phase_checkpoint": str(planning_primitives.get("phase_checkpoint_summary", "")).strip() or "-",
+                "planning_handoff": planning_handoff,
             },
             status=409,
         )

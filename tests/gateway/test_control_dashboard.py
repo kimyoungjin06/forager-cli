@@ -3014,6 +3014,9 @@ def test_control_dashboard_post_replan_route_terminal_block_reuses_job_contract_
     assert payload["job_contract"].startswith("status=blocked")
     assert payload["debug_packet"].startswith("state=blocked")
     assert payload["phase_checkpoint"].startswith("status=blocked")
+    assert payload["planning_handoff"]["job_contract"]["status"] == "blocked"
+    assert payload["planning_handoff"]["debug_packet"]["state"] == "blocked"
+    assert payload["planning_handoff"]["phase_checkpoint"]["status"] == "blocked"
     assert payload["replan_auto_decision"]["current_action"] == "replan"
     assert payload["replan_auto_decision"]["suggested_action"] == "task_review"
     assert payload["replan_auto_decision"]["suggested_next_step"] == "/task T-001"
@@ -3109,6 +3112,8 @@ def test_control_dashboard_post_replan_route_reuses_phase_checkpoint_feedback(tm
 
     assert status == 409
     assert payload["next_step"] == "/task T-001"
+    assert payload["planning_handoff"]["phase_checkpoint"]["status"] == "blocked"
+    assert payload["planning_handoff"]["phase_checkpoint"]["current_phase"] == "verify"
     assert payload["replan_auto_decision"]["planning_feedback_source"] == "phase_checkpoint"
     assert payload["replan_auto_decision"]["planning_feedback_applied"] is True
     assert payload["replan_auto_decision"]["decision_mode"] == "planning_primitive_reuse"
@@ -3116,6 +3121,131 @@ def test_control_dashboard_post_replan_route_reuses_phase_checkpoint_feedback(tm
     assert payload["replan_auto_routing_policy"]["requires_operator_confirmation"] is False
     assert payload["replan_auto_routing_policy"]["can_auto_apply"] is False
     assert "planning primitives reused: source=phase_checkpoint next=/task T-001" in payload["remediation"]
+
+
+def test_dashboard_surfaces_phase_review_ready_task_review_actions(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan | blocked",
+        status="blocked",
+        outcome_kind="replan",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked replan",
+        next_step="/task T-001",
+        remediation="planning primitives reused: source=phase_checkpoint next=/task T-001",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:07:00+09:00",
+        extra={
+            "replan_auto_decision": {
+                "source": "latest_offdesk_judge",
+                "current_action": "replan",
+                "suggested_action": "task_review",
+                "suggested_next_step": "/task T-001",
+                "decision_mode": "planning_primitive_reuse",
+                "bridge_applied": True,
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "confidence": "medium",
+                "planning_feedback_source": "phase_checkpoint",
+                "planning_feedback_state": "blocked",
+                "planning_feedback_summary": "status=blocked | current=verify | verify=blocked|note=verification_gap",
+                "planning_feedback_next_step": "/task T-001",
+                "planning_feedback_suggested_action": "task_review",
+                "planning_feedback_applied": True,
+                "phase_checkpoint_status": "blocked",
+                "phase_checkpoint_current_phase": "verify",
+                "phase_checkpoint_summary": "status=blocked | current=verify | verify=blocked|note=verification_gap",
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "phase_review_ready",
+                "current_action": "replan",
+                "suggested_action": "task_review",
+                "suggested_next_step": "/task T-001",
+                "decision_mode": "planning_primitive_reuse",
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "requires_operator_confirmation": False,
+                "confidence": "medium",
+                "planning_feedback_source": "phase_checkpoint",
+                "planning_feedback_state": "blocked",
+                "planning_feedback_summary": "status=blocked | current=verify | verify=blocked|note=verification_gap",
+                "planning_feedback_applied": True,
+                "phase_checkpoint_status": "blocked",
+                "phase_checkpoint_current_phase": "verify",
+                "phase_checkpoint_summary": "status=blocked | current=verify | verify=blocked|note=verification_gap",
+            },
+        },
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+
+    expected_payload = '{"task_ref":"T-001","review_kind":"phase_review_ready"}'
+    assert any(
+        btn.label == "Review Phase Checkpoint"
+        and btn.path == "/control/actions/task/task-review"
+        and btn.payload_json == expected_payload
+        for btn in runtime_card.runtime_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Review Phase Checkpoint"
+        and btn.path == "/control/actions/task/task-review"
+        and btn.payload_json == expected_payload
+        for btn in runtime_detail.active_task_safe_action_buttons
+    )
+    assert task_detail is not None
+    assert any(
+        btn.label == "Review Phase Checkpoint"
+        and btn.path == "/control/actions/task/task-review"
+        and btn.payload_json == expected_payload
+        for btn in task_detail.safe_action_buttons
+    )
+    assert runtime_detail.latest_manual_step_summary == "task_review=/task T-001 | gate=phase_checkpoint | waiting_for_operator"
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/task-review",
+        body=json.dumps({"task_ref": "T-001", "review_kind": "phase_review_ready"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "preview"
+    assert payload["outcome"]["reason_code"] == "phase_review_ready"
+    assert payload["planning_handoff"]["phase_checkpoint"]["status"] == "blocked"
+    assert payload["planning_handoff"]["phase_checkpoint"]["current_phase"] != "-"
 
 
 def test_control_dashboard_post_replan_route_surfaces_manual_ready_followup_policy(tmp_path: Path, monkeypatch) -> None:

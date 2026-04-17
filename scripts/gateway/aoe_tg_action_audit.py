@@ -857,11 +857,23 @@ def load_latest_replan_auto_operator_summary_for_runtime(
 def summarize_latest_manual_step(policy: Any) -> str:
     normalized_policy = normalize_replan_auto_routing_policy(policy)
     policy_status = str(normalized_policy.get("status", "")).strip().lower()
-    if policy_status not in {"manual_ready", "manual_progressed"}:
+    if policy_status not in {
+        "manual_ready",
+        "manual_progressed",
+        "analysis_review_ready",
+        "contract_review_ready",
+        "debug_review_ready",
+        "phase_review_ready",
+    }:
         return "-"
     next_step = str(normalized_policy.get("suggested_next_step", "")).strip() or "-"
     suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
     confidence = str(normalized_policy.get("confidence", "")).strip() or "-"
+    planning_feedback_source = str(normalized_policy.get("planning_feedback_source", "")).strip() or "-"
+    if policy_status in {"analysis_review_ready", "contract_review_ready", "debug_review_ready", "phase_review_ready"}:
+        if policy_status == "analysis_review_ready":
+            return f"analysis_review={next_step} | gate=analysis_record_set | waiting_for_operator"
+        return f"task_review={next_step} | gate={planning_feedback_source} | waiting_for_operator"
     if policy_status == "manual_progressed":
         feedback_state = str(normalized_policy.get("manual_feedback_state", "")).strip() or "-"
         if suggested_action in {"manual_review", "review", "judge"}:

@@ -748,11 +748,37 @@ def _replan_manual_route_action_button(
     policy: Dict[str, Any],
 ) -> ActionButtonDTO | None:
     row = policy if isinstance(policy, dict) else {}
-    if str(row.get("status", "")).strip() != "manual_ready":
-        return None
+    policy_status = str(row.get("status", "")).strip()
     suggested_next_step = str(row.get("suggested_next_step", "")).strip()
     confidence = str(row.get("confidence", "")).strip() or "-"
     task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if policy_status in {"contract_review_ready", "debug_review_ready", "phase_review_ready", "analysis_review_ready"}:
+        if not suggested_next_step.startswith("/task ") or task_ref == "-":
+            return None
+        payload = {"task_ref": task_ref, "review_kind": policy_status}
+        review_label = {
+            "contract_review_ready": "Review Job Contract",
+            "debug_review_ready": "Review Debug Packet",
+            "phase_review_ready": "Review Phase Checkpoint",
+            "analysis_review_ready": "Review Analysis Records",
+        }.get(policy_status, "Review Task")
+        review_note = {
+            "contract_review_ready": "planning contract review",
+            "debug_review_ready": "debug packet review",
+            "phase_review_ready": "phase checkpoint review",
+            "analysis_review_ready": "analysis record review",
+        }.get(policy_status, "task review")
+        return ActionButtonDTO(
+            label=review_label,
+            command=f"{suggested_next_step} | {policy_status.replace('_', '-')}",
+            method="POST",
+            path="/control/actions/task/task-review",
+            mode="safe",
+            note=f"{review_note} | confidence={confidence} | next={suggested_next_step}",
+            payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        )
+    if policy_status != "manual_ready":
+        return None
     spec = operator_action_contract.http_action_spec(suggested_next_step)
     if not isinstance(spec, dict):
         return None
@@ -768,7 +794,7 @@ def _replan_manual_route_action_button(
             return None
     else:
         return None
-    label = {
+    button_label = {
         "/control/actions/task/followup": "Apply Judge Followup",
         "/control/actions/task/followup-execute": "Apply Judge Execute Step",
         "/control/actions/runtime/judge": "Run Judge Manual Review",
@@ -779,7 +805,7 @@ def _replan_manual_route_action_button(
         "/control/actions/runtime/judge": "judge-backed manual review",
     }.get(path, "judge-backed manual step")
     return ActionButtonDTO(
-        label=label,
+        label=button_label,
         command=suggested_next_step,
         method=str(spec.get("method", "POST")).strip() or "POST",
         path=path,

@@ -1092,6 +1092,10 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
     review_kind = str(payload.get("review_kind", "")).strip().lower() or "task_review"
     review_suffix = {
         "task_review": "analysis-review",
+        "analysis_review_ready": "analysis-review",
+        "contract_review_ready": "contract-review",
+        "debug_review_ready": "debug-review",
+        "phase_review_ready": "phase-review",
         "package_verification_review": "package-verification-review",
         "package_apply_review": "package-apply-review",
         "package_syncback_review": "package-syncback-review",
@@ -1125,6 +1129,85 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
         )
     alias = _project_alias(entry, key)
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    planning_handoff = {
+        "job_contract": {
+            "status": str(task.get("job_contract_status", "")).strip() or "-",
+            "summary": str(task.get("job_contract_summary", "")).strip() or "-",
+            "goal": str(task.get("job_contract_goal", "")).strip() or "-",
+            "scope": [str(item).strip() for item in (task.get("job_contract_scope") or []) if str(item).strip()],
+            "acceptance_checks": [str(item).strip() for item in (task.get("job_contract_acceptance_checks") or []) if str(item).strip()],
+            "artifacts_to_touch": [str(item).strip() for item in (task.get("job_contract_artifacts_to_touch") or []) if str(item).strip()],
+            "rollback_hint": str(task.get("job_contract_rollback_hint", "")).strip() or "-",
+        },
+        "debug_packet": {
+            "state": str(task.get("debug_packet_state", "")).strip() or "-",
+            "summary": str(task.get("debug_packet_summary", "")).strip() or "-",
+            "symptom": str(task.get("debug_packet_symptom", "")).strip() or "-",
+            "root_cause": str(task.get("debug_packet_root_cause", "")).strip() or "-",
+            "evidence": [str(item).strip() for item in (task.get("debug_packet_evidence") or []) if str(item).strip()],
+            "failed_attempt": str(task.get("debug_packet_failed_attempt", "")).strip() or "-",
+            "next_step": str(task.get("debug_packet_next_step", "")).strip() or "-",
+        },
+        "phase_checkpoint": {
+            "status": str(task.get("phase_checkpoint_status", "")).strip() or "-",
+            "current_phase": str(task.get("phase_checkpoint_current_phase", "")).strip() or "-",
+            "summary": str(task.get("phase_checkpoint_summary", "")).strip() or "-",
+            "rows": [str(item).strip() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()],
+        },
+    }
+    if review_kind in {"contract_review_ready", "debug_review_ready", "phase_review_ready", "analysis_review_ready"}:
+        planning_detail = {
+            "contract_review_ready": str(task.get("job_contract_summary", "")).strip() or "-",
+            "debug_review_ready": str(task.get("debug_packet_summary", "")).strip() or "-",
+            "phase_review_ready": str(task.get("phase_checkpoint_summary", "")).strip() or "-",
+            "analysis_review_ready": str(task.get("background_run_worker_record_set_summary", "")).strip()
+            or str(task.get("background_run_worker_record_rows_summary", "")).strip()
+            or "-",
+        }.get(review_kind, "-")
+        remediation = {
+            "contract_review_ready": "inspect the job contract goal, scope, acceptance checks, and artifact targets before dispatching or retrying again",
+            "debug_review_ready": "inspect the debug packet symptom, evidence, failed attempt, and next step before retrying or replanning again",
+            "phase_review_ready": "inspect the current phase checkpoint rows before retrying, replanning, or applying worker updates",
+            "analysis_review_ready": "inspect the analysis record set and blocked findings before resuming the task",
+        }.get(review_kind, "inspect the task review packet before resuming operator actions")
+        return _json(
+            {
+                "ok": True,
+                "implemented": True,
+                "executed": False,
+                "status": "preview",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or f"/task {label} | {review_suffix}",
+                "payload": payload,
+                "next_step": f"/task {label}",
+                "remediation": remediation,
+                "outcome": {
+                    "kind": "task_review",
+                    "status": "preview",
+                    "reason_code": review_kind,
+                    "detail": planning_detail,
+                },
+                "task": {
+                    "request_id": request_id,
+                    "label": label,
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+                "planning_handoff": planning_handoff,
+                "job_contract": planning_handoff["job_contract"]["summary"],
+                "debug_packet": planning_handoff["debug_packet"]["summary"],
+                "phase_checkpoint": planning_handoff["phase_checkpoint"]["summary"],
+                "preview": {
+                    "kind": "task_review",
+                    "review_kind": review_kind,
+                    "project_alias": alias,
+                    "runtime_path": _runtime_action_link(alias),
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+            },
+            status=200,
+        )
     record_rows_payload = _worker_record_rows_payload(task)
     preflight_rows_payload = _worker_preflight_rows_payload(task)
     blocker = worker_task_contract.derive_worker_task_module_action_blocker(
@@ -1167,6 +1250,7 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
             "worker_blocker": blocker_summary,
             "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
             "worker_recommended_action": str(blocker.get("suggested_action", "")).strip().lower() or "task_review",
+            "planning_handoff": planning_handoff,
             "preview": {
                 "kind": "task_review",
                 "review_kind": review_kind,
