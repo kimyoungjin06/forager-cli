@@ -7426,6 +7426,8 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "action_copy" in overview_text
     assert "start with Chat, then keep Global Direct narrow" in overview_text
     assert "pressure-kind-badge" in overview_text
+    assert "planning_review: draft via" in overview_text
+    assert "approved_plan:" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
     assert "Latest Server Guard Thread" in chat_text

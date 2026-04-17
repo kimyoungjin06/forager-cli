@@ -190,6 +190,17 @@ def planning_operator_bundle(
     }
 
 
+def planning_compact_operator_summary(
+    *,
+    planning_review: str = "",
+    approved_plan: str = "",
+) -> str:
+    parts: List[str] = []
+    _append_unique_summary_part(parts, str(planning_review or "").strip())
+    _append_unique_summary_part(parts, str(approved_plan or "").strip())
+    return " | ".join(parts)[:320] if parts else "-"
+
+
 def planning_review_operator_summary(
     task: Optional[Dict[str, Any]] = None,
     *,

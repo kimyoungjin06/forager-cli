@@ -67,6 +67,7 @@
               data-at="{{ row.at }}"
               data-headline="{{ row.headline_summary or row.headline }}"
               data-planning-review="{{ row.planning_review_summary }}"
+              data-approved-plan="{{ row.approved_plan_summary }}"
               data-next-step="{{ row.next_step }}"
               data-link-label="{{ row.link_label }}"
               data-link-href="{{ row.link_href }}"
@@ -79,7 +80,10 @@
                 <strong>{{ row.at }} | {{ row.headline_summary or row.headline }}</strong>
               </div>
               {% if row.planning_review_summary and row.planning_review_summary != '-' %}
-              <div class="muted">{{ row.planning_review_summary }}</div>
+              <div class="muted">planning_review: {{ row.planning_review_summary|replace('planning=', '') }}</div>
+              {% endif %}
+              {% if row.approved_plan_summary and row.approved_plan_summary != '-' %}
+              <div class="muted">approved_plan: {{ row.approved_plan_summary }}</div>
               {% endif %}
               {% if row.next_step and row.next_step != '-' %}
               <div class="muted">next: {{ row.next_step }}</div>
@@ -136,6 +140,7 @@
               at: item.dataset.at || "-",
               headline: item.dataset.headline || "-",
               planningReview: item.dataset.planningReview || "-",
+              approvedPlan: item.dataset.approvedPlan || "-",
               nextStep: item.dataset.nextStep || "-",
               linkLabel: item.dataset.linkLabel || "-",
               linkHref: item.dataset.linkHref || "-",
@@ -368,8 +373,14 @@
             if (entry.planningReview && entry.planningReview !== "-") {
               const planning = document.createElement("div");
               planning.className = "muted";
-              planning.textContent = entry.planningReview;
+              planning.textContent = `planning_review: ${String(entry.planningReview).replace(/^planning=/, "")}`;
               item.appendChild(planning);
+            }
+            if (entry.approvedPlan && entry.approvedPlan !== "-") {
+              const approved = document.createElement("div");
+              approved.className = "muted";
+              approved.textContent = `approved_plan: ${entry.approvedPlan}`;
+              item.appendChild(approved);
             }
             if (entry.nextStep && entry.nextStep !== "-") {
               const meta = document.createElement("div");
@@ -394,11 +405,12 @@
             // Ignore storage failures; in-memory history still works for this page.
           }
         };
-        const pushHistory = (headline, planningReview, nextStep, linkLabel, linkHref, status) => {
+        const pushHistory = (headline, planningReview, approvedPlan, nextStep, linkLabel, linkHref, status) => {
           history.unshift({
             at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
             headline,
             planningReview: planningReview || "-",
+            approvedPlan: approvedPlan || "-",
             nextStep: nextStep || "-",
             linkLabel: linkLabel || "-",
             linkHref: linkHref || "-",
@@ -523,6 +535,7 @@
             pushHistory(
               headline,
               planningReview,
+              approvedPlan,
               asText(payload?.next_step),
               linkLabel,
               linkHref,

@@ -883,12 +883,15 @@ def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str
             or str(getattr(row, "headline", "")).strip()
             or "-"
         )
-        planning_review = str(getattr(row, "planning_review_summary", "")).strip()
+        planning_summary = task_view.planning_compact_operator_summary(
+            planning_review=str(getattr(row, "planning_review_summary", "")).strip(),
+            approved_plan=str(getattr(row, "approved_plan_summary", "")).strip(),
+        )
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         summary = f"{headline} | at={at} | next={next_step}"
-        if planning_review and planning_review != "-" and planning_review not in summary:
-            summary = f"{summary} | {planning_review}"
+        if planning_summary and planning_summary != "-" and planning_summary not in summary:
+            summary = f"{summary} | {planning_summary}"
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
@@ -917,13 +920,16 @@ def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str
             or str(getattr(row, "headline", "")).strip()
             or "-"
         )
-        planning_review = str(getattr(row, "planning_review_summary", "")).strip()
+        planning_summary = task_view.planning_compact_operator_summary(
+            planning_review=str(getattr(row, "planning_review_summary", "")).strip(),
+            approved_plan=str(getattr(row, "approved_plan_summary", "")).strip(),
+        )
         status = str(getattr(row, "outcome_status", "")).strip() or str(getattr(row, "status", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
         summary = f"{headline} | status={status} | at={at} | next={next_step}"
-        if planning_review and planning_review != "-" and planning_review not in summary:
-            summary = f"{summary} | {planning_review}"
+        if planning_summary and planning_summary != "-" and planning_summary not in summary:
+            summary = f"{summary} | {planning_summary}"
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
@@ -976,6 +982,10 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             headline=str(raw.get("headline", "")).strip() or "-",
             headline_summary=action_audit.summarize_action_audit_headline(raw),
             planning_review_summary=action_audit.summarize_retry_replan_planning_review_handoff(
+                raw.get("planning_handoff"),
+                row=raw,
+            ),
+            approved_plan_summary=action_audit.summarize_retry_replan_approved_plan_handoff(
                 raw.get("planning_handoff"),
                 row=raw,
             ),
