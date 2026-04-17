@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 import aoe_tg_chat_state as chat_state
 import aoe_tg_request_contract as request_contract
 import aoe_tg_task_state as task_state
+import aoe_tg_task_view as task_view
 
 from control_dashboard_action_exec_shared import _load_dashboard_manager_state, _load_gateway_main_module
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths, _json
@@ -44,6 +45,43 @@ def _resolve_chat_task_request(project_entry: Dict[str, object], raw_ref: str) -
     if resolved and task_state.get_task_record(project_entry, resolved):
         return resolved
     return ""
+
+
+def _chat_project_ref_from_room(room: str) -> str:
+    token = str(room or "").strip()
+    if not token:
+        return ""
+    head = token.split("/", 1)[0].strip()
+    return head if head.upper().startswith("O") else ""
+
+
+def _resolve_selected_chat_task(manager_state: Dict[str, object], chat_id: str, room: str) -> Dict[str, object]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    session_row = chat_state.get_chat_session_row(manager_state, chat_id, create=False)
+    project_ref = _chat_project_ref_from_room(room)
+    project_key, _project_alias, project_entry = _resolve_chat_project(manager_state, project_ref)
+    if not project_key:
+        active_key = str(manager_state.get("active", "")).strip()
+        active_entry = projects.get(active_key) if isinstance(projects.get(active_key), dict) else {}
+        if active_key and isinstance(active_entry, dict):
+            project_key, project_entry = active_key, active_entry
+    if not project_key or not isinstance(project_entry, dict):
+        return {}
+    selected_ref = chat_state.get_chat_selected_task_ref(manager_state, chat_id, project_key)
+    selected_map = session_row.get("selected_task_refs") if isinstance(session_row.get("selected_task_refs"), dict) else {}
+    if not selected_ref:
+        selected_ref = str(selected_map.get("active", "")).strip()
+    if not selected_ref and isinstance(selected_map, dict):
+        for value in selected_map.values():
+            candidate = str(value or "").strip()
+            if candidate:
+                selected_ref = candidate
+                break
+    request_id = _resolve_chat_task_request(project_entry, selected_ref)
+    if not request_id:
+        return {}
+    record = task_state.get_task_record(project_entry, request_id)
+    return record if isinstance(record, dict) else {}
 
 
 def _chat_send_command_text(*, mode: str, text: str) -> str:
@@ -168,6 +206,7 @@ def _execute_chat_session_update_action(
     current_pending_mode = chat_state.get_pending_mode(manager_state, chat_id) or "none"
     current_lang = chat_state.get_chat_lang(manager_state, chat_id)
     current_report_level = chat_state.get_chat_report_level(manager_state, chat_id)
+    selected_task = _resolve_selected_chat_task(manager_state, chat_id, current_room)
     effective_next_step = next_step or f"/control/chat?chat={chat_id}"
     effective_source_command = (
         f"server-guard-preset:{server_guard_pressure_kind or '-'}:{chat_id}:{server_guard_preset_label}"
@@ -223,6 +262,10 @@ def _execute_chat_session_update_action(
             str(policy.get("action_sentence", "")).strip()
             or str(policy.get("operator_sentence", "")).strip()
             or str(policy.get("priority_link_note", "")).strip()
+        )
+        primary_note = task_view.planning_preset_operator_note(
+            selected_task,
+            base_note=primary_note,
         )
         first_key = next((token for token in order if token in action_map), "")
         for token in order:

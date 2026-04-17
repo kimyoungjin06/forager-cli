@@ -2401,6 +2401,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in text
     assert "latest_judge_decision" in text
     assert "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in text
+    assert "planning_review" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text
@@ -7388,8 +7389,10 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         "Codex Pressure",
         "Codex Pressure",
     ]
-    assert [row.get("note") for row in (apply_payload.get("actions") or [])][:3] == [
-        "start with Chat, then keep Global Direct narrow",
+    action_notes = [row.get("note") for row in (apply_payload.get("actions") or [])][:3]
+    assert action_notes[0].startswith("start with Chat, then keep Global Direct narrow")
+    assert "dispatch waits for critic-approved plan" in action_notes[0]
+    assert action_notes[1:] == [
         "inspect the full server-guard action trail",
         "inspect host pressure after switching the chat rail",
     ]

@@ -756,6 +756,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         latest_replan_auto_route_status_summary = "-"
         latest_replan_auto_operator_summary = "-"
         latest_planning_handoff_summary = "-"
+        latest_planning_review_summary = "-"
         latest_manual_step_summary = "-"
         latest_canonical_writeback_summary = "-"
         latest_canonical_mutation_summary = "-"
@@ -880,6 +881,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=active_task)
                     active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
                     active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
+                    latest_planning_review_summary = task_view.planning_review_operator_summary(
+                        active_task,
+                        planning_handoff=latest_planning_handoff_summary,
+                    )
         active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
         runtime_action_contract = _runtime_command_contract(
             project_alias=alias,
@@ -1162,9 +1167,10 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_replan_auto_routing_policy_summary=latest_replan_auto_routing_policy_summary,
                 latest_replan_auto_route_summary=latest_replan_auto_route_summary,
                 latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
-                latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
-                latest_planning_handoff_summary=latest_planning_handoff_summary,
-                latest_manual_step_summary=latest_manual_step_summary,
+                    latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
+                    latest_planning_handoff_summary=latest_planning_handoff_summary,
+                    latest_planning_review_summary=latest_planning_review_summary,
+                    latest_manual_step_summary=latest_manual_step_summary,
                 latest_canonical_writeback_summary=latest_canonical_writeback_summary,
                 latest_canonical_mutation_summary=latest_canonical_mutation_summary,
                 run_lock_mode=run_lock_mode,
@@ -1421,6 +1427,10 @@ def _build_runtime_detail(
         )
         if str(root_team_dir or "").strip()
         else "-"
+    )
+    latest_planning_review_summary = task_view.planning_review_operator_summary(
+        active_task,
+        planning_handoff=latest_planning_handoff_summary,
     )
     latest_manual_step_summary = (
         _latest_manual_step_summary(
@@ -2009,6 +2019,7 @@ def _build_runtime_detail(
         latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
         latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
         latest_planning_handoff_summary=latest_planning_handoff_summary,
+        latest_planning_review_summary=latest_planning_review_summary,
         latest_manual_step_summary=latest_manual_step_summary,
         latest_canonical_writeback_summary=latest_canonical_writeback_summary,
         latest_canonical_mutation_summary=latest_canonical_mutation_summary,

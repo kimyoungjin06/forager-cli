@@ -28,6 +28,7 @@ from control_dashboard_state import (
 )
 from control_dashboard_state_common import _background_scheduler_note
 import aoe_tg_action_audit as action_audit
+import aoe_tg_task_view as task_view
 
 
 def _safe_stamp(iso_text: str) -> str:
@@ -215,6 +216,12 @@ def build_nightly_session_summary(
 
     runtimes: List[Dict[str, Any]] = []
     for detail in active_details:
+        latest_replan_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+            snapshot.team_dir,
+            project_alias=detail.project_alias,
+        )
+        latest_planning_handoff = (latest_replan_policy or {}).get("planning_handoff")
+        latest_planning_handoff_summary = action_audit.summarize_planning_handoff_snapshot(latest_planning_handoff)
         task_rows = _task_rows_for_runtime(manager_state, detail)
         runtimes.append(
             {
@@ -311,18 +318,13 @@ def build_nightly_session_summary(
                 "latest_judge_decision_bridge_summary": _latest_judge_decision_bridge_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_decision_summary": _latest_replan_auto_decision_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_routing_policy_summary": _latest_replan_auto_routing_policy_summary(snapshot.team_dir, detail.project_alias),
-                "latest_replan_auto_routing_policy": action_audit.load_latest_replan_auto_routing_policy_for_runtime(
-                    snapshot.team_dir,
-                    project_alias=detail.project_alias,
-                ),
-                "latest_planning_handoff_summary": action_audit.summarize_planning_handoff_snapshot(
-                    (
-                        action_audit.load_latest_replan_auto_routing_policy_for_runtime(
-                            snapshot.team_dir,
-                            project_alias=detail.project_alias,
-                        )
-                        or {}
-                    ).get("planning_handoff")
+                "latest_replan_auto_routing_policy": latest_replan_policy,
+                "latest_planning_handoff_summary": latest_planning_handoff_summary,
+                "latest_planning_review_summary": task_view.planning_review_operator_summary(
+                    planning_lanes=detail.active_task_planning_lanes_summary,
+                    approved_plan_gate=detail.active_task_approved_plan_gate_summary,
+                    approved_plan=detail.active_task_approved_plan_summary,
+                    planning_handoff=latest_planning_handoff_summary,
                 ),
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
@@ -502,6 +504,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
+                f"- planning_review: {runtime.get('latest_planning_review_summary', '-')}",
                 f"- planning_handoff: {runtime.get('latest_planning_handoff_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",

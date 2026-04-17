@@ -185,6 +185,7 @@ class RuntimeCardDTO:
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
+    latest_planning_review_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str
@@ -508,6 +509,7 @@ class RuntimeDetailDTO:
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
+    latest_planning_review_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str
@@ -636,6 +638,7 @@ class RecoveryRuntimeDTO:
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
+    latest_planning_review_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str

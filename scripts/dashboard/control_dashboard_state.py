@@ -686,7 +686,12 @@ def _chat_room_presets(*, project_alias: str, selected_room: str, rooms: list[st
     return tokens[:10]
 
 
-def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[ChatSessionPresetDTO]:
+def _chat_session_presets(
+    *,
+    project_alias: str,
+    selected_room: str,
+    selected_task: Dict[str, Any] | None = None,
+) -> list[ChatSessionPresetDTO]:
     alias = str(project_alias or "").strip()
     presets: list[ChatSessionPresetDTO] = [
         ChatSessionPresetDTO(
@@ -696,7 +701,10 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
             pending_mode="",
             lang="ko",
             report_level="short",
-            note="short direct replies on the global rail",
+            note=task_view.planning_preset_operator_note(
+                selected_task,
+                base_note="short direct replies on the global rail",
+            ),
         )
     ]
     if alias:
@@ -709,7 +717,10 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
                     pending_mode="",
                     lang="ko",
                     report_level="long",
-                    note="analysis findings, evidence, caveats",
+                    note=task_view.planning_preset_operator_note(
+                        selected_task,
+                        base_note="analysis findings, evidence, caveats",
+                    ),
                 ),
                 ChatSessionPresetDTO(
                     label="Writing Rail",
@@ -718,7 +729,10 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
                     pending_mode="",
                     lang="ko",
                     report_level="normal",
-                    note="drafts, handoff, quality gate",
+                    note=task_view.planning_preset_operator_note(
+                        selected_task,
+                        base_note="drafts, handoff, quality gate",
+                    ),
                 ),
                 ChatSessionPresetDTO(
                     label="Package Rail",
@@ -727,7 +741,10 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
                     pending_mode="",
                     lang="ko",
                     report_level="normal",
-                    note="artifact verification, apply, syncback",
+                    note=task_view.planning_preset_operator_note(
+                        selected_task,
+                        base_note="artifact verification, apply, syncback",
+                    ),
                 ),
                 ChatSessionPresetDTO(
                     label="Review Rail",
@@ -736,7 +753,10 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
                     pending_mode="",
                     lang="ko",
                     report_level="normal",
-                    note="operator review and escalation",
+                    note=task_view.planning_preset_operator_note(
+                        selected_task,
+                        base_note="operator review and escalation",
+                    ),
                 ),
             ]
         )
@@ -750,7 +770,10 @@ def _chat_session_presets(*, project_alias: str, selected_room: str) -> list[Cha
                 pending_mode="",
                 lang="ko",
                 report_level="normal",
-                note="keep the current room selection",
+                note=task_view.planning_preset_operator_note(
+                    selected_task,
+                    base_note="keep the current room selection",
+                ),
             )
         )
     return presets[:6]
@@ -1064,7 +1087,11 @@ def load_dashboard_chat_page(
         recent_chat_actions=recent_chat_actions,
         limit=20,
     )
-    session_presets = _chat_session_presets(project_alias=selected_project_alias, selected_room=selected_room)
+    session_presets = _chat_session_presets(
+        project_alias=selected_project_alias,
+        selected_room=selected_room,
+        selected_task=selected_task,
+    )
     deep_link_preset = _chat_select_preset(session_presets, token=selected_preset)
     live_preview_preset = _chat_live_preview_preset(
         preview_groups=snapshot_result.snapshot.control_summary.server_guard_preview_groups,

@@ -148,6 +148,61 @@ def approved_plan_gate_operator_summary(task: Dict[str, Any]) -> str:
     return base[:240]
 
 
+def _append_unique_summary_part(parts: List[str], value: str) -> None:
+    token = str(value or "").strip()
+    if not token or token == "-":
+        return
+    if token in parts:
+        return
+    for existing in parts:
+        if token in existing or existing in token:
+            return
+    parts.append(token)
+
+
+def planning_review_operator_summary(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+    planning_handoff: str = "",
+) -> str:
+    task_data = task if isinstance(task, dict) else {}
+    if task_data:
+        planning_lanes = planning_lane_operator_summary(task_data)
+        approved_plan_gate = approved_plan_gate_operator_summary(task_data)
+        approved_plan = str(task_data.get("approved_plan_summary", "")).strip() or approved_plan
+    parts: List[str] = []
+    _append_unique_summary_part(parts, planning_lanes)
+    _append_unique_summary_part(parts, approved_plan_gate)
+    _append_unique_summary_part(parts, approved_plan)
+    _append_unique_summary_part(parts, planning_handoff)
+    return " | ".join(parts)[:320] if parts else "-"
+
+
+def planning_preset_operator_note(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    base_note: str = "",
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+) -> str:
+    parts: List[str] = []
+    _append_unique_summary_part(parts, base_note)
+    _append_unique_summary_part(
+        parts,
+        planning_review_operator_summary(
+            task,
+            planning_lanes=planning_lanes,
+            approved_plan_gate=approved_plan_gate,
+            approved_plan=approved_plan,
+        ),
+    )
+    return " | ".join(parts)[:320] if parts else "-"
+
+
 def critic_has_blockers(critic: Dict[str, Any]) -> bool:
     approved = bool(critic.get("approved", True))
     issues = critic.get("issues") or []

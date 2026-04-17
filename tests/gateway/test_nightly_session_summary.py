@@ -237,6 +237,9 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
         " | phase=status=blocked | current=plan | plan=blocked|note=contract_gap"
         " | approved_plan=blocked | subtasks=0 | reviews=1 | issue=contract_gap"
     )
+    assert "draft via" in runtimes[0]["latest_planning_review_summary"]
+    assert "review via" in runtimes[0]["latest_planning_review_summary"]
+    assert "dispatch waits for critic-approved plan" in runtimes[0]["latest_planning_review_summary"]
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"
     assert runtimes[0]["latest_canonical_writeback_summary"].startswith(
@@ -439,6 +442,8 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes" in markdown
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes" in markdown
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in markdown
+    assert "planning_review: draft via" in markdown
+    assert "dispatch waits for critic-approved plan" in markdown
     assert "planning_handoff: contract=status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0 | debug=state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review | phase=status=blocked | current=plan | plan=blocked|note=contract_gap | approved_plan=blocked | subtasks=0 | reviews=1 | issue=contract_gap" in markdown
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in markdown
     assert "auto_route_status: ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in markdown
