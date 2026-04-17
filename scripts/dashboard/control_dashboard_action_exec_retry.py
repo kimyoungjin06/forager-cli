@@ -147,6 +147,7 @@ def _dispatch_gate_block_response(
                 "detail": str(gate.get("detail", "")).strip() or "-",
             },
             "job_contract": str(gate.get("job_contract_summary", "")).strip() or "-",
+            "approved_plan": str(gate.get("approved_plan_summary", "")).strip() or "-",
             "debug_packet": str(gate.get("debug_packet_summary", "")).strip() or "-",
             "phase_checkpoint": str(gate.get("phase_checkpoint_summary", "")).strip() or "-",
         },
@@ -423,6 +424,8 @@ def _planning_primitives_snapshot(source_task: Dict[str, Any]) -> Dict[str, str]
         return {
             "job_contract_status": "-",
             "job_contract_summary": "-",
+            "approved_plan_status": "-",
+            "approved_plan_summary": "-",
             "debug_packet_state": "-",
             "debug_packet_summary": "-",
             "debug_packet_next_step": "-",
@@ -434,6 +437,8 @@ def _planning_primitives_snapshot(source_task: Dict[str, Any]) -> Dict[str, str]
     return {
         "job_contract_status": str(source_task.get("job_contract_status", "")).strip() or "-",
         "job_contract_summary": str(source_task.get("job_contract_summary", "")).strip() or "-",
+        "approved_plan_status": str(source_task.get("approved_plan_status", "")).strip() or "-",
+        "approved_plan_summary": str(source_task.get("approved_plan_summary", "")).strip() or "-",
         "debug_packet_state": str(source_task.get("debug_packet_state", "")).strip() or "-",
         "debug_packet_summary": str(source_task.get("debug_packet_summary", "")).strip() or "-",
         "debug_packet_next_step": str(source_task.get("debug_packet_next_step", "")).strip() or "-",
@@ -445,7 +450,7 @@ def _planning_primitives_snapshot(source_task: Dict[str, Any]) -> Dict[str, str]
 
 def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(source_task, dict):
-        return {"job_contract": {}, "debug_packet": {}, "phase_checkpoint": {}}
+        return {"job_contract": {}, "approved_plan": {}, "debug_packet": {}, "phase_checkpoint": {}}
     gateway_task_state.refresh_task_planning_primitives(source_task)
     return {
         "job_contract": {
@@ -466,6 +471,18 @@ def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
                 if str(item).strip()
             ],
             "rollback_hint": str(source_task.get("job_contract_rollback_hint", "")).strip() or "-",
+        },
+        "approved_plan": {
+            "version": str(source_task.get("approved_plan_version", "")).strip() or "-",
+            "status": str(source_task.get("approved_plan_status", "")).strip() or "-",
+            "summary": str(source_task.get("approved_plan_summary", "")).strip() or "-",
+            "artifact_rows": [
+                str(item).strip()
+                for item in (source_task.get("approved_plan_artifact_rows") or [])
+                if str(item).strip()
+            ],
+            "subtask_count": max(0, int(source_task.get("approved_plan_subtask_count", 0) or 0)),
+            "review_count": max(0, int(source_task.get("approved_plan_review_count", 0) or 0)),
         },
         "debug_packet": {
             "version": str(source_task.get("debug_packet_version", "")).strip() or "-",
@@ -491,6 +508,8 @@ def _select_planning_task(*candidates: Any) -> Dict[str, Any]:
     planning_keys = (
         "job_contract_status",
         "job_contract_summary",
+        "approved_plan_status",
+        "approved_plan_summary",
         "debug_packet_state",
         "debug_packet_summary",
         "phase_checkpoint_status",
@@ -563,6 +582,20 @@ def _planning_primitives_feedback(
                 "planning_feedback_source": "job_contract",
                 "planning_feedback_state": "blocked",
                 "planning_feedback_summary": str(snapshot.get("job_contract_summary", "")).strip() or "-",
+                "planning_feedback_next_step": task_next_step,
+                "planning_feedback_suggested_action": "task_review",
+                "planning_feedback_applied": task_next_step.startswith("/"),
+            }
+        )
+        return feedback
+    approved_plan_status = str(snapshot.get("approved_plan_status", "")).strip().lower()
+    approved_plan_summary = str(snapshot.get("approved_plan_summary", "")).strip() or "approved plan missing"
+    if approved_plan_status in {"missing", "pending", "blocked"}:
+        feedback.update(
+            {
+                "planning_feedback_source": "approved_plan",
+                "planning_feedback_state": approved_plan_status,
+                "planning_feedback_summary": approved_plan_summary,
                 "planning_feedback_next_step": task_next_step,
                 "planning_feedback_suggested_action": "task_review",
                 "planning_feedback_applied": task_next_step.startswith("/"),
@@ -643,9 +676,21 @@ def _append_blocked_retry_replan_audit(
     if debug_next_step not in {"", "-"}:
         debug_parts.append(f"next={debug_next_step}")
     debug_handoff_summary = " | ".join(debug_parts) if debug_parts else "-"
+    approved_plan = (
+        (planning_handoff or {}).get("approved_plan")
+        if isinstance((planning_handoff or {}).get("approved_plan"), dict)
+        else {}
+    )
+    approved_plan_handoff_summary = str(approved_plan.get("summary", "")).strip() or "-"
     outcome_detail = str(detail or "").strip() or "-"
     if debug_handoff_summary not in {"", "-"} and debug_handoff_summary not in outcome_detail:
         outcome_detail = f"{outcome_detail} | {debug_handoff_summary}" if outcome_detail != "-" else debug_handoff_summary
+    if approved_plan_handoff_summary not in {"", "-"} and approved_plan_handoff_summary not in outcome_detail:
+        outcome_detail = (
+            f"{outcome_detail} | {approved_plan_handoff_summary}"
+            if outcome_detail != "-"
+            else approved_plan_handoff_summary
+        )
     append_action_audit_row(
         team_dir,
         headline=f"{label} | blocked",
@@ -665,8 +710,11 @@ def _append_blocked_retry_replan_audit(
             "replan_auto_decision": dict(replan_auto_decision or {}),
             "replan_auto_routing_policy": dict(replan_auto_routing_policy or {}),
             "job_contract_summary": str((planning_primitives or {}).get("job_contract_summary", "")).strip() or "-",
+            "approved_plan_status": str((planning_primitives or {}).get("approved_plan_status", "")).strip() or "-",
+            "approved_plan_summary": str((planning_primitives or {}).get("approved_plan_summary", "")).strip() or "-",
             "debug_packet_summary": str((planning_primitives or {}).get("debug_packet_summary", "")).strip() or "-",
             "phase_checkpoint_summary": str((planning_primitives or {}).get("phase_checkpoint_summary", "")).strip() or "-",
+            "approved_plan_handoff_summary": approved_plan_handoff_summary,
             "debug_packet_handoff_summary": debug_handoff_summary,
             "planning_handoff_summary": summarize_planning_handoff_snapshot(planning_handoff),
             "planning_handoff": dict(planning_handoff or {}),

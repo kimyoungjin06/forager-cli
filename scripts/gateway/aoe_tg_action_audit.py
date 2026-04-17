@@ -371,6 +371,49 @@ def _normalize_job_contract_snapshot_for_audit(raw: Any) -> Dict[str, Any]:
     return snapshot
 
 
+def _normalize_approved_plan_snapshot_for_audit(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    summary = str(raw.get("summary", "")).strip()
+    status = str(raw.get("status", "")).strip().lower()
+    if status not in {"missing", "pending", "blocked", "approved"}:
+        lowered = summary.lower()
+        for candidate in ("missing", "pending", "blocked", "approved"):
+            if f"approved_plan={candidate}" in lowered:
+                status = candidate
+                break
+    artifact_rows = [
+        str(item).strip()[:200]
+        for item in (raw.get("artifact_rows") or [])
+        if str(item).strip()
+    ]
+    subtask_count = max(0, int(raw.get("subtask_count", 0) or 0))
+    review_count = max(0, int(raw.get("review_count", 0) or 0))
+    if not any((status, summary, artifact_rows, subtask_count, review_count)):
+        return {}
+    if status not in {"missing", "pending", "blocked", "approved"}:
+        return {}
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", "")).strip() or "2026-04-17.v1",
+        "status": status,
+        "subtask_count": subtask_count,
+        "review_count": review_count,
+    }
+    if summary:
+        snapshot["summary"] = summary[:320]
+    if artifact_rows:
+        snapshot["artifact_rows"] = artifact_rows[:8]
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [
+                f"approved_plan={status}",
+                f"subtasks={subtask_count}",
+                f"reviews={review_count}",
+            ]
+        )[:320]
+    return snapshot
+
+
 def _normalize_phase_checkpoint_snapshot_for_audit(raw: Any) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
@@ -422,6 +465,17 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
                 "next_step": source.get("debug_packet_next_step"),
             }
         )
+    approved_plan = _normalize_approved_plan_snapshot_for_audit(payload.get("approved_plan"))
+    if not approved_plan:
+        approved_plan = _normalize_approved_plan_snapshot_for_audit(
+            {
+                "status": source.get("approved_plan_status"),
+                "summary": source.get("approved_plan_summary"),
+                "artifact_rows": source.get("approved_plan_artifact_rows"),
+                "subtask_count": source.get("approved_plan_subtask_count"),
+                "review_count": source.get("approved_plan_review_count"),
+            }
+        )
     phase_checkpoint = _normalize_phase_checkpoint_snapshot_for_audit(payload.get("phase_checkpoint"))
     if not phase_checkpoint:
         phase_checkpoint = _normalize_phase_checkpoint_snapshot_for_audit(
@@ -431,11 +485,12 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
                 "summary": source.get("phase_checkpoint_summary"),
             }
         )
-    if not any((job_contract, debug_packet, phase_checkpoint)):
+    if not any((job_contract, debug_packet, approved_plan, phase_checkpoint)):
         return {}
     return {
         "job_contract": job_contract,
         "debug_packet": debug_packet,
+        "approved_plan": approved_plan,
         "phase_checkpoint": phase_checkpoint,
     }
 
@@ -447,6 +502,7 @@ def summarize_planning_handoff_snapshot(raw: Any) -> str:
     parts: List[str] = []
     job_contract = handoff.get("job_contract") if isinstance(handoff.get("job_contract"), dict) else {}
     debug_packet = handoff.get("debug_packet") if isinstance(handoff.get("debug_packet"), dict) else {}
+    approved_plan = handoff.get("approved_plan") if isinstance(handoff.get("approved_plan"), dict) else {}
     phase_checkpoint = handoff.get("phase_checkpoint") if isinstance(handoff.get("phase_checkpoint"), dict) else {}
     if job_contract:
         parts.append("contract=" + (str(job_contract.get("summary", "")).strip() or "-"))
@@ -454,6 +510,8 @@ def summarize_planning_handoff_snapshot(raw: Any) -> str:
         parts.append("debug=" + (str(debug_packet.get("summary", "")).strip() or "-"))
     if phase_checkpoint:
         parts.append("phase=" + (str(phase_checkpoint.get("summary", "")).strip() or "-"))
+    if approved_plan:
+        parts.append(str(approved_plan.get("summary", "")).strip() or "-")
     return " | ".join(parts) if parts else "-"
 
 
@@ -477,6 +535,20 @@ def summarize_retry_replan_debug_handoff(raw: Any, *, row: Optional[Dict[str, An
     return " | ".join(parts) if parts else "-"
 
 
+def summarize_retry_replan_approved_plan_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
+    handoff = normalize_planning_handoff_snapshot(raw, row=row)
+    if not isinstance(handoff, dict) or not handoff:
+        return "-"
+    approved_plan = handoff.get("approved_plan") if isinstance(handoff.get("approved_plan"), dict) else {}
+    if not approved_plan:
+        return "-"
+    status = str(approved_plan.get("status", "")).strip().lower()
+    if status in {"", "-", "approved"}:
+        return "-"
+    summary = str(approved_plan.get("summary", "")).strip() or f"approved_plan={status}"
+    return compact_action_text(summary, limit=96)
+
+
 def summarize_action_audit_headline(raw: Any) -> str:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -491,6 +563,9 @@ def summarize_action_audit_headline(raw: Any) -> str:
         debug_summary = summarize_retry_replan_debug_handoff(row.get("planning_handoff"), row=row)
         if debug_summary not in {"", "-"} and debug_summary not in headline:
             headline = f"{headline} | {debug_summary}"
+        approved_plan_summary = summarize_retry_replan_approved_plan_handoff(row.get("planning_handoff"), row=row)
+        if approved_plan_summary not in {"", "-"} and approved_plan_summary not in headline:
+            headline = f"{headline} | {approved_plan_summary}"
     return headline
 
 
@@ -537,6 +612,16 @@ def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
         "planning_feedback_applied": bool(row.get("planning_feedback_applied", False)),
         "job_contract_status": str(row.get("job_contract_status", "")).strip() or "-",
         "job_contract_summary": str(row.get("job_contract_summary", "")).strip() or "-",
+        "approved_plan_status": (
+            str(row.get("approved_plan_status", "")).strip()
+            or str((planning_handoff.get("approved_plan") or {}).get("status", "")).strip()
+            or "-"
+        ),
+        "approved_plan_summary": (
+            str(row.get("approved_plan_summary", "")).strip()
+            or str((planning_handoff.get("approved_plan") or {}).get("summary", "")).strip()
+            or "-"
+        ),
         "debug_packet_state": str(row.get("debug_packet_state", "")).strip() or "-",
         "debug_packet_summary": str(row.get("debug_packet_summary", "")).strip() or "-",
         "debug_packet_next_step": str(row.get("debug_packet_next_step", "")).strip() or "-",
@@ -620,6 +705,16 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
         "planning_feedback_applied": bool(row.get("planning_feedback_applied", False)),
         "job_contract_status": str(row.get("job_contract_status", "")).strip() or "-",
         "job_contract_summary": str(row.get("job_contract_summary", "")).strip() or "-",
+        "approved_plan_status": (
+            str(row.get("approved_plan_status", "")).strip()
+            or str((planning_handoff.get("approved_plan") or {}).get("status", "")).strip()
+            or "-"
+        ),
+        "approved_plan_summary": (
+            str(row.get("approved_plan_summary", "")).strip()
+            or str((planning_handoff.get("approved_plan") or {}).get("summary", "")).strip()
+            or "-"
+        ),
         "debug_packet_state": str(row.get("debug_packet_state", "")).strip() or "-",
         "debug_packet_summary": str(row.get("debug_packet_summary", "")).strip() or "-",
         "debug_packet_next_step": str(row.get("debug_packet_next_step", "")).strip() or "-",
@@ -666,6 +761,8 @@ def _merge_replan_audit_context(payload: Any, row: Dict[str, Any]) -> Dict[str, 
     for key in (
         "job_contract_status",
         "job_contract_summary",
+        "approved_plan_status",
+        "approved_plan_summary",
         "debug_packet_state",
         "debug_packet_summary",
         "debug_packet_next_step",

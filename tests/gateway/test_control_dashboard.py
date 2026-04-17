@@ -1033,6 +1033,10 @@ def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(t
                     "status": "ready",
                     "summary": "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1",
                 },
+                "approved_plan": {
+                    "status": "blocked",
+                    "summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+                },
                 "debug_packet": {
                     "state": "blocked",
                     "summary": "state=blocked | symptom=background_run_inflight | evidence=1 | next=/task T-001",
@@ -1065,6 +1069,7 @@ def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(t
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight" in text
+    assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
     assert "background_run_inflight" in text
     assert "attempt=/retry T-001 lane L1" in text
     assert "next=/task T-001" in text
@@ -1089,6 +1094,10 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
         at="2026-04-10T11:07:00+09:00",
         extra={
             "planning_handoff": {
+                "approved_plan": {
+                    "status": "blocked",
+                    "summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+                },
                 "debug_packet": {
                     "state": "blocked",
                     "summary": "state=blocked | symptom=background_run_inflight | evidence=1 | next=/task T-001",
@@ -1112,7 +1121,7 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
 
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
-    assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight" in text
+    assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | approved_plan=blocked" in text
     assert "planning critic blocked replan" in text
 
 
@@ -3120,6 +3129,26 @@ def test_control_dashboard_post_retry_route_terminal_block_prefers_judge_next_st
 def test_control_dashboard_post_replan_route_terminal_block_reuses_job_contract_feedback(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["phase1_mode"] = "ensemble"
+    task["phase1_rounds"] = 1
+    task["phase1_current_round"] = 1
+    task["phase1_current_total_rounds"] = 1
+    task["phase1_current_phase"] = "verification"
+    task["phase1_current_provider"] = "codex"
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_providers"] = ["codex", "claude"]
+    task["plan"] = {
+        "summary": "baseline ready",
+        "subtasks": [{"id": "S1", "owner_role": "Codex-Analyst", "title": "Re-check evidence links"}],
+    }
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": []}
+    task["plan_review_count"] = 1
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
+    gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -3179,6 +3208,7 @@ def test_control_dashboard_post_replan_route_terminal_block_reuses_job_contract_
     assert payload["job_contract"].startswith("status=blocked")
     assert payload["debug_packet"].startswith("state=blocked")
     assert payload["phase_checkpoint"].startswith("status=blocked")
+    assert payload["planning_handoff"]["approved_plan"]["status"] == "approved"
     assert payload["planning_handoff"]["job_contract"]["status"] == "blocked"
     assert payload["planning_handoff"]["debug_packet"]["state"] == "blocked"
     assert payload["planning_handoff"]["phase_checkpoint"]["status"] == "blocked"
@@ -4734,6 +4764,7 @@ def test_dashboard_gates_dispatch_phase2_actions_when_approved_plan_is_blocked(t
         assert payload["status"] == "blocked"
         assert payload["outcome"]["reason_code"] == "approved_plan_blocked"
         assert payload["next_step"] == "/task T-001"
+        assert payload["approved_plan"].startswith("approved_plan=blocked")
         assert payload["outcome"]["detail"].startswith("approved_plan=blocked")
 
 
