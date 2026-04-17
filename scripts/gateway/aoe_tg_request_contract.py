@@ -465,10 +465,13 @@ def build_job_contract(contract: Dict[str, Any], brief: Optional[Dict[str, Any]]
     artifacts_to_touch.extend(_contract_field_rows(fields, "artifacts_to_touch", "write_targets", "touch_paths", limit=12, text_limit=200))
     artifacts_to_touch = _dedupe_rows(artifacts_to_touch, limit=12, text_limit=200)
 
+    has_body = bool(scope or acceptance_checks or artifacts_to_touch)
     contract_status = str(snapshot.get("status", "")).strip().lower()
     brief_status = str(brief_snapshot.get("status", "")).strip().lower()
     status = "ready"
     if contract_status in {"incomplete", "ambiguous"} or brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
+        status = "blocked"
+    elif not has_body:
         status = "blocked"
     elif snapshot.get("readonly") is True:
         status = "review"
@@ -511,6 +514,39 @@ def build_job_contract(contract: Dict[str, Any], brief: Optional[Dict[str, Any]]
             "rollback_hint": rollback_hint,
         }
     )
+
+
+def job_contract_has_body(contract: Dict[str, Any]) -> bool:
+    snapshot = normalize_job_contract_snapshot(contract)
+    if not snapshot:
+        return False
+    return bool(
+        list(snapshot.get("scope") or [])
+        or list(snapshot.get("acceptance_checks") or [])
+        or list(snapshot.get("artifacts_to_touch") or [])
+    )
+
+
+def job_contract_is_blocking(contract: Dict[str, Any]) -> bool:
+    snapshot = normalize_job_contract_snapshot(contract)
+    if not snapshot:
+        return True
+    if not job_contract_has_body(snapshot):
+        return True
+    return str(snapshot.get("status", "")).strip().lower() == "blocked"
+
+
+def job_contract_block_reason(contract: Dict[str, Any]) -> str:
+    snapshot = normalize_job_contract_snapshot(contract)
+    if not snapshot:
+        return "job contract missing"
+    if not job_contract_has_body(snapshot):
+        return "job contract missing scope, acceptance checks, or artifact targets"
+    status = _trim(snapshot.get("status", ""), 32).lower() or "blocked"
+    summary = _trim(snapshot.get("summary", ""), 320)
+    if summary:
+        return summary
+    return f"job contract is {status}"
 
 
 def normalize_background_launch_spec_snapshot(raw: Any) -> Dict[str, Any]:
@@ -1784,7 +1820,17 @@ def apply_job_contract_snapshot(target: Dict[str, Any], contract: Dict[str, Any]
     if not isinstance(target, dict):
         return {}
     metadata = job_contract_metadata(contract)
+    list_defaults = {
+        "job_contract_scope",
+        "job_contract_non_goals",
+        "job_contract_risks",
+        "job_contract_acceptance_checks",
+        "job_contract_artifacts_to_touch",
+    }
     for key, value in metadata.items():
+        if key in list_defaults and value == []:
+            target[key] = []
+            continue
         if value in ("", None, [], {}):
             target.pop(key, None)
             continue

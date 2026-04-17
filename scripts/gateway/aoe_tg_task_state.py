@@ -17,6 +17,7 @@ from aoe_tg_request_contract import (
     apply_request_contract_snapshot,
     build_execution_brief,
     build_job_contract,
+    job_contract_has_body,
     normalize_background_run_ticket_snapshot,
     normalize_execution_brief_snapshot,
     normalize_job_contract_snapshot,
@@ -704,24 +705,24 @@ def derive_task_dispatch_gate(task: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     refresh_task_planning_primitives(task)
     task_ref = _task_ref_label(task)
+    contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
     contract_status = str(task.get("job_contract_status", "")).strip().lower()
     contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
-    contract_scope = [
-        str(item).strip()
-        for item in (task.get("job_contract_scope") or [])
-        if str(item).strip()
-    ]
-    contract_checks = [
-        str(item).strip()
-        for item in (task.get("job_contract_acceptance_checks") or [])
-        if str(item).strip()
-    ]
-    contract_artifacts = [
-        str(item).strip()
-        for item in (task.get("job_contract_artifacts_to_touch") or [])
-        if str(item).strip()
-    ]
-    has_contract_body = bool(contract_scope or contract_checks or contract_artifacts)
+    has_contract_body = job_contract_has_body(contract_snapshot)
     debug_state = str(task.get("debug_packet_state", "")).strip().lower()
     debug_summary = str(task.get("debug_packet_summary", "")).strip() or "-"
     phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
@@ -775,24 +776,24 @@ def derive_task_apply_gate(task: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     refresh_task_planning_primitives(task)
     task_ref = _task_ref_label(task)
+    contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
     contract_status = str(task.get("job_contract_status", "")).strip().lower()
     contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
-    contract_scope = [
-        str(item).strip()
-        for item in (task.get("job_contract_scope") or [])
-        if str(item).strip()
-    ]
-    contract_checks = [
-        str(item).strip()
-        for item in (task.get("job_contract_acceptance_checks") or [])
-        if str(item).strip()
-    ]
-    contract_artifacts = [
-        str(item).strip()
-        for item in (task.get("job_contract_artifacts_to_touch") or [])
-        if str(item).strip()
-    ]
-    has_contract_body = bool(contract_scope or contract_checks or contract_artifacts)
+    has_contract_body = job_contract_has_body(contract_snapshot)
     phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
     phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
     phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"

@@ -15,6 +15,8 @@ from aoe_tg_request_contract import (
     execution_brief_is_offdesk_allowed,
     execution_brief_summary,
     build_request_contract,
+    job_contract_block_reason,
+    job_contract_is_blocking,
     job_contract_planning_appendix,
     request_contract_block_reason,
     request_contract_is_blocking,
@@ -281,11 +283,14 @@ def execute_run_command_flow(
             apply_execution_brief_snapshot(provisional_task, execution_brief)
         save_manager_state(args.manager_state_file, manager_state)
 
-    if dispatch_mode and not execution_brief_is_offdesk_allowed(execution_brief):
+    job_contract_blocked = job_contract_is_blocking(job_contract) if dispatch_mode else False
+    if dispatch_mode and (request_contract_is_blocking(request_contract) or job_contract_blocked or not execution_brief_is_offdesk_allowed(execution_brief)):
         contract_reason = request_contract_block_reason(request_contract)
+        job_reason = job_contract_block_reason(job_contract)
         brief_reason = execution_brief_block_reason(execution_brief)
-        blocked_reason = contract_reason if request_contract_is_blocking(request_contract) else brief_reason
-        block_context = "contract-incomplete" if request_contract_is_blocking(request_contract) else "execution-brief-blocked"
+        contract_incomplete = request_contract_is_blocking(request_contract) or job_contract_blocked
+        blocked_reason = contract_reason if request_contract_is_blocking(request_contract) else (job_reason if job_contract_blocked else brief_reason)
+        block_context = "contract-incomplete" if contract_incomplete else "execution-brief-blocked"
         if isinstance(provisional_task, dict):
             apply_request_contract_snapshot(provisional_task, request_contract)
             apply_job_contract_snapshot(provisional_task, job_contract)
@@ -303,7 +308,7 @@ def execute_run_command_flow(
                 {
                     "kind": "run_contract",
                     "status": "blocked",
-                    "reason_code": "contract_incomplete" if request_contract_is_blocking(request_contract) else "execution_brief_blocked",
+                    "reason_code": "contract_incomplete" if contract_incomplete else "execution_brief_blocked",
                     "next_step": "/offdesk review",
                     "detail": blocked_reason,
                 }
@@ -318,6 +323,16 @@ def execute_run_command_flow(
                 context=block_context,
                 with_menu=True,
             )
+        elif job_contract_blocked:
+            send(
+                "job contract incomplete\n"
+                f"- preset: {selected_role_preset or '-'}\n"
+                f"- contract: {job_contract.get('summary', '-') or '-'}\n"
+                f"- reason: {blocked_reason}\n"
+                "hint: scope, acceptance checks, artifact targets 중 최소 하나를 남길 수 있도록 요청을 더 구체화하세요.",
+                context=block_context,
+                with_menu=True,
+            )
         else:
             send(
                 "execution brief blocked\n"
@@ -329,7 +344,7 @@ def execute_run_command_flow(
                 with_menu=True,
             )
         log_event(
-            event="contract_incomplete" if request_contract_is_blocking(request_contract) else "execution_brief_blocked",
+            event="contract_incomplete" if contract_incomplete else "execution_brief_blocked",
             project=key,
             request_id=provisional_req_id,
             task=provisional_task if isinstance(provisional_task, dict) else None,
