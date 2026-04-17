@@ -738,6 +738,7 @@ class HistorySearchRowDTO:
     detail: str
     followup_hint: str
     raw_ref: str
+    planning_compact_summary: str = ""
     planning_review_summary: str = ""
     approved_plan_summary: str = ""
     pressure_kind_label: str = ""

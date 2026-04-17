@@ -22,7 +22,7 @@ from aoe_tg_runtime_core import (
     latest_intent_snapshot_path as runtime_latest_intent_snapshot_path,
     recovery_summary_dir as runtime_recovery_summary_dir,
 )
-from aoe_tg_task_view import task_display_label
+from aoe_tg_task_view import planning_compact_operator_summary, task_display_label
 
 
 HISTORY_USAGE = (
@@ -69,6 +69,7 @@ class HistoryRow:
     detail: str = ""
     planning_review_summary: str = ""
     approved_plan_summary: str = ""
+    planning_compact_summary: str = ""
     followup_hint: str = ""
     raw_ref: str = ""
 
@@ -492,6 +493,12 @@ def _action_audit_rows(
                         )
                     )
                 approved_plan_handoff_summary = _action_audit_approved_plan_handoff_summary(parsed)
+                planning_compact_summary = _normalize_text(
+                    planning_compact_operator_summary(
+                        planning_review=planning_review_summary,
+                        approved_plan=approved_plan_handoff_summary,
+                    )
+                )
                 approved_plan_handoff_detail = _action_audit_approved_plan_handoff_detail(parsed)
                 detail = _normalize_text(
                     " ".join(
@@ -526,6 +533,7 @@ def _action_audit_rows(
                         detail=detail,
                         planning_review_summary=planning_review_summary or "",
                         approved_plan_summary=approved_plan_handoff_summary or "",
+                        planning_compact_summary=planning_compact_summary or "",
                         followup_hint=str(parsed.get("next_step", "")).strip() or (f"/task {task_short_id}" if task_short_id else ""),
                         raw_ref=f"{path}:{str(parsed.get('at', '')).strip()}",
                     )

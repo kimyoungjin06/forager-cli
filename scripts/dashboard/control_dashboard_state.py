@@ -1447,6 +1447,7 @@ def load_dashboard_history_page(
                 status=row.status,
                 summary=row.summary,
                 detail=row.detail,
+                planning_compact_summary=getattr(row, "planning_compact_summary", ""),
                 planning_review_summary=getattr(row, "planning_review_summary", ""),
                 approved_plan_summary=getattr(row, "approved_plan_summary", ""),
                 followup_hint=row.followup_hint,

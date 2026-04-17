@@ -876,8 +876,7 @@ def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Dispatch Phase2 | blocked | reason=approved_plan_blocked | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
-    assert "planning_review: draft via codex | review via claude | dispatch waits for critic-approved plan" in text
-    assert "approved_plan: approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
+    assert "planning_compact: draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -1223,7 +1222,7 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked" in text
-    assert "planning_review: draft via codex | review via claude | dispatch waits for critic-approved plan" in text
+    assert "planning_compact: draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
     assert "planning critic blocked replan" in text
 
 
