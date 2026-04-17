@@ -875,6 +875,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
         row = ActionAuditRowDTO(
             at=str(raw.get("at", "")).strip() or "-",
             headline=str(raw.get("headline", "")).strip() or "-",
+            headline_summary=action_audit.summarize_action_audit_headline(raw),
             status=str(raw.get("status", "")).strip() or "unknown",
             outcome_kind=outcome_kind or "-",
             outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",

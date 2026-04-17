@@ -44,6 +44,7 @@ def _action_audit_path(team_dir: Any) -> Path:
 def _normalize_latest_action_row(row: Dict[str, Any]) -> Dict[str, str]:
     return {
         "headline": str(row.get("headline", "")).strip() or "-",
+        "headline_summary": summarize_action_audit_headline(row),
         "status": str(row.get("status", "")).strip() or "unknown",
         "outcome_kind": str(row.get("outcome_kind", "")).strip() or "-",
         "outcome_status": str(row.get("outcome_status", "")).strip() or str(row.get("status", "")).strip() or "unknown",
@@ -456,6 +457,43 @@ def summarize_planning_handoff_snapshot(raw: Any) -> str:
     return " | ".join(parts) if parts else "-"
 
 
+def summarize_retry_replan_debug_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
+    handoff = normalize_planning_handoff_snapshot(raw, row=row)
+    if not isinstance(handoff, dict) or not handoff:
+        return "-"
+    debug_packet = handoff.get("debug_packet") if isinstance(handoff.get("debug_packet"), dict) else {}
+    if not debug_packet:
+        return "-"
+    parts: List[str] = []
+    state = str(debug_packet.get("state", "")).strip() or "-"
+    symptom = str(debug_packet.get("symptom", "")).strip() or "-"
+    failed_attempt = compact_action_text(str(debug_packet.get("failed_attempt", "")).strip() or "-", limit=64)
+    if state not in {"", "-"}:
+        parts.append(f"debug={state}")
+    if symptom not in {"", "-"}:
+        parts.append(f"symptom={symptom}")
+    elif failed_attempt not in {"", "-"}:
+        parts.append(f"attempt={failed_attempt}")
+    return " | ".join(parts) if parts else "-"
+
+
+def summarize_action_audit_headline(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    headline = str(row.get("headline", "")).strip() or "-"
+    reason_code = str(row.get("outcome_reason_code", "")).strip() or "-"
+    if reason_code not in {"", "-"} and "reason=" not in headline:
+        headline = f"{headline} | reason={reason_code}"
+    outcome_kind = str(row.get("outcome_kind", "")).strip()
+    status = str(row.get("status", "")).strip() or str(row.get("outcome_status", "")).strip()
+    if outcome_kind in {"retry_run", "replan"} and status == "blocked":
+        debug_summary = summarize_retry_replan_debug_handoff(row.get("planning_handoff"), row=row)
+        if debug_summary not in {"", "-"} and debug_summary not in headline:
+            headline = f"{headline} | {debug_summary}"
+    return headline
+
+
 def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -645,6 +683,9 @@ def _merge_replan_audit_context(payload: Any, row: Dict[str, Any]) -> Dict[str, 
 
 
 def _latest_action_headline(latest_action: Dict[str, str]) -> str:
+    headline_summary = str(latest_action.get("headline_summary", "")).strip() or "-"
+    if headline_summary != "-":
+        return headline_summary
     headline = str(latest_action.get("headline", "")).strip() or "-"
     reason_code = str(latest_action.get("outcome_reason_code", "")).strip() or "-"
     if reason_code in {"", "-"}:

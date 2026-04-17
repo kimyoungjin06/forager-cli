@@ -16,6 +16,7 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_chat_aliases as chat_aliases
+import aoe_tg_action_audit as action_audit
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_runtime_read as runtime_read
@@ -51,6 +52,7 @@ class FileFreshnessDTO:
 class ActionAuditRowDTO:
     at: str
     headline: str
+    headline_summary: str
     status: str
     outcome_kind: str
     outcome_status: str
@@ -257,6 +259,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
+        headline_summary=action_audit.summarize_action_audit_headline(raw),
         status=str(raw.get("status", "")).strip() or "unknown",
         outcome_kind=outcome_kind,
         outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",

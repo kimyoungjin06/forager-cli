@@ -65,7 +65,7 @@
             <li
               data-history-row="true"
               data-at="{{ row.at }}"
-              data-headline="{{ row.headline }}"
+              data-headline="{{ row.headline_summary or row.headline }}"
               data-next-step="{{ row.next_step }}"
               data-link-label="{{ row.link_label }}"
               data-link-href="{{ row.link_href }}"
@@ -75,7 +75,7 @@
               <div class="action-history-head">
                 <span class="action-history-badge {{ row.status }}">{{ row.status }}</span>
                 {% if row.focus_badge %}<a class="action-history-badge" href="/control/audit?focus={{ row.focus_badge }}&amp;limit={{ audit_limit }}">{{ row.focus_badge }}</a>{% endif %}
-                <strong>{{ row.at }} | {{ row.headline }}</strong>
+                <strong>{{ row.at }} | {{ row.headline_summary or row.headline }}</strong>
               </div>
               {% if row.next_step and row.next_step != '-' %}
               <div class="muted">next: {{ row.next_step }}</div>

@@ -102,6 +102,26 @@ def _action_audit_debug_handoff_detail(row: Dict[str, Any]) -> str:
     return " | ".join(parts)
 
 
+def _action_audit_debug_handoff_summary(row: Dict[str, Any]) -> str:
+    handoff = normalize_planning_handoff_snapshot(row.get("planning_handoff"), row=row)
+    if not handoff:
+        return ""
+    debug_packet = handoff.get("debug_packet") if isinstance(handoff.get("debug_packet"), dict) else {}
+    if not debug_packet:
+        return ""
+    parts: List[str] = []
+    state = str(debug_packet.get("state", "")).strip()
+    symptom = str(debug_packet.get("symptom", "")).strip()
+    failed_attempt = str(debug_packet.get("failed_attempt", "")).strip()
+    if state and state != "-":
+        parts.append(f"debug={state}")
+    if symptom and symptom != "-":
+        parts.append(f"symptom={symptom}")
+    elif failed_attempt and failed_attempt != "-":
+        parts.append(f"attempt={failed_attempt}")
+    return " | ".join(parts)
+
+
 def _parse_iso_dt(raw: Any) -> Optional[datetime]:
     token = str(raw or "").strip()
     if not token:
@@ -420,6 +440,9 @@ def _action_audit_rows(
                 summary = _normalize_text(parsed.get("headline", ""))
                 if summary and reason_code and "reason=" not in summary:
                     summary = f"{summary} | reason={reason_code}"
+                debug_handoff_summary = _action_audit_debug_handoff_summary(parsed)
+                if summary and debug_handoff_summary and debug_handoff_summary not in summary:
+                    summary = f"{summary} | {debug_handoff_summary}"
                 debug_handoff_detail = _action_audit_debug_handoff_detail(parsed)
                 detail = _normalize_text(
                     " ".join(
