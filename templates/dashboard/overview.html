@@ -56,6 +56,9 @@
         <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
         <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
         <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
+        <p><strong>planning_lanes</strong> {{ card.active_task_planning_lanes_summary }}</p>
+        <p><strong>approved_plan_gate</strong> {{ card.active_task_approved_plan_gate_summary }}</p>
+        <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
         <details class="info-fold" open>
           <summary>Decision Signals</summary>
           <div class="fold-stack">
@@ -134,6 +137,9 @@
       <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
       <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
       <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
+      <p><strong>planning_lanes</strong> {{ card.active_task_planning_lanes_summary }}</p>
+      <p><strong>approved_plan_gate</strong> {{ card.active_task_approved_plan_gate_summary }}</p>
+      <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
       <details class="info-fold" open>
         <summary>Decision Signals</summary>
         <div class="fold-stack">
@@ -208,7 +214,7 @@
       {% if card.active_task_label %}
       <tr>
         <td><a href="{{ card.runtime_path }}">{{ card.project_alias }}</a><br><span class="muted">{{ card.project_label }}</span></td>
-        <td><a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a><br><span class="muted">{{ card.active_task_status }}/{{ card.active_task_phase }}</span></td>
+        <td><a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a><br><span class="muted">{{ card.active_task_status }}/{{ card.active_task_phase }}</span><br><span class="muted">{{ card.active_task_planning_lanes_summary }}</span><br><span class="muted">{{ card.active_task_approved_plan_gate_summary }}</span></td>
         <td>{{ card.active_task_execution_brief_status }}<br><span class="muted">{{ card.active_task_execution_brief_summary }}</span><br><span class="muted">{{ card.active_task_reentry_rails_summary }}</span></td>
         <td>{{ card.active_task_background_run_status }}<br><span class="muted">{{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</span><br><span class="muted">{{ card.active_task_background_run_external_phase }} | {{ card.active_task_background_run_external_note }}</span><br><span class="muted">{{ card.active_task_background_run_runtime_handle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_bundle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_artifacts }}</span></td>
         <td>{{ card.background_worker_summary }}<br><span class="muted">{{ card.background_queue_summary }}</span><br><span class="muted">{{ card.background_scheduler_summary }}</span><br><span class="muted">{{ card.latest_judge_summary }}</span><br><span class="muted">{{ card.latest_judge_decision_summary }}</span><br><span class="muted">{{ card.latest_judge_decision_bridge_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_decision_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_operator_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_routing_policy_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_route_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_route_status_summary }}</span><br><span class="muted">{{ card.active_task_background_run_worker_update_operator_summary }}</span><br><span class="muted">{{ card.active_task_context_pack_summary }}</span><br><span class="muted">{{ card.active_task_model_plan_summary }}</span><br><span class="muted">{{ card.workspace_summary }}</span><br><span class="muted">{{ card.document_registry_summary }}</span><br><span class="muted">{{ card.model_routing_summary }}</span><br><span class="muted">{{ card.model_registry_summary }}</span><br><span class="muted">run_lock={{ card.run_lock_mode }}</span><br><span class="muted">slots {{ card.background_slot_active }}/{{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</span></td>
@@ -234,6 +240,8 @@
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
       <p><strong>chat_console</strong> <a href="{{ card.chat_console_path }}">{{ card.chat_console_label }}</a></p>
       <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }} | {{ card.active_task_execution_brief_summary }}</p>
+      <p><strong>planning</strong> {{ card.active_task_planning_lanes_summary }} | {{ card.active_task_approved_plan_gate_summary }}</p>
+      <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
       <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</p>
       <p><strong>background_queue</strong> {{ card.background_queue_summary }} | {{ card.background_scheduler_summary }}</p>
       <p><strong>decision</strong> {{ card.active_task_execution_brief_operator_decision }}</p>

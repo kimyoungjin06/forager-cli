@@ -1101,6 +1101,11 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 ),
                 active_task_context_pack_summary=active_task_context_pack_summary,
                 active_task_model_plan_summary=active_task_model_plan_summary,
+                active_task_planning_lanes_summary=task_view.planning_lane_operator_summary(active_task or {}),
+                active_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(active_task or {}),
+                active_task_approved_plan_summary=(
+                    str((active_task or {}).get("approved_plan_summary", "")).strip() or "-"
+                ),
                 active_task_reentry_rails_summary=(
                     str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
                 ),

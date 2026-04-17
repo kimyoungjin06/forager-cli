@@ -153,6 +153,9 @@ class RuntimeCardDTO:
     active_task_followup_brief_reason: str
     active_task_context_pack_summary: str
     active_task_model_plan_summary: str
+    active_task_planning_lanes_summary: str
+    active_task_approved_plan_gate_summary: str
+    active_task_approved_plan_summary: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str
     active_task_background_run_runner_target: str
@@ -827,6 +830,11 @@ class ChatConsolePageDTO:
     selected_pending_mode: str
     selected_lang: str
     selected_report_level: str
+    selected_task_planning_lanes_summary: str = "-"
+    selected_task_approved_plan_gate_summary: str = "-"
+    selected_task_planner_lane_summary: str = "-"
+    selected_task_critic_lane_summary: str = "-"
+    selected_task_approved_plan_summary: str = "-"
     rooms: List[str] = field(default_factory=list)
     room_presets: List[str] = field(default_factory=list)
     session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)

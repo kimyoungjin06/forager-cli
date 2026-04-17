@@ -563,7 +563,15 @@ def summarize_action_audit_headline(raw: Any) -> str:
         debug_summary = summarize_retry_replan_debug_handoff(row.get("planning_handoff"), row=row)
         if debug_summary not in {"", "-"} and debug_summary not in headline:
             headline = f"{headline} | {debug_summary}"
+    if status == "blocked":
         approved_plan_summary = summarize_retry_replan_approved_plan_handoff(row.get("planning_handoff"), row=row)
+        if approved_plan_summary in {"", "-"}:
+            approved_plan_summary = compact_action_text(
+                str(row.get("approved_plan_summary", "")).strip() or str(row.get("approved_plan", "")).strip(),
+                limit=96,
+            )
+            if approved_plan_summary.lower() in {"", "-", "approved_plan=approved"}:
+                approved_plan_summary = "-"
         if approved_plan_summary not in {"", "-"} and approved_plan_summary not in headline:
             headline = f"{headline} | {approved_plan_summary}"
     return headline

@@ -15,12 +15,14 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_runtime_core as runtime_core
+import aoe_tg_action_audit as action_audit
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_history_search as history_search
 import aoe_tg_chat_aliases as chat_aliases
 import aoe_tg_chat_state as chat_state
 import aoe_tg_room_handlers as room_handlers
 import aoe_tg_task_state as task_state
+import aoe_tg_task_view as task_view
 
 from control_dashboard_server_guard import build_server_guard, server_guard_pressure_policy, write_server_guard_snapshot
 from control_dashboard_state_builders import (
@@ -374,6 +376,47 @@ def _chat_session_recent_task_refs(row: Dict[str, Any], *, project_key: str) -> 
         if len(refs) >= 8:
             break
     return refs
+
+
+def _chat_selected_task_ref(
+    manager_state: Dict[str, Any],
+    *,
+    raw_session: Dict[str, Any],
+    chat_id: str,
+    project_key: str,
+) -> str:
+    key = str(project_key or "").strip()
+    if key:
+        selected = chat_state.get_chat_selected_task_ref(manager_state, chat_id, key)
+        if selected:
+            return selected
+    selected_map = raw_session.get("selected_task_refs") if isinstance(raw_session.get("selected_task_refs"), dict) else {}
+    if not selected_map:
+        return ""
+    active_key = str(manager_state.get("active", "")).strip()
+    if key and active_key and key == active_key:
+        fallback = str(selected_map.get("active", "")).strip()
+        if fallback:
+            return fallback
+    if len(selected_map) == 1:
+        only_ref = next(iter(selected_map.values()), "")
+        return str(only_ref or "").strip()
+    return ""
+
+
+def _chat_selected_task_record(
+    manager_state: Dict[str, Any],
+    *,
+    project_key: str,
+    task_ref: str,
+) -> Dict[str, Any]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    entry = projects.get(str(project_key or "").strip())
+    if not isinstance(entry, dict):
+        return {}
+    resolved_request_id = task_state.resolve_task_request_id(entry, task_ref)
+    task = task_state.get_task_record(entry, resolved_request_id) if resolved_request_id else None
+    return task if isinstance(task, dict) else {}
 
 
 def _build_chat_timeline_entries(
@@ -993,10 +1036,16 @@ def load_dashboard_chat_page(
         raw_session=selected_session_row if isinstance(selected_session_row, dict) else {},
         selected_room=selected_room,
     )
-    selected_task_ref = (
-        chat_state.get_chat_selected_task_ref(snapshot_result.manager_state, selected_token, selected_project_key)
-        if selected_project_key
-        else ""
+    selected_task_ref = _chat_selected_task_ref(
+        snapshot_result.manager_state,
+        raw_session=selected_session_row if isinstance(selected_session_row, dict) else {},
+        chat_id=selected_token,
+        project_key=selected_project_key,
+    )
+    selected_task = _chat_selected_task_record(
+        snapshot_result.manager_state,
+        project_key=selected_project_key,
+        task_ref=selected_task_ref,
     )
     selected_recent_task_refs = (
         chat_state.get_chat_recent_task_refs(snapshot_result.manager_state, selected_token, selected_project_key)
@@ -1033,6 +1082,11 @@ def load_dashboard_chat_page(
         selected_pending_mode=selected_session.pending_mode if selected_session is not None else "none",
         selected_lang=selected_session.lang if selected_session is not None else chat_state.DEFAULT_UI_LANG,
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
+        selected_task_planning_lanes_summary=task_view.planning_lane_operator_summary(selected_task),
+        selected_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(selected_task),
+        selected_task_planner_lane_summary=str(selected_task.get("planner_lane_summary", "")).strip() or "-",
+        selected_task_critic_lane_summary=str(selected_task.get("critic_lane_summary", "")).strip() or "-",
+        selected_task_approved_plan_summary=str(selected_task.get("approved_plan_summary", "")).strip() or "-",
         rooms=rooms,
         room_presets=_chat_room_presets(project_alias=selected_project_alias, selected_room=selected_room, rooms=rooms),
         session_presets=session_presets,

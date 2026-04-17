@@ -414,6 +414,7 @@
           const command = asText(payload?.source_command);
           const taskLabel = asText(payload?.task?.label || payload?.preview?.label || payload?.preview?.request_id);
           const runtimeLabel = asText(payload?.transition?.orch_target || payload?.preview?.project_alias || payload?.auto_state?.command);
+          const approvedPlan = asText(payload?.approved_plan || payload?.approved_plan_summary || payload?.planning_handoff?.approved_plan?.summary);
           const contexts = Array.isArray(payload?.messages)
             ? payload.messages.map((row) => asText(row?.context)).filter((row) => row && row !== "-")
             : [];
@@ -433,12 +434,16 @@
           } else if (payload?.error) {
             headline = `${label} | ${payload.error}`;
           }
+          if (approvedPlan !== "-" && !headline.includes("approved_plan=")) {
+            headline = `${headline} | ${approvedPlan}`;
+          }
           const rowsData = [
             ["status", status],
             ["mode", asText(payload?.mode)],
             ["command", command],
             ["task", taskLabel],
             ["runtime", runtimeLabel],
+            ["approved_plan", approvedPlan],
             ["next_step", asText(payload?.next_step)],
             ["remediation", asText(payload?.remediation)],
             ["preset_diff", asText(payload?.chat_preset_diff_summary)],

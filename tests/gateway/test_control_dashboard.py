@@ -402,6 +402,17 @@ def test_runtime_read_matches_gateway_wrapper_state(tmp_path: Path) -> None:
 def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_planner_providers"] = ["codex"]
+    task["phase1_critic_providers"] = ["claude"]
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": ["ready for execution"]}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
+    gw.save_manager_state(manager_state_file, state)
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Offdesk Judge",
@@ -565,6 +576,11 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "underspecified" in overview_text
     assert "brief_summary" in overview_text
     assert "blocked=acceptance_gap" in overview_text
+    assert "planning_lanes" in overview_text
+    assert "draft via codex | review via claude" in overview_text
+    assert "approved_plan_gate" in overview_text
+    assert "dispatch unlocked after critic approval | review via claude" in overview_text
+    assert "approved_plan" in overview_text
     assert "reentry_rails" in overview_text
     assert "retry=blocked:underspecified exec=L1 review=R1" in overview_text
     assert "followup=none" in overview_text
@@ -636,6 +652,15 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_planner_providers"] = ["codex"]
+    task["phase1_critic_providers"] = ["claude"]
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": ["ready for execution"]}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
     state["chat_sessions"] = {
         "123456": {
             "updated_at": "2026-04-15T11:10:00+09:00",
@@ -755,6 +780,11 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "123456" in text
     assert "O2/analysis" in text
     assert "analysis room tail line" in text
+    assert "planning_lanes" in text
+    assert "draft via codex | review via claude" in text
+    assert "approved_plan_gate" in text
+    assert "dispatch unlocked after critic approval | review via claude" in text
+    assert "approved_plan" in text
     assert "/control/actions/chat/send" in text
     assert "/control/actions/chat/session-update" in text
     assert "One-shot Direct" in text
@@ -779,6 +809,22 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "live_preview_preset" in text
     assert "Apply Global Direct" in text
     assert "server-guard-live-preview:codex:123456:Global Direct" in text
+
+
+def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() -> None:
+    row = {
+        "headline": "Dispatch Phase2 | blocked",
+        "status": "blocked",
+        "outcome_kind": "dispatch_phase2",
+        "outcome_status": "blocked",
+        "outcome_reason_code": "approved_plan_blocked",
+        "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+    }
+
+    summary = action_audit.summarize_action_audit_headline(row)
+
+    assert "reason=approved_plan_blocked" in summary
+    assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -2105,6 +2151,17 @@ def test_control_dashboard_surfaces_external_background_phase_in_runtime_and_off
 def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = gw.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["phase1_current_planner"] = "codex"
+    task["phase1_current_critic"] = "claude"
+    task["phase1_planner_providers"] = ["codex"]
+    task["phase1_critic_providers"] = ["claude"]
+    task["plan_critic"] = {"approved": True, "issues": [], "recommendations": ["ready for execution"]}
+    task["plan_review_count"] = 3
+    task["plan_convergence_status"] = "ready"
+    task["plan_gate_passed"] = True
+    gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -2123,6 +2180,11 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "underspecified" in text
     assert "brief_summary" in text
     assert "blocked=acceptance_gap" in text
+    assert "planning_lanes" in text
+    assert "draft via codex | review via claude" in text
+    assert "approved_plan_gate" in text
+    assert "dispatch unlocked after critic approval | review via claude" in text
+    assert "approved_plan" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=none" in text
