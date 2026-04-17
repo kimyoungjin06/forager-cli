@@ -15,6 +15,7 @@ from aoe_tg_request_contract import (
     apply_execution_brief_snapshot,
     apply_job_contract_snapshot,
     apply_request_contract_snapshot,
+    build_request_contract,
     build_execution_brief,
     build_job_contract,
     job_contract_has_body,
@@ -511,10 +512,24 @@ def refresh_task_planning_primitives(
     if not isinstance(task, dict):
         return {}
 
-    request_contract_snapshot = normalize_request_contract_snapshot(
-        request_contract
+    explicit_request_contract_snapshot = (
+        normalize_request_contract_snapshot(request_contract)
         if isinstance(request_contract, dict)
-        else {
+        else {}
+    )
+    explicit_execution_brief_snapshot = (
+        normalize_execution_brief_snapshot(execution_brief)
+        if isinstance(execution_brief, dict)
+        else {}
+    )
+    explicit_request_contract = bool(explicit_request_contract_snapshot)
+    explicit_execution_brief = bool(explicit_execution_brief_snapshot)
+
+    request_contract_snapshot = (
+        explicit_request_contract_snapshot
+        if explicit_request_contract
+        else normalize_request_contract_snapshot(
+            {
             "version": task.get("request_contract_version"),
             "contract_type": task.get("request_contract_type"),
             "preset": task.get("request_contract_preset"),
@@ -525,23 +540,28 @@ def refresh_task_planning_primitives(
             "fields": task.get("request_contract_fields"),
             "artifact_contracts": task.get("request_contract_artifact_contracts"),
         }
+        )
     )
     if request_contract_snapshot:
         apply_request_contract_snapshot(task, request_contract_snapshot)
 
-    execution_brief_snapshot = normalize_execution_brief_snapshot(
-        execution_brief
-        if isinstance(execution_brief, dict)
-        else {
-            "version": task.get("execution_brief_version"),
-            "status": task.get("execution_brief_status"),
-            "summary": task.get("execution_brief_summary"),
-            "executable_slice": task.get("execution_brief_executable_slice"),
-            "blocked_slice": task.get("execution_brief_blocked_slice"),
-            "operator_decision": task.get("execution_brief_operator_decision"),
-            "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
-        }
-    )
+    execution_brief_snapshot: Dict[str, Any] = {}
+    if explicit_execution_brief:
+        execution_brief_snapshot = explicit_execution_brief_snapshot
+    elif explicit_request_contract and request_contract_snapshot:
+        execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
+    else:
+        execution_brief_snapshot = normalize_execution_brief_snapshot(
+            {
+                "version": task.get("execution_brief_version"),
+                "status": task.get("execution_brief_status"),
+                "summary": task.get("execution_brief_summary"),
+                "executable_slice": task.get("execution_brief_executable_slice"),
+                "blocked_slice": task.get("execution_brief_blocked_slice"),
+                "operator_decision": task.get("execution_brief_operator_decision"),
+                "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
+            }
+        )
     if not execution_brief_snapshot and request_contract_snapshot:
         execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
     if execution_brief_snapshot:
@@ -558,21 +578,25 @@ def refresh_task_planning_primitives(
         ):
             task.pop(key, None)
 
-    job_contract_snapshot = normalize_job_contract_snapshot(
-        {
-            "version": task.get("job_contract_version"),
-            "status": task.get("job_contract_status"),
-            "planning_mode": task.get("job_contract_planning_mode"),
-            "summary": task.get("job_contract_summary"),
-            "goal": task.get("job_contract_goal"),
-            "scope": task.get("job_contract_scope"),
-            "non_goals": task.get("job_contract_non_goals"),
-            "risks": task.get("job_contract_risks"),
-            "acceptance_checks": task.get("job_contract_acceptance_checks"),
-            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
-            "rollback_hint": task.get("job_contract_rollback_hint"),
-        }
-    )
+    job_contract_snapshot: Dict[str, Any] = {}
+    if request_contract_snapshot and (explicit_request_contract or explicit_execution_brief):
+        job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
+    else:
+        job_contract_snapshot = normalize_job_contract_snapshot(
+            {
+                "version": task.get("job_contract_version"),
+                "status": task.get("job_contract_status"),
+                "planning_mode": task.get("job_contract_planning_mode"),
+                "summary": task.get("job_contract_summary"),
+                "goal": task.get("job_contract_goal"),
+                "scope": task.get("job_contract_scope"),
+                "non_goals": task.get("job_contract_non_goals"),
+                "risks": task.get("job_contract_risks"),
+                "acceptance_checks": task.get("job_contract_acceptance_checks"),
+                "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+                "rollback_hint": task.get("job_contract_rollback_hint"),
+            }
+        )
     if not job_contract_snapshot and request_contract_snapshot:
         job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
     if not job_contract_snapshot and execution_brief_snapshot:
@@ -646,18 +670,20 @@ def refresh_task_planning_primitives(
         ):
             task.pop(key, None)
 
-    debug_packet_snapshot = normalize_debug_packet_snapshot(
-        {
-            "version": task.get("debug_packet_version"),
-            "state": task.get("debug_packet_state"),
-            "summary": task.get("debug_packet_summary"),
-            "symptom": task.get("debug_packet_symptom"),
-            "root_cause": task.get("debug_packet_root_cause"),
-            "evidence": task.get("debug_packet_evidence"),
-            "failed_attempt": task.get("debug_packet_failed_attempt"),
-            "next_step": task.get("debug_packet_next_step"),
-        }
-    )
+    debug_packet_snapshot: Dict[str, Any] = {}
+    if not (explicit_request_contract or explicit_execution_brief):
+        debug_packet_snapshot = normalize_debug_packet_snapshot(
+            {
+                "version": task.get("debug_packet_version"),
+                "state": task.get("debug_packet_state"),
+                "summary": task.get("debug_packet_summary"),
+                "symptom": task.get("debug_packet_symptom"),
+                "root_cause": task.get("debug_packet_root_cause"),
+                "evidence": task.get("debug_packet_evidence"),
+                "failed_attempt": task.get("debug_packet_failed_attempt"),
+                "next_step": task.get("debug_packet_next_step"),
+            }
+        )
     if not debug_packet_snapshot:
         debug_packet_snapshot = build_debug_packet_snapshot(task)
     if debug_packet_snapshot:
@@ -675,15 +701,17 @@ def refresh_task_planning_primitives(
         ):
             task.pop(key, None)
 
-    phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
-        {
-            "version": task.get("phase_checkpoint_version"),
-            "status": task.get("phase_checkpoint_status"),
-            "current_phase": task.get("phase_checkpoint_current_phase"),
-            "summary": task.get("phase_checkpoint_summary"),
-            "rows": task.get("phase_checkpoint_rows"),
-        }
-    )
+    phase_checkpoint_snapshot: Dict[str, Any] = {}
+    if not (explicit_request_contract or explicit_execution_brief):
+        phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
+            {
+                "version": task.get("phase_checkpoint_version"),
+                "status": task.get("phase_checkpoint_status"),
+                "current_phase": task.get("phase_checkpoint_current_phase"),
+                "summary": task.get("phase_checkpoint_summary"),
+                "rows": task.get("phase_checkpoint_rows"),
+            }
+        )
     if not phase_checkpoint_snapshot:
         phase_checkpoint_snapshot = build_phase_checkpoint_snapshot(task, debug_packet_snapshot)
     if phase_checkpoint_snapshot:
@@ -2403,6 +2431,8 @@ def ensure_task_record(
     intent_action: str = "",
     intent_class: str = "",
     intent_trace: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
+    execution_brief: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     token = str(request_id or "").strip()
     tasks = ensure_project_tasks(entry)
@@ -2452,6 +2482,37 @@ def ensure_task_record(
         item["intent_trace"] = next_intent_trace[:400]
     if next_intent_command or next_intent_action or next_intent_class or next_intent_trace:
         item["intent_recorded_at"] = now
+
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        request_contract
+        if isinstance(request_contract, dict)
+        else {
+            "version": item.get("request_contract_version"),
+            "contract_type": item.get("request_contract_type"),
+            "preset": item.get("request_contract_preset"),
+            "status": item.get("request_contract_status"),
+            "summary": item.get("request_contract_summary"),
+            "missing_fields": item.get("request_contract_missing_fields"),
+            "required_outputs": item.get("request_contract_required_outputs"),
+            "fields": item.get("request_contract_fields"),
+            "artifact_contracts": item.get("request_contract_artifact_contracts"),
+        }
+    )
+    if (
+        not request_contract_snapshot
+        and str(item.get("mode", mode or "")).strip().lower() == "dispatch"
+        and str(item.get("prompt", prompt or "")).strip()
+    ):
+        request_contract_snapshot = build_request_contract(
+            source_prompt=str(item.get("prompt", prompt or "")).strip(),
+            selected_roles=list(item.get("roles") or roles or []),
+        )
+    if request_contract_snapshot or isinstance(execution_brief, dict) or str(item.get("mode", mode or "")).strip().lower() == "dispatch":
+        refresh_task_planning_primitives(
+            item,
+            request_contract=request_contract_snapshot,
+            execution_brief=execution_brief if isinstance(execution_brief, dict) else None,
+        )
 
     assign_task_alias(entry, item, prompt=prompt, rebuild_index=False)
     item["context"] = build_task_context(request_id=token, entry=entry, task=item)

@@ -1275,6 +1275,8 @@ def ensure_task_record(
     intent_action: str = "",
     intent_class: str = "",
     intent_trace: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
+    execution_brief: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return ensure_task_record_state(
         entry,
@@ -1293,6 +1295,8 @@ def ensure_task_record(
         intent_action=intent_action,
         intent_class=intent_class,
         intent_trace=intent_trace,
+        request_contract=request_contract,
+        execution_brief=execution_brief,
     )
 
 

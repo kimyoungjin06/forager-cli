@@ -1451,6 +1451,37 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
     assert "phase_checkpoint: status=blocked | current=plan" in summary
 
 
+def test_ensure_task_record_populates_planning_primitives_on_creation() -> None:
+    entry = {
+        "name": "demo_proj",
+        "project_alias": "O9",
+        "project_root": "/tmp/demo",
+        "team_dir": "/tmp/demo/.aoe-team",
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+    }
+
+    task = gw.ensure_task_record(
+        entry=entry,
+        request_id="REQ-CREATE",
+        prompt="Implement and verify the summary handoff.",
+        mode="dispatch",
+        roles=["Codex-Dev", "Codex-Reviewer"],
+        verifier_roles=["Codex-Reviewer"],
+        require_verifier=True,
+    )
+
+    assert task["request_contract_status"] == "complete"
+    assert task["execution_brief_status"] == "executable"
+    assert task["job_contract_status"] == "blocked"
+    assert task["job_contract_scope"] == []
+    assert task["job_contract_acceptance_checks"] == []
+    assert task["job_contract_artifacts_to_touch"] == []
+    assert task["phase_checkpoint_status"] == "blocked"
+    assert task["phase_checkpoint_current_phase"] == "plan"
+
+
 def test_task_lifecycle_summary_includes_external_background_phase() -> None:
     task = gw.sanitize_task_record(
         {
