@@ -853,6 +853,9 @@ def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for
         at="2026-04-15T12:00:00+09:00",
         extra={
             "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+            "planning_handoff": {
+                "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+            },
         },
     )
     config = dashboard_app.DashboardAppConfig(
@@ -871,7 +874,9 @@ def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for
 
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
-    assert "Dispatch Phase2 | blocked | reason=approved_plan_blocked | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
+    assert "Dispatch Phase2 | blocked | reason=approved_plan_blocked | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
+    assert "planning_review: draft via codex | review via claude | dispatch waits for critic-approved plan" in text
+    assert "approved_plan: approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -7437,6 +7442,8 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
+    assert "planning=draft via" in health["server_guard_latest_result_summary"]
+    assert "dispatch waits for critic-approved plan" in health["server_guard_latest_result_summary"]
 
     audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard&chat=123456&limit=20", config)
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)

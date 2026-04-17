@@ -207,6 +207,7 @@ def _execute_chat_session_update_action(
     current_lang = chat_state.get_chat_lang(manager_state, chat_id)
     current_report_level = chat_state.get_chat_report_level(manager_state, chat_id)
     selected_task = _resolve_selected_chat_task(manager_state, chat_id, current_room)
+    planning_bundle = task_view.planning_operator_bundle(selected_task)
     effective_next_step = next_step or f"/control/chat?chat={chat_id}"
     effective_source_command = (
         f"server-guard-preset:{server_guard_pressure_kind or '-'}:{chat_id}:{server_guard_preset_label}"
@@ -296,6 +297,18 @@ def _execute_chat_session_update_action(
             "server_guard_preset_label": server_guard_preset_label,
             "server_guard_pressure_kind": server_guard_pressure_kind,
             "chat_preset_diff_summary": preset_diff_summary,
+            "planning_review": str(planning_bundle.get("planning_review", "")).strip() or "-",
+            "planning_review_summary": str(planning_bundle.get("planning_review", "")).strip() or "-",
+            "planning_lanes": str(planning_bundle.get("planning_lanes", "")).strip() or "-",
+            "planning_lanes_summary": str(planning_bundle.get("planning_lanes", "")).strip() or "-",
+            "approved_plan_gate": str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",
+            "approved_plan_gate_summary": str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",
+            "planner_lane": str(planning_bundle.get("planner_lane", "")).strip() or "-",
+            "planner_lane_summary": str(planning_bundle.get("planner_lane", "")).strip() or "-",
+            "critic_lane": str(planning_bundle.get("critic_lane", "")).strip() or "-",
+            "critic_lane_summary": str(planning_bundle.get("critic_lane", "")).strip() or "-",
+            "approved_plan": str(planning_bundle.get("approved_plan", "")).strip() or "-",
+            "approved_plan_summary": str(planning_bundle.get("approved_plan", "")).strip() or "-",
             "actions": followup_actions,
             "reply_text": (
                 f"{server_guard_preset_label + chr(10) if focus_badge == 'server-guard' and server_guard_preset_label else ''}"

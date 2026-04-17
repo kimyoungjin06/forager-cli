@@ -223,6 +223,26 @@ def _append_action_audit(
         "transcript_preview": str(payload.get("reply_text", "")).strip()[:4000],
         "chat_preset_diff_summary": str(payload.get("chat_preset_diff_summary", "")).strip(),
     }
+    planning_handoff = payload.get("planning_handoff") if isinstance(payload.get("planning_handoff"), dict) else {}
+    if planning_handoff:
+        row["planning_handoff"] = planning_handoff
+    for source_key, row_key in (
+        ("planning_review_summary", "planning_review_summary"),
+        ("planning_review", "planning_review_summary"),
+        ("planning_lanes_summary", "planning_lanes_summary"),
+        ("planning_lanes", "planning_lanes_summary"),
+        ("approved_plan_gate_summary", "approved_plan_gate_summary"),
+        ("approved_plan_gate", "approved_plan_gate_summary"),
+        ("planner_lane_summary", "planner_lane_summary"),
+        ("planner_lane", "planner_lane_summary"),
+        ("critic_lane_summary", "critic_lane_summary"),
+        ("critic_lane", "critic_lane_summary"),
+        ("approved_plan_summary", "approved_plan_summary"),
+        ("approved_plan", "approved_plan_summary"),
+    ):
+        value = str(payload.get(source_key, "")).strip()
+        if value:
+            row[row_key] = value
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:
         paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)

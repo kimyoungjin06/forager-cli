@@ -878,10 +878,17 @@ def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str
     for row in rows:
         if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
             continue
-        headline = str(getattr(row, "headline", "")).strip() or "-"
+        headline = (
+            str(getattr(row, "headline_summary", "")).strip()
+            or str(getattr(row, "headline", "")).strip()
+            or "-"
+        )
+        planning_review = str(getattr(row, "planning_review_summary", "")).strip()
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         summary = f"{headline} | at={at} | next={next_step}"
+        if planning_review and planning_review != "-" and planning_review not in summary:
+            summary = f"{summary} | {planning_review}"
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
@@ -905,11 +912,18 @@ def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str
             continue
         if str(getattr(row, "outcome_kind", "")).strip() not in result_kinds:
             continue
-        headline = str(getattr(row, "headline", "")).strip() or "-"
+        headline = (
+            str(getattr(row, "headline_summary", "")).strip()
+            or str(getattr(row, "headline", "")).strip()
+            or "-"
+        )
+        planning_review = str(getattr(row, "planning_review_summary", "")).strip()
         status = str(getattr(row, "outcome_status", "")).strip() or str(getattr(row, "status", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
         summary = f"{headline} | status={status} | at={at} | next={next_step}"
+        if planning_review and planning_review != "-" and planning_review not in summary:
+            summary = f"{summary} | {planning_review}"
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
@@ -1423,6 +1437,8 @@ def load_dashboard_history_page(
                 status=row.status,
                 summary=row.summary,
                 detail=row.detail,
+                planning_review_summary=getattr(row, "planning_review_summary", ""),
+                approved_plan_summary=getattr(row, "approved_plan_summary", ""),
                 followup_hint=row.followup_hint,
                 raw_ref=row.raw_ref,
                 pressure_kind_label=_history_row_pressure_label(row, fallback_key=fallback_pressure_key),
