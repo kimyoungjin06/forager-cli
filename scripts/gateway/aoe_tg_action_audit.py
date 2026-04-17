@@ -307,6 +307,20 @@ def normalize_replan_auto_decision(raw: Any) -> Dict[str, Any]:
         "analysis_feedback_next_step": str(row.get("analysis_feedback_next_step", "")).strip() or "-",
         "analysis_feedback_open_kinds": str(row.get("analysis_feedback_open_kinds", "")).strip() or "-",
         "analysis_feedback_applied": bool(row.get("analysis_feedback_applied", False)),
+        "planning_feedback_source": str(row.get("planning_feedback_source", "")).strip() or "-",
+        "planning_feedback_state": str(row.get("planning_feedback_state", "")).strip() or "-",
+        "planning_feedback_summary": str(row.get("planning_feedback_summary", "")).strip() or "-",
+        "planning_feedback_next_step": str(row.get("planning_feedback_next_step", "")).strip() or "-",
+        "planning_feedback_suggested_action": str(row.get("planning_feedback_suggested_action", "")).strip() or "-",
+        "planning_feedback_applied": bool(row.get("planning_feedback_applied", False)),
+        "job_contract_status": str(row.get("job_contract_status", "")).strip() or "-",
+        "job_contract_summary": str(row.get("job_contract_summary", "")).strip() or "-",
+        "debug_packet_state": str(row.get("debug_packet_state", "")).strip() or "-",
+        "debug_packet_summary": str(row.get("debug_packet_summary", "")).strip() or "-",
+        "debug_packet_next_step": str(row.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": str(row.get("phase_checkpoint_status", "")).strip() or "-",
+        "phase_checkpoint_current_phase": str(row.get("phase_checkpoint_current_phase", "")).strip() or "-",
+        "phase_checkpoint_summary": str(row.get("phase_checkpoint_summary", "")).strip() or "-",
     }
 
 
@@ -335,6 +349,9 @@ def summarize_replan_auto_decision(decision: Any) -> str:
         parts.append(f"reuse={kind}:{profile}")
     elif bool(row.get("analysis_feedback_applied", False)):
         parts.append("reuse=analysis_record_set")
+    elif bool(row.get("planning_feedback_applied", False)):
+        source = str(row.get("planning_feedback_source", "")).strip() or "-"
+        parts.append(f"reuse={source}")
     if bool(row.get("can_auto_apply", False)):
         parts.append("auto=yes")
     return " | ".join(parts)
@@ -369,6 +386,18 @@ def normalize_replan_auto_routing_policy(raw: Any) -> Dict[str, Any]:
         "analysis_feedback_summary": str(row.get("analysis_feedback_summary", "")).strip() or "-",
         "analysis_feedback_open_kinds": str(row.get("analysis_feedback_open_kinds", "")).strip() or "-",
         "analysis_feedback_applied": bool(row.get("analysis_feedback_applied", False)),
+        "planning_feedback_source": str(row.get("planning_feedback_source", "")).strip() or "-",
+        "planning_feedback_state": str(row.get("planning_feedback_state", "")).strip() or "-",
+        "planning_feedback_summary": str(row.get("planning_feedback_summary", "")).strip() or "-",
+        "planning_feedback_applied": bool(row.get("planning_feedback_applied", False)),
+        "job_contract_status": str(row.get("job_contract_status", "")).strip() or "-",
+        "job_contract_summary": str(row.get("job_contract_summary", "")).strip() or "-",
+        "debug_packet_state": str(row.get("debug_packet_state", "")).strip() or "-",
+        "debug_packet_summary": str(row.get("debug_packet_summary", "")).strip() or "-",
+        "debug_packet_next_step": str(row.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": str(row.get("phase_checkpoint_status", "")).strip() or "-",
+        "phase_checkpoint_current_phase": str(row.get("phase_checkpoint_current_phase", "")).strip() or "-",
+        "phase_checkpoint_summary": str(row.get("phase_checkpoint_summary", "")).strip() or "-",
     }
 
 
@@ -394,6 +423,8 @@ def summarize_replan_auto_routing_policy(policy: Any) -> str:
         parts.append("confirm=yes")
     elif bool(row.get("can_auto_apply", False)):
         parts.append("auto=yes")
+    elif bool(row.get("planning_feedback_applied", False)):
+        parts.append(f"gate={str(row.get('planning_feedback_source', '')).strip() or '-'}")
     return " | ".join(parts)
 
 
@@ -749,6 +780,13 @@ def summarize_replan_auto_operator_status(
         kind = str(normalized_policy.get("canonical_feedback_kind", "")).strip() or "-"
         profile = str(normalized_policy.get("canonical_feedback_profile", "")).strip() or "-"
         return f"mutation={ready_next} | kind={kind}:{profile} | reused"
+    if ready_status == "analysis_review_ready" and ready_next not in {"", "-"}:
+        feedback_state = str(normalized_policy.get("analysis_feedback_state", "")).strip() or "-"
+        return f"analysis_review={ready_next} | state={feedback_state} | reused"
+    if ready_status in {"contract_review_ready", "debug_review_ready", "phase_review_ready"} and ready_next not in {"", "-"}:
+        source = str(normalized_policy.get("planning_feedback_source", "")).strip() or "-"
+        state = str(normalized_policy.get("planning_feedback_state", "")).strip() or "-"
+        return f"planning_review={ready_next} | source={source} | state={state} | reused"
     if ready_status == "manual_ready" and ready_next not in {"", "-"}:
         suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
         if suggested_action in {"manual_review", "review", "judge"}:
@@ -788,6 +826,11 @@ def summarize_replan_auto_operator_summary(
         return f"{status_summary} | reuse=task_truth"
     if str(normalized_policy.get("status", "")).strip() == "mutation_progressed":
         return f"{status_summary} | reuse=canonical_writeback"
+    if str(normalized_policy.get("status", "")).strip() == "analysis_review_ready":
+        return f"{status_summary} | reuse=analysis_record_set"
+    if str(normalized_policy.get("status", "")).strip() in {"contract_review_ready", "debug_review_ready", "phase_review_ready"}:
+        source = str(normalized_policy.get("planning_feedback_source", "")).strip() or "-"
+        return f"{status_summary} | reuse={source}"
     return status_summary
 
 

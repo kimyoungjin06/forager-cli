@@ -341,6 +341,177 @@ def _retry_blocked_remediation_with_analysis_feedback(remediation: str, decision
     return f"{base}; {suffix}" if base else suffix
 
 
+def _retry_blocked_remediation_with_planning_feedback(remediation: str, decision: Dict[str, Any]) -> str:
+    if not isinstance(decision, dict) or not bool(decision.get("planning_feedback_applied", False)):
+        return remediation
+    source = str(decision.get("planning_feedback_source", "")).strip() or "-"
+    next_step = str(decision.get("planning_feedback_next_step", "")).strip() or "-"
+    summary = str(decision.get("planning_feedback_summary", "")).strip() or "-"
+    suffix = f"planning primitives reused: source={source} next={next_step}"
+    if summary and summary != "-":
+        suffix = f"{suffix} | {summary}"
+    base = str(remediation or "").strip()
+    return f"{base}; {suffix}" if base else suffix
+
+
+def _suggested_action_from_next_step(next_step: str, *, fallback: str = "task_review") -> str:
+    step = str(next_step or "").strip().lower()
+    if step.startswith("/retry "):
+        return "retry"
+    if step.startswith("/replan "):
+        return "replan"
+    if step.startswith("/followup-exec "):
+        return "followup_execute"
+    if step.startswith("/followup "):
+        return "followup"
+    if step.startswith("/task "):
+        return "task_review"
+    if step.startswith("/offdesk review") or step.startswith("/orch judge "):
+        return "manual_review"
+    if step.startswith("/sync "):
+        return "sync_review"
+    if step.startswith("/check "):
+        return "observe"
+    return fallback
+
+
+def _planning_primitives_snapshot(source_task: Dict[str, Any]) -> Dict[str, str]:
+    if not isinstance(source_task, dict):
+        return {
+            "job_contract_status": "-",
+            "job_contract_summary": "-",
+            "debug_packet_state": "-",
+            "debug_packet_summary": "-",
+            "debug_packet_next_step": "-",
+            "phase_checkpoint_status": "-",
+            "phase_checkpoint_current_phase": "-",
+            "phase_checkpoint_summary": "-",
+        }
+    gateway_task_state.refresh_task_planning_primitives(source_task)
+    return {
+        "job_contract_status": str(source_task.get("job_contract_status", "")).strip() or "-",
+        "job_contract_summary": str(source_task.get("job_contract_summary", "")).strip() or "-",
+        "debug_packet_state": str(source_task.get("debug_packet_state", "")).strip() or "-",
+        "debug_packet_summary": str(source_task.get("debug_packet_summary", "")).strip() or "-",
+        "debug_packet_next_step": str(source_task.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": str(source_task.get("phase_checkpoint_status", "")).strip() or "-",
+        "phase_checkpoint_current_phase": str(source_task.get("phase_checkpoint_current_phase", "")).strip() or "-",
+        "phase_checkpoint_summary": str(source_task.get("phase_checkpoint_summary", "")).strip() or "-",
+    }
+
+
+def _select_planning_task(*candidates: Any) -> Dict[str, Any]:
+    planning_keys = (
+        "job_contract_status",
+        "job_contract_summary",
+        "debug_packet_state",
+        "debug_packet_summary",
+        "phase_checkpoint_status",
+        "phase_checkpoint_summary",
+    )
+    for item in candidates:
+        if isinstance(item, dict) and any(str(item.get(key, "")).strip() for key in planning_keys):
+            return item
+    for item in candidates:
+        if isinstance(item, dict) and item:
+            return item
+    return {}
+
+
+def _planning_primitives_feedback(
+    *,
+    source_task: Dict[str, Any],
+    source_command: str,
+    suggested_action: str,
+) -> Dict[str, Any]:
+    snapshot = _planning_primitives_snapshot(source_task)
+    feedback: Dict[str, Any] = {
+        **snapshot,
+        "planning_feedback_source": "-",
+        "planning_feedback_state": "-",
+        "planning_feedback_summary": "-",
+        "planning_feedback_next_step": "-",
+        "planning_feedback_suggested_action": "-",
+        "planning_feedback_applied": False,
+    }
+    if _command_head(source_command) != "/replan":
+        return feedback
+    action = str(suggested_action or "").strip().lower()
+    if action not in {"retry", "replan"}:
+        return feedback
+    task_ref = _analysis_feedback_task_ref(source_task)
+    task_next_step = f"/task {task_ref}" if task_ref else "-"
+    contract_status = str(snapshot.get("job_contract_status", "")).strip().lower()
+    contract_scope = [
+        str(item).strip()
+        for item in (source_task.get("job_contract_scope") or [])
+        if str(item).strip()
+    ]
+    contract_checks = [
+        str(item).strip()
+        for item in (source_task.get("job_contract_acceptance_checks") or [])
+        if str(item).strip()
+    ]
+    contract_artifacts = [
+        str(item).strip()
+        for item in (source_task.get("job_contract_artifacts_to_touch") or [])
+        if str(item).strip()
+    ]
+    has_contract_body = bool(contract_scope or contract_checks or contract_artifacts)
+    if contract_status in {"", "-"} or not has_contract_body:
+        feedback.update(
+            {
+                "planning_feedback_source": "job_contract",
+                "planning_feedback_state": "missing",
+                "planning_feedback_summary": str(snapshot.get("job_contract_summary", "")).strip() or "job contract missing",
+                "planning_feedback_next_step": task_next_step,
+                "planning_feedback_suggested_action": "task_review",
+                "planning_feedback_applied": task_next_step.startswith("/"),
+            }
+        )
+        return feedback
+    if contract_status == "blocked":
+        feedback.update(
+            {
+                "planning_feedback_source": "job_contract",
+                "planning_feedback_state": "blocked",
+                "planning_feedback_summary": str(snapshot.get("job_contract_summary", "")).strip() or "-",
+                "planning_feedback_next_step": task_next_step,
+                "planning_feedback_suggested_action": "task_review",
+                "planning_feedback_applied": task_next_step.startswith("/"),
+            }
+        )
+        return feedback
+    debug_state = str(snapshot.get("debug_packet_state", "")).strip().lower()
+    debug_next_step = str(snapshot.get("debug_packet_next_step", "")).strip()
+    if debug_state == "blocked":
+        resolved_next_step = debug_next_step if debug_next_step.startswith("/") else task_next_step
+        feedback.update(
+            {
+                "planning_feedback_source": "debug_packet",
+                "planning_feedback_state": debug_state,
+                "planning_feedback_summary": str(snapshot.get("debug_packet_summary", "")).strip() or "-",
+                "planning_feedback_next_step": resolved_next_step,
+                "planning_feedback_suggested_action": _suggested_action_from_next_step(resolved_next_step),
+                "planning_feedback_applied": resolved_next_step.startswith("/"),
+            }
+        )
+        return feedback
+    phase_status = str(snapshot.get("phase_checkpoint_status", "")).strip().lower()
+    if phase_status == "blocked":
+        feedback.update(
+            {
+                "planning_feedback_source": "phase_checkpoint",
+                "planning_feedback_state": phase_status,
+                "planning_feedback_summary": str(snapshot.get("phase_checkpoint_summary", "")).strip() or "-",
+                "planning_feedback_next_step": task_next_step,
+                "planning_feedback_suggested_action": "task_review",
+                "planning_feedback_applied": task_next_step.startswith("/"),
+            }
+        )
+    return feedback
+
+
 def _append_blocked_retry_replan_audit(
     *,
     team_dir: Path,
@@ -354,6 +525,7 @@ def _append_blocked_retry_replan_audit(
     latest_judge_decision_bridge: Dict[str, Any],
     replan_auto_decision: Dict[str, Any],
     replan_auto_routing_policy: Dict[str, Any],
+    planning_primitives: Dict[str, Any],
     now_iso: Any,
 ) -> None:
     if not blocked or not isinstance(entry, dict):
@@ -382,6 +554,9 @@ def _append_blocked_retry_replan_audit(
             "latest_judge_decision_bridge": dict(latest_judge_decision_bridge or {}),
             "replan_auto_decision": dict(replan_auto_decision or {}),
             "replan_auto_routing_policy": dict(replan_auto_routing_policy or {}),
+            "job_contract_summary": str((planning_primitives or {}).get("job_contract_summary", "")).strip() or "-",
+            "debug_packet_summary": str((planning_primitives or {}).get("debug_packet_summary", "")).strip() or "-",
+            "phase_checkpoint_summary": str((planning_primitives or {}).get("phase_checkpoint_summary", "")).strip() or "-",
         },
     )
 
@@ -471,6 +646,12 @@ def _replan_auto_decision_stub(
         suggested_action=suggested_action,
     )
     analysis_feedback_applied = bool(analysis_record_feedback.get("applied", False))
+    planning_feedback = _planning_primitives_feedback(
+        source_task=source_task if isinstance(source_task, dict) else {},
+        source_command=source_command,
+        suggested_action=suggested_action,
+    )
+    planning_feedback_applied = bool(planning_feedback.get("planning_feedback_applied", False))
     if manual_feedback_applied:
         suggested_next_step = str(manual_step_feedback.get("next_step", "")).strip() or suggested_next_step
         canonical_feedback_applied = False
@@ -483,6 +664,7 @@ def _replan_auto_decision_stub(
     elif analysis_feedback_applied:
         suggested_action = "task_review"
         suggested_next_step = str(analysis_record_feedback.get("next_step", "")).strip() or suggested_next_step
+    can_auto_apply = suggested_action in {"retry", "replan"} and suggested_next_step.startswith("/")
     decision_mode = str(bridge.get("decision_mode", "")).strip() or ("judge_signal" if decision else "none")
     if manual_feedback_applied:
         decision_mode = "manual_feedback_reuse"
@@ -490,6 +672,17 @@ def _replan_auto_decision_stub(
         decision_mode = "canonical_writeback_reuse"
     elif analysis_feedback_applied:
         decision_mode = "analysis_record_set_reuse"
+    if planning_feedback_applied:
+        suggested_action = (
+            str(planning_feedback.get("planning_feedback_suggested_action", "")).strip()
+            or suggested_action
+        )
+        suggested_next_step = (
+            str(planning_feedback.get("planning_feedback_next_step", "")).strip()
+            or suggested_next_step
+        )
+        can_auto_apply = suggested_action in {"retry", "replan"} and suggested_next_step.startswith("/")
+        decision_mode = "planning_primitive_reuse"
     return {
         "source": "latest_offdesk_judge",
         "current_action": "replan",
@@ -498,7 +691,7 @@ def _replan_auto_decision_stub(
         "decision_mode": decision_mode,
         "bridge_applied": bool(bridge.get("applied", False)),
         "supports_auto_decision": bool(bridge.get("supports_auto_decision", False)),
-        "can_auto_apply": suggested_action in {"retry", "replan"} and suggested_next_step.startswith("/"),
+        "can_auto_apply": can_auto_apply,
         "reasoning": str(decision.get("reasoning", "")).strip() or "-",
         "caution": str(decision.get("caution", "")).strip() or "-",
         "confidence": str(decision.get("confidence", "")).strip() or "-",
@@ -517,6 +710,20 @@ def _replan_auto_decision_stub(
         "analysis_feedback_next_step": str(analysis_record_feedback.get("next_step", "")).strip() or "-",
         "analysis_feedback_open_kinds": str(analysis_record_feedback.get("open_kinds", "")).strip() or "-",
         "analysis_feedback_applied": analysis_feedback_applied,
+        "job_contract_status": str(planning_feedback.get("job_contract_status", "")).strip() or "-",
+        "job_contract_summary": str(planning_feedback.get("job_contract_summary", "")).strip() or "-",
+        "debug_packet_state": str(planning_feedback.get("debug_packet_state", "")).strip() or "-",
+        "debug_packet_summary": str(planning_feedback.get("debug_packet_summary", "")).strip() or "-",
+        "debug_packet_next_step": str(planning_feedback.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": str(planning_feedback.get("phase_checkpoint_status", "")).strip() or "-",
+        "phase_checkpoint_current_phase": str(planning_feedback.get("phase_checkpoint_current_phase", "")).strip() or "-",
+        "phase_checkpoint_summary": str(planning_feedback.get("phase_checkpoint_summary", "")).strip() or "-",
+        "planning_feedback_source": str(planning_feedback.get("planning_feedback_source", "")).strip() or "-",
+        "planning_feedback_state": str(planning_feedback.get("planning_feedback_state", "")).strip() or "-",
+        "planning_feedback_summary": str(planning_feedback.get("planning_feedback_summary", "")).strip() or "-",
+        "planning_feedback_next_step": str(planning_feedback.get("planning_feedback_next_step", "")).strip() or "-",
+        "planning_feedback_suggested_action": str(planning_feedback.get("planning_feedback_suggested_action", "")).strip() or "-",
+        "planning_feedback_applied": planning_feedback_applied,
     }
 
 
@@ -546,13 +753,25 @@ def _replan_auto_routing_policy(
     analysis_feedback_summary = str(decision.get("analysis_feedback_summary", "")).strip() or "-"
     analysis_feedback_open_kinds = str(decision.get("analysis_feedback_open_kinds", "")).strip() or "-"
     analysis_feedback_applied = bool(decision.get("analysis_feedback_applied", False))
+    planning_feedback_source = str(decision.get("planning_feedback_source", "")).strip() or "-"
+    planning_feedback_state = str(decision.get("planning_feedback_state", "")).strip() or "-"
+    planning_feedback_summary = str(decision.get("planning_feedback_summary", "")).strip() or "-"
+    planning_feedback_applied = bool(decision.get("planning_feedback_applied", False))
     manual_ready = (
         supports_auto_decision
         and not can_auto_apply
         and suggested_next_step.startswith("/")
         and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}
     )
-    if manual_feedback_applied and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}:
+    if planning_feedback_applied:
+        if planning_feedback_source == "job_contract":
+            status = "contract_review_ready"
+        elif planning_feedback_source == "debug_packet":
+            status = "debug_review_ready"
+        else:
+            status = "phase_review_ready"
+        requires_operator_confirmation = False
+    elif manual_feedback_applied and suggested_action in {"followup", "followup_execute", "manual_review", "review", "judge"}:
         status = "manual_progressed"
         requires_operator_confirmation = False
     elif canonical_feedback_applied and suggested_action in {"followup", "followup_execute"}:
@@ -589,6 +808,18 @@ def _replan_auto_routing_policy(
         "analysis_feedback_summary": analysis_feedback_summary,
         "analysis_feedback_open_kinds": analysis_feedback_open_kinds,
         "analysis_feedback_applied": analysis_feedback_applied,
+        "planning_feedback_source": planning_feedback_source,
+        "planning_feedback_state": planning_feedback_state,
+        "planning_feedback_summary": planning_feedback_summary,
+        "planning_feedback_applied": planning_feedback_applied,
+        "job_contract_status": str(decision.get("job_contract_status", "")).strip() or "-",
+        "job_contract_summary": str(decision.get("job_contract_summary", "")).strip() or "-",
+        "debug_packet_state": str(decision.get("debug_packet_state", "")).strip() or "-",
+        "debug_packet_summary": str(decision.get("debug_packet_summary", "")).strip() or "-",
+        "debug_packet_next_step": str(decision.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": str(decision.get("phase_checkpoint_status", "")).strip() or "-",
+        "phase_checkpoint_current_phase": str(decision.get("phase_checkpoint_current_phase", "")).strip() or "-",
+        "phase_checkpoint_summary": str(decision.get("phase_checkpoint_summary", "")).strip() or "-",
     }
 
 
@@ -1146,6 +1377,8 @@ def _execute_retry_run_transition(
         remediation = _retry_blocked_remediation_for_reason(reason_code, detail_note)
     latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
     latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if blocked and isinstance(entry, dict) else {}
+    planning_task = _select_planning_task(source_task, executed_task)
+    planning_primitives = _planning_primitives_snapshot(planning_task)
     latest_judge_decision_bridge: Dict[str, Any] = {}
     replan_auto_decision: Dict[str, Any] = {}
     replan_auto_routing_policy: Dict[str, Any] = {}
@@ -1160,13 +1393,20 @@ def _execute_retry_run_transition(
             next_step=next_step,
             latest_judge_decision=latest_judge_decision,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
-            source_task=source_task if isinstance(source_task, dict) else executed_task,
+            source_task=planning_task,
         )
         replan_auto_routing_policy = _replan_auto_routing_policy(
             source_command=source_command,
             replan_auto_decision=replan_auto_decision,
         )
-        if str(replan_auto_routing_policy.get("status", "")).strip() in {"manual_progressed", "mutation_progressed", "analysis_review_ready"}:
+        if str(replan_auto_routing_policy.get("status", "")).strip() in {
+            "manual_progressed",
+            "mutation_progressed",
+            "analysis_review_ready",
+            "contract_review_ready",
+            "debug_review_ready",
+            "phase_review_ready",
+        }:
             progressed_next_step = str(replan_auto_routing_policy.get("suggested_next_step", "")).strip()
             if progressed_next_step.startswith("/"):
                 next_step = progressed_next_step
@@ -1175,6 +1415,7 @@ def _execute_retry_run_transition(
         remediation = _retry_blocked_remediation_with_manual_feedback(remediation, replan_auto_decision)
         remediation = _retry_blocked_remediation_with_canonical_feedback(remediation, replan_auto_decision)
         remediation = _retry_blocked_remediation_with_analysis_feedback(remediation, replan_auto_decision)
+        remediation = _retry_blocked_remediation_with_planning_feedback(remediation, replan_auto_decision)
         _append_blocked_retry_replan_audit(
             team_dir=paths.team_dir,
             entry=entry,
@@ -1187,6 +1428,7 @@ def _execute_retry_run_transition(
             latest_judge_decision_bridge=latest_judge_decision_bridge,
             replan_auto_decision=replan_auto_decision,
             replan_auto_routing_policy=replan_auto_routing_policy,
+            planning_primitives=planning_primitives,
             now_iso=_now_iso,
         )
     return _json(
@@ -1225,6 +1467,9 @@ def _execute_retry_run_transition(
             "latest_judge_decision_bridge": latest_judge_decision_bridge,
             "replan_auto_decision": replan_auto_decision,
             "replan_auto_routing_policy": replan_auto_routing_policy,
+            "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
+            "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
+            "phase_checkpoint": str(planning_primitives.get("phase_checkpoint_summary", "")).strip() or "-",
         },
         status=409 if blocked else 200,
     )
@@ -1440,6 +1685,8 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         blocked_contexts = [str(row.get("context", "")).strip() for row in messages if str(row.get("context", "")).strip()]
         latest_judge = _latest_judge_summary_payload(team_dir=paths.team_dir, entry=entry) if isinstance(entry, dict) else {}
         latest_judge_decision = _latest_judge_decision_payload(team_dir=paths.team_dir, entry=entry) if isinstance(entry, dict) else {}
+        planning_task = _select_planning_task(source_task)
+        planning_primitives = _planning_primitives_snapshot(planning_task)
         error_code = (
             "followup_execute_brief_required"
             if "orch-followup-exec blocked" in blocked_contexts
@@ -1460,13 +1707,20 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             next_step=next_step,
             latest_judge_decision=latest_judge_decision,
             latest_judge_decision_bridge=latest_judge_decision_bridge,
-            source_task=source_task if isinstance(source_task, dict) else {},
+            source_task=planning_task,
         )
         replan_auto_routing_policy = _replan_auto_routing_policy(
             source_command=str(spec.get("command", "-")),
             replan_auto_decision=replan_auto_decision,
         )
-        if str(replan_auto_routing_policy.get("status", "")).strip() in {"manual_progressed", "mutation_progressed", "analysis_review_ready"}:
+        if str(replan_auto_routing_policy.get("status", "")).strip() in {
+            "manual_progressed",
+            "mutation_progressed",
+            "analysis_review_ready",
+            "contract_review_ready",
+            "debug_review_ready",
+            "phase_review_ready",
+        }:
             progressed_next_step = str(replan_auto_routing_policy.get("suggested_next_step", "")).strip()
             if progressed_next_step.startswith("/"):
                 next_step = progressed_next_step
@@ -1478,6 +1732,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         remediation = _retry_blocked_remediation_with_manual_feedback(remediation, replan_auto_decision)
         remediation = _retry_blocked_remediation_with_canonical_feedback(remediation, replan_auto_decision)
         remediation = _retry_blocked_remediation_with_analysis_feedback(remediation, replan_auto_decision)
+        remediation = _retry_blocked_remediation_with_planning_feedback(remediation, replan_auto_decision)
         if (
             is_replan
             and _payload_bool(payload, "auto_route_apply")
@@ -1534,6 +1789,7 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             latest_judge_decision_bridge=latest_judge_decision_bridge,
             replan_auto_decision=replan_auto_decision,
             replan_auto_routing_policy=replan_auto_routing_policy,
+            planning_primitives=planning_primitives,
             now_iso=_now_iso,
         )
         return _json(
@@ -1556,6 +1812,9 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "latest_judge_decision_bridge": latest_judge_decision_bridge,
                 "replan_auto_decision": replan_auto_decision,
                 "replan_auto_routing_policy": replan_auto_routing_policy,
+                "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
+                "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
+                "phase_checkpoint": str(planning_primitives.get("phase_checkpoint_summary", "")).strip() or "-",
             },
             status=409,
         )
