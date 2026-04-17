@@ -21,6 +21,7 @@ from aoe_tg_orch_task_handlers import (
 )
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as gateway_task_state
+import aoe_tg_task_view as gateway_task_view
 
 from control_dashboard_action_exec_shared import (
     _DASHBOARD_CHAT_ID,
@@ -1129,6 +1130,8 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
         )
     alias = _project_alias(entry, key)
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    planning_lanes_summary = gateway_task_view.planning_lane_operator_summary(task)
+    approved_plan_gate_summary = gateway_task_view.approved_plan_gate_operator_summary(task)
     planning_handoff = {
         "job_contract": {
             "status": str(task.get("job_contract_status", "")).strip() or "-",
@@ -1154,6 +1157,14 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
             "summary": str(task.get("phase_checkpoint_summary", "")).strip() or "-",
             "rows": [str(item).strip() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()],
         },
+        "planning_lanes_summary": planning_lanes_summary,
+        "approved_plan_gate_summary": approved_plan_gate_summary,
+        "planner_lane_summary": str(task.get("planner_lane_summary", "")).strip() or "-",
+        "critic_lane_summary": str(task.get("critic_lane_summary", "")).strip() or "-",
+        "planning_review_summary": gateway_task_view.planning_review_operator_summary(
+            planning_lanes=planning_lanes_summary,
+            approved_plan_gate=approved_plan_gate_summary,
+        ),
     }
     if review_kind in {"contract_review_ready", "debug_review_ready", "phase_review_ready", "analysis_review_ready"}:
         planning_detail = {
@@ -1195,6 +1206,9 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
                     "detail_path": f"/control/tasks/by-request/{request_id}",
                 },
                 "planning_handoff": planning_handoff,
+                "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
+                "planning_lanes": planning_lanes_summary,
+                "approved_plan_gate": approved_plan_gate_summary,
                 "job_contract": planning_handoff["job_contract"]["summary"],
                 "debug_packet": planning_handoff["debug_packet"]["summary"],
                 "phase_checkpoint": planning_handoff["phase_checkpoint"]["summary"],

@@ -450,8 +450,20 @@ def _planning_primitives_snapshot(source_task: Dict[str, Any]) -> Dict[str, str]
 
 def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(source_task, dict):
-        return {"job_contract": {}, "approved_plan": {}, "debug_packet": {}, "phase_checkpoint": {}}
+        return {
+            "job_contract": {},
+            "approved_plan": {},
+            "debug_packet": {},
+            "phase_checkpoint": {},
+            "planning_lanes_summary": "-",
+            "approved_plan_gate_summary": "-",
+            "planner_lane_summary": "-",
+            "critic_lane_summary": "-",
+            "planning_review_summary": "-",
+        }
     gateway_task_state.refresh_task_planning_primitives(source_task)
+    planning_lanes_summary = gateway_task_view.planning_lane_operator_summary(source_task)
+    approved_plan_gate_summary = gateway_task_view.approved_plan_gate_operator_summary(source_task)
     return {
         "job_contract": {
             "version": str(source_task.get("job_contract_version", "")).strip() or "-",
@@ -501,6 +513,14 @@ def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
             "summary": str(source_task.get("phase_checkpoint_summary", "")).strip() or "-",
             "rows": [str(item).strip() for item in (source_task.get("phase_checkpoint_rows") or []) if str(item).strip()],
         },
+        "planning_lanes_summary": planning_lanes_summary,
+        "approved_plan_gate_summary": approved_plan_gate_summary,
+        "planner_lane_summary": str(source_task.get("planner_lane_summary", "")).strip() or "-",
+        "critic_lane_summary": str(source_task.get("critic_lane_summary", "")).strip() or "-",
+        "planning_review_summary": gateway_task_view.planning_review_operator_summary(
+            planning_lanes=planning_lanes_summary,
+            approved_plan_gate=approved_plan_gate_summary,
+        ),
     }
 
 
@@ -1631,6 +1651,9 @@ def _execute_retry_run_transition(
             "replan_auto_decision": replan_auto_decision,
             "replan_auto_routing_policy": replan_auto_routing_policy,
             "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
+            "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
+            "planning_lanes": str(planning_handoff.get("planning_lanes_summary", "")).strip() or "-",
+            "approved_plan_gate": str(planning_handoff.get("approved_plan_gate_summary", "")).strip() or "-",
             "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
             "phase_checkpoint": str(planning_primitives.get("phase_checkpoint_summary", "")).strip() or "-",
             "planning_handoff": planning_handoff,
@@ -1979,6 +2002,9 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "replan_auto_decision": replan_auto_decision,
                 "replan_auto_routing_policy": replan_auto_routing_policy,
                 "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
+                "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
+                "planning_lanes": str(planning_handoff.get("planning_lanes_summary", "")).strip() or "-",
+                "approved_plan_gate": str(planning_handoff.get("approved_plan_gate_summary", "")).strip() or "-",
                 "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
                 "phase_checkpoint": str(planning_primitives.get("phase_checkpoint_summary", "")).strip() or "-",
                 "planning_handoff": planning_handoff,

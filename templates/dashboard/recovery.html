@@ -54,6 +54,13 @@
     {% include 'dashboard/_server_guard_actions.html' %}
   {% endwith %}
   {% endif %}
+  {% if recovery.runtimes %}
+  <ul class="kv-list compact">
+    <li><span>planning_review</span><strong>{{ recovery.runtimes[0].latest_planning_review_summary }}</strong></li>
+    <li><span>planning_lanes</span><strong>{{ recovery.runtimes[0].active_task_planning_lanes_summary }}</strong></li>
+    <li><span>approved_plan_gate</span><strong>{{ recovery.runtimes[0].active_task_approved_plan_gate_summary }}</strong></li>
+  </ul>
+  {% endif %}
   {% with
     section_title='control_actions',
     safe_hints=[],

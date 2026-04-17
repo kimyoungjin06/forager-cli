@@ -1,5 +1,6 @@
 {% extends 'dashboard/base.html' %}
 {% block content %}
+{% set planning_card = snapshot.attention_runtime_cards[0] if snapshot.attention_runtime_cards else (snapshot.runtime_cards[0] if snapshot.runtime_cards else none) %}
 <section class="grid two">
   <article class="panel">
     <h2>Control Summary</h2>
@@ -27,6 +28,11 @@
       <li><span>server_guard_snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
       <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
       <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
+      {% if planning_card and planning_card.active_task_label %}
+      <li><span>planning_review</span><strong>{{ planning_card.latest_planning_review_summary }}</strong></li>
+      <li><span>planning_lanes</span><strong>{{ planning_card.active_task_planning_lanes_summary }}</strong></li>
+      <li><span>approved_plan_gate</span><strong>{{ planning_card.active_task_approved_plan_gate_summary }}</strong></li>
+      {% endif %}
     </ul>
     {% with title='Server Guard Health Card', include_actions=true, label_prefix='server_guard' %}
       {% include 'dashboard/_server_guard_health_card.html' %}
@@ -56,6 +62,7 @@
         <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
         <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
         <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
+        <p><strong>planning_review</strong> {{ card.latest_planning_review_summary }}</p>
         <p><strong>planning_lanes</strong> {{ card.active_task_planning_lanes_summary }}</p>
         <p><strong>approved_plan_gate</strong> {{ card.active_task_approved_plan_gate_summary }}</p>
         <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>

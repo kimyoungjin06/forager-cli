@@ -1111,6 +1111,7 @@ def load_dashboard_chat_page(
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
         selected_task_planning_lanes_summary=task_view.planning_lane_operator_summary(selected_task),
         selected_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(selected_task),
+        selected_task_planning_review_summary=task_view.planning_review_operator_summary(selected_task),
         selected_task_planner_lane_summary=str(selected_task.get("planner_lane_summary", "")).strip() or "-",
         selected_task_critic_lane_summary=str(selected_task.get("critic_lane_summary", "")).strip() or "-",
         selected_task_approved_plan_summary=str(selected_task.get("approved_plan_summary", "")).strip() or "-",

@@ -485,14 +485,52 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
                 "summary": source.get("phase_checkpoint_summary"),
             }
         )
-    if not any((job_contract, debug_packet, approved_plan, phase_checkpoint)):
+    planning_lanes_summary = str(payload.get("planning_lanes_summary", "")).strip() or str(
+        source.get("planning_lanes_summary", "")
+    ).strip()
+    approved_plan_gate_summary = str(payload.get("approved_plan_gate_summary", "")).strip() or str(
+        source.get("approved_plan_gate_summary", "")
+    ).strip()
+    planner_lane_summary = str(payload.get("planner_lane_summary", "")).strip() or str(
+        source.get("planner_lane_summary", "")
+    ).strip()
+    critic_lane_summary = str(payload.get("critic_lane_summary", "")).strip() or str(
+        source.get("critic_lane_summary", "")
+    ).strip()
+    planning_review_summary = str(payload.get("planning_review_summary", "")).strip() or str(
+        source.get("planning_review_summary", "")
+    ).strip()
+    if not any(
+        (
+            job_contract,
+            debug_packet,
+            approved_plan,
+            phase_checkpoint,
+            planning_lanes_summary,
+            approved_plan_gate_summary,
+            planner_lane_summary,
+            critic_lane_summary,
+            planning_review_summary,
+        )
+    ):
         return {}
-    return {
+    normalized = {
         "job_contract": job_contract,
         "debug_packet": debug_packet,
         "approved_plan": approved_plan,
         "phase_checkpoint": phase_checkpoint,
     }
+    if planning_lanes_summary:
+        normalized["planning_lanes_summary"] = planning_lanes_summary[:240]
+    if approved_plan_gate_summary:
+        normalized["approved_plan_gate_summary"] = approved_plan_gate_summary[:240]
+    if planner_lane_summary:
+        normalized["planner_lane_summary"] = planner_lane_summary[:200]
+    if critic_lane_summary:
+        normalized["critic_lane_summary"] = critic_lane_summary[:200]
+    if planning_review_summary:
+        normalized["planning_review_summary"] = planning_review_summary[:320]
+    return normalized
 
 
 def summarize_planning_handoff_snapshot(raw: Any) -> str:
@@ -549,6 +587,25 @@ def summarize_retry_replan_approved_plan_handoff(raw: Any, *, row: Optional[Dict
     return compact_action_text(summary, limit=96)
 
 
+def summarize_retry_replan_planning_review_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
+    handoff = normalize_planning_handoff_snapshot(raw, row=row)
+    if not isinstance(handoff, dict) or not handoff:
+        return "-"
+    summary = str(handoff.get("planning_review_summary", "")).strip()
+    if summary in {"", "-"}:
+        parts: List[str] = []
+        planning_lanes = str(handoff.get("planning_lanes_summary", "")).strip()
+        approved_plan_gate = str(handoff.get("approved_plan_gate_summary", "")).strip()
+        if planning_lanes not in {"", "-"}:
+            parts.append(planning_lanes)
+        if approved_plan_gate not in {"", "-"}:
+            parts.append(approved_plan_gate)
+        summary = " | ".join(parts).strip()
+    if summary in {"", "-"}:
+        return "-"
+    return "planning=" + compact_action_text(summary, limit=132)
+
+
 def summarize_action_audit_headline(raw: Any) -> str:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -563,6 +620,9 @@ def summarize_action_audit_headline(raw: Any) -> str:
         debug_summary = summarize_retry_replan_debug_handoff(row.get("planning_handoff"), row=row)
         if debug_summary not in {"", "-"} and debug_summary not in headline:
             headline = f"{headline} | {debug_summary}"
+        planning_review_summary = summarize_retry_replan_planning_review_handoff(row.get("planning_handoff"), row=row)
+        if planning_review_summary not in {"", "-"} and planning_review_summary not in headline:
+            headline = f"{headline} | {planning_review_summary}"
     if status == "blocked":
         approved_plan_summary = summarize_retry_replan_approved_plan_handoff(row.get("planning_handoff"), row=row)
         if approved_plan_summary in {"", "-"}:

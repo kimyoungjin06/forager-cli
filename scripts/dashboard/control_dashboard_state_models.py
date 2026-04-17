@@ -835,6 +835,7 @@ class ChatConsolePageDTO:
     selected_report_level: str
     selected_task_planning_lanes_summary: str = "-"
     selected_task_approved_plan_gate_summary: str = "-"
+    selected_task_planning_review_summary: str = "-"
     selected_task_planner_lane_summary: str = "-"
     selected_task_critic_lane_summary: str = "-"
     selected_task_approved_plan_summary: str = "-"

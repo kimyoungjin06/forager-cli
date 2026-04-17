@@ -11,6 +11,7 @@
   <p><strong>server_guard_note</strong> {{ snapshot.control_summary.server_guard.note }} | next={{ snapshot.control_summary.server_guard.next_step }}</p>
   <p><strong>server_guard_snapshot</strong> {{ snapshot.control_summary.server_guard.snapshot_path }}</p>
   {% if planning_card and planning_card.active_task_label %}
+  <p><strong>planning_review</strong> {{ planning_card.latest_planning_review_summary }}</p>
   <p><strong>planning_lanes</strong> {{ planning_card.active_task_planning_lanes_summary }}</p>
   <p><strong>approved_plan_gate</strong> {{ planning_card.active_task_approved_plan_gate_summary }}</p>
   <p><strong>approved_plan</strong> {{ planning_card.active_task_approved_plan_summary }}</p>
@@ -41,6 +42,7 @@
       <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
       <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
       <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
+      <p><strong>planning_review</strong> {{ card.latest_planning_review_summary }}</p>
       <p><strong>planning_lanes</strong> {{ card.active_task_planning_lanes_summary }}</p>
       <p><strong>approved_plan_gate</strong> {{ card.active_task_approved_plan_gate_summary }}</p>
       <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
@@ -154,7 +156,7 @@
       </div>
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
       <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }} | {{ card.active_task_execution_brief_summary }}</p>
-      <p><strong>planning</strong> {{ card.active_task_planning_lanes_summary }} | {{ card.active_task_approved_plan_gate_summary }}</p>
+      <p><strong>planning</strong> {{ card.latest_planning_review_summary }}</p>
       <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
       <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</p>
       <p><strong>background_queue</strong> {{ card.background_queue_summary }} | {{ card.background_scheduler_summary }}</p>

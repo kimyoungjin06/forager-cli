@@ -809,6 +809,8 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "live_preview_preset" in text
     assert "Apply Global Direct" in text
     assert "server-guard-live-preview:codex:123456:Global Direct" in text
+    assert "planning_review" in text
+    assert "active planner=codex critic=claude" in text
     assert "preset_lanes" in text
     assert "preset_gate" in text
 
@@ -1117,6 +1119,7 @@ def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(t
         at="2026-04-10T11:07:00+09:00",
         extra={
             "planning_handoff": {
+                "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
                 "job_contract": {
                     "status": "ready",
                     "summary": "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1",
@@ -1156,7 +1159,7 @@ def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(t
 
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
-    assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight" in text
+    assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | planning=draft via codex | review via claude | dispatch waits for critic-approved plan" in text
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
     assert "background_run_inflight" in text
     assert "attempt=/retry T-001 lane L1" in text
@@ -1182,6 +1185,7 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
         at="2026-04-10T11:07:00+09:00",
         extra={
             "planning_handoff": {
+                "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
                 "approved_plan": {
                     "status": "blocked",
                     "summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
@@ -1209,7 +1213,7 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
 
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
-    assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | approved_plan=blocked" in text
+    assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked" in text
     assert "planning critic blocked replan" in text
 
 
@@ -2227,6 +2231,7 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "approved_plan_gate" in text
     assert "dispatch unlocked after critic approval | review via claude" in text
     assert "approved_plan" in text
+    assert "planning_review" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=none" in text
