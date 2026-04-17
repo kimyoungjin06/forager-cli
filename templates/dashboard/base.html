@@ -218,6 +218,30 @@
           item.appendChild(val);
           rows.appendChild(item);
         };
+        const appendPlanningCompactRow = (planningReview, approvedPlan) => {
+          if ((!planningReview || planningReview === "-") && (!approvedPlan || approvedPlan === "-")) {
+            return;
+          }
+          const item = document.createElement("li");
+          const key = document.createElement("span");
+          const val = document.createElement("strong");
+          key.textContent = "planning_compact";
+          if (planningReview && planningReview !== "-") {
+            const planning = document.createElement("div");
+            planning.className = "muted";
+            planning.textContent = `planning_review: ${String(planningReview).replace(/^planning=/, "")}`;
+            val.appendChild(planning);
+          }
+          if (approvedPlan && approvedPlan !== "-") {
+            const approved = document.createElement("div");
+            approved.className = "muted";
+            approved.textContent = `approved_plan: ${approvedPlan}`;
+            val.appendChild(approved);
+          }
+          item.appendChild(key);
+          item.appendChild(val);
+          rows.appendChild(item);
+        };
         const appendLink = (label, href) => {
           if (!href || href === "-") {
             return;
@@ -473,10 +497,8 @@
             ["command", command],
             ["task", taskLabel],
             ["runtime", runtimeLabel],
-            ["planning_review", planningReview],
             ["planning_lanes", planningLanes],
             ["approved_plan_gate", approvedPlanGate],
-            ["approved_plan", approvedPlan],
             ["next_step", asText(payload?.next_step)],
             ["remediation", asText(payload?.remediation)],
             ["preset_diff", asText(payload?.chat_preset_diff_summary)],
@@ -496,17 +518,20 @@
             rowsData,
             linkRows,
             presetDiffHighlight: Boolean(payload?.server_guard_preset_label),
+            planningReview,
+            approvedPlan,
           };
         };
         const setResult = (label, status, payload, error = false, recordHistory = true) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
           panel.classList.toggle("compact-view", !error);
-          const { headline, rowsData, linkRows, presetDiffHighlight } = buildSummary(label, status, payload);
+          const { headline, rowsData, linkRows, presetDiffHighlight, planningReview, approvedPlan } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
           clearActions();
           clearLinks();
+          appendPlanningCompactRow(planningReview, approvedPlan);
           rowsData.forEach(([key, value]) =>
             appendRow(key, asText(value), key === "preset_diff" && presetDiffHighlight ? {
               highlighted: true,

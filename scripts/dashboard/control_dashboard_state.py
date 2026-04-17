@@ -883,10 +883,7 @@ def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str
             or str(getattr(row, "headline", "")).strip()
             or "-"
         )
-        planning_summary = task_view.planning_compact_operator_summary(
-            planning_review=str(getattr(row, "planning_review_summary", "")).strip(),
-            approved_plan=str(getattr(row, "approved_plan_summary", "")).strip(),
-        )
+        planning_summary = str(getattr(row, "planning_compact_summary", "")).strip()
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         summary = f"{headline} | at={at} | next={next_step}"
@@ -920,10 +917,7 @@ def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str
             or str(getattr(row, "headline", "")).strip()
             or "-"
         )
-        planning_summary = task_view.planning_compact_operator_summary(
-            planning_review=str(getattr(row, "planning_review_summary", "")).strip(),
-            approved_plan=str(getattr(row, "approved_plan_summary", "")).strip(),
-        )
+        planning_summary = str(getattr(row, "planning_compact_summary", "")).strip()
         status = str(getattr(row, "outcome_status", "")).strip() or str(getattr(row, "status", "")).strip() or "-"
         at = str(getattr(row, "at", "")).strip() or "-"
         next_step = str(getattr(row, "next_step", "")).strip() or "-"
@@ -977,17 +971,23 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             "process_pressure_preview",
         }:
             focus_badge = "server-guard"
+        planning_review_summary = action_audit.summarize_retry_replan_planning_review_handoff(
+            raw.get("planning_handoff"),
+            row=raw,
+        )
+        approved_plan_summary = action_audit.summarize_retry_replan_approved_plan_handoff(
+            raw.get("planning_handoff"),
+            row=raw,
+        )
         row = ActionAuditRowDTO(
             at=str(raw.get("at", "")).strip() or "-",
             headline=str(raw.get("headline", "")).strip() or "-",
             headline_summary=action_audit.summarize_action_audit_headline(raw),
-            planning_review_summary=action_audit.summarize_retry_replan_planning_review_handoff(
-                raw.get("planning_handoff"),
-                row=raw,
-            ),
-            approved_plan_summary=action_audit.summarize_retry_replan_approved_plan_handoff(
-                raw.get("planning_handoff"),
-                row=raw,
+            planning_review_summary=planning_review_summary,
+            approved_plan_summary=approved_plan_summary,
+            planning_compact_summary=task_view.planning_compact_operator_summary(
+                planning_review=planning_review_summary,
+                approved_plan=approved_plan_summary,
             ),
             status=str(raw.get("status", "")).strip() or "unknown",
             outcome_kind=outcome_kind or "-",

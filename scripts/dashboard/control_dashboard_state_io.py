@@ -20,6 +20,7 @@ import aoe_tg_action_audit as action_audit
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_runtime_read as runtime_read
+import aoe_tg_task_view as task_view
 
 MANAGER_STATE_FILENAME = "orch_manager_state.json"
 AUTO_STATE_FILENAME = "auto_scheduler.json"
@@ -55,6 +56,7 @@ class ActionAuditRowDTO:
     headline_summary: str
     planning_review_summary: str
     approved_plan_summary: str
+    planning_compact_summary: str
     status: str
     outcome_kind: str
     outcome_status: str
@@ -258,17 +260,23 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         "process_pressure_preview",
     }:
         focus_badge = "server-guard"
+    planning_review_summary = action_audit.summarize_retry_replan_planning_review_handoff(
+        raw.get("planning_handoff"),
+        row=raw,
+    )
+    approved_plan_summary = action_audit.summarize_retry_replan_approved_plan_handoff(
+        raw.get("planning_handoff"),
+        row=raw,
+    )
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         headline_summary=action_audit.summarize_action_audit_headline(raw),
-        planning_review_summary=action_audit.summarize_retry_replan_planning_review_handoff(
-            raw.get("planning_handoff"),
-            row=raw,
-        ),
-        approved_plan_summary=action_audit.summarize_retry_replan_approved_plan_handoff(
-            raw.get("planning_handoff"),
-            row=raw,
+        planning_review_summary=planning_review_summary,
+        approved_plan_summary=approved_plan_summary,
+        planning_compact_summary=task_view.planning_compact_operator_summary(
+            planning_review=planning_review_summary,
+            approved_plan=approved_plan_summary,
         ),
         status=str(raw.get("status", "")).strip() or "unknown",
         outcome_kind=outcome_kind,

@@ -615,6 +615,7 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     assert "action-result-rows" in overview_text
     assert "action-result-links" in overview_text
     assert "action-result-history" in overview_text
+    assert "planning_compact" in overview_text
     assert "preset_diff · live_preview" in overview_text
     assert "action-result-emphasis-badge" in overview_text
     assert "action-history-badge" in overview_text
