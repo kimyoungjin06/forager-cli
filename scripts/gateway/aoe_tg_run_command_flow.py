@@ -219,11 +219,35 @@ def execute_run_command_flow(
         "ensemble" if bool(getattr(args, "plan_phase1_ensemble", True)) and planning_requested and dispatch_mode else "single"
     )
     configured_phase1_rounds = max(3, int(getattr(args, "plan_phase1_rounds", 3) or 3)) if configured_phase1_mode == "ensemble" else 1
-    configured_phase1_providers = [
+    configured_phase1_planner_providers = [
         str(token).strip().lower()
-        for token in str(getattr(args, "plan_phase1_providers", "codex,claude") or "codex,claude").split(",")
+        for token in str(
+            getattr(
+                args,
+                "plan_phase1_planner_providers",
+                getattr(args, "plan_phase1_providers", "codex,claude"),
+            )
+            or getattr(args, "plan_phase1_providers", "codex,claude")
+        ).split(",")
         if str(token).strip()
     ]
+    configured_phase1_critic_providers = [
+        str(token).strip().lower()
+        for token in str(
+            getattr(
+                args,
+                "plan_phase1_critic_providers",
+                getattr(args, "plan_phase1_providers", "codex,claude"),
+            )
+            or getattr(args, "plan_phase1_providers", "codex,claude")
+        ).split(",")
+        if str(token).strip()
+    ]
+    configured_phase1_providers: list[str] = []
+    for provider in [*configured_phase1_planner_providers, *configured_phase1_critic_providers]:
+        token = str(provider).strip().lower()
+        if token and token not in configured_phase1_providers:
+            configured_phase1_providers.append(token)
     selected_dispatch_roles = parse_roles_csv(dispatch_roles)
     request_contract = (
         build_request_contract(
@@ -270,6 +294,8 @@ def execute_run_command_flow(
             phase1_mode=configured_phase1_mode,
             phase1_rounds=configured_phase1_rounds,
             phase1_providers=configured_phase1_providers,
+            phase1_planner_providers=configured_phase1_planner_providers,
+            phase1_critic_providers=configured_phase1_critic_providers,
             phase1_role_preset=selected_role_preset,
             phase2_team_preset=selected_role_preset,
             run_intent_command=run_intent_command,

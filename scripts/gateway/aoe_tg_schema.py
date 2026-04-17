@@ -351,7 +351,7 @@ def _review_request_contract_floor(
         return []
     context = "\n".join((str(title or ""), str(goal or ""))).lower()
     floor = [
-        "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, but declared review_evidence artifacts and review_report.md remain allowed write targets.",
+        "Review-only flow stays readonly; execution subtasks gather scope, severity, and test-gap evidence without mutating canonical persisted outputs, and declared review_evidence artifacts remain allowed write targets.",
     ]
     diff_range_policy = snapshot.get("fields", {}).get("diff_range_policy", {})
     if isinstance(diff_range_policy, dict) and diff_range_policy and _contains_any(

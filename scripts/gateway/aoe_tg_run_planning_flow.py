@@ -29,6 +29,8 @@ def _provision_planning_task(
     phase1_mode: str = "",
     phase1_rounds: int = 0,
     phase1_providers: Optional[List[str]] = None,
+    phase1_planner_providers: Optional[List[str]] = None,
+    phase1_critic_providers: Optional[List[str]] = None,
     phase1_role_preset: str = "",
     phase2_team_preset: str = "",
     run_intent_command: str = "",
@@ -65,6 +67,10 @@ def _provision_planning_task(
         task["phase1_current_total_rounds"] = int(phase1_rounds)
     if phase1_providers:
         task["phase1_providers"] = [str(item).strip() for item in phase1_providers if str(item).strip()]
+    if phase1_planner_providers:
+        task["phase1_planner_providers"] = [str(item).strip() for item in phase1_planner_providers if str(item).strip()]
+    if phase1_critic_providers:
+        task["phase1_critic_providers"] = [str(item).strip() for item in phase1_critic_providers if str(item).strip()]
     task["phase1_current_phase"] = "planner"
     task["phase1_current_detail"] = "phase1 planning queued"
     task["phase1_candidate_roles"] = [str(item).strip() for item in (selected_roles or []) if str(item).strip()]

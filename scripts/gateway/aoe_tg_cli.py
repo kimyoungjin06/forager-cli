@@ -111,7 +111,18 @@ def build_parser(*, deps: Dict[str, Any]) -> argparse.ArgumentParser:
     p.add_argument("--plan-phase1-ensemble", action="store_true", default=(os.environ.get("AOE_PLAN_PHASE1_ENSEMBLE", "1").strip().lower() in {"1", "true", "yes", "on"}), help="use multi-provider Phase1 planning before execution")
     p.add_argument("--no-plan-phase1-ensemble", dest="plan_phase1_ensemble", action="store_false", help="disable multi-provider Phase1 planning")
     p.add_argument("--plan-phase1-rounds", type=int, default=plan_phase1_rounds_default, help="minimum number of Phase1 planning ensemble rounds (default: 3)")
-    p.add_argument("--plan-phase1-providers", default=os.environ.get("AOE_PLAN_PHASE1_PROVIDERS", "codex,claude"), help="comma-separated providers for Phase1 ensemble planning")
+    phase1_provider_default = os.environ.get("AOE_PLAN_PHASE1_PROVIDERS", "codex,claude")
+    p.add_argument("--plan-phase1-providers", default=phase1_provider_default, help="comma-separated providers for Phase1 ensemble planning")
+    p.add_argument(
+        "--plan-phase1-planner-providers",
+        default=os.environ.get("AOE_PLAN_PHASE1_PLANNER_PROVIDERS", phase1_provider_default),
+        help="comma-separated providers for planner lane in Phase1 ensemble planning",
+    )
+    p.add_argument(
+        "--plan-phase1-critic-providers",
+        default=os.environ.get("AOE_PLAN_PHASE1_CRITIC_PROVIDERS", phase1_provider_default),
+        help="comma-separated providers for critic review lane in Phase1 ensemble planning",
+    )
     p.add_argument("--control-providers", default=os.environ.get("AOE_CONTROL_PROVIDERS", os.environ.get("AOE_PLAN_PHASE1_PROVIDERS", "codex,claude")), help="comma-separated provider priority for Control Plane direct/planner/critic stages")
     p.add_argument("--plan-phase1-min-providers", type=int, default=plan_phase1_min_providers_default, help="minimum required providers for Phase1 ensemble planning")
     p.add_argument("--plan-auto-replan", action="store_true", default=(os.environ.get("AOE_PLAN_AUTO_REPLAN", "1").strip().lower() in {"1", "true", "yes", "on"}), help="auto-replan when critic finds blocking issues")

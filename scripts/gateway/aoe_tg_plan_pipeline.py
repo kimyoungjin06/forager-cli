@@ -46,6 +46,8 @@ class PlanMeta:
     phase1_mode: str = ""
     phase1_rounds: int = 0
     phase1_providers: List[str] = field(default_factory=list)
+    phase1_planner_providers: List[str] = field(default_factory=list)
+    phase1_critic_providers: List[str] = field(default_factory=list)
     phase1_role_preset: str = ""
     phase2_team_preset: str = ""
     rate_limit: Dict[str, Any] = field(default_factory=dict)
@@ -300,6 +302,25 @@ def compute_dispatch_plan(
     phase1_mode = ""
     phase1_rounds = 0
     phase1_providers: List[str] = []
+    phase1_planner_providers: List[str] = []
+    phase1_critic_providers: List[str] = []
+    for token in str(
+        getattr(args, "plan_phase1_planner_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+        or getattr(args, "plan_phase1_providers", "codex,claude")
+    ).split(","):
+        item = str(token).strip().lower()
+        if item and item not in phase1_planner_providers:
+            phase1_planner_providers.append(item)
+    for token in str(
+        getattr(args, "plan_phase1_critic_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+        or getattr(args, "plan_phase1_providers", "codex,claude")
+    ).split(","):
+        item = str(token).strip().lower()
+        if item and item not in phase1_critic_providers:
+            phase1_critic_providers.append(item)
+    for token in [*phase1_planner_providers, *phase1_critic_providers]:
+        if token not in phase1_providers:
+            phase1_providers.append(token)
     role_preset = normalize_role_preset(
         request_contract_meta.get("request_contract_preset")
         or request_contract_meta.get("preset")
@@ -321,6 +342,9 @@ def compute_dispatch_plan(
                     max_subtasks=max(1, int(args.plan_max_subtasks)),
                     meta_overrides={
                         "worker_roles": list(selected_roles or []),
+                        "phase1_planner_providers": list(phase1_planner_providers),
+                        "phase1_critic_providers": list(phase1_critic_providers),
+                        "phase1_providers": list(phase1_providers),
                         "phase1_role_preset": role_preset,
                         "phase2_team_preset": team_preset,
                         "request_contract": request_contract_meta,
@@ -375,6 +399,12 @@ def compute_dispatch_plan(
                     phase1_mode = str(ensemble.get("phase1_mode", "ensemble") or "ensemble")
                     phase1_rounds = max(0, int(ensemble.get("phase1_rounds", 0) or 0))
                     phase1_providers = [str(x).strip() for x in (ensemble.get("phase1_providers") or []) if str(x).strip()]
+                    phase1_planner_providers = [
+                        str(x).strip() for x in (ensemble.get("phase1_planner_providers") or []) if str(x).strip()
+                    ]
+                    phase1_critic_providers = [
+                        str(x).strip() for x in (ensemble.get("phase1_critic_providers") or []) if str(x).strip()
+                    ]
                     rate_limit = dict(ensemble.get("rate_limit") or {}) if isinstance(ensemble.get("rate_limit"), dict) else {}
                 else:
                     if callable(report_progress):
@@ -391,6 +421,9 @@ def compute_dispatch_plan(
                         meta = dict(meta)
                         if selected_roles:
                             meta["worker_roles"] = list(selected_roles)
+                        meta["phase1_planner_providers"] = list(phase1_planner_providers)
+                        meta["phase1_critic_providers"] = list(phase1_critic_providers)
+                        meta["phase1_providers"] = list(phase1_providers)
                         meta["phase1_role_preset"] = role_preset
                         meta["phase2_team_preset"] = team_preset
                         plan_data["meta"] = meta
@@ -539,6 +572,8 @@ def compute_dispatch_plan(
         phase1_mode=phase1_mode,
         phase1_rounds=phase1_rounds,
         phase1_providers=phase1_providers,
+        phase1_planner_providers=phase1_planner_providers,
+        phase1_critic_providers=phase1_critic_providers,
         phase1_role_preset=role_preset,
         phase2_team_preset=team_preset,
         rate_limit=rate_limit,
@@ -628,6 +663,8 @@ def apply_plan_and_lineage(
     phase1_mode: str = "",
     phase1_rounds: int = 0,
     phase1_providers: Optional[List[str]] = None,
+    phase1_planner_providers: Optional[List[str]] = None,
+    phase1_critic_providers: Optional[List[str]] = None,
     phase1_role_preset: str = "",
     phase2_team_preset: str = "",
     critic_has_blockers: Callable[[Dict[str, Any]], bool],
@@ -668,6 +705,12 @@ def apply_plan_and_lineage(
         task["phase1_rounds"] = int(phase1_rounds)
     if phase1_providers:
         task["phase1_providers"] = [str(item).strip() for item in phase1_providers if str(item).strip()]
+    planner_rows = [str(item).strip() for item in (phase1_planner_providers or phase1_providers or []) if str(item).strip()]
+    critic_rows = [str(item).strip() for item in (phase1_critic_providers or phase1_providers or []) if str(item).strip()]
+    if planner_rows:
+        task["phase1_planner_providers"] = planner_rows
+    if critic_rows:
+        task["phase1_critic_providers"] = critic_rows
     task["plan_gate_passed"] = not bool(plan_gate_blocked)
     if plan_gate_reason:
         task["plan_gate_reason"] = str(plan_gate_reason).strip()[:240]

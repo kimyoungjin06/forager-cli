@@ -212,6 +212,16 @@ def configured_control_providers(args: Any) -> List[str]:
     return providers or ["codex", "claude"]
 
 
+def _provider_csv_list(raw: Any, *, default: str = "codex,claude") -> List[str]:
+    source = str(raw or "").strip() or default
+    providers: List[str] = []
+    for token in source.split(","):
+        item = str(token or "").strip().lower()
+        if item and item not in providers:
+            providers.append(item)
+    return providers or [str(token).strip() for token in default.split(",") if str(token).strip()]
+
+
 def available_control_provider_execs(
     args: Any,
     *,
@@ -749,14 +759,16 @@ def run_phase1_ensemble_planning(
     run_phase1_ensemble_planning_fn: Callable[..., Dict[str, Any]],
     which: Callable[[str], Optional[str]],
 ) -> Dict[str, Any]:
-    providers_csv = str(getattr(args, "plan_phase1_providers", "codex,claude") or "codex,claude")
+    requested_planners = _provider_csv_list(
+        getattr(args, "plan_phase1_planner_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+    )
+    requested_critics = _provider_csv_list(
+        getattr(args, "plan_phase1_critic_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+    )
     requested: List[str] = []
-    for token in providers_csv.split(","):
-        item = str(token or "").strip().lower()
-        if item and item not in requested:
-            requested.append(item)
-    if not requested:
-        requested = ["codex", "claude"]
+    for name in [*requested_planners, *requested_critics]:
+        if name not in requested:
+            requested.append(name)
 
     runner_catalog: Dict[str, tuple[str, Callable[[str, int], str]]] = {
         "codex": ("codex", lambda prompt, timeout_sec: run_codex_exec_fn(args, prompt, timeout_sec)),
@@ -776,6 +788,8 @@ def run_phase1_ensemble_planning(
             "phase1_rounds": 0,
             "phase1_mode": "ensemble",
             "phase1_providers": requested,
+            "phase1_planner_providers": requested_planners,
+            "phase1_critic_providers": requested_critics,
         }
 
     available_execs: Dict[str, Callable[[str, int], str]] = {}
@@ -788,10 +802,12 @@ def run_phase1_ensemble_planning(
             missing_binaries.append(binary)
 
     min_providers = max(1, int(getattr(args, "plan_phase1_min_providers", 2) or 2))
-    if len(available_execs) < min_providers:
+    available_planners = [name for name in requested_planners if name in available_execs]
+    available_critics = [name for name in requested_critics if name in available_execs]
+    if len(available_planners) < min_providers:
         detail = (
             f"phase1 ensemble requires at least {min_providers} providers; "
-            f"available={','.join(sorted(available_execs)) or 'none'} "
+            f"available={','.join(sorted(available_planners)) or 'none'} "
             f"missing={','.join(missing_binaries) or 'none'}"
         )
         return {
@@ -805,6 +821,24 @@ def run_phase1_ensemble_planning(
             "phase1_rounds": 0,
             "phase1_mode": "ensemble",
             "phase1_providers": list(available_execs),
+            "phase1_planner_providers": available_planners,
+            "phase1_critic_providers": available_critics,
+        }
+    if not available_critics:
+        detail = "phase1 critic review requires at least one available provider"
+        return {
+            "plan_data": None,
+            "plan_critic": default_plan_critic_payload_fn(),
+            "plan_roles": [],
+            "plan_replans": [],
+            "plan_error": detail,
+            "plan_gate_blocked": True,
+            "plan_gate_reason": detail,
+            "phase1_rounds": 0,
+            "phase1_mode": "ensemble",
+            "phase1_providers": list(available_execs),
+            "phase1_planner_providers": available_planners,
+            "phase1_critic_providers": available_critics,
         }
 
     return run_phase1_ensemble_planning_fn(

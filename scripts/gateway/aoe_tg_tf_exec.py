@@ -1152,6 +1152,16 @@ def ensure_tf_exec_workspace(
             meta["phase1_providers"] = [
                 str(row).strip() for row in phase1_providers if str(row).strip()
             ]
+        phase1_planner_providers = metadata.get("phase1_planner_providers")
+        if isinstance(phase1_planner_providers, list) and phase1_planner_providers:
+            meta["phase1_planner_providers"] = [
+                str(row).strip() for row in phase1_planner_providers if str(row).strip()
+            ]
+        phase1_critic_providers = metadata.get("phase1_critic_providers")
+        if isinstance(phase1_critic_providers, list) and phase1_critic_providers:
+            meta["phase1_critic_providers"] = [
+                str(row).strip() for row in phase1_critic_providers if str(row).strip()
+            ]
         lane_summary = phase2_execution_lane_summary(metadata)
         if lane_summary["execution_roles"]:
             meta["execution_lane_roles"] = list(lane_summary["execution_roles"])

@@ -153,6 +153,14 @@ def _task_phase1_summary(task: Dict[str, Any]) -> str:
     mode = str(task.get("phase1_mode", "")).strip() or "single"
     rounds = max(0, int(task.get("phase1_rounds", 0) or 0)) or 1
     providers = task_view.dedupe_roles(task.get("phase1_providers") or [])
+    planner_providers = task_view.dedupe_roles(task.get("phase1_planner_providers") or [])
+    critic_providers = task_view.dedupe_roles(task.get("phase1_critic_providers") or [])
+    if planner_providers or critic_providers:
+        return (
+            f"{mode} rounds={rounds} "
+            f"planners={', '.join(planner_providers) if planner_providers else '-'} "
+            f"critics={', '.join(critic_providers) if critic_providers else '-'}"
+        )
     return f"{mode} rounds={rounds} providers={', '.join(providers) if providers else '-'}"
 
 

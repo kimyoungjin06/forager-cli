@@ -1421,6 +1421,8 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
             "roles": ["Codex-Analyst"],
             "verifier_roles": ["Codex-Reviewer"],
             "phase1_mode": "single",
+            "phase1_planner_providers": ["codex"],
+            "phase1_critic_providers": ["claude"],
             "phase1_role_preset": "analysis",
             "phase2_team_preset": "analysis",
             "execution_brief_status": "underspecified",
@@ -1441,7 +1443,9 @@ def test_sanitize_task_record_derives_job_contract_debug_packet_and_phase_checkp
     assert "reports/summary.md" in task["job_contract_scope"]
     assert task["planner_lane_status"] == "pending"
     assert "planner=pending" in task["planner_lane_summary"]
+    assert "providers=codex" in task["planner_lane_summary"]
     assert task["critic_lane_status"] == "pending"
+    assert "providers=claude" in task["critic_lane_summary"]
     assert task["critic_review_status"] == "pending"
     assert "critic_review=pending" in task["critic_review_summary"]
     assert task["approved_plan_status"] == "missing"

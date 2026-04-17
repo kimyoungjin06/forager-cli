@@ -682,7 +682,7 @@ def build_planner_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     )
     mode = str(task.get("phase1_mode", "")).strip() or "single"
     preset = str(task.get("phase1_role_preset", "")).strip() or "-"
-    providers = [str(item).strip() for item in (task.get("phase1_providers") or []) if str(item).strip()]
+    providers = [str(item).strip() for item in (task.get("phase1_planner_providers") or task.get("phase1_providers") or []) if str(item).strip()]
     actor = (
         str(task.get("phase1_current_planner", "")).strip()
         or str(task.get("phase1_current_provider", "")).strip()
@@ -707,6 +707,8 @@ def build_planner_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
         summary_parts.append(f"rounds={total_rounds}")
     if preset and preset != "-":
         summary_parts.append(f"preset={preset}")
+    if providers:
+        summary_parts.append("providers=" + ",".join(providers[:4]))
     return {
         "version": PLANNING_LANE_VERSION,
         "status": status,
@@ -728,6 +730,7 @@ def build_critic_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
     blockers = _plan_critic_has_blockers(critic) or task.get("plan_gate_passed") is False
     primary_issue = _latest_plan_issue(task)
     actor = str(task.get("phase1_current_critic", "")).strip()
+    providers = [str(item).strip() for item in (task.get("phase1_critic_providers") or task.get("phase1_providers") or []) if str(item).strip()]
     if not actor:
         history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
         for row in reversed(history):
@@ -740,6 +743,8 @@ def build_critic_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
             )
             if actor:
                 break
+    if not actor and providers:
+        actor = providers[0]
     status = "pending"
     if blockers:
         status = "blocked"
@@ -756,6 +761,8 @@ def build_critic_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
         summary_parts.append(f"convergence={convergence}")
     if primary_issue:
         summary_parts.append(f"issue={primary_issue[:120]}")
+    if providers:
+        summary_parts.append("providers=" + ",".join(providers[:4]))
     return {
         "version": PLANNING_LANE_VERSION,
         "status": status,
@@ -777,6 +784,12 @@ def build_critic_review_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
         str(task.get("phase1_current_planner", "")).strip()
         or str(task.get("phase1_current_provider", "")).strip()
     )
+    if not provider:
+        critic_providers = [str(item).strip() for item in (task.get("phase1_critic_providers") or task.get("phase1_providers") or []) if str(item).strip()]
+        provider = critic_providers[0] if critic_providers else ""
+    if not planner_provider:
+        planner_providers = [str(item).strip() for item in (task.get("phase1_planner_providers") or task.get("phase1_providers") or []) if str(item).strip()]
+        planner_provider = planner_providers[0] if planner_providers else ""
     review_mode = "native_review" if str(task.get("phase1_mode", "")).strip() == "ensemble" else "plan_review"
     blocking_issues = _normalize_small_rows((critic or {}).get("issues"), limit=8, text_limit=240)
     required_fixes = _normalize_small_rows((critic or {}).get("recommendations"), limit=8, text_limit=240)
@@ -3185,6 +3198,8 @@ def summarize_task_monitor(
         phase1_mode = str(task.get("phase1_mode", "")).strip()
         phase1_rounds = max(0, int(task.get("phase1_rounds", 0) or 0))
         phase1_providers = dedupe_roles(task.get("phase1_providers") or [])
+        phase1_planner_providers = dedupe_roles(task.get("phase1_planner_providers") or [])
+        phase1_critic_providers = dedupe_roles(task.get("phase1_critic_providers") or [])
         phase1_current_phase = str(task.get("phase1_current_phase", "")).strip()
         phase1_current_round = max(0, int(task.get("phase1_current_round", 0) or 0))
         phase1_current_total = max(0, int(task.get("phase1_current_total_rounds", 0) or 0))
@@ -3202,7 +3217,12 @@ def summarize_task_monitor(
                 ),
             )
             phase1_parts.append(phase1_token)
-            if phase1_providers:
+            if phase1_planner_providers or phase1_critic_providers:
+                if phase1_planner_providers:
+                    phase1_parts.append("planners=" + ",".join(phase1_planner_providers))
+                if phase1_critic_providers:
+                    phase1_parts.append("critics=" + ",".join(phase1_critic_providers))
+            elif phase1_providers:
                 phase1_parts.append("providers=" + ",".join(phase1_providers))
             current_actor = phase1_current_provider or phase1_current_planner or phase1_current_critic
             if current_actor:

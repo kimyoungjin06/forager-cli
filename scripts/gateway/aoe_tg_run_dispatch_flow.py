@@ -224,6 +224,12 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
         phase1_providers = [
             str(item).strip() for item in (plan_meta.phase1_providers or []) if str(item).strip()
         ]
+        phase1_planner_providers = [
+            str(item).strip() for item in (plan_meta.phase1_planner_providers or []) if str(item).strip()
+        ]
+        phase1_critic_providers = [
+            str(item).strip() for item in (plan_meta.phase1_critic_providers or []) if str(item).strip()
+        ]
         rate_limit_meta = dict(plan_meta.rate_limit or {}) if isinstance(plan_meta.rate_limit, dict) else {}
         if provisional_task is not None:
             if rate_limit_meta:
@@ -379,6 +385,22 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
                 dispatch_metadata["phase1_providers"] = [
                     str(row).strip() for row in plan_phase1_providers if str(row).strip()
                 ]
+            elif phase1_providers:
+                dispatch_metadata["phase1_providers"] = list(phase1_providers)
+            plan_phase1_planner_providers = current_plan_meta.get("phase1_planner_providers")
+            if isinstance(plan_phase1_planner_providers, list) and plan_phase1_planner_providers:
+                dispatch_metadata["phase1_planner_providers"] = [
+                    str(row).strip() for row in plan_phase1_planner_providers if str(row).strip()
+                ]
+            elif phase1_planner_providers:
+                dispatch_metadata["phase1_planner_providers"] = list(phase1_planner_providers)
+            plan_phase1_critic_providers = current_plan_meta.get("phase1_critic_providers")
+            if isinstance(plan_phase1_critic_providers, list) and plan_phase1_critic_providers:
+                dispatch_metadata["phase1_critic_providers"] = [
+                    str(row).strip() for row in plan_phase1_critic_providers if str(row).strip()
+                ]
+            elif phase1_critic_providers:
+                dispatch_metadata["phase1_critic_providers"] = list(phase1_critic_providers)
             plan_phase1_role_preset = str(current_plan_meta.get("phase1_role_preset", "")).strip().lower()
             if plan_phase1_role_preset:
                 dispatch_metadata["phase1_role_preset"] = plan_phase1_role_preset
@@ -484,6 +506,8 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
                 phase1_mode=phase1_mode,
                 phase1_rounds=phase1_rounds,
                 phase1_providers=phase1_providers,
+                phase1_planner_providers=phase1_planner_providers,
+                phase1_critic_providers=phase1_critic_providers,
                 phase1_role_preset=str(plan_meta.phase1_role_preset or selected_role_preset),
                 phase2_team_preset=str(plan_meta.phase2_team_preset or selected_role_preset),
                 critic_has_blockers=deps.critic_has_blockers,
@@ -546,6 +570,8 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
             phase1_mode=phase1_mode,
             phase1_rounds=phase1_rounds,
             phase1_providers=phase1_providers,
+            phase1_planner_providers=phase1_planner_providers,
+            phase1_critic_providers=phase1_critic_providers,
             phase1_role_preset=str(plan_meta.phase1_role_preset or selected_role_preset),
             phase2_team_preset=str(plan_meta.phase2_team_preset or selected_role_preset),
             critic_has_blockers=deps.critic_has_blockers,

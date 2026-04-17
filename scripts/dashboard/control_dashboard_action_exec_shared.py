@@ -205,11 +205,19 @@ def _dashboard_run_args(config: DashboardAppConfig, *, source_task: Optional[Dic
     verifier_roles = gateway_task_view.dedupe_roles((source_task or {}).get("verifier_roles") or [])
     phase1_rounds = int((source_task or {}).get("phase1_rounds", 0) or 0)
     phase1_providers = [str(item).strip() for item in ((source_task or {}).get("phase1_providers") or []) if str(item).strip()]
+    phase1_planner_providers = [
+        str(item).strip() for item in ((source_task or {}).get("phase1_planner_providers") or []) if str(item).strip()
+    ]
+    phase1_critic_providers = [
+        str(item).strip() for item in ((source_task or {}).get("phase1_critic_providers") or []) if str(item).strip()
+    ]
     args.auto_dispatch = False
     args.task_planning = True
     args.plan_phase1_ensemble = True
     args.plan_phase1_rounds = phase1_rounds if phase1_rounds > 0 else 3
     args.plan_phase1_providers = ",".join(phase1_providers) if phase1_providers else "codex,claude"
+    args.plan_phase1_planner_providers = ",".join(phase1_planner_providers) if phase1_planner_providers else args.plan_phase1_providers
+    args.plan_phase1_critic_providers = ",".join(phase1_critic_providers) if phase1_critic_providers else args.plan_phase1_providers
     args.plan_max_subtasks = 4
     args.plan_auto_replan = True
     args.plan_replan_attempts = 2

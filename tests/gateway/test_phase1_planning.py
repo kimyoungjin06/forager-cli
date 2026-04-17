@@ -177,6 +177,62 @@ def test_phase1_ensemble_runs_three_rounds_and_uses_both_providers() -> None:
     assert any(item.startswith("claude:") for item in prompts)
 
 
+def test_phase1_ensemble_separates_planner_and_critic_provider_sets() -> None:
+    planner_calls: list[str] = []
+    critic_calls: list[str] = []
+
+    def _runner(name: str):
+        def _run(prompt: str, timeout_sec: int) -> str:
+            if "critic이다" in prompt:
+                critic_calls.append(name)
+                return json.dumps({"approved": True, "issues": [], "recommendations": []}, ensure_ascii=False)
+            planner_calls.append(name)
+            return json.dumps(
+                {
+                    "summary": f"plan from {name}",
+                    "subtasks": [
+                        {
+                            "id": "S1",
+                            "title": "Draft",
+                            "goal": "Write the plan",
+                            "owner_role": "Codex-Writer",
+                            "acceptance": ["has a concise plan"],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        return _run
+
+    args = SimpleNamespace(
+        plan_phase1_providers="codex,claude",
+        plan_phase1_planner_providers="codex",
+        plan_phase1_critic_providers="claude",
+        plan_phase1_rounds=3,
+        plan_max_subtasks=3,
+        orch_command_timeout_sec=120,
+        plan_block_on_critic=True,
+    )
+
+    result = ensemble_mod.run_phase1_ensemble_planning(
+        args=args,
+        user_prompt="Prepare a stable execution plan",
+        available_roles=["Codex-Writer", "Codex-Reviewer"],
+        normalize_task_plan_payload=gw.normalize_task_plan_payload,
+        parse_json_object_from_text=gw.parse_json_object_from_text,
+        run_provider_execs={"codex": _runner("codex"), "claude": _runner("claude")},
+        plan_roles_from_subtasks=gw.plan_roles_from_subtasks,
+        report_progress=None,
+    )
+
+    assert result["phase1_planner_providers"] == ["codex"]
+    assert result["phase1_critic_providers"] == ["claude"]
+    assert planner_calls == ["codex", "codex", "codex"]
+    assert critic_calls == ["claude", "claude", "claude"]
+    assert result["plan_issue_history"][0]["provider"] == "codex"
+    assert result["plan_issue_history"][0]["critic_provider"] == "claude"
+
+
 def test_phase1_ensemble_marks_repeated_blocker_as_stalled() -> None:
     def _runner(prompt: str, timeout_sec: int) -> str:
         if "critic이다" in prompt:

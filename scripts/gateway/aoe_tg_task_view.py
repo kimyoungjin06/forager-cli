@@ -233,6 +233,8 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     phase1_mode = str(task.get("phase1_mode", "")).strip()
     phase1_rounds = max(0, int(task.get("phase1_rounds", 0) or 0))
     phase1_providers = dedupe_roles(task.get("phase1_providers") or [])
+    phase1_planner_providers = dedupe_roles(task.get("phase1_planner_providers") or [])
+    phase1_critic_providers = dedupe_roles(task.get("phase1_critic_providers") or [])
     phase1_candidate_roles = dedupe_roles(task.get("phase1_candidate_roles") or [])
     phase1_role_preset = str(task.get("phase1_role_preset", "")).strip()
     phase2_team_preset = str(task.get("phase2_team_preset", "")).strip()
@@ -242,14 +244,31 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     phase1_current_provider = str(task.get("phase1_current_provider", "")).strip()
     phase1_current_planner = str(task.get("phase1_current_planner", "")).strip()
     phase1_current_critic = str(task.get("phase1_current_critic", "")).strip()
-    if phase1_mode or phase1_rounds or phase1_providers:
-        lines.append(
-            "phase1: {mode} rounds={rounds} providers={providers}".format(
+    if phase1_mode or phase1_rounds or phase1_providers or phase1_planner_providers or phase1_critic_providers:
+        phase1_parts = [
+            "phase1: {mode} rounds={rounds}".format(
                 mode=phase1_mode or "single",
                 rounds=phase1_rounds or 1,
-                providers=", ".join(phase1_providers) if phase1_providers else "-",
             )
-        )
+        ]
+        if phase1_planner_providers or phase1_critic_providers:
+            phase1_parts.append(
+                "planners={planners}".format(
+                    planners=", ".join(phase1_planner_providers) if phase1_planner_providers else "-"
+                )
+            )
+            phase1_parts.append(
+                "critics={critics}".format(
+                    critics=", ".join(phase1_critic_providers) if phase1_critic_providers else "-"
+                )
+            )
+        else:
+            phase1_parts.append(
+                "providers={providers}".format(
+                    providers=", ".join(phase1_providers) if phase1_providers else "-"
+                )
+            )
+        lines.append(" ".join(phase1_parts))
     if phase1_current_phase or phase1_current_round or phase1_current_provider or phase1_current_planner or phase1_current_critic:
         actor_parts: List[str] = []
         if phase1_current_provider:
