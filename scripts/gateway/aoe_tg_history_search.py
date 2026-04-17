@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from aoe_tg_action_audit import normalize_planning_handoff_snapshot
+from aoe_tg_action_audit import normalize_planning_handoff_snapshot, summarize_action_audit_headline
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_project_state import project_alias_for_key
 from aoe_tg_runtime_core import (
@@ -465,15 +465,11 @@ def _action_audit_rows(
                 project_alias = str(meta.get("project_alias", "")).strip()
                 task_short_id = str(meta.get("task_short_id", "")).strip().upper()
                 reason_code = str(parsed.get("outcome_reason_code", "")).strip()
-                summary = _normalize_text(parsed.get("headline", ""))
+                summary = _normalize_text(summarize_action_audit_headline(parsed))
+                if not summary:
+                    summary = _normalize_text(parsed.get("headline", ""))
                 if summary and reason_code and "reason=" not in summary:
                     summary = f"{summary} | reason={reason_code}"
-                debug_handoff_summary = _action_audit_debug_handoff_summary(parsed)
-                if summary and debug_handoff_summary and debug_handoff_summary not in summary:
-                    summary = f"{summary} | {debug_handoff_summary}"
-                approved_plan_handoff_summary = _action_audit_approved_plan_handoff_summary(parsed)
-                if summary and approved_plan_handoff_summary and approved_plan_handoff_summary not in summary:
-                    summary = f"{summary} | {approved_plan_handoff_summary}"
                 debug_handoff_detail = _action_audit_debug_handoff_detail(parsed)
                 approved_plan_handoff_detail = _action_audit_approved_plan_handoff_detail(parsed)
                 detail = _normalize_text(

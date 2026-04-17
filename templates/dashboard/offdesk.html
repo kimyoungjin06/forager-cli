@@ -3,12 +3,18 @@
 <section class="panel">
   <h2>Offdesk Prep</h2>
   <p class="muted">read-only parity with /offdesk prepare and /offdesk review</p>
+  {% set planning_card = snapshot.attention_runtime_cards[0] if snapshot.attention_runtime_cards else (snapshot.runtime_cards[0] if snapshot.runtime_cards else none) %}
   <p><strong>execution_brief_summary</strong> {{ snapshot.control_summary.execution_brief_summary }}</p>
   <p><strong>background_run_summary</strong> {{ snapshot.control_summary.background_run_summary }}</p>
   <p><strong>background_worker_summary</strong> {{ snapshot.control_summary.background_worker_summary }}</p>
   <p><strong>server_guard</strong> {{ snapshot.control_summary.server_guard.summary }}</p>
   <p><strong>server_guard_note</strong> {{ snapshot.control_summary.server_guard.note }} | next={{ snapshot.control_summary.server_guard.next_step }}</p>
   <p><strong>server_guard_snapshot</strong> {{ snapshot.control_summary.server_guard.snapshot_path }}</p>
+  {% if planning_card and planning_card.active_task_label %}
+  <p><strong>planning_lanes</strong> {{ planning_card.active_task_planning_lanes_summary }}</p>
+  <p><strong>approved_plan_gate</strong> {{ planning_card.active_task_approved_plan_gate_summary }}</p>
+  <p><strong>approved_plan</strong> {{ planning_card.active_task_approved_plan_summary }}</p>
+  {% endif %}
   {% if snapshot.control_summary.server_guard.recommended_actions %}
   {% with title='server_guard_actions', actions=snapshot.control_summary.server_guard.recommended_actions %}
     {% include 'dashboard/_server_guard_actions.html' %}

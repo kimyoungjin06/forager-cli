@@ -809,6 +809,8 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "live_preview_preset" in text
     assert "Apply Global Direct" in text
     assert "server-guard-live-preview:codex:123456:Global Direct" in text
+    assert "preset_lanes" in text
+    assert "preset_gate" in text
 
 
 def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() -> None:
@@ -825,6 +827,46 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
 
     assert "reason=approved_plan_blocked" in summary
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
+
+
+def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for_blocked_rows(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Dispatch Phase2 | blocked",
+        status="blocked",
+        outcome_kind="dispatch_phase2",
+        outcome_status="blocked",
+        outcome_reason_code="approved_plan_blocked",
+        outcome_detail="queue gate waiting",
+        next_step="/task T-001",
+        remediation="inspect approved plan blockers before dispatch",
+        source_command="/dispatch task T-001",
+        link_label="Task T-001",
+        link_href="/control/tasks/by-request/REQ-1",
+        at="2026-04-15T12:00:00+09:00",
+        extra={
+            "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/history?q=approved_plan_blocked&scope=dashboard",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Dispatch Phase2 | blocked | reason=approved_plan_blocked | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -2196,6 +2238,11 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "server_guard" in text
     assert "server_guard_note" in text
     assert "server_guard_snapshot" in text
+    assert "planning_lanes" in text
+    assert "draft via codex | review via claude" in text
+    assert "approved_plan_gate" in text
+    assert "dispatch unlocked after critic approval | review via claude" in text
+    assert "approved_plan" in text
     assert "Open Health JSON" in text
     assert "server-guard" in text
     assert "background_scheduler" in text
