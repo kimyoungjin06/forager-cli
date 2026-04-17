@@ -704,10 +704,12 @@ def _latest_planning_review_summary(
     )
     handoff = handoff_policy.get("planning_handoff") if isinstance(handoff_policy, dict) else {}
     approved_plan_summary = action_audit.summarize_retry_replan_approved_plan_handoff(handoff)
-    return task_view.planning_review_operator_summary(
-        task,
-        approved_plan=approved_plan_summary,
-    )
+    return str(
+        task_view.planning_operator_bundle(
+            task,
+            approved_plan=approved_plan_summary,
+        ).get("planning_review", "-")
+    ).strip() or "-"
 
 
 def _latest_manual_step_summary(team_dir: Path, *, project_alias: str, active_task: Dict[str, Any] | None = None) -> str:
@@ -1051,6 +1053,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             project_alias=alias,
             request_id=active_request_id,
         )
+        active_task_planning_bundle = task_view.planning_operator_bundle(active_task or {})
         cards.append(
             RuntimeCardDTO(
                 project_key=str(row.get("key", "")).strip() or str(row.get("alias", "")).strip(),
@@ -1128,11 +1131,18 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 ),
                 active_task_context_pack_summary=active_task_context_pack_summary,
                 active_task_model_plan_summary=active_task_model_plan_summary,
-                active_task_planning_lanes_summary=task_view.planning_lane_operator_summary(active_task or {}),
-                active_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(active_task or {}),
-                active_task_approved_plan_summary=(
-                    str((active_task or {}).get("approved_plan_summary", "")).strip() or "-"
-                ),
+                active_task_planning_lanes_summary=str(
+                    active_task_planning_bundle.get("planning_lanes", "")
+                ).strip()
+                or "-",
+                active_task_approved_plan_gate_summary=str(
+                    active_task_planning_bundle.get("approved_plan_gate", "")
+                ).strip()
+                or "-",
+                active_task_approved_plan_summary=str(
+                    active_task_planning_bundle.get("approved_plan", "")
+                ).strip()
+                or "-",
                 active_task_reentry_rails_summary=(
                     str((active_task or {}).get("reentry_rails_summary", "")).strip() or "-"
                 ),
@@ -1748,6 +1758,7 @@ def _build_runtime_detail(
         project_alias=target_alias,
         request_id=active_request_id,
     )
+    active_task_planning_bundle = task_view.planning_operator_bundle(active_task or {})
     return RuntimeDetailDTO(
         project_key=key,
         project_alias=target_alias,
@@ -1829,10 +1840,26 @@ def _build_runtime_detail(
         active_task_job_contract_rollback_hint=(
             str((active_task or {}).get("job_contract_rollback_hint", "")).strip() or "-"
         ),
-        active_task_planning_lanes_summary=task_view.planning_lane_operator_summary(active_task or {}),
-        active_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(active_task or {}),
-        active_task_planner_lane_summary=str((active_task or {}).get("planner_lane_summary", "")).strip() or "-",
-        active_task_critic_lane_summary=str((active_task or {}).get("critic_lane_summary", "")).strip() or "-",
+        active_task_planning_review_summary=str(
+            active_task_planning_bundle.get("planning_review", "")
+        ).strip()
+        or "-",
+        active_task_planning_lanes_summary=str(
+            active_task_planning_bundle.get("planning_lanes", "")
+        ).strip()
+        or "-",
+        active_task_approved_plan_gate_summary=str(
+            active_task_planning_bundle.get("approved_plan_gate", "")
+        ).strip()
+        or "-",
+        active_task_planner_lane_summary=str(
+            active_task_planning_bundle.get("planner_lane", "")
+        ).strip()
+        or "-",
+        active_task_critic_lane_summary=str(
+            active_task_planning_bundle.get("critic_lane", "")
+        ).strip()
+        or "-",
         active_task_critic_review_summary=str((active_task or {}).get("critic_review_summary", "")).strip() or "-",
         active_task_critic_review_blocking_issues=" | ".join(
             str(item).strip()
@@ -1846,7 +1873,10 @@ def _build_runtime_detail(
             if str(item).strip()
         )
         or "-",
-        active_task_approved_plan_summary=str((active_task or {}).get("approved_plan_summary", "")).strip() or "-",
+        active_task_approved_plan_summary=str(
+            active_task_planning_bundle.get("approved_plan", "")
+        ).strip()
+        or "-",
         active_task_approved_plan_artifact_rows=" | ".join(
             str(item).strip()
             for item in ((active_task or {}).get("approved_plan_artifact_rows") or [])

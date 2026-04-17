@@ -68,11 +68,8 @@
   {% endif %}
   {% if chat.selected_chat_id and chat.recommended_session_presets %}
   <p><strong>manager_presets</strong></p>
-  {% if chat.selected_task_planning_lanes_summary and chat.selected_task_planning_lanes_summary != '-' %}
-  <p class="muted"><strong>preset_lanes</strong> {{ chat.selected_task_planning_lanes_summary }}</p>
-  {% endif %}
-  {% if chat.selected_task_approved_plan_gate_summary and chat.selected_task_approved_plan_gate_summary != '-' %}
-  <p class="muted"><strong>preset_gate</strong> {{ chat.selected_task_approved_plan_gate_summary }}</p>
+  {% if chat.selected_task_planning_review_summary and chat.selected_task_planning_review_summary != '-' %}
+  <p class="muted"><strong>preset_planning</strong> {{ chat.selected_task_planning_review_summary }}</p>
   {% endif %}
   <div class="chat-hints">
     {% for preset in chat.recommended_session_presets %}

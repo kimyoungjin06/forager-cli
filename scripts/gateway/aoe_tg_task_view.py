@@ -160,6 +160,36 @@ def _append_unique_summary_part(parts: List[str], value: str) -> None:
     parts.append(token)
 
 
+def planning_operator_bundle(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+    planner_lane: str = "",
+    critic_lane: str = "",
+) -> Dict[str, str]:
+    task_data = task if isinstance(task, dict) else {}
+    if task_data:
+        planning_lanes = planning_lane_operator_summary(task_data)
+        approved_plan_gate = approved_plan_gate_operator_summary(task_data)
+        approved_plan = str(task_data.get("approved_plan_summary", "")).strip() or approved_plan
+        planner_lane = str(task_data.get("planner_lane_summary", "")).strip() or planner_lane
+        critic_lane = str(task_data.get("critic_lane_summary", "")).strip() or critic_lane
+    parts: List[str] = []
+    _append_unique_summary_part(parts, planning_lanes)
+    _append_unique_summary_part(parts, approved_plan_gate)
+    _append_unique_summary_part(parts, approved_plan)
+    return {
+        "planning_review": " | ".join(parts)[:320] if parts else "-",
+        "planning_lanes": str(planning_lanes or "").strip() or "-",
+        "approved_plan_gate": str(approved_plan_gate or "").strip() or "-",
+        "approved_plan": str(approved_plan or "").strip() or "-",
+        "planner_lane": str(planner_lane or "").strip() or "-",
+        "critic_lane": str(critic_lane or "").strip() or "-",
+    }
+
+
 def planning_review_operator_summary(
     task: Optional[Dict[str, Any]] = None,
     *,
@@ -168,17 +198,15 @@ def planning_review_operator_summary(
     approved_plan: str = "",
     planning_handoff: str = "",
 ) -> str:
-    task_data = task if isinstance(task, dict) else {}
-    if task_data:
-        planning_lanes = planning_lane_operator_summary(task_data)
-        approved_plan_gate = approved_plan_gate_operator_summary(task_data)
-        approved_plan = str(task_data.get("approved_plan_summary", "")).strip() or approved_plan
-    parts: List[str] = []
-    _append_unique_summary_part(parts, planning_lanes)
-    _append_unique_summary_part(parts, approved_plan_gate)
-    _append_unique_summary_part(parts, approved_plan)
-    _append_unique_summary_part(parts, planning_handoff)
-    return " | ".join(parts)[:320] if parts else "-"
+    summary = planning_operator_bundle(
+        task,
+        planning_lanes=planning_lanes,
+        approved_plan_gate=approved_plan_gate,
+        approved_plan=approved_plan,
+    ).get("planning_review", "-")
+    if planning_handoff not in {"", "-"} and planning_handoff not in summary:
+        return " | ".join([summary, str(planning_handoff).strip()])[:320] if summary not in {"", "-"} else str(planning_handoff).strip()[:320]
+    return summary
 
 
 def planning_preset_operator_note(
@@ -193,12 +221,12 @@ def planning_preset_operator_note(
     _append_unique_summary_part(parts, base_note)
     _append_unique_summary_part(
         parts,
-        planning_review_operator_summary(
+        planning_operator_bundle(
             task,
             planning_lanes=planning_lanes,
             approved_plan_gate=approved_plan_gate,
             approved_plan=approved_plan,
-        ),
+        ).get("planning_review", "-"),
     )
     return " | ".join(parts)[:320] if parts else "-"
 
@@ -751,10 +779,14 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     approved_plan_rows = [str(item).strip() for item in (task.get("approved_plan_artifact_rows") or []) if str(item).strip()]
     if approved_plan_rows:
         lines.append("approved_plan_artifact: " + " | ".join(approved_plan_rows[:4])[:240])
-    planning_lanes = planning_lane_operator_summary(task)
+    planning_bundle = planning_operator_bundle(task)
+    planning_review = str(planning_bundle.get("planning_review", "")).strip()
+    if planning_review and planning_review != "-":
+        lines.append("planning_review: " + planning_review[:240])
+    planning_lanes = str(planning_bundle.get("planning_lanes", "")).strip()
     if planning_lanes and planning_lanes != "-":
         lines.append("planning_lanes: " + planning_lanes[:240])
-    approved_plan_gate = approved_plan_gate_operator_summary(task)
+    approved_plan_gate = str(planning_bundle.get("approved_plan_gate", "")).strip()
     if approved_plan_gate and approved_plan_gate != "-":
         lines.append("approved_plan_gate: " + approved_plan_gate[:240])
     debug_packet_summary = str(task.get("debug_packet_summary", "")).strip()

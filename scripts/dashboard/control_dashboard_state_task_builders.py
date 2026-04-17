@@ -1018,6 +1018,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             str(task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip(),
             str(task.get("backend_contract", "") or result.get("backend_contract", "")).strip(),
         )
+        planning_bundle = task_view.planning_operator_bundle(task)
         chat_console_path, chat_console_label = _chat_console_target(
             manager_state,
             root_team_dir=root_team_dir,
@@ -1040,8 +1041,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             verifier_roles=task_view.dedupe_roles(task.get("verifier_roles") or []),
             phase1_summary=_task_phase1_summary(task),
             phase1_progress=_task_phase1_progress(task),
-            planning_lanes_summary=task_view.planning_lane_operator_summary(task),
-            approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(task),
+            planning_review_summary=str(planning_bundle.get("planning_review", "")).strip() or "-",
+            planning_lanes_summary=str(planning_bundle.get("planning_lanes", "")).strip() or "-",
+            approved_plan_gate_summary=str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",
             phase1_candidate_roles=task_view.dedupe_roles(task.get("phase1_candidate_roles") or []),
             phase1_role_preset=str(task.get("phase1_role_preset", "")).strip(),
             phase2_team_preset=str(task.get("phase2_team_preset", "")).strip(),
@@ -1101,8 +1103,8 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             )
             or "-",
             job_contract_rollback_hint=str(task.get("job_contract_rollback_hint", "")).strip() or "-",
-            planner_lane_summary=str(task.get("planner_lane_summary", "")).strip() or "-",
-            critic_lane_summary=str(task.get("critic_lane_summary", "")).strip() or "-",
+            planner_lane_summary=str(planning_bundle.get("planner_lane", "")).strip() or "-",
+            critic_lane_summary=str(planning_bundle.get("critic_lane", "")).strip() or "-",
             critic_review_summary=str(task.get("critic_review_summary", "")).strip() or "-",
             critic_review_blocking_issues=" | ".join(
                 str(item).strip() for item in (task.get("critic_review_blocking_issues") or []) if str(item).strip()
@@ -1112,7 +1114,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 str(item).strip() for item in (task.get("critic_review_required_fixes") or []) if str(item).strip()
             )
             or "-",
-            approved_plan_summary=str(task.get("approved_plan_summary", "")).strip() or "-",
+            approved_plan_summary=str(planning_bundle.get("approved_plan", "")).strip() or "-",
             approved_plan_artifact_rows=" | ".join(
                 str(item).strip() for item in (task.get("approved_plan_artifact_rows") or []) if str(item).strip()
             )

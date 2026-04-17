@@ -324,11 +324,16 @@ def build_nightly_session_summary(
                 "latest_replan_auto_routing_policy_summary": _latest_replan_auto_routing_policy_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_routing_policy": latest_replan_policy,
                 "latest_planning_handoff_summary": latest_planning_handoff_summary,
-                "latest_planning_review_summary": task_view.planning_review_operator_summary(
-                    planning_lanes=detail.active_task_planning_lanes_summary,
-                    approved_plan_gate=detail.active_task_approved_plan_gate_summary,
-                    approved_plan=latest_planning_review_approved_plan,
-                ),
+                "latest_planning_review_summary": str(
+                    task_view.planning_operator_bundle(
+                        planning_lanes=detail.active_task_planning_lanes_summary,
+                        approved_plan_gate=detail.active_task_approved_plan_gate_summary,
+                        approved_plan=latest_planning_review_approved_plan,
+                        planner_lane=detail.active_task_planner_lane_summary,
+                        critic_lane=detail.active_task_critic_lane_summary,
+                    ).get("planning_review", "-")
+                ).strip()
+                or "-",
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
                     snapshot.team_dir,

@@ -1098,6 +1098,8 @@ def load_dashboard_chat_page(
         session_presets=session_presets,
     )
 
+    selected_task_planning_bundle = task_view.planning_operator_bundle(selected_task)
+
     return snapshot_result.snapshot, ChatConsolePageDTO(
         selected_chat_id=selected_session.chat_id if selected_session is not None else selected_token,
         selected_chat_alias=selected_session.chat_alias if selected_session is not None else alias_by_chat_id.get(selected_token, ""),
@@ -1109,12 +1111,30 @@ def load_dashboard_chat_page(
         selected_pending_mode=selected_session.pending_mode if selected_session is not None else "none",
         selected_lang=selected_session.lang if selected_session is not None else chat_state.DEFAULT_UI_LANG,
         selected_report_level=selected_session.report_level if selected_session is not None else chat_state.DEFAULT_REPORT_LEVEL,
-        selected_task_planning_lanes_summary=task_view.planning_lane_operator_summary(selected_task),
-        selected_task_approved_plan_gate_summary=task_view.approved_plan_gate_operator_summary(selected_task),
-        selected_task_planning_review_summary=task_view.planning_review_operator_summary(selected_task),
-        selected_task_planner_lane_summary=str(selected_task.get("planner_lane_summary", "")).strip() or "-",
-        selected_task_critic_lane_summary=str(selected_task.get("critic_lane_summary", "")).strip() or "-",
-        selected_task_approved_plan_summary=str(selected_task.get("approved_plan_summary", "")).strip() or "-",
+        selected_task_planning_lanes_summary=str(
+            selected_task_planning_bundle.get("planning_lanes", "")
+        ).strip()
+        or "-",
+        selected_task_approved_plan_gate_summary=str(
+            selected_task_planning_bundle.get("approved_plan_gate", "")
+        ).strip()
+        or "-",
+        selected_task_planning_review_summary=str(
+            selected_task_planning_bundle.get("planning_review", "")
+        ).strip()
+        or "-",
+        selected_task_planner_lane_summary=str(
+            selected_task_planning_bundle.get("planner_lane", "")
+        ).strip()
+        or "-",
+        selected_task_critic_lane_summary=str(
+            selected_task_planning_bundle.get("critic_lane", "")
+        ).strip()
+        or "-",
+        selected_task_approved_plan_summary=str(
+            selected_task_planning_bundle.get("approved_plan", "")
+        ).strip()
+        or "-",
         rooms=rooms,
         room_presets=_chat_room_presets(project_alias=selected_project_alias, selected_room=selected_room, rooms=rooms),
         session_presets=session_presets,
