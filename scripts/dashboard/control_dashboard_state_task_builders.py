@@ -34,6 +34,7 @@ from control_dashboard_state_common import (
     _completion_contract_for_preset,
     _detail_path,
     _filter_dispatch_phase2_action_buttons,
+    _filter_manual_route_action_buttons,
     _replan_manual_route_action_button,
     _replan_auto_route_action_button,
     _task_action_buttons,
@@ -887,6 +888,14 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             phase2_action_buttons,
             task=task,
         )
+        safe_action_buttons = _filter_manual_route_action_buttons(
+            safe_action_buttons,
+            task=task,
+        )
+        phase2_action_buttons = _filter_manual_route_action_buttons(
+            phase2_action_buttons,
+            task=task,
+        )
         phase2_action_buttons = _append_unique_action_button(
             phase2_action_buttons,
             _replan_auto_route_action_button(
@@ -900,6 +909,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             label=task_view.task_display_label(task, fallback_request_id=rid),
             request_id=rid,
             policy=latest_replan_auto_routing_policy,
+            task=task,
         )
         if manual_route_button is not None and str(manual_route_button.mode).strip() == "phase2":
             phase2_action_buttons = _append_unique_action_button(phase2_action_buttons, manual_route_button)

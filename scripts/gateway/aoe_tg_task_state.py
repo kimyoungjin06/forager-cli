@@ -869,6 +869,79 @@ def derive_task_apply_gate(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def derive_task_manual_gate(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    refresh_task_planning_primitives(task)
+    task_ref = _task_ref_label(task)
+    contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
+    contract_status = str(task.get("job_contract_status", "")).strip().lower()
+    contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
+    debug_state = str(task.get("debug_packet_state", "")).strip().lower()
+    debug_summary = str(task.get("debug_packet_summary", "")).strip() or "-"
+    phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
+    phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
+    phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    phase_rows = [str(item).strip().lower() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()]
+    manual_phase_ready = phase_current in {"verify", "handoff"}
+    if not manual_phase_ready:
+        for item in phase_rows:
+            phase_name, _, rest = item.partition("=")
+            row_state = rest.split("|", 1)[0].strip().lower() if rest else ""
+            if phase_name in {"verify", "handoff"} and row_state in {"ready", "active", "done", "running"}:
+                manual_phase_ready = True
+                break
+    status = "ready"
+    reason_code = "ready"
+    remediation = "manual route is ready"
+    next_step = f"/task {task_ref}"
+    detail = phase_summary
+    if phase_status == "blocked" and not manual_phase_ready:
+        status = "blocked"
+        reason_code = "phase_checkpoint_blocked"
+        remediation = "clear the current checkpoint blocker before applying judge-backed manual steps"
+        detail = phase_summary
+    elif not manual_phase_ready:
+        status = "blocked"
+        reason_code = "phase_checkpoint_not_manual_ready"
+        remediation = "wait until the task reaches verify or handoff before applying judge-backed manual steps"
+        detail = phase_summary
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "detail": detail,
+        "summary": "manual_gate | contract={contract} | debug={debug} | phase={phase}/{current}".format(
+            contract=contract_status or "-",
+            debug=debug_state or "-",
+            phase=phase_status or "-",
+            current=phase_current or "-",
+        )[:320],
+        "remediation": remediation,
+        "next_step": next_step,
+        "job_contract_status": contract_status or "-",
+        "job_contract_summary": contract_summary,
+        "debug_packet_state": debug_state or "-",
+        "debug_packet_summary": debug_summary,
+        "phase_checkpoint_status": phase_status or "-",
+        "phase_checkpoint_current_phase": phase_current or "-",
+        "phase_checkpoint_summary": phase_summary,
+    }
+
+
 def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
     if not isinstance(task, dict):
         return ""

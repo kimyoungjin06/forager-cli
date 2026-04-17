@@ -20,6 +20,7 @@ from control_dashboard_state_common import (
     _chat_console_target,
     _detail_path,
     _filter_dispatch_phase2_action_buttons,
+    _filter_manual_route_action_buttons,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
     _runtime_action_buttons,
@@ -350,6 +351,7 @@ def _build_recovery_runtime_rows(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
             policy=row.get("latest_replan_auto_routing_policy") if isinstance(row.get("latest_replan_auto_routing_policy"), dict) else {},
+            task=active_task_row or {},
         )
         if runtime_manual_route_button is not None and str(runtime_manual_route_button.mode).strip() == "phase2":
             runtime_phase2_action_buttons = _append_unique_action_button(runtime_phase2_action_buttons, runtime_manual_route_button)
@@ -483,11 +485,20 @@ def _build_recovery_runtime_rows(
             phase2_commands=list(active_task_action_contract.get("phase2") or []),
             include_followup_preview=bool(active_request_id),
         )
+        active_task_safe_action_buttons = _filter_manual_route_action_buttons(
+            active_task_safe_action_buttons,
+            task=active_task_row or {},
+        )
+        active_task_phase2_action_buttons = _filter_manual_route_action_buttons(
+            active_task_phase2_action_buttons,
+            task=active_task_row or {},
+        )
         active_task_manual_route_button = _replan_manual_route_action_button(
             project_alias=alias,
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
             policy=row.get("latest_replan_auto_routing_policy") if isinstance(row.get("latest_replan_auto_routing_policy"), dict) else {},
+            task=active_task_row or {},
         )
         if active_task_manual_route_button is not None and str(active_task_manual_route_button.mode).strip() == "phase2":
             active_task_phase2_action_buttons = _append_unique_action_button(active_task_phase2_action_buttons, active_task_manual_route_button)

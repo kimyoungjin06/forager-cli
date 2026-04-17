@@ -154,6 +154,47 @@ def _dispatch_gate_block_response(
     )
 
 
+def _manual_route_gate_block_response(
+    *,
+    spec: Dict[str, object],
+    payload: Dict[str, Any],
+    source_command: str,
+    source_task: Dict[str, Any],
+    task_ref: str,
+    outcome_kind: str,
+) -> Tuple[int, Dict[str, str], bytes]:
+    gate = gateway_task_state.derive_task_manual_gate(source_task)
+    next_step = str(gate.get("next_step", "")).strip() or f"/task {task_ref}"
+    remediation = str(gate.get("remediation", "")).strip() or (
+        "inspect the current phase checkpoint before applying judge-backed manual steps"
+    )
+    return _json(
+        {
+            "ok": False,
+            "implemented": True,
+            "executed": False,
+            "status": "blocked",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "safe",
+            "source_command": source_command,
+            "payload": payload,
+            "next_step": next_step,
+            "remediation": remediation,
+            "outcome": {
+                "kind": outcome_kind,
+                "status": "blocked",
+                "reason_code": str(gate.get("reason_code", "")).strip() or "manual_gate_blocked",
+                "detail": str(gate.get("detail", "")).strip() or "-",
+            },
+            "job_contract": str(gate.get("job_contract_summary", "")).strip() or "-",
+            "debug_packet": str(gate.get("debug_packet_summary", "")).strip() or "-",
+            "phase_checkpoint": str(gate.get("phase_checkpoint_summary", "")).strip() or "-",
+        },
+        status=409,
+    )
+
+
 def _latest_judge_summary_payload(*, team_dir: Path, entry: Dict[str, Any]) -> Dict[str, str]:
     alias = _project_status_ref(str(entry.get("name", "")).strip(), entry)
     row = load_latest_action_audit_for_runtime_kind(
@@ -1950,6 +1991,16 @@ def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
                 source_command=command_text or "/followup-exec",
                 source_task=source_task,
                 task_ref=task_ref,
+            )
+        manual_gate = gateway_task_state.derive_task_manual_gate(source_task)
+        if str(manual_gate.get("status", "")).strip() == "blocked":
+            return _manual_route_gate_block_response(
+                spec=spec,
+                payload=payload,
+                source_command=command_text or "/followup-exec",
+                source_task=source_task,
+                task_ref=task_ref,
+                outcome_kind="followup_execute",
             )
     task_payload = None
     if isinstance(source_task, dict) and source_request_id:

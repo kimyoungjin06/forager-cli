@@ -35,6 +35,7 @@ from control_dashboard_state_common import (
     _completion_contract_for_preset,
     _detail_path,
     _filter_dispatch_phase2_action_buttons,
+    _filter_manual_route_action_buttons,
     _provider_repeat_counts,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
@@ -907,6 +908,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
             policy=latest_replan_auto_routing_policy,
+            task=active_task or {},
         )
         if runtime_manual_route_button is not None and str(runtime_manual_route_button.mode).strip() == "phase2":
             runtime_phase2_action_buttons = _append_unique_action_button(runtime_phase2_action_buttons, runtime_manual_route_button)
@@ -1547,6 +1549,7 @@ def _build_runtime_detail(
             label=str(row.get("active_task_label", "")).strip(),
             request_id=active_request_id,
             policy=latest_replan_auto_routing_policy,
+            task=active_task or {},
         ),
     )
     runtime_phase2_action_buttons = _append_unique_action_button(
@@ -1566,6 +1569,14 @@ def _build_runtime_detail(
         active_task_phase2_action_buttons,
         task=active_task or {},
     )
+    active_task_safe_action_buttons = _filter_manual_route_action_buttons(
+        active_task_safe_action_buttons,
+        task=active_task or {},
+    )
+    active_task_phase2_action_buttons = _filter_manual_route_action_buttons(
+        active_task_phase2_action_buttons,
+        task=active_task or {},
+    )
     active_task_phase2_action_buttons = _append_unique_action_button(
         active_task_phase2_action_buttons,
         _replan_auto_route_action_button(
@@ -1579,6 +1590,7 @@ def _build_runtime_detail(
         label=str(row.get("active_task_label", "")).strip(),
         request_id=active_request_id,
         policy=latest_replan_auto_routing_policy,
+        task=active_task or {},
     )
     if active_task_manual_route_button is not None and str(active_task_manual_route_button.mode).strip() == "phase2":
         active_task_phase2_action_buttons = _append_unique_action_button(active_task_phase2_action_buttons, active_task_manual_route_button)

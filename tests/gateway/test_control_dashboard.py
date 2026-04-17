@@ -4745,6 +4745,25 @@ def test_dashboard_surfaces_manual_ready_followup_execute_and_worker_apply_butto
     task["background_run_worker_update_stub_status"] = "ready"
     task["background_run_worker_update_stub_summary"] = "status=ready | target=reports/summary.md"
     task["background_run_worker_update_stub_targets"] = ["reports/summary.md"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "standard"
+    task["job_contract_summary"] = "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1"
+    task["job_contract_goal"] = "Summarize findings with supporting evidence"
+    task["job_contract_scope"] = ["reports/summary.md"]
+    task["job_contract_acceptance_checks"] = ["attach evidence to the summary update"]
+    task["job_contract_artifacts_to_touch"] = ["reports/summary.md"]
+    task["job_contract_rollback_hint"] = "limit mutations to declared artifact targets before apply"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = (
+        "status=active | current=verify | plan=done|note=contract_ready | "
+        "implement=done|note=execution_complete | verify=active|note=judge_manual_ready"
+    )
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=contract_ready",
+        "implement=done|note=execution_complete",
+        "verify=active|note=judge_manual_ready",
+    ]
     manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     assert action_audit.append_action_audit_row(
@@ -5253,6 +5272,150 @@ def test_dashboard_blocks_worker_apply_until_phase_checkpoint_reaches_verify_or_
     assert payload["phase_checkpoint"] == (
         "status=active | current=implement | plan=ready|note=contract_captured | "
         "implement=running|note=worker_apply_pending"
+    )
+
+
+def test_dashboard_blocks_manual_routes_until_phase_checkpoint_reaches_verify_or_handoff(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "standard"
+    task["job_contract_summary"] = "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1"
+    task["job_contract_goal"] = "Summarize findings with supporting evidence"
+    task["job_contract_scope"] = ["reports/summary.md"]
+    task["job_contract_non_goals"] = ["avoid unrelated source mutations"]
+    task["job_contract_risks"] = ["review wording before handoff"]
+    task["job_contract_acceptance_checks"] = ["attach evidence to the summary update"]
+    task["job_contract_artifacts_to_touch"] = ["reports/summary.md"]
+    task["job_contract_rollback_hint"] = "limit mutations to declared artifact targets before applying judge-backed steps"
+    task["debug_packet_state"] = "active"
+    task["debug_packet_summary"] = "state=active | symptom=background_run_inflight | evidence=1 | next=/task T-001"
+    task["debug_packet_symptom"] = "background_run_inflight"
+    task["debug_packet_evidence"] = ["runtime handle still attached"]
+    task["debug_packet_failed_attempt"] = "/retry T-001 lane L1"
+    task["debug_packet_next_step"] = "/task T-001"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "implement"
+    task["phase_checkpoint_summary"] = (
+        "status=active | current=implement | plan=done|note=contract_ready | "
+        "implement=running|note=manual_step_not_ready"
+    )
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=contract_ready",
+        "implement=running|note=manual_step_not_ready",
+    ]
+    task["followup_brief_status"] = "partially_executable"
+    task["followup_brief_summary"] = "partially_executable | execution=L2 | review=R1"
+    task["followup_brief_execution_lane_ids"] = ["L2"]
+    task["followup_brief_review_lane_ids"] = ["R1"]
+    task["followup_brief_reason"] = "operator keeps the review slice"
+    task["exec_critic"] = {
+        "manual_followup_execution_lane_ids": ["L2"],
+        "manual_followup_review_lane_ids": ["R1"],
+        "reason": "operator keeps the review slice",
+    }
+    gw.save_manager_state(manager_state_file, state)
+
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan | blocked",
+        status="blocked",
+        outcome_kind="replan",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked replan",
+        next_step="/followup-exec T-001 lane L2",
+        remediation="judge decision reuse: action=followup_execute next=/followup-exec T-001 lane L2",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T10:07:00+09:00",
+        extra={
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "manual_ready",
+                "current_action": "replan",
+                "suggested_action": "followup_execute",
+                "suggested_next_step": "/followup-exec T-001 lane L2",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": False,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+
+    blocked_manual_paths = {
+        "/control/actions/task/followup",
+        "/control/actions/task/followup-execute",
+    }
+    assert all(btn.path not in blocked_manual_paths for btn in runtime_card.runtime_safe_action_buttons)
+    assert all(btn.path not in blocked_manual_paths for btn in runtime_card.runtime_phase2_action_buttons)
+    assert all(btn.path not in blocked_manual_paths for btn in runtime_detail.active_task_safe_action_buttons)
+    assert all(btn.path not in blocked_manual_paths for btn in runtime_detail.active_task_phase2_action_buttons)
+    assert task_detail is not None
+    assert all(btn.path not in blocked_manual_paths for btn in task_detail.safe_action_buttons)
+    assert all(btn.path not in blocked_manual_paths for btn in task_detail.phase2_action_buttons)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    preview_status, preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["R1"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    assert preview_status == 409
+    assert preview_headers["Content-Type"].startswith("application/json")
+    assert preview_payload["outcome"]["reason_code"] == "phase_checkpoint_not_manual_ready"
+    assert preview_payload["next_step"] == "/task T-001"
+    assert preview_payload["phase_checkpoint"] == (
+        "status=active | current=implement | plan=done|note=contract_ready | "
+        "implement=running|note=manual_step_not_ready"
+    )
+
+    execute_status, execute_headers, execute_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/followup-execute",
+        body=json.dumps({"task_ref": "T-001", "lane_ids": ["L2"]}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    execute_payload = json.loads(execute_body.decode("utf-8"))
+    assert execute_status == 409
+    assert execute_headers["Content-Type"].startswith("application/json")
+    assert execute_payload["outcome"]["reason_code"] == "phase_checkpoint_not_manual_ready"
+    assert execute_payload["next_step"] == "/task T-001"
+    assert execute_payload["phase_checkpoint"] == (
+        "status=active | current=implement | plan=done|note=contract_ready | "
+        "implement=running|note=manual_step_not_ready"
     )
 
 

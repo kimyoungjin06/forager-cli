@@ -381,6 +381,45 @@ def _preview_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
             project_key = str(key)
             source_task = task
             break
+    if isinstance(source_task, dict):
+        manual_gate = gateway_task_state.derive_task_manual_gate(source_task)
+        if str(manual_gate.get("status", "")).strip() == "blocked":
+            return _json(
+                {
+                    "ok": False,
+                    "implemented": True,
+                    "executed": False,
+                    "status": "blocked",
+                    "method": "POST",
+                    "path": spec.get("path", "-"),
+                    "mode": spec.get("mode", "-"),
+                    "source_command": spec.get("command", "-"),
+                    "payload": payload,
+                    "next_step": str(manual_gate.get("next_step", "")).strip() or f"/task {task_ref}",
+                    "remediation": str(manual_gate.get("remediation", "")).strip() or (
+                        "inspect the current phase checkpoint before applying judge-backed follow-up steps"
+                    ),
+                    "outcome": {
+                        "kind": "task_followup",
+                        "status": "blocked",
+                        "reason_code": str(manual_gate.get("reason_code", "")).strip() or "manual_gate_blocked",
+                        "detail": str(manual_gate.get("detail", "")).strip() or "-",
+                    },
+                    "job_contract": str(manual_gate.get("job_contract_summary", "")).strip() or "-",
+                    "debug_packet": str(manual_gate.get("debug_packet_summary", "")).strip() or "-",
+                    "phase_checkpoint": str(manual_gate.get("phase_checkpoint_summary", "")).strip() or "-",
+                    "task": {
+                        "project_alias": detail.project_alias,
+                        "request_id": detail.request_id,
+                        "label": detail.label,
+                        "status": detail.status,
+                        "tf_phase": detail.tf_phase,
+                        "detail_path": f"/control/tasks/by-request/{detail.request_id}",
+                        "runtime_path": f"/control/runtimes/{detail.project_alias}",
+                    },
+                },
+                status=409,
+            )
     response = _json(
         {
             "ok": True,

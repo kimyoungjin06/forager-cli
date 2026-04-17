@@ -474,6 +474,25 @@ def _filter_dispatch_phase2_action_buttons(
     ]
 
 
+def _filter_manual_route_action_buttons(
+    buttons: Iterable[ActionButtonDTO],
+    *,
+    task: Dict[str, Any],
+) -> List[ActionButtonDTO]:
+    manual_gate = gateway_task_state.derive_task_manual_gate(task)
+    if str(manual_gate.get("status", "")).strip() != "blocked":
+        return [row for row in buttons if isinstance(row, ActionButtonDTO)]
+    blocked_paths = {
+        "/control/actions/task/followup",
+        "/control/actions/task/followup-execute",
+    }
+    return [
+        row
+        for row in buttons
+        if isinstance(row, ActionButtonDTO) and str(row.path).strip() not in blocked_paths
+    ]
+
+
 def _worker_preflight_rows_payload(
     task: Dict[str, Any],
     *,
@@ -746,6 +765,7 @@ def _replan_manual_route_action_button(
     label: str,
     request_id: str,
     policy: Dict[str, Any],
+    task: Dict[str, Any] | None = None,
 ) -> ActionButtonDTO | None:
     row = policy if isinstance(policy, dict) else {}
     policy_status = str(row.get("status", "")).strip()
@@ -787,6 +807,9 @@ def _replan_manual_route_action_button(
     if path in {"/control/actions/task/followup", "/control/actions/task/followup-execute"}:
         payload_task_ref = str(payload.get("task_ref", "")).strip()
         if payload_task_ref not in {"", "-", task_ref, str(request_id).strip()}:
+            return None
+        manual_gate = gateway_task_state.derive_task_manual_gate(task if isinstance(task, dict) else {})
+        if str(manual_gate.get("status", "")).strip() == "blocked":
             return None
     elif path == "/control/actions/runtime/judge":
         payload_project_ref = str(payload.get("project_ref", "")).strip()
