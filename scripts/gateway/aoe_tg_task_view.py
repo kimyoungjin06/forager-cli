@@ -209,16 +209,17 @@ def planning_review_operator_summary(
     return summary
 
 
-def planning_preset_operator_note(
+def planning_operator_note(
     task: Optional[Dict[str, Any]] = None,
     *,
-    base_note: str = "",
+    notes: Optional[Iterable[str]] = None,
     planning_lanes: str = "",
     approved_plan_gate: str = "",
     approved_plan: str = "",
 ) -> str:
     parts: List[str] = []
-    _append_unique_summary_part(parts, base_note)
+    for note in notes or []:
+        _append_unique_summary_part(parts, str(note or "").strip())
     _append_unique_summary_part(
         parts,
         planning_operator_bundle(
@@ -229,6 +230,23 @@ def planning_preset_operator_note(
         ).get("planning_review", "-"),
     )
     return " | ".join(parts)[:320] if parts else "-"
+
+
+def planning_preset_operator_note(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    base_note: str = "",
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+) -> str:
+    return planning_operator_note(
+        task,
+        notes=[base_note],
+        planning_lanes=planning_lanes,
+        approved_plan_gate=approved_plan_gate,
+        approved_plan=approved_plan,
+    )
 
 
 def critic_has_blockers(critic: Dict[str, Any]) -> bool:

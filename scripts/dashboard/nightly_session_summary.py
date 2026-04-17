@@ -497,9 +497,13 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
     for runtime in runtimes:
         if not isinstance(runtime, dict):
             continue
+        runtime_heading = f"{runtime.get('project_alias', '-')} {runtime.get('project_label', '-')}"
+        runtime_planning_review = str(runtime.get("latest_planning_review_summary", "")).strip()
+        if runtime_planning_review and runtime_planning_review != "-":
+            runtime_heading = f"{runtime_heading} | {runtime_planning_review}"
         lines.extend(
             [
-                f"## {runtime.get('project_alias', '-')} {runtime.get('project_label', '-')}",
+                f"## {runtime_heading}",
                 f"- runtime: {runtime.get('readiness', '-')}",
                 f"- status: {runtime.get('status', '-')}",
                 f"- attention: {runtime.get('attention_summary', '-')}",

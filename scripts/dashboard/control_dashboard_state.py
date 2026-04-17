@@ -824,11 +824,9 @@ def _chat_live_preview_preset_note(
     if preview_groups:
         lead = preview_groups[0]
         pressure_note = str(lead.action_sentence or lead.operator_sentence or "").strip()
-    return task_view.planning_preset_operator_note(
+    return task_view.planning_operator_note(
         selected_task,
-        base_note=" | ".join(
-            token for token in [pressure_note, str(row.note or "").strip()] if token and token != "-"
-        ),
+        notes=[pressure_note, str(row.note or "").strip()],
     )
 
 

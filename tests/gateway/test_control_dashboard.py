@@ -1217,6 +1217,7 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked" in text
+    assert "planning_review: draft via codex | review via claude | dispatch waits for critic-approved plan" in text
     assert "planning critic blocked replan" in text
 
 
@@ -2396,6 +2397,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "focus_filter" in text
     assert "server-guard" in text
     assert "Open Health JSON" in text
+    assert "nightly_planning_review" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "execution_brief_summary" in text

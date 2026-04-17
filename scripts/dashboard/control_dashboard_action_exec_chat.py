@@ -263,9 +263,9 @@ def _execute_chat_session_update_action(
             or str(policy.get("operator_sentence", "")).strip()
             or str(policy.get("priority_link_note", "")).strip()
         )
-        primary_note = task_view.planning_preset_operator_note(
+        primary_note = task_view.planning_operator_note(
             selected_task,
-            base_note=primary_note,
+            notes=[primary_note],
         )
         first_key = next((token for token in order if token in action_map), "")
         for token in order:
