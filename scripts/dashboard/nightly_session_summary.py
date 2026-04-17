@@ -222,6 +222,10 @@ def build_nightly_session_summary(
         )
         latest_planning_handoff = (latest_replan_policy or {}).get("planning_handoff")
         latest_planning_handoff_summary = action_audit.summarize_planning_handoff_snapshot(latest_planning_handoff)
+        latest_planning_review_approved_plan = (
+            action_audit.summarize_retry_replan_approved_plan_handoff(latest_planning_handoff)
+            or detail.active_task_approved_plan_summary
+        )
         task_rows = _task_rows_for_runtime(manager_state, detail)
         runtimes.append(
             {
@@ -323,8 +327,7 @@ def build_nightly_session_summary(
                 "latest_planning_review_summary": task_view.planning_review_operator_summary(
                     planning_lanes=detail.active_task_planning_lanes_summary,
                     approved_plan_gate=detail.active_task_approved_plan_gate_summary,
-                    approved_plan=detail.active_task_approved_plan_summary,
-                    planning_handoff=latest_planning_handoff_summary,
+                    approved_plan=latest_planning_review_approved_plan,
                 ),
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(

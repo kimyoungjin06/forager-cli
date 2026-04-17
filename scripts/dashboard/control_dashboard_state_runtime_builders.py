@@ -690,6 +690,26 @@ def _latest_planning_handoff_summary(team_dir: Path, *, project_alias: str) -> s
     return summary if summary not in {"", "-"} else "-"
 
 
+def _latest_planning_review_summary(
+    team_dir: Path,
+    *,
+    project_alias: str,
+    active_task: Dict[str, Any] | None = None,
+    policy: Dict[str, Any] | None = None,
+) -> str:
+    task = active_task if isinstance(active_task, dict) else {}
+    handoff_policy = policy if isinstance(policy, dict) else action_audit.load_latest_replan_auto_routing_policy_for_runtime(
+        team_dir,
+        project_alias=project_alias,
+    )
+    handoff = handoff_policy.get("planning_handoff") if isinstance(handoff_policy, dict) else {}
+    approved_plan_summary = action_audit.summarize_retry_replan_approved_plan_handoff(handoff)
+    return task_view.planning_review_operator_summary(
+        task,
+        approved_plan=approved_plan_summary,
+    )
+
+
 def _latest_manual_step_summary(team_dir: Path, *, project_alias: str, active_task: Dict[str, Any] | None = None) -> str:
     policy_summary = action_audit.load_latest_manual_step_summary_for_runtime(
         team_dir,
@@ -881,9 +901,11 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=active_task)
                     active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
                     active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
-                    latest_planning_review_summary = task_view.planning_review_operator_summary(
-                        active_task,
-                        planning_handoff=latest_planning_handoff_summary,
+                    latest_planning_review_summary = _latest_planning_review_summary(
+                        root_team_dir,
+                        project_alias=str(entry.get("project_alias", "")).strip(),
+                        active_task=active_task,
+                        policy=latest_replan_auto_routing_policy,
                     )
         active_rate_limit_summary = _runtime_active_task_rate_limit_summary(row)
         runtime_action_contract = _runtime_command_contract(
@@ -1428,9 +1450,14 @@ def _build_runtime_detail(
         if str(root_team_dir or "").strip()
         else "-"
     )
-    latest_planning_review_summary = task_view.planning_review_operator_summary(
-        active_task,
-        planning_handoff=latest_planning_handoff_summary,
+    latest_planning_review_summary = (
+        _latest_planning_review_summary(
+            Path(str(root_team_dir or "")).expanduser(),
+            project_alias=str(entry.get("project_alias", "")).strip(),
+            active_task=active_task or {},
+        )
+        if str(root_team_dir or "").strip()
+        else task_view.planning_review_operator_summary(active_task)
     )
     latest_manual_step_summary = (
         _latest_manual_step_summary(
