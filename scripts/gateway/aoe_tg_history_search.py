@@ -67,11 +67,14 @@ class HistoryRow:
     status: str = ""
     summary: str = ""
     detail: str = ""
-    planning_review_summary: str = ""
-    approved_plan_summary: str = ""
     planning_compact_summary: str = ""
+    approved_plan_summary: str = ""
     followup_hint: str = ""
     raw_ref: str = ""
+
+    @property
+    def planning_review_summary(self) -> str:
+        return self.planning_compact_summary
 
 
 def _normalize_text(raw: Any) -> str:
@@ -531,9 +534,8 @@ def _action_audit_rows(
                         status=str(parsed.get("status", "")).strip() or str(parsed.get("outcome_status", "")).strip(),
                         summary=summary or "-",
                         detail=detail,
-                        planning_review_summary=planning_review_summary or "",
-                        approved_plan_summary=approved_plan_handoff_summary or "",
                         planning_compact_summary=planning_compact_summary or "",
+                        approved_plan_summary=approved_plan_handoff_summary or "",
                         followup_hint=str(parsed.get("next_step", "")).strip() or (f"/task {task_short_id}" if task_short_id else ""),
                         raw_ref=f"{path}:{str(parsed.get('at', '')).strip()}",
                     )

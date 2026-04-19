@@ -1132,6 +1132,10 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
     planning_lanes_summary = gateway_task_view.planning_lane_operator_summary(task)
     approved_plan_gate_summary = gateway_task_view.approved_plan_gate_operator_summary(task)
+    planning_compact_summary = gateway_task_view.planning_review_operator_summary(
+        planning_lanes=planning_lanes_summary,
+        approved_plan_gate=approved_plan_gate_summary,
+    )
     planning_handoff = {
         "job_contract": {
             "status": str(task.get("job_contract_status", "")).strip() or "-",
@@ -1161,10 +1165,8 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
         "approved_plan_gate_summary": approved_plan_gate_summary,
         "planner_lane_summary": str(task.get("planner_lane_summary", "")).strip() or "-",
         "critic_lane_summary": str(task.get("critic_lane_summary", "")).strip() or "-",
-        "planning_review_summary": gateway_task_view.planning_review_operator_summary(
-            planning_lanes=planning_lanes_summary,
-            approved_plan_gate=approved_plan_gate_summary,
-        ),
+        "planning_compact_summary": planning_compact_summary,
+        "planning_review_summary": planning_compact_summary,
     }
     if review_kind in {"contract_review_ready", "debug_review_ready", "phase_review_ready", "analysis_review_ready"}:
         planning_detail = {
@@ -1206,6 +1208,8 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
                     "detail_path": f"/control/tasks/by-request/{request_id}",
                 },
                 "planning_handoff": planning_handoff,
+                "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
+                "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
                 "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
                 "planning_lanes": planning_lanes_summary,
                 "approved_plan_gate": approved_plan_gate_summary,
