@@ -2402,7 +2402,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "focus_filter" in text
     assert "server-guard" in text
     assert "Open Health JSON" in text
-    assert "nightly_planning_review" in text
+    assert "nightly_planning_compact" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "execution_brief_summary" in text
@@ -2420,7 +2420,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in text
     assert "latest_judge_decision" in text
     assert "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in text
-    assert "planning_review" in text
+    assert "planning_compact" in text
     assert "obs stale=" in text
     assert "waiting on execution lane(s): L1" in text
     assert "overlapping files: reports/summary.md" in text

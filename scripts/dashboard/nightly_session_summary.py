@@ -485,7 +485,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
             )
             planning_review = str(row.get("planning_review_summary", "")).strip()
             if planning_review and planning_review != "-":
-                lines.append(f"  - planning_review: {planning_review}")
+                lines.append(f"  - planning_compact: {planning_review}")
             if str(row.get("link_href", "")).strip():
                 lines.append(
                     "  - link: {label} -> {href}".format(
@@ -519,7 +519,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
-                f"- planning_review: {runtime.get('latest_planning_review_summary', '-')}",
+                f"- planning_compact: {runtime.get('latest_planning_review_summary', '-')}",
                 f"- planning_handoff: {runtime.get('latest_planning_handoff_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
