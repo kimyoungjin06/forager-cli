@@ -213,26 +213,26 @@
           item.appendChild(val);
           rows.appendChild(item);
         };
-        const appendPlanningCompactRow = (planningReview, approvedPlan) => {
-          if ((!planningReview || planningReview === "-") && (!approvedPlan || approvedPlan === "-")) {
+        const renderPlanningCompactText = (planningCompact) => {
+          const compact = asText(planningCompact);
+          if (compact === "-") {
+            return "-";
+          }
+          return String(compact).replace(/^planning_compact=/, "").replace(/^planning=/, "");
+        };
+        const appendPlanningCompactRow = (planningCompact) => {
+          const compact = renderPlanningCompactText(planningCompact);
+          if (compact === "-") {
             return;
           }
           const item = document.createElement("li");
           const key = document.createElement("span");
           const val = document.createElement("strong");
           key.textContent = "planning_compact";
-          if (planningReview && planningReview !== "-") {
-            const planning = document.createElement("div");
-            planning.className = "muted";
-            planning.textContent = `planning_review: ${String(planningReview).replace(/^planning=/, "")}`;
-            val.appendChild(planning);
-          }
-          if (approvedPlan && approvedPlan !== "-") {
-            const approved = document.createElement("div");
-            approved.className = "muted";
-            approved.textContent = `approved_plan: ${approvedPlan}`;
-            val.appendChild(approved);
-          }
+          const planning = document.createElement("div");
+          planning.className = "muted";
+          planning.textContent = `planning_compact: ${compact}`;
+          val.appendChild(planning);
           item.appendChild(key);
           item.appendChild(val);
           rows.appendChild(item);
@@ -392,7 +392,7 @@
             if (entry.planningCompact && entry.planningCompact !== "-") {
               const planning = document.createElement("div");
               planning.className = "muted";
-              planning.textContent = `planning_compact: ${String(entry.planningCompact).replace(/^planning=/, "")}`;
+              planning.textContent = `planning_compact: ${renderPlanningCompactText(entry.planningCompact)}`;
               item.appendChild(planning);
             }
             if (entry.nextStep && entry.nextStep !== "-") {
@@ -490,7 +490,7 @@
           const taskLabel = asText(payload?.task?.label || payload?.preview?.label || payload?.preview?.request_id);
           const runtimeLabel = asText(payload?.transition?.orch_target || payload?.preview?.project_alias || payload?.auto_state?.command);
           const approvedPlan = asText(payload?.approved_plan || payload?.approved_plan_summary || payload?.planning_handoff?.approved_plan?.summary);
-          const planningReview = asText(payload?.planning_review || payload?.planning_handoff?.planning_review_summary);
+          const planningReview = asText(payload?.planning_review || payload?.planning_review_summary || payload?.planning_handoff?.planning_review_summary);
           const planningCompact = buildPlanningCompact(planningReview, approvedPlan, payload);
           const planningLanes = asText(payload?.planning_lanes || payload?.planning_handoff?.planning_lanes_summary);
           const approvedPlanGate = asText(payload?.approved_plan_gate || payload?.planning_handoff?.approved_plan_gate_summary);
@@ -513,8 +513,8 @@
           } else if (payload?.error) {
             headline = `${label} | ${payload.error}`;
           }
-          if (planningReview !== "-" && !headline.includes("planning=")) {
-            headline = `${headline} | planning=${planningReview}`;
+          if (planningCompact !== "-" && !headline.includes("planning_compact=")) {
+            headline = `${headline} | planning_compact=${renderPlanningCompactText(planningCompact)}`;
           }
           if (approvedPlan !== "-" && !headline.includes("approved_plan=")) {
             headline = `${headline} | ${approvedPlan}`;
@@ -555,12 +555,12 @@
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
           panel.classList.toggle("compact-view", !error);
-          const { headline, rowsData, linkRows, presetDiffHighlight, planningCompact, planningReview, approvedPlan } = buildSummary(label, status, payload);
+          const { headline, rowsData, linkRows, presetDiffHighlight, planningCompact } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
           clearActions();
           clearLinks();
-          appendPlanningCompactRow(planningReview, approvedPlan);
+          appendPlanningCompactRow(planningCompact);
           rowsData.forEach(([key, value]) =>
             appendRow(key, asText(value), key === "preset_diff" && presetDiffHighlight ? {
               highlighted: true,

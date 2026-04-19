@@ -878,18 +878,7 @@ def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str
     for row in rows:
         if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
             continue
-        headline = (
-            str(getattr(row, "headline_summary", "")).strip()
-            or str(getattr(row, "headline", "")).strip()
-            or "-"
-        )
-        planning_summary = _row_planning_compact_summary(row)
-        next_step = str(getattr(row, "next_step", "")).strip() or "-"
-        at = str(getattr(row, "at", "")).strip() or "-"
-        summary = f"{headline} | at={at} | next={next_step}"
-        labeled_planning = _planning_compact_suffix(planning_summary)
-        if labeled_planning != "-" and labeled_planning not in summary:
-            summary = f"{summary} | {labeled_planning}"
+        summary = _server_guard_row_summary(row, include_status=False)
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
@@ -913,19 +902,7 @@ def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str
             continue
         if str(getattr(row, "outcome_kind", "")).strip() not in result_kinds:
             continue
-        headline = (
-            str(getattr(row, "headline_summary", "")).strip()
-            or str(getattr(row, "headline", "")).strip()
-            or "-"
-        )
-        planning_summary = _row_planning_compact_summary(row)
-        status = str(getattr(row, "outcome_status", "")).strip() or str(getattr(row, "status", "")).strip() or "-"
-        at = str(getattr(row, "at", "")).strip() or "-"
-        next_step = str(getattr(row, "next_step", "")).strip() or "-"
-        summary = f"{headline} | status={status} | at={at} | next={next_step}"
-        labeled_planning = _planning_compact_suffix(planning_summary)
-        if labeled_planning != "-" and labeled_planning not in summary:
-            summary = f"{summary} | {labeled_planning}"
+        summary = _server_guard_row_summary(row, include_status=True)
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
@@ -952,6 +929,25 @@ def _row_planning_compact_summary(row: ActionAuditRowDTO) -> str:
         planning_review=str(getattr(row, "planning_review_summary", "")).strip(),
         approved_plan=str(getattr(row, "approved_plan_summary", "")).strip(),
     )
+
+
+def _server_guard_row_summary(row: ActionAuditRowDTO, *, include_status: bool) -> str:
+    headline = (
+        str(getattr(row, "headline_summary", "")).strip()
+        or str(getattr(row, "headline", "")).strip()
+        or "-"
+    )
+    planning_summary = _planning_compact_suffix(_row_planning_compact_summary(row))
+    at = str(getattr(row, "at", "")).strip() or "-"
+    next_step = str(getattr(row, "next_step", "")).strip() or "-"
+    parts = [headline]
+    if include_status:
+        status = str(getattr(row, "outcome_status", "")).strip() or str(getattr(row, "status", "")).strip() or "-"
+        parts.append(f"status={status}")
+    parts.extend((f"at={at}", f"next={next_step}"))
+    if planning_summary != "-":
+        parts.append(planning_summary)
+    return " | ".join(parts)
 
 
 def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: int = 8) -> list[ActionAuditRowDTO]:
