@@ -994,7 +994,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             "process_pressure_preview",
         }:
             focus_badge = "server-guard"
-        planning_compact_summary = action_audit.summarize_retry_replan_planning_review_handoff(
+        planning_compact_summary = action_audit.summarize_retry_replan_planning_compact_handoff(
             raw.get("planning_handoff"),
             row=raw,
         )

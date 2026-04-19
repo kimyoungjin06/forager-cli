@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from aoe_tg_action_audit import (
     normalize_planning_handoff_snapshot,
     summarize_action_audit_headline,
-    summarize_retry_replan_planning_review_handoff,
+    summarize_retry_replan_planning_compact_handoff,
 )
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_project_state import project_alias_for_key
@@ -482,7 +482,7 @@ def _action_audit_rows(
                     summary = f"{summary} | reason={reason_code}"
                 debug_handoff_detail = _action_audit_debug_handoff_detail(parsed)
                 planning_review_summary = _normalize_text(
-                    summarize_retry_replan_planning_review_handoff(parsed.get("planning_handoff"), row=parsed)
+                    summarize_retry_replan_planning_compact_handoff(parsed.get("planning_handoff"), row=parsed)
                 )
                 if planning_review_summary in {"", "-"}:
                     planning_review_summary = _normalize_text(

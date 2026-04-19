@@ -263,7 +263,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         "process_pressure_preview",
     }:
         focus_badge = "server-guard"
-    planning_review_summary = action_audit.summarize_retry_replan_planning_review_handoff(
+    planning_review_summary = action_audit.summarize_retry_replan_planning_compact_handoff(
         raw.get("planning_handoff"),
         row=raw,
     )

@@ -534,8 +534,8 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
     if critic_lane_summary:
         normalized["critic_lane_summary"] = critic_lane_summary[:200]
     if planning_review_summary:
-        normalized["planning_review_summary"] = planning_review_summary[:320]
         normalized["planning_compact_summary"] = planning_review_summary[:320]
+        normalized["planning_review_summary"] = planning_review_summary[:320]
     return normalized
 
 
@@ -593,7 +593,7 @@ def summarize_retry_replan_approved_plan_handoff(raw: Any, *, row: Optional[Dict
     return compact_action_text(summary, limit=96)
 
 
-def summarize_retry_replan_planning_review_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
+def summarize_retry_replan_planning_compact_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
     handoff = normalize_planning_handoff_snapshot(raw, row=row)
     if not isinstance(handoff, dict) or not handoff:
         return "-"
@@ -614,6 +614,10 @@ def summarize_retry_replan_planning_review_handoff(raw: Any, *, row: Optional[Di
     return "planning=" + compact_action_text(summary, limit=132)
 
 
+def summarize_retry_replan_planning_review_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
+    return summarize_retry_replan_planning_compact_handoff(raw, row=row)
+
+
 def summarize_action_audit_headline(raw: Any) -> str:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -629,9 +633,9 @@ def summarize_action_audit_headline(raw: Any) -> str:
         if debug_summary not in {"", "-"} and debug_summary not in headline:
             headline = f"{headline} | {debug_summary}"
     if status == "blocked":
-        planning_review_summary = summarize_retry_replan_planning_review_handoff(row.get("planning_handoff"), row=row)
-        if planning_review_summary not in {"", "-"} and planning_review_summary not in headline:
-            headline = f"{headline} | {planning_review_summary}"
+        planning_compact_summary = summarize_retry_replan_planning_compact_handoff(row.get("planning_handoff"), row=row)
+        if planning_compact_summary not in {"", "-"} and planning_compact_summary not in headline:
+            headline = f"{headline} | {planning_compact_summary}"
     if status == "blocked":
         approved_plan_summary = summarize_retry_replan_approved_plan_handoff(row.get("planning_handoff"), row=row)
         if approved_plan_summary in {"", "-"}:
