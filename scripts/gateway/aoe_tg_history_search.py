@@ -481,13 +481,20 @@ def _action_audit_rows(
                 if summary and reason_code and "reason=" not in summary:
                     summary = f"{summary} | reason={reason_code}"
                 debug_handoff_detail = _action_audit_debug_handoff_detail(parsed)
-                planning_review_summary = _normalize_text(
+                planning_compact_summary = _normalize_text(
                     summarize_retry_replan_planning_compact_handoff(parsed.get("planning_handoff"), row=parsed)
                 )
-                if planning_review_summary in {"", "-"}:
-                    planning_review_summary = _normalize_text(
+                if planning_compact_summary in {"", "-"}:
+                    planning_compact_summary = _normalize_text(
                         str(
-                            parsed.get("planning_review_summary")
+                            parsed.get("planning_compact_summary")
+                            or parsed.get("planning_compact")
+                            or parsed.get("planning_review_summary")
+                            or (
+                                (parsed.get("planning_handoff") or {}).get("planning_compact_summary")
+                                if isinstance(parsed.get("planning_handoff"), dict)
+                                else ""
+                            )
                             or (
                                 (parsed.get("planning_handoff") or {}).get("planning_review_summary")
                                 if isinstance(parsed.get("planning_handoff"), dict)
@@ -498,7 +505,7 @@ def _action_audit_rows(
                 approved_plan_handoff_summary = _action_audit_approved_plan_handoff_summary(parsed)
                 planning_compact_summary = _normalize_text(
                     planning_compact_operator_summary(
-                        planning_review=planning_review_summary,
+                        planning_review=planning_compact_summary,
                         approved_plan=approved_plan_handoff_summary,
                     )
                 )

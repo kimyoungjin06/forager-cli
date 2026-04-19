@@ -824,7 +824,7 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
         "outcome_reason_code": "approved_plan_blocked",
         "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
         "planning_handoff": {
-            "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+            "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
         },
     }
 
@@ -855,7 +855,7 @@ def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for
         extra={
             "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
             "planning_handoff": {
-                "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+                "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
             },
         },
     )
@@ -1127,7 +1127,7 @@ def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(t
         at="2026-04-10T11:07:00+09:00",
         extra={
             "planning_handoff": {
-                "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+                "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
                 "job_contract": {
                     "status": "ready",
                     "summary": "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1",
@@ -1193,7 +1193,7 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
         at="2026-04-10T11:07:00+09:00",
         extra={
             "planning_handoff": {
-                "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+                "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
                 "approved_plan": {
                     "status": "blocked",
                     "summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",

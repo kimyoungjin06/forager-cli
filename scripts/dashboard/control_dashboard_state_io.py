@@ -263,12 +263,12 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         "process_pressure_preview",
     }:
         focus_badge = "server-guard"
-    planning_review_summary = action_audit.summarize_retry_replan_planning_compact_handoff(
+    planning_compact_summary = action_audit.summarize_retry_replan_planning_compact_handoff(
         raw.get("planning_handoff"),
         row=raw,
     )
-    if planning_review_summary in {"", "-"}:
-        planning_review_summary = str(
+    if planning_compact_summary in {"", "-"}:
+        planning_compact_summary = str(
             raw.get("planning_compact_summary")
             or raw.get("planning_review_summary")
             or raw.get("planning_review")
@@ -283,7 +283,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
             raw.get("approved_plan_summary") or raw.get("approved_plan") or "-"
         ).strip() or "-"
     planning_compact_summary = task_view.planning_compact_operator_summary(
-        planning_review=planning_review_summary,
+        planning_review=planning_compact_summary,
         approved_plan=approved_plan_summary,
     )
     return ActionAuditRowDTO(

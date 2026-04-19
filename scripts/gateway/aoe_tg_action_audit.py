@@ -500,7 +500,7 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
     planning_compact_summary = str(payload.get("planning_compact_summary", "")).strip() or str(
         source.get("planning_compact_summary", "")
     ).strip()
-    planning_review_summary = (
+    planning_compact_summary = (
         planning_compact_summary
         or str(payload.get("planning_review_summary", "")).strip()
         or str(source.get("planning_review_summary", "")).strip()
@@ -515,7 +515,7 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
             approved_plan_gate_summary,
             planner_lane_summary,
             critic_lane_summary,
-            planning_review_summary,
+            planning_compact_summary,
         )
     ):
         return {}
@@ -533,9 +533,9 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
         normalized["planner_lane_summary"] = planner_lane_summary[:200]
     if critic_lane_summary:
         normalized["critic_lane_summary"] = critic_lane_summary[:200]
-    if planning_review_summary:
-        normalized["planning_compact_summary"] = planning_review_summary[:320]
-        normalized["planning_review_summary"] = planning_review_summary[:320]
+    if planning_compact_summary:
+        normalized["planning_compact_summary"] = planning_compact_summary[:320]
+        normalized["planning_review_summary"] = planning_compact_summary[:320]
     return normalized
 
 
