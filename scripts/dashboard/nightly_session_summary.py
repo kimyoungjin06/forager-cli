@@ -344,7 +344,6 @@ def build_nightly_session_summary(
                 "latest_replan_auto_routing_policy": latest_replan_policy,
                 "latest_planning_handoff_summary": latest_planning_handoff_summary,
                 "latest_planning_compact_summary": latest_planning_compact_summary,
-                "latest_planning_review_summary": latest_planning_compact_summary,
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
                     snapshot.team_dir,
@@ -494,11 +493,11 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     next_step=row.get("next_step", "-"),
                 )
             )
-            planning_review = str(row.get("planning_compact_summary", "")).strip() or str(
+            planning_compact = str(row.get("planning_compact_summary", "")).strip() or str(
                 row.get("planning_review_summary", "")
             ).strip()
-            if planning_review and planning_review != "-":
-                lines.append(f"  - planning_compact: {planning_review}")
+            if planning_compact and planning_compact != "-":
+                lines.append(f"  - planning_compact: {planning_compact}")
             if str(row.get("link_href", "")).strip():
                 lines.append(
                     "  - link: {label} -> {href}".format(
@@ -511,11 +510,11 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         if not isinstance(runtime, dict):
             continue
         runtime_heading = f"{runtime.get('project_alias', '-')} {runtime.get('project_label', '-')}"
-        runtime_planning_review = str(runtime.get("latest_planning_compact_summary", "")).strip() or str(
+        runtime_planning_compact = str(runtime.get("latest_planning_compact_summary", "")).strip() or str(
             runtime.get("latest_planning_review_summary", "")
         ).strip()
-        if runtime_planning_review and runtime_planning_review != "-":
-            runtime_heading = f"{runtime_heading} | {runtime_planning_review}"
+        if runtime_planning_compact and runtime_planning_compact != "-":
+            runtime_heading = f"{runtime_heading} | {runtime_planning_compact}"
         lines.extend(
             [
                 f"## {runtime_heading}",
