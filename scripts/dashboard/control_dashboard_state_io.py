@@ -54,9 +54,8 @@ class ActionAuditRowDTO:
     at: str
     headline: str
     headline_summary: str
-    planning_review_summary: str
-    approved_plan_summary: str
     planning_compact_summary: str
+    approved_plan_summary: str
     status: str
     outcome_kind: str
     outcome_status: str
@@ -73,6 +72,10 @@ class ActionAuditRowDTO:
     chat_preset_diff_summary: str = ""
     thread_href: str = ""
     thread_label: str = ""
+
+    @property
+    def planning_review_summary(self) -> str:
+        return self.planning_compact_summary
 
 
 @dataclass(frozen=True)
@@ -279,16 +282,16 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         approved_plan_summary = str(
             raw.get("approved_plan_summary") or raw.get("approved_plan") or "-"
         ).strip() or "-"
+    planning_compact_summary = task_view.planning_compact_operator_summary(
+        planning_review=planning_review_summary,
+        approved_plan=approved_plan_summary,
+    )
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         headline_summary=action_audit.summarize_action_audit_headline(raw),
-        planning_review_summary=planning_review_summary,
+        planning_compact_summary=planning_compact_summary,
         approved_plan_summary=approved_plan_summary,
-        planning_compact_summary=task_view.planning_compact_operator_summary(
-            planning_review=planning_review_summary,
-            approved_plan=approved_plan_summary,
-        ),
         status=str(raw.get("status", "")).strip() or "unknown",
         outcome_kind=outcome_kind,
         outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",

@@ -759,10 +759,13 @@ class HistorySearchRowDTO:
     followup_hint: str
     raw_ref: str
     planning_compact_summary: str = ""
-    planning_review_summary: str = ""
     approved_plan_summary: str = ""
     pressure_kind_label: str = ""
     pressure_kind_note: str = ""
+
+    @property
+    def planning_review_summary(self) -> str:
+        return self.planning_compact_summary
 
 
 @dataclass(frozen=True)

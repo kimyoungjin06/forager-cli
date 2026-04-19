@@ -994,7 +994,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             "process_pressure_preview",
         }:
             focus_badge = "server-guard"
-        planning_review_summary = action_audit.summarize_retry_replan_planning_review_handoff(
+        planning_compact_summary = action_audit.summarize_retry_replan_planning_review_handoff(
             raw.get("planning_handoff"),
             row=raw,
         )
@@ -1002,16 +1002,16 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             raw.get("planning_handoff"),
             row=raw,
         )
+        planning_compact_summary = task_view.planning_compact_operator_summary(
+            planning_review=planning_compact_summary,
+            approved_plan=approved_plan_summary,
+        )
         row = ActionAuditRowDTO(
             at=str(raw.get("at", "")).strip() or "-",
             headline=str(raw.get("headline", "")).strip() or "-",
             headline_summary=action_audit.summarize_action_audit_headline(raw),
-            planning_review_summary=planning_review_summary,
+            planning_compact_summary=planning_compact_summary,
             approved_plan_summary=approved_plan_summary,
-            planning_compact_summary=task_view.planning_compact_operator_summary(
-                planning_review=planning_review_summary,
-                approved_plan=approved_plan_summary,
-            ),
             status=str(raw.get("status", "")).strip() or "unknown",
             outcome_kind=outcome_kind or "-",
             outcome_status=str(raw.get("outcome_status", "")).strip() or str(raw.get("status", "")).strip() or "unknown",
@@ -1471,7 +1471,6 @@ def load_dashboard_history_page(
                 summary=row.summary,
                 detail=row.detail,
                 planning_compact_summary=getattr(row, "planning_compact_summary", ""),
-                planning_review_summary=getattr(row, "planning_review_summary", ""),
                 approved_plan_summary=getattr(row, "approved_plan_summary", ""),
                 followup_hint=row.followup_hint,
                 raw_ref=row.raw_ref,
