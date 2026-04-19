@@ -29,7 +29,7 @@
       <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
       <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
       {% if planning_card and planning_card.active_task_label %}
-      <li><span>planning_review</span><strong>{{ planning_card.latest_planning_review_summary }}</strong></li>
+      <li><span>planning_compact</span><strong>{{ planning_card.latest_planning_review_summary }}</strong></li>
       <li><span>planning_lanes</span><strong>{{ planning_card.active_task_planning_lanes_summary }}</strong></li>
       <li><span>approved_plan_gate</span><strong>{{ planning_card.active_task_approved_plan_gate_summary }}</strong></li>
       {% endif %}
@@ -62,7 +62,7 @@
         <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
         <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
         <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
-        <p><strong>planning_review</strong> {{ card.latest_planning_review_summary }}</p>
+        <p><strong>planning_compact</strong> {{ card.latest_planning_review_summary }}</p>
         <p><strong>planning_lanes</strong> {{ card.active_task_planning_lanes_summary }}</p>
         <p><strong>approved_plan_gate</strong> {{ card.active_task_approved_plan_gate_summary }}</p>
         <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
@@ -144,7 +144,7 @@
       <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
       <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
       <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
-      <p><strong>planning_review</strong> {{ card.latest_planning_review_summary }}</p>
+      <p><strong>planning_compact</strong> {{ card.latest_planning_review_summary }}</p>
       <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
       <details class="info-fold" open>
         <summary>Decision Signals</summary>
@@ -246,7 +246,7 @@
       <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
       <p><strong>chat_console</strong> <a href="{{ card.chat_console_path }}">{{ card.chat_console_label }}</a></p>
       <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }} | {{ card.active_task_execution_brief_summary }}</p>
-      <p><strong>planning</strong> {{ card.latest_planning_review_summary }}</p>
+      <p><strong>planning_compact</strong> {{ card.latest_planning_review_summary }}</p>
       <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
       <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</p>
       <p><strong>background_queue</strong> {{ card.background_queue_summary }} | {{ card.background_scheduler_summary }}</p>

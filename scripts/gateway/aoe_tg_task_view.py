@@ -215,8 +215,6 @@ def planning_review_operator_summary(
         approved_plan_gate=approved_plan_gate,
         approved_plan=approved_plan,
     ).get("planning_review", "-")
-    if planning_handoff not in {"", "-"} and planning_handoff not in summary:
-        return " | ".join([summary, str(planning_handoff).strip()])[:320] if summary not in {"", "-"} else str(planning_handoff).strip()[:320]
     return summary
 
 

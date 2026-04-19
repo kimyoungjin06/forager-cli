@@ -810,9 +810,9 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "live_preview_preset" in text
     assert "Apply Global Direct" in text
     assert "server-guard-live-preview:codex:123456:Global Direct" in text
-    assert "planning_review" in text
+    assert "planning_compact" in text
     assert "active planner=codex critic=claude" in text
-    assert "preset_planning" in text
+    assert "preset_planning_compact" in text
 
 
 def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() -> None:
@@ -1513,7 +1513,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "job_goal" in text
     assert "job_scope" in text
     assert "job_acceptance" in text
-    assert "planning_review" in text
+    assert "planning_compact" in text
     assert "dispatch unlocked after critic approval | review via claude" in text
     assert "planning_lanes" in text
     assert "draft via codex | review via claude" in text
@@ -1849,7 +1849,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "job_goal" in text
     assert "job_scope" in text
     assert "job_acceptance" in text
-    assert "planning_review" in text
+    assert "planning_compact" in text
     assert "dispatch unlocked after critic approval | review via claude" in text
     assert "planning_lanes" in text
     assert "draft via codex | review via claude" in text
@@ -2244,7 +2244,7 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
     assert "approved_plan_gate" in text
     assert "dispatch unlocked after critic approval | review via claude" in text
     assert "approved_plan" in text
-    assert "planning_review" in text
+    assert "planning_compact" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=none" in text
