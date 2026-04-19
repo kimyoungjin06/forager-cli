@@ -237,9 +237,10 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
         " | phase=status=blocked | current=plan | plan=blocked|note=contract_gap"
         " | approved_plan=blocked | subtasks=0 | reviews=1 | issue=contract_gap"
     )
-    assert "draft via" in runtimes[0]["latest_planning_review_summary"]
-    assert "review via" in runtimes[0]["latest_planning_review_summary"]
-    assert "dispatch waits for critic-approved plan" in runtimes[0]["latest_planning_review_summary"]
+    assert "draft via" in runtimes[0]["latest_planning_compact_summary"]
+    assert "review via" in runtimes[0]["latest_planning_compact_summary"]
+    assert "dispatch waits for critic-approved plan" in runtimes[0]["latest_planning_compact_summary"]
+    assert runtimes[0]["latest_planning_review_summary"] == runtimes[0]["latest_planning_compact_summary"]
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"
     assert runtimes[0]["latest_canonical_writeback_summary"].startswith(

@@ -78,6 +78,21 @@ def _task_rows_for_runtime(manager_state: Dict[str, Any], detail: RuntimeDetailD
     return rows
 
 
+def _runtime_planning_compact_summary(detail: RuntimeDetailDTO, *, approved_plan: str) -> str:
+    return (
+        str(
+            task_view.planning_operator_bundle(
+                planning_lanes=detail.active_task_planning_lanes_summary,
+                approved_plan_gate=detail.active_task_approved_plan_gate_summary,
+                approved_plan=approved_plan,
+                planner_lane=detail.active_task_planner_lane_summary,
+                critic_lane=detail.active_task_critic_lane_summary,
+            ).get("planning_review", "-")
+        ).strip()
+        or "-"
+    )
+
+
 def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
     return {
         "request_id": task.request_id,
@@ -226,6 +241,10 @@ def build_nightly_session_summary(
             action_audit.summarize_retry_replan_approved_plan_handoff(latest_planning_handoff)
             or detail.active_task_approved_plan_summary
         )
+        latest_planning_compact_summary = _runtime_planning_compact_summary(
+            detail,
+            approved_plan=latest_planning_review_approved_plan,
+        )
         task_rows = _task_rows_for_runtime(manager_state, detail)
         runtimes.append(
             {
@@ -324,16 +343,8 @@ def build_nightly_session_summary(
                 "latest_replan_auto_routing_policy_summary": _latest_replan_auto_routing_policy_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_routing_policy": latest_replan_policy,
                 "latest_planning_handoff_summary": latest_planning_handoff_summary,
-                "latest_planning_review_summary": str(
-                    task_view.planning_operator_bundle(
-                        planning_lanes=detail.active_task_planning_lanes_summary,
-                        approved_plan_gate=detail.active_task_approved_plan_gate_summary,
-                        approved_plan=latest_planning_review_approved_plan,
-                        planner_lane=detail.active_task_planner_lane_summary,
-                        critic_lane=detail.active_task_critic_lane_summary,
-                    ).get("planning_review", "-")
-                ).strip()
-                or "-",
+                "latest_planning_compact_summary": latest_planning_compact_summary,
+                "latest_planning_review_summary": latest_planning_compact_summary,
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
                     snapshot.team_dir,
@@ -483,7 +494,9 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     next_step=row.get("next_step", "-"),
                 )
             )
-            planning_review = str(row.get("planning_review_summary", "")).strip()
+            planning_review = str(row.get("planning_compact_summary", "")).strip() or str(
+                row.get("planning_review_summary", "")
+            ).strip()
             if planning_review and planning_review != "-":
                 lines.append(f"  - planning_compact: {planning_review}")
             if str(row.get("link_href", "")).strip():
@@ -498,7 +511,9 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         if not isinstance(runtime, dict):
             continue
         runtime_heading = f"{runtime.get('project_alias', '-')} {runtime.get('project_label', '-')}"
-        runtime_planning_review = str(runtime.get("latest_planning_review_summary", "")).strip()
+        runtime_planning_review = str(runtime.get("latest_planning_compact_summary", "")).strip() or str(
+            runtime.get("latest_planning_review_summary", "")
+        ).strip()
         if runtime_planning_review and runtime_planning_review != "-":
             runtime_heading = f"{runtime_heading} | {runtime_planning_review}"
         lines.extend(
@@ -519,7 +534,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
-                f"- planning_compact: {runtime.get('latest_planning_review_summary', '-')}",
+                f"- planning_compact: {runtime.get('latest_planning_compact_summary', runtime.get('latest_planning_review_summary', '-'))}",
                 f"- planning_handoff: {runtime.get('latest_planning_handoff_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",

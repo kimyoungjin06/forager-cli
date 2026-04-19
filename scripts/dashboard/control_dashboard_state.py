@@ -874,40 +874,44 @@ def _chat_recommended_session_presets(
     return selected[:4]
 
 
-def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str]:
+def _latest_server_guard_summary(
+    rows: list[ActionAuditRowDTO],
+    *,
+    include_status: bool,
+    outcome_kinds: set[str] | None = None,
+) -> tuple[str, str]:
     for row in rows:
         if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
             continue
-        summary = _server_guard_row_summary(row, include_status=False)
+        if outcome_kinds is not None and str(getattr(row, "outcome_kind", "")).strip() not in outcome_kinds:
+            continue
+        summary = _server_guard_row_summary(row, include_status=include_status)
         href = str(getattr(row, "link_href", "")).strip()
         if not href or href == "-":
             href = "/control/audit?focus=server-guard"
         return summary, href
     return "-", "/control/audit?focus=server-guard"
+
+
+def _latest_server_guard_action(rows: list[ActionAuditRowDTO]) -> tuple[str, str]:
+    return _latest_server_guard_summary(rows, include_status=False)
 
 
 def _latest_server_guard_result(rows: list[ActionAuditRowDTO]) -> tuple[str, str]:
-    result_kinds = {
-        "background_queue_cleanup_preview",
-        "background_queue_cleanup",
-        "auto_recover",
-        "codex_process_pressure_preview",
-        "python_process_pressure_preview",
-        "tmux_process_pressure_preview",
-        "process_pressure_preview",
-        "chat_session_update",
-    }
-    for row in rows:
-        if str(getattr(row, "focus_badge", "")).strip() != "server-guard":
-            continue
-        if str(getattr(row, "outcome_kind", "")).strip() not in result_kinds:
-            continue
-        summary = _server_guard_row_summary(row, include_status=True)
-        href = str(getattr(row, "link_href", "")).strip()
-        if not href or href == "-":
-            href = "/control/audit?focus=server-guard"
-        return summary, href
-    return "-", "/control/audit?focus=server-guard"
+    return _latest_server_guard_summary(
+        rows,
+        include_status=True,
+        outcome_kinds={
+            "background_queue_cleanup_preview",
+            "background_queue_cleanup",
+            "auto_recover",
+            "codex_process_pressure_preview",
+            "python_process_pressure_preview",
+            "tmux_process_pressure_preview",
+            "process_pressure_preview",
+            "chat_session_update",
+        },
+    )
 
 
 def _planning_compact_suffix(value: str) -> str:

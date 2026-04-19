@@ -227,6 +227,8 @@ def _append_action_audit(
     if planning_handoff:
         row["planning_handoff"] = planning_handoff
     for source_key, row_key in (
+        ("planning_compact_summary", "planning_compact_summary"),
+        ("planning_compact", "planning_compact_summary"),
         ("planning_review_summary", "planning_review_summary"),
         ("planning_review", "planning_review_summary"),
         ("planning_lanes_summary", "planning_lanes_summary"),

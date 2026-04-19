@@ -497,9 +497,14 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
     critic_lane_summary = str(payload.get("critic_lane_summary", "")).strip() or str(
         source.get("critic_lane_summary", "")
     ).strip()
-    planning_review_summary = str(payload.get("planning_review_summary", "")).strip() or str(
-        source.get("planning_review_summary", "")
+    planning_compact_summary = str(payload.get("planning_compact_summary", "")).strip() or str(
+        source.get("planning_compact_summary", "")
     ).strip()
+    planning_review_summary = (
+        planning_compact_summary
+        or str(payload.get("planning_review_summary", "")).strip()
+        or str(source.get("planning_review_summary", "")).strip()
+    )
     if not any(
         (
             job_contract,
@@ -530,6 +535,7 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
         normalized["critic_lane_summary"] = critic_lane_summary[:200]
     if planning_review_summary:
         normalized["planning_review_summary"] = planning_review_summary[:320]
+        normalized["planning_compact_summary"] = planning_review_summary[:320]
     return normalized
 
 
@@ -591,7 +597,9 @@ def summarize_retry_replan_planning_review_handoff(raw: Any, *, row: Optional[Di
     handoff = normalize_planning_handoff_snapshot(raw, row=row)
     if not isinstance(handoff, dict) or not handoff:
         return "-"
-    summary = str(handoff.get("planning_review_summary", "")).strip()
+    summary = str(handoff.get("planning_compact_summary", "")).strip() or str(
+        handoff.get("planning_review_summary", "")
+    ).strip()
     if summary in {"", "-"}:
         parts: List[str] = []
         planning_lanes = str(handoff.get("planning_lanes_summary", "")).strip()
