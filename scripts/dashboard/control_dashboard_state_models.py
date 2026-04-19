@@ -206,6 +206,10 @@ class RuntimeCardDTO:
     notes: List[str] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
 
+    @property
+    def latest_planning_compact_summary(self) -> str:
+        return self.latest_planning_review_summary
+
 
 @dataclass(frozen=True)
 class ActiveTaskRowDTO:
@@ -375,6 +379,10 @@ class TaskDetailDTO:
     safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     reference_lines: List[str] = field(default_factory=list)
+
+    @property
+    def planning_compact_summary(self) -> str:
+        return self.planning_review_summary
 
 
 @dataclass(frozen=True)
@@ -546,6 +554,14 @@ class RuntimeDetailDTO:
     lines: List[str] = field(default_factory=list)
     recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
 
+    @property
+    def active_task_planning_compact_summary(self) -> str:
+        return self.active_task_planning_review_summary
+
+    @property
+    def latest_planning_compact_summary(self) -> str:
+        return self.latest_planning_review_summary
+
 
 @dataclass(frozen=True)
 class RecoveryTaskDTO:
@@ -672,6 +688,10 @@ class RecoveryRuntimeDTO:
     active_task_safe_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     active_task_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
+
+    @property
+    def latest_planning_compact_summary(self) -> str:
+        return self.latest_planning_review_summary
 
 
 @dataclass(frozen=True)
@@ -873,6 +893,10 @@ class ChatConsolePageDTO:
     select_task_action_path: str = "/control/actions/chat/session-select-task"
     send_mode_options: Dict[str, str] = field(default_factory=dict)
     recent_chat_actions: List[ActionAuditRowDTO] = field(default_factory=list)
+
+    @property
+    def selected_task_planning_compact_summary(self) -> str:
+        return self.selected_task_planning_review_summary
 
 
 @dataclass(frozen=True)

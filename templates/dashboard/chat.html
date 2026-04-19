@@ -21,7 +21,7 @@
     <li><span>next</span><strong>{{ snapshot.control_summary.server_guard.next_step }}</strong></li>
     <li><span>chat_session</span><strong>{{ chat.selected_chat_alias or chat.selected_chat_id or '-' }}</strong></li>
     <li><span>selected_task</span><strong>{{ chat.selected_task_ref or '-' }}</strong></li>
-    <li><span>planning_compact</span><strong>{{ chat.selected_task_planning_review_summary }}</strong></li>
+    <li><span>planning_compact</span><strong>{{ chat.selected_task_planning_compact_summary }}</strong></li>
     <li><span>planning_lanes</span><strong>{{ chat.selected_task_planning_lanes_summary }}</strong></li>
     <li><span>approved_plan_gate</span><strong>{{ chat.selected_task_approved_plan_gate_summary }}</strong></li>
   </ul>
@@ -68,8 +68,8 @@
   {% endif %}
   {% if chat.selected_chat_id and chat.recommended_session_presets %}
   <p><strong>manager_presets</strong></p>
-  {% if chat.selected_task_planning_review_summary and chat.selected_task_planning_review_summary != '-' %}
-  <p class="muted"><strong>preset_planning_compact</strong> {{ chat.selected_task_planning_review_summary }}</p>
+  {% if chat.selected_task_planning_compact_summary and chat.selected_task_planning_compact_summary != '-' %}
+  <p class="muted"><strong>preset_planning_compact</strong> {{ chat.selected_task_planning_compact_summary }}</p>
   {% endif %}
   <div class="chat-hints">
     {% for preset in chat.recommended_session_presets %}
@@ -137,7 +137,7 @@
         <li><span>chat_id</span><strong class="mono">{{ chat.selected_chat_id or "-" }}</strong></li>
         <li><span>project</span><strong>{{ chat.selected_project_alias or "-" }}</strong></li>
         <li><span>selected_task</span><strong class="mono">{{ chat.selected_task_ref or "-" }}</strong></li>
-        <li><span>planning_compact</span><strong>{{ chat.selected_task_planning_review_summary }}</strong></li>
+        <li><span>planning_compact</span><strong>{{ chat.selected_task_planning_compact_summary }}</strong></li>
         <li><span>planning_lanes</span><strong>{{ chat.selected_task_planning_lanes_summary }}</strong></li>
         <li><span>approved_plan_gate</span><strong>{{ chat.selected_task_approved_plan_gate_summary }}</strong></li>
         <li><span>planner_lane</span><strong>{{ chat.selected_task_planner_lane_summary }}</strong></li>

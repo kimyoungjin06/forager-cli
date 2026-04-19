@@ -3,8 +3,8 @@
 <section class="panel">
   <h2>Nightly Session Summary</h2>
   <p class="muted">recovered operator state from the latest nightly summary artifact</p>
-  {% if recovery.exists and recovery.runtimes and recovery.runtimes[0].latest_planning_review_summary and recovery.runtimes[0].latest_planning_review_summary != '-' %}
-  <p class="muted"><strong>nightly_planning_compact</strong> {{ recovery.runtimes[0].latest_planning_review_summary }}</p>
+  {% if recovery.exists and recovery.runtimes and recovery.runtimes[0].latest_planning_compact_summary and recovery.runtimes[0].latest_planning_compact_summary != '-' %}
+  <p class="muted"><strong>nightly_planning_compact</strong> {{ recovery.runtimes[0].latest_planning_compact_summary }}</p>
   {% endif %}
   {% if recovery.exists %}
   <ul class="kv-list">
@@ -59,7 +59,7 @@
   {% endif %}
   {% if recovery.runtimes %}
   <ul class="kv-list compact">
-    <li><span>planning_compact</span><strong>{{ recovery.runtimes[0].latest_planning_review_summary }}</strong></li>
+    <li><span>planning_compact</span><strong>{{ recovery.runtimes[0].latest_planning_compact_summary }}</strong></li>
     <li><span>planning_lanes</span><strong>{{ recovery.runtimes[0].active_task_planning_lanes_summary }}</strong></li>
     <li><span>approved_plan_gate</span><strong>{{ recovery.runtimes[0].active_task_approved_plan_gate_summary }}</strong></li>
   </ul>
@@ -163,7 +163,7 @@
           <p><strong>replan_auto_decision</strong> {{ runtime.latest_replan_auto_decision_summary }}</p>
           <p><strong>auto_route</strong> {{ runtime.latest_replan_auto_operator_summary }}</p>
           <p><strong>replan_auto_routing_policy</strong> {{ runtime.latest_replan_auto_routing_policy_summary }}</p>
-          <p><strong>planning_compact</strong> {{ runtime.latest_planning_review_summary }}</p>
+          <p><strong>planning_compact</strong> {{ runtime.latest_planning_compact_summary }}</p>
           <p><strong>planning_handoff</strong> {{ runtime.latest_planning_handoff_summary }}</p>
           <p><strong>latest_replan_auto_route</strong> {{ runtime.latest_replan_auto_route_summary }}</p>
           <p><strong>auto_route_status</strong> {{ runtime.latest_replan_auto_route_status_summary }}</p>
