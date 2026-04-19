@@ -185,7 +185,7 @@ class RuntimeCardDTO:
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
-    latest_planning_review_summary: str
+    latest_planning_compact_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str
@@ -207,8 +207,8 @@ class RuntimeCardDTO:
     lines: List[str] = field(default_factory=list)
 
     @property
-    def latest_planning_compact_summary(self) -> str:
-        return self.latest_planning_review_summary
+    def latest_planning_review_summary(self) -> str:
+        return self.latest_planning_compact_summary
 
 
 @dataclass(frozen=True)
@@ -247,7 +247,7 @@ class TaskDetailDTO:
     verifier_roles: List[str] = field(default_factory=list)
     phase1_summary: str = ""
     phase1_progress: str = ""
-    planning_review_summary: str = ""
+    planning_compact_summary: str = ""
     planning_lanes_summary: str = ""
     approved_plan_gate_summary: str = ""
     phase1_candidate_roles: List[str] = field(default_factory=list)
@@ -381,8 +381,8 @@ class TaskDetailDTO:
     reference_lines: List[str] = field(default_factory=list)
 
     @property
-    def planning_compact_summary(self) -> str:
-        return self.planning_review_summary
+    def planning_review_summary(self) -> str:
+        return self.planning_compact_summary
 
 
 @dataclass(frozen=True)
@@ -427,7 +427,7 @@ class RuntimeDetailDTO:
     active_task_job_contract_acceptance_checks: str
     active_task_job_contract_artifacts_to_touch: str
     active_task_job_contract_rollback_hint: str
-    active_task_planning_review_summary: str
+    active_task_planning_compact_summary: str
     active_task_planning_lanes_summary: str
     active_task_approved_plan_gate_summary: str
     active_task_planner_lane_summary: str
@@ -519,7 +519,7 @@ class RuntimeDetailDTO:
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
-    latest_planning_review_summary: str
+    latest_planning_compact_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str
@@ -555,12 +555,12 @@ class RuntimeDetailDTO:
     recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
 
     @property
-    def active_task_planning_compact_summary(self) -> str:
-        return self.active_task_planning_review_summary
+    def active_task_planning_review_summary(self) -> str:
+        return self.active_task_planning_compact_summary
 
     @property
-    def latest_planning_compact_summary(self) -> str:
-        return self.latest_planning_review_summary
+    def latest_planning_review_summary(self) -> str:
+        return self.latest_planning_compact_summary
 
 
 @dataclass(frozen=True)
@@ -656,7 +656,7 @@ class RecoveryRuntimeDTO:
     latest_replan_auto_route_status_summary: str
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
-    latest_planning_review_summary: str
+    latest_planning_compact_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str
@@ -690,8 +690,8 @@ class RecoveryRuntimeDTO:
     task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
 
     @property
-    def latest_planning_compact_summary(self) -> str:
-        return self.latest_planning_review_summary
+    def latest_planning_review_summary(self) -> str:
+        return self.latest_planning_compact_summary
 
 
 @dataclass(frozen=True)
@@ -860,7 +860,7 @@ class ChatConsolePageDTO:
     selected_report_level: str
     selected_task_planning_lanes_summary: str = "-"
     selected_task_approved_plan_gate_summary: str = "-"
-    selected_task_planning_review_summary: str = "-"
+    selected_task_planning_compact_summary: str = "-"
     selected_task_planner_lane_summary: str = "-"
     selected_task_critic_lane_summary: str = "-"
     selected_task_approved_plan_summary: str = "-"
@@ -895,8 +895,8 @@ class ChatConsolePageDTO:
     recent_chat_actions: List[ActionAuditRowDTO] = field(default_factory=list)
 
     @property
-    def selected_task_planning_compact_summary(self) -> str:
-        return self.selected_task_planning_review_summary
+    def selected_task_planning_review_summary(self) -> str:
+        return self.selected_task_planning_compact_summary
 
 
 @dataclass(frozen=True)

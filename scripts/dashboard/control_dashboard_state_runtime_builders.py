@@ -690,7 +690,7 @@ def _latest_planning_handoff_summary(team_dir: Path, *, project_alias: str) -> s
     return summary if summary not in {"", "-"} else "-"
 
 
-def _latest_planning_review_summary(
+def _latest_planning_compact_summary(
     team_dir: Path,
     *,
     project_alias: str,
@@ -778,7 +778,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
         latest_replan_auto_route_status_summary = "-"
         latest_replan_auto_operator_summary = "-"
         latest_planning_handoff_summary = "-"
-        latest_planning_review_summary = "-"
+        latest_planning_compact_summary = "-"
         latest_manual_step_summary = "-"
         latest_canonical_writeback_summary = "-"
         latest_canonical_mutation_summary = "-"
@@ -903,7 +903,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     model_plan = model_endpoint_adapter.resolve_task_model_plan(team_dir, entry=entry, task=active_task)
                     active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
                     active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
-                    latest_planning_review_summary = _latest_planning_review_summary(
+                    latest_planning_compact_summary = _latest_planning_compact_summary(
                         root_team_dir,
                         project_alias=str(entry.get("project_alias", "")).strip(),
                         active_task=active_task,
@@ -1201,7 +1201,7 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
                     latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
                     latest_planning_handoff_summary=latest_planning_handoff_summary,
-                    latest_planning_review_summary=latest_planning_review_summary,
+                    latest_planning_compact_summary=latest_planning_compact_summary,
                     latest_manual_step_summary=latest_manual_step_summary,
                 latest_canonical_writeback_summary=latest_canonical_writeback_summary,
                 latest_canonical_mutation_summary=latest_canonical_mutation_summary,
@@ -1460,8 +1460,8 @@ def _build_runtime_detail(
         if str(root_team_dir or "").strip()
         else "-"
     )
-    latest_planning_review_summary = (
-        _latest_planning_review_summary(
+    latest_planning_compact_summary = (
+        _latest_planning_compact_summary(
             Path(str(root_team_dir or "")).expanduser(),
             project_alias=str(entry.get("project_alias", "")).strip(),
             active_task=active_task or {},
@@ -1840,7 +1840,7 @@ def _build_runtime_detail(
         active_task_job_contract_rollback_hint=(
             str((active_task or {}).get("job_contract_rollback_hint", "")).strip() or "-"
         ),
-        active_task_planning_review_summary=str(
+        active_task_planning_compact_summary=str(
             active_task_planning_bundle.get("planning_review", "")
         ).strip()
         or "-",
@@ -2076,7 +2076,7 @@ def _build_runtime_detail(
         latest_replan_auto_route_status_summary=latest_replan_auto_route_status_summary,
         latest_replan_auto_operator_summary=latest_replan_auto_operator_summary,
         latest_planning_handoff_summary=latest_planning_handoff_summary,
-        latest_planning_review_summary=latest_planning_review_summary,
+        latest_planning_compact_summary=latest_planning_compact_summary,
         latest_manual_step_summary=latest_manual_step_summary,
         latest_canonical_writeback_summary=latest_canonical_writeback_summary,
         latest_canonical_mutation_summary=latest_canonical_mutation_summary,

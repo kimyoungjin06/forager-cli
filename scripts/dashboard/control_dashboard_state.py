@@ -1185,7 +1185,7 @@ def load_dashboard_chat_page(
             selected_task_planning_bundle.get("approved_plan_gate", "")
         ).strip()
         or "-",
-        selected_task_planning_review_summary=str(
+        selected_task_planning_compact_summary=str(
             selected_task_planning_bundle.get("planning_review", "")
         ).strip()
         or "-",

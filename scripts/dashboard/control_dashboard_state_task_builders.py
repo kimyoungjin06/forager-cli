@@ -1041,7 +1041,7 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             verifier_roles=task_view.dedupe_roles(task.get("verifier_roles") or []),
             phase1_summary=_task_phase1_summary(task),
             phase1_progress=_task_phase1_progress(task),
-            planning_review_summary=str(planning_bundle.get("planning_review", "")).strip() or "-",
+            planning_compact_summary=str(planning_bundle.get("planning_review", "")).strip() or "-",
             planning_lanes_summary=str(planning_bundle.get("planning_lanes", "")).strip() or "-",
             approved_plan_gate_summary=str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",
             phase1_candidate_roles=task_view.dedupe_roles(task.get("phase1_candidate_roles") or []),
