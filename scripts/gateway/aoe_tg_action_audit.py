@@ -535,7 +535,6 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
         normalized["critic_lane_summary"] = critic_lane_summary[:200]
     if planning_compact_summary:
         normalized["planning_compact_summary"] = planning_compact_summary[:320]
-        normalized["planning_review_summary"] = planning_compact_summary[:320]
     return normalized
 
 

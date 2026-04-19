@@ -299,8 +299,6 @@ def _execute_chat_session_update_action(
             "chat_preset_diff_summary": preset_diff_summary,
             "planning_compact": str(planning_bundle.get("planning_review", "")).strip() or "-",
             "planning_compact_summary": str(planning_bundle.get("planning_review", "")).strip() or "-",
-            "planning_review": str(planning_bundle.get("planning_review", "")).strip() or "-",
-            "planning_review_summary": str(planning_bundle.get("planning_review", "")).strip() or "-",
             "planning_lanes": str(planning_bundle.get("planning_lanes", "")).strip() or "-",
             "planning_lanes_summary": str(planning_bundle.get("planning_lanes", "")).strip() or "-",
             "approved_plan_gate": str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",

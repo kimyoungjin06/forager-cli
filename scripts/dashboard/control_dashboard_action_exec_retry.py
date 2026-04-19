@@ -460,7 +460,6 @@ def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
             "planner_lane_summary": "-",
             "critic_lane_summary": "-",
             "planning_compact_summary": "-",
-            "planning_review_summary": "-",
         }
     gateway_task_state.refresh_task_planning_primitives(source_task)
     planning_lanes_summary = gateway_task_view.planning_lane_operator_summary(source_task)
@@ -523,7 +522,6 @@ def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
         "planner_lane_summary": str(source_task.get("planner_lane_summary", "")).strip() or "-",
         "critic_lane_summary": str(source_task.get("critic_lane_summary", "")).strip() or "-",
         "planning_compact_summary": planning_compact_summary,
-        "planning_review_summary": planning_compact_summary,
     }
 
 
@@ -1656,7 +1654,6 @@ def _execute_retry_run_transition(
             "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
             "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
             "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
-            "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
             "planning_lanes": str(planning_handoff.get("planning_lanes_summary", "")).strip() or "-",
             "approved_plan_gate": str(planning_handoff.get("approved_plan_gate_summary", "")).strip() or "-",
             "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
@@ -2009,7 +2006,6 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
                 "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
                 "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
-                "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
                 "planning_lanes": str(planning_handoff.get("planning_lanes_summary", "")).strip() or "-",
                 "approved_plan_gate": str(planning_handoff.get("approved_plan_gate_summary", "")).strip() or "-",
                 "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",

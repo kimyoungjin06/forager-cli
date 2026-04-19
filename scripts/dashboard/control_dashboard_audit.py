@@ -245,9 +245,6 @@ def _append_action_audit(
         value = str(payload.get(source_key, "")).strip()
         if value:
             row[row_key] = value
-    compact = str(row.get("planning_compact_summary", "")).strip()
-    if compact:
-        row["planning_review_summary"] = compact
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:
         paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)

@@ -1166,7 +1166,6 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
         "planner_lane_summary": str(task.get("planner_lane_summary", "")).strip() or "-",
         "critic_lane_summary": str(task.get("critic_lane_summary", "")).strip() or "-",
         "planning_compact_summary": planning_compact_summary,
-        "planning_review_summary": planning_compact_summary,
     }
     if review_kind in {"contract_review_ready", "debug_review_ready", "phase_review_ready", "analysis_review_ready"}:
         planning_detail = {
@@ -1210,7 +1209,6 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
                 "planning_handoff": planning_handoff,
                 "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
                 "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
-                "planning_review": str(planning_handoff.get("planning_review_summary", "")).strip() or "-",
                 "planning_lanes": planning_lanes_summary,
                 "approved_plan_gate": approved_plan_gate_summary,
                 "job_contract": planning_handoff["job_contract"]["summary"],
