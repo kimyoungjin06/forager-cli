@@ -7426,8 +7426,8 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "action_copy" in overview_text
     assert "start with Chat, then keep Global Direct narrow" in overview_text
     assert "pressure-kind-badge" in overview_text
-    assert "planning_review: draft via" in overview_text
-    assert "approved_plan:" in overview_text
+    assert "planning_compact: draft via" in overview_text
+    assert "approved_plan=" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
     assert "Latest Server Guard Thread" in chat_text
@@ -7444,7 +7444,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
-    assert "planning=draft via" in health["server_guard_latest_result_summary"]
+    assert "planning_compact=draft via" in health["server_guard_latest_result_summary"]
     assert "dispatch waits for critic-approved plan" in health["server_guard_latest_result_summary"]
 
     audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard&chat=123456&limit=20", config)

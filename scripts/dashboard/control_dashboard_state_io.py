@@ -264,10 +264,18 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         raw.get("planning_handoff"),
         row=raw,
     )
+    if planning_review_summary in {"", "-"}:
+        planning_review_summary = str(
+            raw.get("planning_review_summary") or raw.get("planning_review") or "-"
+        ).strip() or "-"
     approved_plan_summary = action_audit.summarize_retry_replan_approved_plan_handoff(
         raw.get("planning_handoff"),
         row=raw,
     )
+    if approved_plan_summary in {"", "-"}:
+        approved_plan_summary = str(
+            raw.get("approved_plan_summary") or raw.get("approved_plan") or "-"
+        ).strip() or "-"
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",

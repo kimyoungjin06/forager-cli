@@ -66,8 +66,7 @@
               data-history-row="true"
               data-at="{{ row.at }}"
               data-headline="{{ row.headline_summary or row.headline }}"
-              data-planning-review="{{ row.planning_review_summary }}"
-              data-approved-plan="{{ row.approved_plan_summary }}"
+              data-planning-compact="{{ row.planning_compact_summary }}"
               data-next-step="{{ row.next_step }}"
               data-link-label="{{ row.link_label }}"
               data-link-href="{{ row.link_href }}"
@@ -79,11 +78,8 @@
                 {% if row.focus_badge %}<a class="action-history-badge" href="/control/audit?focus={{ row.focus_badge }}&amp;limit={{ audit_limit }}">{{ row.focus_badge }}</a>{% endif %}
                 <strong>{{ row.at }} | {{ row.headline_summary or row.headline }}</strong>
               </div>
-              {% if row.planning_review_summary and row.planning_review_summary != '-' %}
-              <div class="muted">planning_review: {{ row.planning_review_summary|replace('planning=', '') }}</div>
-              {% endif %}
-              {% if row.approved_plan_summary and row.approved_plan_summary != '-' %}
-              <div class="muted">approved_plan: {{ row.approved_plan_summary }}</div>
+              {% if row.planning_compact_summary and row.planning_compact_summary != '-' %}
+              <div class="muted">planning_compact: {{ row.planning_compact_summary|replace('planning=', '') }}</div>
               {% endif %}
               {% if row.next_step and row.next_step != '-' %}
               <div class="muted">next: {{ row.next_step }}</div>
@@ -139,8 +135,7 @@
             seeded.push({
               at: item.dataset.at || "-",
               headline: item.dataset.headline || "-",
-              planningReview: item.dataset.planningReview || "-",
-              approvedPlan: item.dataset.approvedPlan || "-",
+              planningCompact: item.dataset.planningCompact || "-",
               nextStep: item.dataset.nextStep || "-",
               linkLabel: item.dataset.linkLabel || "-",
               linkHref: item.dataset.linkHref || "-",
@@ -394,17 +389,11 @@
             }
             head.appendChild(headline);
             item.appendChild(head);
-            if (entry.planningReview && entry.planningReview !== "-") {
+            if (entry.planningCompact && entry.planningCompact !== "-") {
               const planning = document.createElement("div");
               planning.className = "muted";
-              planning.textContent = `planning_review: ${String(entry.planningReview).replace(/^planning=/, "")}`;
+              planning.textContent = `planning_compact: ${String(entry.planningCompact).replace(/^planning=/, "")}`;
               item.appendChild(planning);
-            }
-            if (entry.approvedPlan && entry.approvedPlan !== "-") {
-              const approved = document.createElement("div");
-              approved.className = "muted";
-              approved.textContent = `approved_plan: ${entry.approvedPlan}`;
-              item.appendChild(approved);
             }
             if (entry.nextStep && entry.nextStep !== "-") {
               const meta = document.createElement("div");
@@ -429,12 +418,31 @@
             // Ignore storage failures; in-memory history still works for this page.
           }
         };
-        const pushHistory = (headline, planningReview, approvedPlan, nextStep, linkLabel, linkHref, status) => {
+        const buildPlanningCompact = (planningReview, approvedPlan, payload) => {
+          const direct = asText(payload?.planning_compact || payload?.planning_compact_summary);
+          if (direct !== "-") {
+            return direct;
+          }
+          const parts = [];
+          const push = (value) => {
+            const token = asText(value);
+            if (token === "-" || parts.includes(token)) {
+              return;
+            }
+            if (parts.some((existing) => existing.includes(token) || token.includes(existing))) {
+              return;
+            }
+            parts.push(token);
+          };
+          push(planningReview);
+          push(approvedPlan);
+          return parts.length ? parts.join(" | ") : "-";
+        };
+        const pushHistory = (headline, planningCompact, nextStep, linkLabel, linkHref, status) => {
           history.unshift({
             at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
             headline,
-            planningReview: planningReview || "-",
-            approvedPlan: approvedPlan || "-",
+            planningCompact: planningCompact || "-",
             nextStep: nextStep || "-",
             linkLabel: linkLabel || "-",
             linkHref: linkHref || "-",
@@ -457,6 +465,25 @@
           const text = String(value).trim();
           return text || "-";
         };
+        history = Array.isArray(history)
+          ? history.map((entry) => {
+              if (!entry || typeof entry !== "object") {
+                return null;
+              }
+              return {
+                at: asText(entry.at),
+                headline: asText(entry.headline),
+                planningCompact: buildPlanningCompact(entry.planningCompact, entry.approvedPlan, null) === "-"
+                  ? buildPlanningCompact(entry.planningReview, entry.approvedPlan, null)
+                  : buildPlanningCompact(entry.planningCompact, entry.approvedPlan, null),
+                nextStep: asText(entry.nextStep),
+                linkLabel: asText(entry.linkLabel),
+                linkHref: asText(entry.linkHref),
+                status: asText(entry.status),
+                focusBadge: asText(entry.focusBadge) === "-" ? "" : asText(entry.focusBadge),
+              };
+            }).filter(Boolean)
+          : [];
         const buildSummary = (label, httpStatus, payload) => {
           const status = asText(payload?.status || httpStatus);
           const command = asText(payload?.source_command);
@@ -464,6 +491,7 @@
           const runtimeLabel = asText(payload?.transition?.orch_target || payload?.preview?.project_alias || payload?.auto_state?.command);
           const approvedPlan = asText(payload?.approved_plan || payload?.approved_plan_summary || payload?.planning_handoff?.approved_plan?.summary);
           const planningReview = asText(payload?.planning_review || payload?.planning_handoff?.planning_review_summary);
+          const planningCompact = buildPlanningCompact(planningReview, approvedPlan, payload);
           const planningLanes = asText(payload?.planning_lanes || payload?.planning_handoff?.planning_lanes_summary);
           const approvedPlanGate = asText(payload?.approved_plan_gate || payload?.planning_handoff?.approved_plan_gate_summary);
           const contexts = Array.isArray(payload?.messages)
@@ -518,6 +546,7 @@
             rowsData,
             linkRows,
             presetDiffHighlight: Boolean(payload?.server_guard_preset_label),
+            planningCompact,
             planningReview,
             approvedPlan,
           };
@@ -526,7 +555,7 @@
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
           panel.classList.toggle("compact-view", !error);
-          const { headline, rowsData, linkRows, presetDiffHighlight, planningReview, approvedPlan } = buildSummary(label, status, payload);
+          const { headline, rowsData, linkRows, presetDiffHighlight, planningCompact, planningReview, approvedPlan } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
           clearActions();
@@ -559,8 +588,7 @@
             const linkLabel = primaryTaskLink !== "-" ? "task detail" : (primaryRuntimeLink !== "-" ? "runtime detail" : "-");
             pushHistory(
               headline,
-              planningReview,
-              approvedPlan,
+              planningCompact,
               asText(payload?.next_step),
               linkLabel,
               linkHref,
