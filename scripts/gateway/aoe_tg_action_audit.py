@@ -622,6 +622,22 @@ def summarize_retry_replan_planning_review_handoff(raw: Any, *, row: Optional[Di
     return summarize_retry_replan_planning_compact_handoff(raw, row=row)
 
 
+def summarize_subagent_evidence_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(
+        str(row.get("subagent_evidence_summary", "")).strip()
+        or str(row.get("general_subagent_artifact_summary", "")).strip(),
+        limit=120,
+    )
+    if summary in {"", "-"}:
+        return "-"
+    if summary.startswith("subagent_evidence="):
+        return summary
+    return f"subagent_evidence={summary}"
+
+
 def summarize_action_audit_headline(raw: Any) -> str:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -651,6 +667,9 @@ def summarize_action_audit_headline(raw: Any) -> str:
                 approved_plan_summary = "-"
         if approved_plan_summary not in {"", "-"} and approved_plan_summary not in headline:
             headline = f"{headline} | {approved_plan_summary}"
+    subagent_evidence_summary = summarize_subagent_evidence_compact(row)
+    if subagent_evidence_summary not in {"", "-"} and subagent_evidence_summary not in headline:
+        headline = f"{headline} | {subagent_evidence_summary}"
     return headline
 
 

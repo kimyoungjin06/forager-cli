@@ -926,6 +926,15 @@ def _planning_compact_suffix(value: str) -> str:
     return f"planning_compact={token}"
 
 
+def _subagent_evidence_suffix(value: str) -> str:
+    token = str(value or "").strip()
+    if not token or token == "-":
+        return "-"
+    if token.startswith("subagent_evidence="):
+        return token
+    return f"subagent_evidence={token}"
+
+
 def _row_planning_compact_summary(row: ActionAuditRowDTO) -> str:
     compact = str(getattr(row, "planning_compact_summary", "")).strip()
     if compact and compact != "-":
@@ -944,6 +953,7 @@ def _server_guard_row_summary(row: ActionAuditRowDTO, *, include_status: bool) -
         or "-"
     )
     planning_summary = _planning_compact_suffix(_row_planning_compact_summary(row))
+    subagent_summary = _subagent_evidence_suffix(str(getattr(row, "subagent_evidence_summary", "")).strip())
     at = str(getattr(row, "at", "")).strip() or "-"
     next_step = str(getattr(row, "next_step", "")).strip() or "-"
     parts = [headline]
@@ -953,6 +963,8 @@ def _server_guard_row_summary(row: ActionAuditRowDTO, *, include_status: bool) -
     parts.extend((f"at={at}", f"next={next_step}"))
     if planning_summary != "-":
         parts.append(planning_summary)
+    if subagent_summary != "-" and subagent_summary not in headline:
+        parts.append(subagent_summary)
     return " | ".join(parts)
 
 

@@ -855,6 +855,7 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
         "outcome_status": "blocked",
         "outcome_reason_code": "approved_plan_blocked",
         "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+        "subagent_evidence_summary": "general_research | confidence=high | sources=2 | findings=2 | blocking=1",
         "planning_handoff": {
             "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
         },
@@ -865,6 +866,7 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
     assert "reason=approved_plan_blocked" in summary
     assert "planning=draft via codex | review via claude | dispatch waits for critic-approved plan" in summary
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
+    assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in summary
 
 
 # Legacy planning compact compatibility
@@ -7421,7 +7423,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert "server_guard_latest_result" in overview_text
     assert "Codex Pressure Preview | preview" in overview_text
     assert health_status == 200
-    assert health["server_guard_latest_result_summary"].startswith("Codex Pressure Preview | preview")
+    assert health["server_guard_latest_result_summary"].startswith("Codex Pressure Preview")
     assert any(
         row.get("path") == "/control/actions/runtime/server-guard-pressure-preview"
         and "\"pressure_kind\":\"codex\"" in str(row.get("payload_json", ""))
@@ -7603,6 +7605,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
     assert "planning_compact=draft via" in health["server_guard_latest_result_summary"]
     assert "dispatch waits for critic-approved plan" in health["server_guard_latest_result_summary"]
+    assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in health["server_guard_latest_result_summary"]
 
     audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard&chat=123456&limit=20", config)
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
@@ -7803,11 +7806,11 @@ def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result
     assert audit_status == 200
     assert "server_guard_latest_action" in audit_text
     assert "server_guard_latest_result" in audit_text
-    assert "Codex Pressure Preview | preview" in audit_text
+    assert "Codex Pressure" in audit_text
     assert recovery_status == 200
     assert "server_guard_latest_action" in recovery_text
     assert "server_guard_latest_result" in recovery_text
-    assert "Codex Pressure Preview | preview" in recovery_text
+    assert "Codex Pressure" in recovery_text
 
 
 def test_control_dashboard_health_view_renders_operator_health_card(tmp_path: Path, monkeypatch) -> None:

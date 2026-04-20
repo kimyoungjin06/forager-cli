@@ -235,6 +235,13 @@
           }
           return String(compact).replace(/^planning_compact=/, "").replace(/^planning=/, "");
         };
+        const renderSubagentEvidenceText = (subagentEvidence) => {
+          const evidence = asText(subagentEvidence);
+          if (evidence === "-") {
+            return "-";
+          }
+          return String(evidence).replace(/^subagent_evidence=/, "");
+        };
         const appendPlanningCompactRow = (planningCompact) => {
           const compact = renderPlanningCompactText(planningCompact);
           if (compact === "-") {
@@ -582,6 +589,9 @@
           }
           if (approvedPlan !== "-" && !headline.includes("approved_plan=")) {
             headline = `${headline} | ${approvedPlan}`;
+          }
+          if (subagentEvidence !== "-" && !headline.includes("subagent_evidence=")) {
+            headline = `${headline} | subagent_evidence=${renderSubagentEvidenceText(subagentEvidence)}`;
           }
           const rowsData = [
             ["status", status],
