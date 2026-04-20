@@ -35,6 +35,10 @@ import nightly_session_summary as nightly_summary  # noqa: E402
 import aoe_tg_document_registry as document_registry  # noqa: E402
 import aoe_tg_workspace_brief as workspace_brief  # noqa: E402
 
+LEGACY_PLANNING_REVIEW_SUMMARY = (
+    "draft via codex | review via claude | dispatch waits for critic-approved plan"
+)
+
 
 def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
     team_dir = control_root / ".aoe-team"
@@ -386,6 +390,18 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         write_timestamped_copy=False,
     )
     return team_dir, manager_state_file, project_root
+
+
+def _legacy_planning_review_payload() -> dict[str, str]:
+    return {"planning_review_summary": LEGACY_PLANNING_REVIEW_SUMMARY}
+
+
+def _rewrite_latest_nightly_runtime_with_legacy_planning_review_key(latest_json: Path) -> None:
+    payload = json.loads(latest_json.read_text(encoding="utf-8"))
+    payload["runtimes"][0]["latest_planning_review_summary"] = payload["runtimes"][0].pop(
+        "latest_planning_compact_summary"
+    )
+    latest_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def test_runtime_read_matches_gateway_wrapper_state(tmp_path: Path) -> None:
@@ -841,12 +857,10 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
 def test_legacy_action_audit_planning_compact_handoff_reads_top_level_review_key() -> None:
     summary = action_audit.summarize_retry_replan_planning_compact_handoff(
         {},
-        row={
-            "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
-        },
+        row=_legacy_planning_review_payload(),
     )
 
-    assert summary == "planning=draft via codex | review via claude | dispatch waits for critic-approved plan"
+    assert summary == f"planning={LEGACY_PLANNING_REVIEW_SUMMARY}"
 
 
 def test_legacy_control_dashboard_append_action_audit_backfills_planning_compact_from_review_key(tmp_path: Path) -> None:
@@ -868,7 +882,7 @@ def test_legacy_control_dashboard_append_action_audit_backfills_planning_compact
             "source_command": "/followup T-001",
             "next_step": "/task T-001",
             "remediation": "-",
-            "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+            **_legacy_planning_review_payload(),
             "preview": {"detail_path": "/control/tasks/by-request/REQ-1"},
         },
     )
@@ -876,7 +890,7 @@ def test_legacy_control_dashboard_append_action_audit_backfills_planning_compact
     rows = [json.loads(line) for line in (team_dir / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
     row = rows[-1]
 
-    assert row["planning_compact_summary"] == "draft via codex | review via claude | dispatch waits for critic-approved plan"
+    assert row["planning_compact_summary"] == LEGACY_PLANNING_REVIEW_SUMMARY
     assert "planning_review_summary" not in row
 
 
@@ -2487,11 +2501,7 @@ def test_legacy_control_dashboard_recovery_route_reads_nightly_planning_review_k
         output_dir=team_dir / "recovery" / "nightly-session-summary",
         write_timestamped_copy=False,
     )
-    payload = json.loads(latest_json.read_text(encoding="utf-8"))
-    payload["runtimes"][0]["latest_planning_review_summary"] = payload["runtimes"][0].pop(
-        "latest_planning_compact_summary"
-    )
-    latest_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _rewrite_latest_nightly_runtime_with_legacy_planning_review_key(latest_json)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
