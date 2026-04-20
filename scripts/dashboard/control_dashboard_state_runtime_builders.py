@@ -38,6 +38,7 @@ from control_dashboard_state_common import (
     _detail_path,
     _filter_dispatch_phase2_action_buttons,
     _filter_manual_route_action_buttons,
+    _general_subagent_support_button,
     _provider_repeat_counts,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
@@ -1642,6 +1643,13 @@ def _build_runtime_detail(
             task=active_task or {},
         ),
     )
+    runtime_safe_action_buttons = _append_unique_action_button(
+        runtime_safe_action_buttons,
+        _general_subagent_support_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
+        ),
+    )
     runtime_phase2_action_buttons = _append_unique_action_button(
         runtime_phase2_action_buttons,
         _worker_update_proposal_accept_button(
@@ -1743,6 +1751,13 @@ def _build_runtime_detail(
                 "evidence_refs": (active_task or {}).get("background_run_worker_result_evidence_refs"),
             },
             proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
+        ),
+    )
+    active_task_safe_action_buttons = _append_unique_action_button(
+        active_task_safe_action_buttons,
+        _general_subagent_support_button(
+            label=str(row.get("active_task_label", "")).strip(),
+            request_id=active_request_id,
         ),
     )
     if not worker_apply_applied and worker_apply_ready:

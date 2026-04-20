@@ -1069,6 +1069,25 @@ def _worker_update_preview_button(
     )
 
 
+def _general_subagent_support_button(
+    *,
+    label: str,
+    request_id: str,
+) -> ActionButtonDTO | None:
+    task_ref = operator_action_contract.task_command_ref(label, request_id)
+    if not task_ref or task_ref == "-":
+        return None
+    return ActionButtonDTO(
+        label="Run Support Research",
+        command=f"/task {task_ref} | general-research-support",
+        method="POST",
+        path="/control/actions/task/subagent-support-run",
+        mode="safe",
+        note="materialize bounded general_research evidence without changing dispatch or apply state",
+        payload_json=json.dumps({"task_ref": task_ref}, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
 def _worker_apply_preview_button(
     *,
     label: str,

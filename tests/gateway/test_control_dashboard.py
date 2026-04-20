@@ -5167,6 +5167,7 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
 
     expected_manual_payload = '{"task_ref":"T-001","lane_ids":[]}'
     expected_preview_payload = '{"task_ref":"T-001"}'
+    expected_support_payload = '{"task_ref":"T-001"}'
     expected_proposal_payload = '{"project_ref":"O2","proposal_ref":"PROP-001"}'
     assert any(
         btn.label == "Apply Judge Followup"
@@ -5178,6 +5179,12 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         btn.label == "Preview Worker Update"
         and btn.path == "/control/actions/task/worker-update-preview"
         and btn.payload_json == expected_preview_payload
+        for btn in runtime_card.runtime_safe_action_buttons
+    )
+    assert any(
+        btn.label == "Run Support Research"
+        and btn.path == "/control/actions/task/subagent-support-run"
+        and btn.payload_json == expected_support_payload
         for btn in runtime_card.runtime_safe_action_buttons
     )
     assert any(
@@ -5199,6 +5206,12 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         for btn in runtime_detail.active_task_safe_action_buttons
     )
     assert any(
+        btn.label == "Run Support Research"
+        and btn.path == "/control/actions/task/subagent-support-run"
+        and btn.payload_json == expected_support_payload
+        for btn in runtime_detail.active_task_safe_action_buttons
+    )
+    assert any(
         btn.label == "Accept Worker Proposal"
         and btn.path == "/control/actions/runtime/todo-accept"
         and btn.payload_json == expected_proposal_payload
@@ -5215,6 +5228,12 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
         btn.label == "Preview Worker Update"
         and btn.path == "/control/actions/task/worker-update-preview"
         and btn.payload_json == expected_preview_payload
+        for btn in task_detail.safe_action_buttons
+    )
+    assert any(
+        btn.label == "Run Support Research"
+        and btn.path == "/control/actions/task/subagent-support-run"
+        and btn.payload_json == expected_support_payload
         for btn in task_detail.safe_action_buttons
     )
     assert any(
@@ -5244,6 +5263,7 @@ def test_dashboard_surfaces_manual_ready_and_worker_proposal_action_buttons(tmp_
     recovery_text = dashboard_app.build_dashboard_response("/control/recovery", config)[2].decode("utf-8")
     assert "Apply Judge Followup" in recovery_text
     assert "Preview Worker Update" in recovery_text
+    assert "Run Support Research" in recovery_text
     assert "Accept Worker Proposal" in recovery_text
 
 
@@ -7599,6 +7619,55 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "/control/health/view" in recovery_text
     assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in recovery_text
     assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in recovery_text
+
+
+def test_control_dashboard_runs_general_subagent_support_action_from_task(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    artifact_path = project_root / ".aoe-team" / "harness_authoring" / "subagents" / "req-1-general-research.json"
+    assert not artifact_path.exists()
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/subagent-support-run",
+        body=b'{"task_ref":"T-001"}',
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    task_text = dashboard_app.build_dashboard_response("/control/tasks/by-request/REQ-1", config)[2].decode("utf-8")
+    runtime_text = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)[2].decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "completed"
+    assert payload["outcome"]["kind"] == "general_subagent_support"
+    assert payload["outcome"]["reason_code"] == "artifact_written"
+    assert payload["task"]["request_id"] == "REQ-1"
+    assert payload["task"]["detail_path"] == "/control/tasks/by-request/REQ-1"
+    assert payload["preview"]["runtime_path"] == "/control/runtimes/O2"
+    assert payload["general_subagent_executed"] is True
+    assert payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan | backend=filesystem")
+    assert payload["subagent_evidence_summary"].startswith("general_research | confidence=")
+    assert payload["subagent_artifact_path"] == "harness_authoring/subagents/req-1-general-research.json"
+    assert payload["planning_compact"].startswith("draft via codex, claude | review via codex, claude")
+    assert "dispatch waits for critic-approved plan" in payload["planning_compact"]
+    assert payload["subagent_key_findings"]
+    assert payload["subagent_artifact_refs"]
+    assert artifact_path.exists()
+    assert "subagent_contract" in task_text
+    assert "general_research | profile=on_desk_plan | backend=filesystem" in task_text
+    assert "subagent_evidence" in task_text
+    assert "harness_authoring/subagents/req-1-general-research.json" in task_text
+    assert "subagent_evidence" in runtime_text
+    assert "harness_authoring/subagents/req-1-general-research.json" in runtime_text
 
 
 def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guard_history(tmp_path: Path, monkeypatch) -> None:

@@ -15,6 +15,7 @@ from control_dashboard_action_exec import (
     _execute_analysis_review_action,
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
+    _execute_general_subagent_support_action,
     _preview_background_queue_clean_action,
     _preview_server_guard_pressure_action,
     _execute_chat_send_action,
@@ -152,6 +153,19 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         if auto_route_apply_raw:
             spec["payload"]["auto_route_apply"] = True
         return spec
+
+    if path == "/control/actions/task/subagent-support-run":
+        task_ref = str(payload.get("task_ref", "")).strip()
+        if not task_ref:
+            raise ValueError("task_ref is required")
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"/task {task_ref} | general-research-support",
+            "note": "materialize bounded general_research evidence without changing dispatch or apply state",
+            "payload": {"task_ref": task_ref},
+        }
 
     if path == "/control/actions/task/followup":
         task_ref = str(payload.get("task_ref", "")).strip()
@@ -561,6 +575,9 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/task/followup":
         return _with_action_audit(_preview_followup_action(spec, config=config), config=config)
+
+    if path == "/control/actions/task/subagent-support-run":
+        return _with_action_audit(_execute_general_subagent_support_action(spec, config=config), config=config)
 
     if path == "/control/actions/task/followup-execute":
         return _with_action_audit(_execute_followup_action(spec, config=config), config=config)

@@ -1296,6 +1296,138 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
     )
 
 
+def _execute_general_subagent_support_action(
+    spec: Dict[str, object],
+    *,
+    config: DashboardAppConfig,
+) -> Tuple[int, Dict[str, str], bytes]:
+    payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
+    task_ref = str(payload.get("task_ref", "")).strip()
+    _paths, manager_state = _load_dashboard_manager_state(config)
+    try:
+        key, entry, request_id, task = _resolve_task_entry(manager_state=manager_state, task_ref=task_ref)
+    except RuntimeError as exc:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or "-",
+                "payload": payload,
+                "next_step": "/control/tasks",
+                "remediation": "refresh the task list and retry support research with an existing task ref",
+                "outcome": {
+                    "kind": "general_subagent_support",
+                    "status": "blocked",
+                    "reason_code": "task_missing",
+                    "detail": str(exc),
+                },
+            },
+            status=404,
+        )
+    alias = _project_alias(entry, key)
+    label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    team_dir = Path(str(entry.get("team_dir", "")).strip() or str(config.team_dir or ".")).expanduser().resolve()
+    artifact = harness_authoring_adapter.run_general_subagent_support(
+        team_dir,
+        entry=entry,
+        task=task,
+    )
+    if not artifact:
+        return _json(
+            {
+                "ok": False,
+                "implemented": True,
+                "executed": False,
+                "status": "blocked",
+                "method": "POST",
+                "path": str(spec.get("path", "")).strip() or "-",
+                "mode": str(spec.get("mode", "")).strip() or "safe",
+                "source_command": str(spec.get("command", "")).strip() or f"/task {label} | general-research-support",
+                "payload": payload,
+                "next_step": f"/task {label}",
+                "remediation": "inspect the harness authoring contract and selected docs before retrying support research",
+                "outcome": {
+                    "kind": "general_subagent_support",
+                    "status": "blocked",
+                    "reason_code": "artifact_not_written",
+                    "detail": "support research contract did not produce an artifact",
+                },
+                "task": {
+                    "request_id": request_id,
+                    "label": label,
+                    "detail_path": f"/control/tasks/by-request/{request_id}",
+                },
+            },
+            status=500,
+        )
+    subagent_surface = harness_authoring_adapter.summarize_general_subagent_surface(
+        team_dir,
+        entry=entry,
+        task=task,
+    )
+    planning_bundle = gateway_task_view.planning_operator_bundle(task)
+    return _json(
+        {
+            "ok": True,
+            "implemented": True,
+            "executed": True,
+            "status": "completed",
+            "method": "POST",
+            "path": str(spec.get("path", "")).strip() or "-",
+            "mode": str(spec.get("mode", "")).strip() or "safe",
+            "source_command": str(spec.get("command", "")).strip() or f"/task {label} | general-research-support",
+            "payload": payload,
+            "next_step": f"/control/tasks/by-request/{request_id}",
+            "remediation": "review the bounded evidence artifact before changing planning, dispatch, or apply state",
+            "outcome": {
+                "kind": "general_subagent_support",
+                "status": "completed",
+                "reason_code": "artifact_written",
+                "detail": str(subagent_surface.get("artifact_summary", "")).strip() or str(artifact.get("artifact_path", "")).strip() or "-",
+            },
+            "task": {
+                "request_id": request_id,
+                "label": label,
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+            "preview": {
+                "kind": "general_subagent_support",
+                "project_alias": alias,
+                "runtime_path": _runtime_action_link(alias),
+                "detail_path": f"/control/tasks/by-request/{request_id}",
+            },
+            "general_subagent_executed": True,
+            "general_subagent_artifact_path": str(artifact.get("artifact_path", "")).strip() or "-",
+            "planning_compact_summary": str(planning_bundle.get("planning_compact", "")).strip() or "-",
+            "planning_compact": str(planning_bundle.get("planning_compact", "")).strip() or "-",
+            "planning_lanes_summary": str(planning_bundle.get("planning_lanes", "")).strip() or "-",
+            "planning_lanes": str(planning_bundle.get("planning_lanes", "")).strip() or "-",
+            "approved_plan_gate_summary": str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",
+            "approved_plan_gate": str(planning_bundle.get("approved_plan_gate", "")).strip() or "-",
+            "approved_plan_summary": str(planning_bundle.get("approved_plan", "")).strip() or "-",
+            "approved_plan": str(planning_bundle.get("approved_plan", "")).strip() or "-",
+            "planner_lane_summary": str(planning_bundle.get("planner_lane", "")).strip() or "-",
+            "planner_lane": str(planning_bundle.get("planner_lane", "")).strip() or "-",
+            "critic_lane_summary": str(planning_bundle.get("critic_lane", "")).strip() or "-",
+            "critic_lane": str(planning_bundle.get("critic_lane", "")).strip() or "-",
+            "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or str(artifact.get("contract_summary", "")).strip() or "-",
+            "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or str(artifact.get("artifact_summary", "")).strip() or "-",
+            "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or str(artifact.get("artifact_path", "")).strip() or "-",
+            "subagent_sources": list(artifact.get("sources") or []),
+            "subagent_key_findings": list(artifact.get("key_findings") or []),
+            "subagent_blocking_issues": list(artifact.get("blocking_issues") or []),
+            "subagent_recommended_next_step": str(artifact.get("recommended_next_step", "")).strip() or f"/task {label}",
+            "subagent_artifact_refs": list(artifact.get("artifact_refs") or []),
+        },
+        status=200,
+    )
+
+
 def _execute_worker_update_preview_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
     payload = spec.get("payload") if isinstance(spec.get("payload"), dict) else {}
     task_ref = str(payload.get("task_ref", "")).strip()

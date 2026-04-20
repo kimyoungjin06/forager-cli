@@ -21,6 +21,7 @@ from control_dashboard_state_common import (
     _detail_path,
     _filter_dispatch_phase2_action_buttons,
     _filter_manual_route_action_buttons,
+    _general_subagent_support_button,
     _recovery_control_action_buttons,
     _replan_manual_route_action_button,
     _runtime_action_buttons,
@@ -455,6 +456,13 @@ def _build_recovery_runtime_rows(
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
             ),
         )
+        runtime_safe_action_buttons = _append_unique_action_button(
+            runtime_safe_action_buttons,
+            _general_subagent_support_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+            ),
+        )
         if not runtime_worker_apply_applied and runtime_worker_apply_ready:
             runtime_phase2_action_buttons = _append_unique_action_button(
                 runtime_phase2_action_buttons,
@@ -579,6 +587,13 @@ def _build_recovery_runtime_rows(
                     "target_artifacts": str(row.get("active_task_background_run_worker_update_stub_targets", "")).split(","),
                 },
                 proposal_ids=row.get("active_task_background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        active_task_safe_action_buttons = _append_unique_action_button(
+            active_task_safe_action_buttons,
+            _general_subagent_support_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
             ),
         )
         if not runtime_worker_apply_applied and runtime_worker_apply_ready:

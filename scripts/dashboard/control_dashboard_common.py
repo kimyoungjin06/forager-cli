@@ -20,6 +20,7 @@ ACTION_PATHS = {
     "/control/actions/chat/session-select-task",
     "/control/actions/task/retry",
     "/control/actions/task/replan",
+    "/control/actions/task/subagent-support-run",
     "/control/actions/task/followup",
     "/control/actions/task/followup-execute",
     "/control/actions/task/task-review",

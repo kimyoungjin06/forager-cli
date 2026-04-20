@@ -36,6 +36,7 @@ from control_dashboard_state_common import (
     _detail_path,
     _filter_dispatch_phase2_action_buttons,
     _filter_manual_route_action_buttons,
+    _general_subagent_support_button,
     _replan_manual_route_action_button,
     _replan_auto_route_action_button,
     _task_action_buttons,
@@ -997,6 +998,13 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                     "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
                 },
                 proposal_ids=task.get("background_run_worker_update_proposal_ids") or [],
+            ),
+        )
+        safe_action_buttons = _append_unique_action_button(
+            safe_action_buttons,
+            _general_subagent_support_button(
+                label=task_view.task_display_label(task, fallback_request_id=rid),
+                request_id=rid,
             ),
         )
         if not worker_apply_applied and worker_apply_ready:

@@ -16,6 +16,7 @@ from control_dashboard_action_exec_chat import (
 )
 from control_dashboard_action_exec_runtime import (
     _execute_analysis_review_action,
+    _execute_general_subagent_support_action,
     _execute_runtime_judge_action,
     _execute_runtime_syncback_apply_action,
     _execute_runtime_syncback_preview_action,
@@ -35,6 +36,7 @@ from control_dashboard_action_exec_shared import _load_dashboard_manager_state
 
 __all__ = [
     "_execute_analysis_review_action",
+    "_execute_general_subagent_support_action",
     "_execute_background_queue_clean_action",
     "_preview_background_queue_clean_action",
     "_preview_server_guard_pressure_action",
