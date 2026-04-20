@@ -180,8 +180,10 @@ def planning_operator_bundle(
     _append_unique_summary_part(parts, planning_lanes)
     _append_unique_summary_part(parts, approved_plan_gate)
     _append_unique_summary_part(parts, approved_plan)
+    planning_compact = " | ".join(parts)[:320] if parts else "-"
     return {
-        "planning_review": " | ".join(parts)[:320] if parts else "-",
+        "planning_compact": planning_compact,
+        "planning_review": planning_compact,
         "planning_lanes": str(planning_lanes or "").strip() or "-",
         "approved_plan_gate": str(approved_plan_gate or "").strip() or "-",
         "approved_plan": str(approved_plan or "").strip() or "-",
@@ -192,11 +194,12 @@ def planning_operator_bundle(
 
 def planning_compact_operator_summary(
     *,
+    planning_compact: str = "",
     planning_review: str = "",
     approved_plan: str = "",
 ) -> str:
     parts: List[str] = []
-    _append_unique_summary_part(parts, str(planning_review or "").strip())
+    _append_unique_summary_part(parts, str(planning_compact or "").strip() or str(planning_review or "").strip())
     _append_unique_summary_part(parts, str(approved_plan or "").strip())
     return " | ".join(parts)[:320] if parts else "-"
 
@@ -214,7 +217,7 @@ def planning_review_operator_summary(
         planning_lanes=planning_lanes,
         approved_plan_gate=approved_plan_gate,
         approved_plan=approved_plan,
-    ).get("planning_review", "-")
+    ).get("planning_compact", "-")
     return summary
 
 
@@ -236,7 +239,7 @@ def planning_operator_note(
             planning_lanes=planning_lanes,
             approved_plan_gate=approved_plan_gate,
             approved_plan=approved_plan,
-        ).get("planning_review", "-"),
+        ).get("planning_compact", "-"),
     )
     return " | ".join(parts)[:320] if parts else "-"
 
@@ -807,9 +810,9 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     if approved_plan_rows:
         lines.append("approved_plan_artifact: " + " | ".join(approved_plan_rows[:4])[:240])
     planning_bundle = planning_operator_bundle(task)
-    planning_review = str(planning_bundle.get("planning_review", "")).strip()
-    if planning_review and planning_review != "-":
-        lines.append("planning_review: " + planning_review[:240])
+    planning_compact = str(planning_bundle.get("planning_compact", "")).strip()
+    if planning_compact and planning_compact != "-":
+        lines.append("planning_compact: " + planning_compact[:240])
     planning_lanes = str(planning_bundle.get("planning_lanes", "")).strip()
     if planning_lanes and planning_lanes != "-":
         lines.append("planning_lanes: " + planning_lanes[:240])

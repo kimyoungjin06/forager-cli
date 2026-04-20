@@ -489,7 +489,7 @@ def _action_audit_rows(
                 approved_plan_handoff_summary = _action_audit_approved_plan_handoff_summary(parsed)
                 planning_compact_summary = _normalize_text(
                     planning_compact_operator_summary(
-                        planning_review=planning_compact_summary,
+                        planning_compact=planning_compact_summary,
                         approved_plan=approved_plan_handoff_summary,
                     )
                 )

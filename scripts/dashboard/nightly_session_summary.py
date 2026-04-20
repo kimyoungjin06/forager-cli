@@ -87,7 +87,7 @@ def _runtime_planning_compact_summary(detail: RuntimeDetailDTO, *, approved_plan
                 approved_plan=approved_plan,
                 planner_lane=detail.active_task_planner_lane_summary,
                 critic_lane=detail.active_task_critic_lane_summary,
-            ).get("planning_review", "-")
+            ).get("planning_compact", "-")
         ).strip()
         or "-"
     )

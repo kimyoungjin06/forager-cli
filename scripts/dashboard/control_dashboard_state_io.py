@@ -278,7 +278,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
             raw.get("approved_plan_summary") or raw.get("approved_plan") or "-"
         ).strip() or "-"
     planning_compact_summary = task_view.planning_compact_operator_summary(
-        planning_review=planning_compact_summary,
+        planning_compact=planning_compact_summary,
         approved_plan=approved_plan_summary,
     )
     return ActionAuditRowDTO(

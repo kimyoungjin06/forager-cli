@@ -930,7 +930,8 @@ def _row_planning_compact_summary(row: ActionAuditRowDTO) -> str:
     if compact and compact != "-":
         return compact
     return task_view.planning_compact_operator_summary(
-        planning_review=str(getattr(row, "planning_review_summary", "")).strip(),
+        planning_compact=str(getattr(row, "planning_compact_summary", "")).strip()
+        or str(getattr(row, "planning_review_summary", "")).strip(),
         approved_plan=str(getattr(row, "approved_plan_summary", "")).strip(),
     )
 
@@ -1003,7 +1004,7 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             row=raw,
         )
         planning_compact_summary = task_view.planning_compact_operator_summary(
-            planning_review=planning_compact_summary,
+            planning_compact=planning_compact_summary,
             approved_plan=approved_plan_summary,
         )
         row = ActionAuditRowDTO(
@@ -1190,7 +1191,7 @@ def load_dashboard_chat_page(
         ).strip()
         or "-",
         selected_task_planning_compact_summary=str(
-            selected_task_planning_bundle.get("planning_review", "")
+            selected_task_planning_bundle.get("planning_compact", "")
         ).strip()
         or "-",
         selected_task_planner_lane_summary=str(

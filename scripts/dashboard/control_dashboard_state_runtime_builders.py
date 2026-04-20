@@ -708,7 +708,7 @@ def _latest_planning_compact_summary(
         task_view.planning_operator_bundle(
             task,
             approved_plan=approved_plan_summary,
-        ).get("planning_review", "-")
+        ).get("planning_compact", "-")
     ).strip() or "-"
 
 
@@ -1841,7 +1841,7 @@ def _build_runtime_detail(
             str((active_task or {}).get("job_contract_rollback_hint", "")).strip() or "-"
         ),
         active_task_planning_compact_summary=str(
-            active_task_planning_bundle.get("planning_review", "")
+            active_task_planning_bundle.get("planning_compact", "")
         ).strip()
         or "-",
         active_task_planning_lanes_summary=str(
