@@ -57,6 +57,9 @@ class ActionAuditRowDTO:
     headline: str
     headline_summary: str
     planning_compact_summary: str
+    subagent_contract_summary: str
+    subagent_evidence_summary: str
+    subagent_artifact_path: str
     approved_plan_summary: str
     status: str
     outcome_kind: str
@@ -283,11 +286,17 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         planning_compact=planning_compact_summary,
         approved_plan=approved_plan_summary,
     )
+    subagent_contract_summary = str(raw.get("subagent_contract_summary") or raw.get("general_subagent_summary") or "-").strip() or "-"
+    subagent_evidence_summary = str(raw.get("subagent_evidence_summary") or raw.get("general_subagent_artifact_summary") or "-").strip() or "-"
+    subagent_artifact_path = str(raw.get("subagent_artifact_path") or raw.get("general_subagent_artifact_path") or "-").strip() or "-"
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         headline_summary=action_audit.summarize_action_audit_headline(raw),
         planning_compact_summary=planning_compact_summary,
+        subagent_contract_summary=subagent_contract_summary,
+        subagent_evidence_summary=subagent_evidence_summary,
+        subagent_artifact_path=subagent_artifact_path,
         approved_plan_summary=approved_plan_summary,
         status=str(raw.get("status", "")).strip() or "unknown",
         outcome_kind=outcome_kind,
@@ -320,6 +329,11 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
             {
                 "at": row.at,
                 "headline": row.headline,
+                "planning_compact_summary": row.planning_compact_summary,
+                "subagent_contract_summary": row.subagent_contract_summary,
+                "subagent_evidence_summary": row.subagent_evidence_summary,
+                "subagent_artifact_path": row.subagent_artifact_path,
+                "approved_plan_summary": row.approved_plan_summary,
                 "status": row.status,
                 "outcome_kind": row.outcome_kind,
                 "outcome_status": row.outcome_status,

@@ -69,6 +69,9 @@ class HistoryRow:
     summary: str = ""
     detail: str = ""
     planning_compact_summary: str = ""
+    subagent_contract_summary: str = ""
+    subagent_evidence_summary: str = ""
+    subagent_artifact_path: str = ""
     approved_plan_summary: str = ""
     followup_hint: str = ""
     raw_ref: str = ""
@@ -495,6 +498,15 @@ def _action_audit_rows(
                     )
                 )
                 approved_plan_handoff_detail = _action_audit_approved_plan_handoff_detail(parsed)
+                subagent_contract_summary = _normalize_text(
+                    str(parsed.get("subagent_contract_summary") or parsed.get("general_subagent_summary") or "")
+                )
+                subagent_evidence_summary = _normalize_text(
+                    str(parsed.get("subagent_evidence_summary") or parsed.get("general_subagent_artifact_summary") or "")
+                )
+                subagent_artifact_path = _normalize_text(
+                    str(parsed.get("subagent_artifact_path") or parsed.get("general_subagent_artifact_path") or "")
+                )
                 detail = _normalize_text(
                     " ".join(
                         str(item).strip()
@@ -527,6 +539,9 @@ def _action_audit_rows(
                         summary=summary or "-",
                         detail=detail,
                         planning_compact_summary=planning_compact_summary or "",
+                        subagent_contract_summary=subagent_contract_summary or "",
+                        subagent_evidence_summary=subagent_evidence_summary or "",
+                        subagent_artifact_path=subagent_artifact_path or "",
                         approved_plan_summary=approved_plan_handoff_summary or "",
                         followup_hint=str(parsed.get("next_step", "")).strip() or (f"/task {task_short_id}" if task_short_id else ""),
                         raw_ref=f"{path}:{str(parsed.get('at', '')).strip()}",

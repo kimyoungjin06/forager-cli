@@ -11,6 +11,7 @@ import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
 import aoe_tg_todo_state as todo_state
 import aoe_tg_worker_task_contract as worker_task_contract
+import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
 from aoe_tg_action_audit import append_action_audit_row
 from aoe_tg_orch_task_handlers import (
     _OFFDESK_JUDGE_SYSTEM,
@@ -1130,6 +1131,11 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
         )
     alias = _project_alias(entry, key)
     label = str(task.get("short_id", "")).strip() or str(task.get("alias", "")).strip() or request_id
+    subagent_surface = harness_authoring_adapter.summarize_general_subagent_surface(
+        Path(str(entry.get("team_dir", "")).strip() or "."),
+        entry=entry,
+        task=task,
+    )
     planning_lanes_summary = gateway_task_view.planning_lane_operator_summary(task)
     approved_plan_gate_summary = gateway_task_view.approved_plan_gate_operator_summary(task)
     planning_compact_summary = gateway_task_view.planning_review_operator_summary(
@@ -1209,6 +1215,9 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
                 "planning_handoff": planning_handoff,
                 "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
                 "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
+                "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
+                "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
+                "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
                 "planning_lanes": planning_lanes_summary,
                 "approved_plan_gate": approved_plan_gate_summary,
                 "job_contract": planning_handoff["job_contract"]["summary"],
@@ -1267,6 +1276,9 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
             "worker_blocked_rows": list(blocker.get("blocked_rows") or []),
             "worker_recommended_action": str(blocker.get("suggested_action", "")).strip().lower() or "task_review",
             "planning_handoff": planning_handoff,
+            "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
+            "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
+            "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
             "preview": {
                 "kind": "task_review",
                 "review_kind": review_kind,

@@ -67,6 +67,9 @@
               data-at="{{ row.at }}"
               data-headline="{{ row.headline_summary or row.headline }}"
               data-planning-compact="{{ row.planning_compact_summary }}"
+              data-subagent-contract="{{ row.subagent_contract_summary }}"
+              data-subagent-evidence="{{ row.subagent_evidence_summary }}"
+              data-subagent-artifact="{{ row.subagent_artifact_path }}"
               data-next-step="{{ row.next_step }}"
               data-link-label="{{ row.link_label }}"
               data-link-href="{{ row.link_href }}"
@@ -80,6 +83,15 @@
               </div>
               {% if row.planning_compact_summary and row.planning_compact_summary != '-' %}
               <div class="muted">planning_compact: {{ row.planning_compact_summary|replace('planning=', '') }}</div>
+              {% endif %}
+              {% if row.subagent_contract_summary and row.subagent_contract_summary != '-' %}
+              <div class="muted">subagent_contract: {{ row.subagent_contract_summary }}</div>
+              {% endif %}
+              {% if row.subagent_evidence_summary and row.subagent_evidence_summary != '-' %}
+              <div class="muted">subagent_evidence: {{ row.subagent_evidence_summary }}</div>
+              {% endif %}
+              {% if row.subagent_artifact_path and row.subagent_artifact_path != '-' %}
+              <div class="muted">subagent_artifact: {{ row.subagent_artifact_path }}</div>
               {% endif %}
               {% if row.next_step and row.next_step != '-' %}
               <div class="muted">next: {{ row.next_step }}</div>
@@ -136,6 +148,9 @@
               at: item.dataset.at || "-",
               headline: item.dataset.headline || "-",
               planningCompact: item.dataset.planningCompact || "-",
+              subagentContract: item.dataset.subagentContract || "-",
+              subagentEvidence: item.dataset.subagentEvidence || "-",
+              subagentArtifact: item.dataset.subagentArtifact || "-",
               nextStep: item.dataset.nextStep || "-",
               linkLabel: item.dataset.linkLabel || "-",
               linkHref: item.dataset.linkHref || "-",
@@ -395,6 +410,24 @@
               planning.textContent = `planning_compact: ${renderPlanningCompactText(entry.planningCompact)}`;
               item.appendChild(planning);
             }
+            if (entry.subagentContract && entry.subagentContract !== "-") {
+              const contract = document.createElement("div");
+              contract.className = "muted";
+              contract.textContent = `subagent_contract: ${entry.subagentContract}`;
+              item.appendChild(contract);
+            }
+            if (entry.subagentEvidence && entry.subagentEvidence !== "-") {
+              const evidence = document.createElement("div");
+              evidence.className = "muted";
+              evidence.textContent = `subagent_evidence: ${entry.subagentEvidence}`;
+              item.appendChild(evidence);
+            }
+            if (entry.subagentArtifact && entry.subagentArtifact !== "-") {
+              const artifact = document.createElement("div");
+              artifact.className = "muted";
+              artifact.textContent = `subagent_artifact: ${entry.subagentArtifact}`;
+              item.appendChild(artifact);
+            }
             if (entry.nextStep && entry.nextStep !== "-") {
               const meta = document.createElement("div");
               meta.className = "muted";
@@ -438,11 +471,24 @@
           push(approvedPlan);
           return parts.length ? parts.join(" | ") : "-";
         };
-        const pushHistory = (headline, planningCompact, nextStep, linkLabel, linkHref, status) => {
+        const pushHistory = (
+          headline,
+          planningCompact,
+          subagentContract,
+          subagentEvidence,
+          subagentArtifact,
+          nextStep,
+          linkLabel,
+          linkHref,
+          status,
+        ) => {
           history.unshift({
             at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
             headline,
             planningCompact: planningCompact || "-",
+            subagentContract: subagentContract || "-",
+            subagentEvidence: subagentEvidence || "-",
+            subagentArtifact: subagentArtifact || "-",
             nextStep: nextStep || "-",
             linkLabel: linkLabel || "-",
             linkHref: linkHref || "-",
@@ -476,6 +522,9 @@
                 planningCompact: buildPlanningCompact(entry.planningCompact, entry.approvedPlan, null) === "-"
                   ? buildPlanningCompact(entry.planningReview, entry.approvedPlan, null)
                   : buildPlanningCompact(entry.planningCompact, entry.approvedPlan, null),
+                subagentContract: asText(entry.subagentContract || entry.subagent_contract || entry.subagentContractSummary || entry.subagent_contract_summary),
+                subagentEvidence: asText(entry.subagentEvidence || entry.subagent_evidence || entry.subagentEvidenceSummary || entry.subagent_evidence_summary),
+                subagentArtifact: asText(entry.subagentArtifact || entry.subagent_artifact || entry.subagentArtifactPath || entry.subagent_artifact_path),
                 nextStep: asText(entry.nextStep),
                 linkLabel: asText(entry.linkLabel),
                 linkHref: asText(entry.linkHref),
@@ -492,6 +541,21 @@
           const approvedPlan = asText(payload?.approved_plan || payload?.approved_plan_summary || payload?.planning_handoff?.approved_plan?.summary);
           const planningReview = asText(payload?.planning_review || payload?.planning_review_summary || payload?.planning_handoff?.planning_review_summary);
           const planningCompact = buildPlanningCompact(planningReview, approvedPlan, payload);
+          const subagentContract = asText(
+            payload?.subagent_contract ||
+            payload?.subagent_contract_summary ||
+            payload?.general_subagent_summary
+          );
+          const subagentEvidence = asText(
+            payload?.subagent_evidence ||
+            payload?.subagent_evidence_summary ||
+            payload?.general_subagent_artifact_summary
+          );
+          const subagentArtifact = asText(
+            payload?.subagent_artifact ||
+            payload?.subagent_artifact_path ||
+            payload?.general_subagent_artifact_path
+          );
           const planningLanes = asText(payload?.planning_lanes || payload?.planning_handoff?.planning_lanes_summary);
           const approvedPlanGate = asText(payload?.approved_plan_gate || payload?.planning_handoff?.approved_plan_gate_summary);
           const contexts = Array.isArray(payload?.messages)
@@ -527,6 +591,9 @@
             ["runtime", runtimeLabel],
             ["planning_lanes", planningLanes],
             ["approved_plan_gate", approvedPlanGate],
+            ["subagent_contract", subagentContract],
+            ["subagent_evidence", subagentEvidence],
+            ["subagent_artifact", subagentArtifact],
             ["next_step", asText(payload?.next_step)],
             ["remediation", asText(payload?.remediation)],
             ["preset_diff", asText(payload?.chat_preset_diff_summary)],
@@ -547,15 +614,25 @@
             linkRows,
             presetDiffHighlight: Boolean(payload?.server_guard_preset_label),
             planningCompact,
-            planningReview,
-            approvedPlan,
+            subagentContract,
+            subagentEvidence,
+            subagentArtifact,
           };
         };
         const setResult = (label, status, payload, error = false, recordHistory = true) => {
           panel.classList.remove("hidden");
           panel.classList.toggle("error", Boolean(error));
           panel.classList.toggle("compact-view", !error);
-          const { headline, rowsData, linkRows, presetDiffHighlight, planningCompact } = buildSummary(label, status, payload);
+          const {
+            headline,
+            rowsData,
+            linkRows,
+            presetDiffHighlight,
+            planningCompact,
+            subagentContract,
+            subagentEvidence,
+            subagentArtifact,
+          } = buildSummary(label, status, payload);
           summary.textContent = headline;
           clearRows();
           clearActions();
@@ -589,6 +666,9 @@
             pushHistory(
               headline,
               planningCompact,
+              subagentContract,
+              subagentEvidence,
+              subagentArtifact,
               asText(payload?.next_step),
               linkLabel,
               linkHref,

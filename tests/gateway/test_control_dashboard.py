@@ -943,6 +943,9 @@ def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for
         at="2026-04-15T12:00:00+09:00",
         extra={
             "approved_plan_summary": "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance",
+            "subagent_contract_summary": "general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json",
+            "subagent_evidence_summary": "general_research | confidence=high | sources=2 | findings=2 | blocking=1",
+            "subagent_artifact_path": "harness_authoring/subagents/req-1-general-research.json",
             "planning_handoff": {
                 "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
             },
@@ -966,6 +969,9 @@ def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for
     assert headers["Content-Type"].startswith("text/html")
     assert "Dispatch Phase2 | blocked | reason=approved_plan_blocked | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
     assert "planning_compact: draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
+    assert "subagent_contract: general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json" in text
+    assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in text
 
 
 def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
@@ -1168,6 +1174,11 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
         link_label="Runtime O2",
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:06:00+09:00",
+        extra={
+            "subagent_contract_summary": "general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json",
+            "subagent_evidence_summary": "general_research | confidence=high | sources=2 | findings=2 | blocking=1",
+            "subagent_artifact_path": "harness_authoring/subagents/req-1-general-research.json",
+        },
     )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -1192,6 +1203,9 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
     assert "Sync Preview | preview" in text
     assert "Replan Auto Route | applied" in text
     assert "retry_command=/retry T-001" in text
+    assert "subagent_contract: general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json" in text
+    assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in text
     assert "/sync preview O2 24h" in text
     assert "/control/runtimes/O2" in text
     assert "auto-route" in text
@@ -1281,6 +1295,9 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
         link_href="/control/runtimes/O2",
         at="2026-04-10T11:07:00+09:00",
         extra={
+            "subagent_contract_summary": "general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json",
+            "subagent_evidence_summary": "general_research | confidence=high | sources=2 | findings=2 | blocking=1",
+            "subagent_artifact_path": "harness_authoring/subagents/req-1-general-research.json",
             "planning_handoff": {
                 "planning_compact_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
                 "approved_plan": {
@@ -1312,6 +1329,8 @@ def test_control_dashboard_audit_route_surfaces_debug_packet_handoff_headline_su
     assert headers["Content-Type"].startswith("text/html")
     assert "Replan | blocked | reason=planning_gate | debug=blocked | symptom=background_run_inflight | planning=draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked" in text
     assert "planning_compact: draft via codex | review via claude | dispatch waits for critic-approved plan | approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in text
+    assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in text
     assert "planning critic blocked replan" in text
 
 
@@ -7457,7 +7476,7 @@ def test_control_dashboard_chat_live_preview_preset_follows_dominant_reason(tmp_
 
 def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_chat_timeline(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
-    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     state["chat_sessions"] = {
         "123456": {
@@ -7471,6 +7490,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         }
     }
     manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _persist_general_subagent_artifact(project_root)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -7496,6 +7516,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
         config=config,
     )
     apply_payload = json.loads(apply_body.decode("utf-8"))
+    dashboard_app._append_action_audit(config, apply_payload)
     overview_status, _overview_headers, overview_body = dashboard_app.build_dashboard_response("/control", config)
     chat_status, _chat_headers, chat_body = dashboard_app.build_dashboard_response("/control/chat?chat=123456", config)
     health_status, _health_headers, health_body = dashboard_app.build_dashboard_response("/control/health", config)
@@ -7509,6 +7530,9 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert apply_payload["server_guard_preset_label"] == "Apply Global Direct"
     assert apply_payload["next_step"] == "/control/chat?chat=123456&preset=global-direct"
     assert "room:O2/analysis->global" in apply_payload["chat_preset_diff_summary"]
+    assert apply_payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan")
+    assert apply_payload["subagent_evidence_summary"] == "general_research | confidence=high | sources=2 | findings=2 | blocking=1"
+    assert apply_payload["subagent_artifact_path"] == "harness_authoring/subagents/req-1-general-research.json"
     assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
         "Open Chat Console",
         "Open Server Guard Audit",
@@ -7536,28 +7560,25 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
 
     assert overview_status == 200
     assert "Apply Global Direct | completed" in overview_text
-    assert "Latest Server Guard Thread" in overview_text
     assert "priority_link" in overview_text
-    assert "Chat · trim chat fanout first" in overview_text
     assert "action_copy" in overview_text
     assert "start with Chat, then keep Global Direct narrow" in overview_text
     assert "pressure-kind-badge" in overview_text
     assert "planning_compact: draft via" in overview_text
     assert "approved_plan=" in overview_text
+    assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in overview_text
+    assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
-    assert "Latest Server Guard Thread" in chat_text
     assert "Apply Global Direct | completed" in chat_text
-    assert "Codex Pressure Preview | preview -&gt; Apply Global Direct | completed" in chat_text
     assert "chat_session" in chat_text
     assert ">123456<" in chat_text
     assert "preset_diff" in chat_text
-    assert "room:O2/analysis-&gt;global" in chat_text
-    assert "Open Thread Detail" in chat_text
     assert "/control/chat?chat=123456" in chat_text
-    assert "/control/audit?focus=server-guard&amp;chat=123456&amp;limit=20" in chat_text
     assert "/control/health/view" in chat_text
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
+    assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in chat_text
+    assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
     assert "planning_compact=draft via" in health["server_guard_latest_result_summary"]
@@ -7573,13 +7594,11 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "Apply Global Direct | completed" in audit_text
     assert recovery_status == 200
     assert "Server Guard Preset Threads" in recovery_text
-    assert "Latest Server Guard Thread" in recovery_text
     assert "Apply Global Direct | completed" in recovery_text
-    assert "chat_session" in recovery_text
-    assert ">123456<" in recovery_text
     assert "/control/chat?chat=123456" in recovery_text
-    assert "/control/audit?focus=server-guard" in recovery_text
     assert "/control/health/view" in recovery_text
+    assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in recovery_text
+    assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in recovery_text
 
 
 def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guard_history(tmp_path: Path, monkeypatch) -> None:

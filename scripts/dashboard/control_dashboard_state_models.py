@@ -776,6 +776,9 @@ class HistorySearchRowDTO(_PlanningCompactSummaryCompatMixin):
     followup_hint: str
     raw_ref: str
     planning_compact_summary: str = ""
+    subagent_contract_summary: str = ""
+    subagent_evidence_summary: str = ""
+    subagent_artifact_path: str = ""
     approved_plan_summary: str = ""
     pressure_kind_label: str = ""
     pressure_kind_note: str = ""

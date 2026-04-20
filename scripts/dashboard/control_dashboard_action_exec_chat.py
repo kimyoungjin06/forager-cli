@@ -6,6 +6,7 @@ from __future__ import annotations
 import subprocess
 from typing import Dict, Tuple
 
+import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
 import aoe_tg_chat_state as chat_state
 import aoe_tg_request_contract as request_contract
 import aoe_tg_task_state as task_state
@@ -82,6 +83,39 @@ def _resolve_selected_chat_task(manager_state: Dict[str, object], chat_id: str, 
         return {}
     record = task_state.get_task_record(project_entry, request_id)
     return record if isinstance(record, dict) else {}
+
+
+def _resolve_selected_chat_task_context(
+    manager_state: Dict[str, object],
+    chat_id: str,
+    room: str,
+) -> tuple[Dict[str, object], Dict[str, object], str]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    session_row = chat_state.get_chat_session_row(manager_state, chat_id, create=False)
+    project_ref = _chat_project_ref_from_room(room)
+    project_key, _project_alias, project_entry = _resolve_chat_project(manager_state, project_ref)
+    if not project_key:
+        active_key = str(manager_state.get("active", "")).strip()
+        active_entry = projects.get(active_key) if isinstance(projects.get(active_key), dict) else {}
+        if active_key and isinstance(active_entry, dict):
+            project_key, project_entry = active_key, active_entry
+    if not project_key or not isinstance(project_entry, dict):
+        return {}, {}, ""
+    selected_ref = chat_state.get_chat_selected_task_ref(manager_state, chat_id, project_key)
+    selected_map = session_row.get("selected_task_refs") if isinstance(session_row.get("selected_task_refs"), dict) else {}
+    if not selected_ref:
+        selected_ref = str(selected_map.get("active", "")).strip()
+    if not selected_ref and isinstance(selected_map, dict):
+        for value in selected_map.values():
+            candidate = str(value or "").strip()
+            if candidate:
+                selected_ref = candidate
+                break
+    request_id = _resolve_chat_task_request(project_entry, selected_ref)
+    if not request_id:
+        return {}, project_entry, ""
+    record = task_state.get_task_record(project_entry, request_id)
+    return (record if isinstance(record, dict) else {}), project_entry, request_id
 
 
 def _chat_send_command_text(*, mode: str, text: str) -> str:
@@ -206,8 +240,17 @@ def _execute_chat_session_update_action(
     current_pending_mode = chat_state.get_pending_mode(manager_state, chat_id) or "none"
     current_lang = chat_state.get_chat_lang(manager_state, chat_id)
     current_report_level = chat_state.get_chat_report_level(manager_state, chat_id)
-    selected_task = _resolve_selected_chat_task(manager_state, chat_id, current_room)
+    selected_task, selected_task_entry, _selected_request_id = _resolve_selected_chat_task_context(
+        manager_state,
+        chat_id,
+        current_room,
+    )
     planning_bundle = task_view.planning_operator_bundle(selected_task)
+    subagent_surface = harness_authoring_adapter.summarize_general_subagent_surface(
+        str(selected_task_entry.get("team_dir", "")).strip() or paths.team_dir,
+        entry=selected_task_entry,
+        task=selected_task,
+    )
     effective_next_step = next_step or f"/control/chat?chat={chat_id}"
     effective_source_command = (
         f"server-guard-preset:{server_guard_pressure_kind or '-'}:{chat_id}:{server_guard_preset_label}"
@@ -309,6 +352,9 @@ def _execute_chat_session_update_action(
             "critic_lane_summary": str(planning_bundle.get("critic_lane", "")).strip() or "-",
             "approved_plan": str(planning_bundle.get("approved_plan", "")).strip() or "-",
             "approved_plan_summary": str(planning_bundle.get("approved_plan", "")).strip() or "-",
+            "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
+            "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
+            "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
             "actions": followup_actions,
             "reply_text": (
                 f"{server_guard_preset_label + chr(10) if focus_badge == 'server-guard' and server_guard_preset_label else ''}"

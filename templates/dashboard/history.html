@@ -72,6 +72,9 @@
           {% if row.pressure_kind_note %}<br><span class="muted">{{ row.pressure_kind_note }}</span>{% endif %}
           {% if row.reason_code %}<br><span class="muted">reason: {{ row.reason_code }}</span>{% endif %}
           {% if row.planning_compact_summary %}<br><span class="muted">planning_compact: {{ row.planning_compact_summary|replace('planning=', '') }}</span>{% endif %}
+          {% if row.subagent_contract_summary and row.subagent_contract_summary != '-' %}<br><span class="muted">subagent_contract: {{ row.subagent_contract_summary }}</span>{% endif %}
+          {% if row.subagent_evidence_summary and row.subagent_evidence_summary != '-' %}<br><span class="muted">subagent_evidence: {{ row.subagent_evidence_summary }}</span>{% endif %}
+          {% if row.subagent_artifact_path and row.subagent_artifact_path != '-' %}<br><span class="muted">subagent_artifact: {{ row.subagent_artifact_path }}</span>{% endif %}
           {% if row.detail %}<br><span class="muted">{{ row.detail }}</span>{% endif %}
         </td>
         <td>

@@ -211,6 +211,12 @@ def _append_action_audit(
     for source_key, row_key in (
         ("planning_compact_summary", "planning_compact_summary"),
         ("planning_compact", "planning_compact_summary"),
+        ("subagent_contract_summary", "subagent_contract_summary"),
+        ("general_subagent_summary", "subagent_contract_summary"),
+        ("subagent_evidence_summary", "subagent_evidence_summary"),
+        ("general_subagent_artifact_summary", "subagent_evidence_summary"),
+        ("subagent_artifact_path", "subagent_artifact_path"),
+        ("general_subagent_artifact_path", "subagent_artifact_path"),
         ("planning_lanes_summary", "planning_lanes_summary"),
         ("planning_lanes", "planning_lanes_summary"),
         ("approved_plan_gate_summary", "approved_plan_gate_summary"),

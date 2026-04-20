@@ -998,6 +998,18 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
             headline=str(raw.get("headline", "")).strip() or "-",
             headline_summary=action_audit.summarize_action_audit_headline(raw),
             planning_compact_summary=planning_compact_summary,
+            subagent_contract_summary=str(
+                raw.get("subagent_contract_summary") or raw.get("general_subagent_summary") or "-"
+            ).strip()
+            or "-",
+            subagent_evidence_summary=str(
+                raw.get("subagent_evidence_summary") or raw.get("general_subagent_artifact_summary") or "-"
+            ).strip()
+            or "-",
+            subagent_artifact_path=str(
+                raw.get("subagent_artifact_path") or raw.get("general_subagent_artifact_path") or "-"
+            ).strip()
+            or "-",
             approved_plan_summary=approved_plan_summary,
             status=str(raw.get("status", "")).strip() or "unknown",
             outcome_kind=outcome_kind or "-",
@@ -1458,6 +1470,9 @@ def load_dashboard_history_page(
                 summary=row.summary,
                 detail=row.detail,
                 planning_compact_summary=getattr(row, "planning_compact_summary", ""),
+                subagent_contract_summary=getattr(row, "subagent_contract_summary", ""),
+                subagent_evidence_summary=getattr(row, "subagent_evidence_summary", ""),
+                subagent_artifact_path=getattr(row, "subagent_artifact_path", ""),
                 approved_plan_summary=getattr(row, "approved_plan_summary", ""),
                 followup_hint=row.followup_hint,
                 raw_ref=row.raw_ref,

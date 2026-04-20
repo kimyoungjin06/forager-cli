@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Tuple
 
 import aoe_tg_background_runs as background_runs
 import aoe_tg_chat_state as chat_state
+import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_executor_dispatch import (
     build_gateway_command_launch_spec_for_adapter,
@@ -523,6 +524,25 @@ def _planning_handoff_packet(source_task: Dict[str, Any]) -> Dict[str, Any]:
         "critic_lane_summary": str(source_task.get("critic_lane_summary", "")).strip() or "-",
         "planning_compact_summary": planning_compact_summary,
     }
+
+
+def _subagent_surface(
+    *,
+    team_dir: Path,
+    entry: Dict[str, Any],
+    task: Dict[str, Any],
+) -> Dict[str, str]:
+    if not isinstance(task, dict) or not task:
+        return {
+            "summary": "-",
+            "artifact_summary": "-",
+            "artifact_path": "-",
+        }
+    return harness_authoring_adapter.summarize_general_subagent_surface(
+        team_dir,
+        entry=entry,
+        task=task,
+    )
 
 
 def _select_planning_task(*candidates: Any) -> Dict[str, Any]:
@@ -1562,6 +1582,11 @@ def _execute_retry_run_transition(
     planning_task = _select_planning_task(source_task, executed_task)
     planning_primitives = _planning_primitives_snapshot(planning_task)
     planning_handoff = _planning_handoff_packet(planning_task)
+    subagent_surface = _subagent_surface(
+        team_dir=paths.team_dir,
+        entry=entry,
+        task=planning_task,
+    )
     latest_judge_decision_bridge: Dict[str, Any] = {}
     replan_auto_decision: Dict[str, Any] = {}
     replan_auto_routing_policy: Dict[str, Any] = {}
@@ -1654,6 +1679,9 @@ def _execute_retry_run_transition(
             "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
             "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
             "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
+            "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
+            "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
+            "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
             "planning_lanes": str(planning_handoff.get("planning_lanes_summary", "")).strip() or "-",
             "approved_plan_gate": str(planning_handoff.get("approved_plan_gate_summary", "")).strip() or "-",
             "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
@@ -1877,6 +1905,11 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
         planning_task = _select_planning_task(source_task)
         planning_primitives = _planning_primitives_snapshot(planning_task)
         planning_handoff = _planning_handoff_packet(planning_task)
+        subagent_surface = _subagent_surface(
+            team_dir=paths.team_dir,
+            entry=entry,
+            task=planning_task,
+        )
         error_code = (
             "followup_execute_brief_required"
             if "orch-followup-exec blocked" in blocked_contexts
@@ -2006,6 +2039,9 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
                 "job_contract": str(planning_primitives.get("job_contract_summary", "")).strip() or "-",
                 "planning_compact_summary": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
                 "planning_compact": str(planning_handoff.get("planning_compact_summary", "")).strip() or "-",
+                "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
+                "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
+                "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
                 "planning_lanes": str(planning_handoff.get("planning_lanes_summary", "")).strip() or "-",
                 "approved_plan_gate": str(planning_handoff.get("approved_plan_gate_summary", "")).strip() or "-",
                 "debug_packet": str(planning_primitives.get("debug_packet_summary", "")).strip() or "-",
