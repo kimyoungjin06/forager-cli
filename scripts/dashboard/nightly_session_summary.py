@@ -93,6 +93,10 @@ def _runtime_planning_compact_summary(detail: RuntimeDetailDTO, *, approved_plan
     )
 
 
+def _recent_action_planning_compact_summary(row: Dict[str, Any]) -> str:
+    return str(row.get("planning_compact_summary", "")).strip() or "-"
+
+
 def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
     return {
         "request_id": task.request_id,
@@ -493,9 +497,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     next_step=row.get("next_step", "-"),
                 )
             )
-            planning_compact = str(row.get("planning_compact_summary", "")).strip() or str(
-                row.get("planning_review_summary", "")
-            ).strip()
+            planning_compact = _recent_action_planning_compact_summary(row)
             if planning_compact and planning_compact != "-":
                 lines.append(f"  - planning_compact: {planning_compact}")
             if str(row.get("link_href", "")).strip():
@@ -510,9 +512,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         if not isinstance(runtime, dict):
             continue
         runtime_heading = f"{runtime.get('project_alias', '-')} {runtime.get('project_label', '-')}"
-        runtime_planning_compact = str(runtime.get("latest_planning_compact_summary", "")).strip() or str(
-            runtime.get("latest_planning_review_summary", "")
-        ).strip()
+        runtime_planning_compact = str(runtime.get("latest_planning_compact_summary", "")).strip()
         if runtime_planning_compact and runtime_planning_compact != "-":
             runtime_heading = f"{runtime_heading} | {runtime_planning_compact}"
         lines.extend(
@@ -533,7 +533,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- latest_judge_decision_bridge: {runtime.get('latest_judge_decision_bridge_summary', '-')}",
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
-                f"- planning_compact: {runtime.get('latest_planning_compact_summary', runtime.get('latest_planning_review_summary', '-'))}",
+                f"- planning_compact: {runtime.get('latest_planning_compact_summary', '-')}",
                 f"- planning_handoff: {runtime.get('latest_planning_handoff_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",

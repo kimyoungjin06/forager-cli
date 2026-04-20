@@ -106,6 +106,14 @@ def _worker_syncback_applied(
     return True
 
 
+def _recovery_latest_planning_compact_summary(row: Dict[str, Any]) -> str:
+    return (
+        str(row.get("latest_planning_compact_summary", "")).strip()
+        or str(row.get("latest_planning_review_summary", "")).strip()
+        or "-"
+    )
+
+
 def _build_recovery_task_rows(
     rows: Iterable[Dict[str, Any]],
     *,
@@ -683,9 +691,7 @@ def _build_recovery_runtime_rows(
                     or "-"
                 ),
                 latest_planning_handoff_summary=str(row.get("latest_planning_handoff_summary", "")).strip() or "-",
-                latest_planning_compact_summary=str(row.get("latest_planning_compact_summary", "")).strip()
-                or str(row.get("latest_planning_review_summary", "")).strip()
-                or "-",
+                latest_planning_compact_summary=_recovery_latest_planning_compact_summary(row),
                 latest_manual_step_summary=str(row.get("latest_manual_step_summary", "")).strip() or "-",
                 latest_canonical_writeback_summary=(
                     str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"
