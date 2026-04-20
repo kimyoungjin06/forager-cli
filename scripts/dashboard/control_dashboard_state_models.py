@@ -9,6 +9,34 @@ from typing import Dict, List
 from control_dashboard_state_io import ActionAuditRowDTO, FileFreshnessDTO
 
 
+class _PlanningCompactSummaryCompatMixin:
+    @property
+    def planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
+        return self.planning_compact_summary
+
+
+class _LatestPlanningCompactSummaryCompatMixin:
+    @property
+    def latest_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
+        return self.latest_planning_compact_summary
+
+
+class _ActiveTaskPlanningCompactSummaryCompatMixin:
+    @property
+    def active_task_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
+        return self.active_task_planning_compact_summary
+
+
+class _SelectedTaskPlanningCompactSummaryCompatMixin:
+    @property
+    def selected_task_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
+        return self.selected_task_planning_compact_summary
+
+
 @dataclass(frozen=True)
 class ServerGuardDTO:
     status: str
@@ -117,7 +145,7 @@ class ControlSummaryDTO:
 
 
 @dataclass(frozen=True)
-class RuntimeCardDTO:
+class RuntimeCardDTO(_LatestPlanningCompactSummaryCompatMixin):
     project_key: str
     project_alias: str
     project_label: str
@@ -206,12 +234,6 @@ class RuntimeCardDTO:
     notes: List[str] = field(default_factory=list)
     lines: List[str] = field(default_factory=list)
 
-    @property
-    def latest_planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.latest_planning_compact_summary
-
-
 @dataclass(frozen=True)
 class ActiveTaskRowDTO:
     project_key: str
@@ -232,7 +254,7 @@ class ActiveTaskRowDTO:
 
 
 @dataclass(frozen=True)
-class TaskDetailDTO:
+class TaskDetailDTO(_PlanningCompactSummaryCompatMixin):
     project_key: str
     project_alias: str
     project_label: str
@@ -381,14 +403,12 @@ class TaskDetailDTO:
     phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     reference_lines: List[str] = field(default_factory=list)
 
-    @property
-    def planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.planning_compact_summary
-
-
 @dataclass(frozen=True)
-class RuntimeDetailDTO:
+class RuntimeDetailDTO(
+    _PlanningCompactSummaryCompatMixin,
+    _ActiveTaskPlanningCompactSummaryCompatMixin,
+    _LatestPlanningCompactSummaryCompatMixin,
+):
     project_key: str
     project_alias: str
     project_label: str
@@ -556,17 +576,6 @@ class RuntimeDetailDTO:
     lines: List[str] = field(default_factory=list)
     recent_tasks: List[ActiveTaskRowDTO] = field(default_factory=list)
 
-    @property
-    def active_task_planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.active_task_planning_compact_summary
-
-    @property
-    def latest_planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.latest_planning_compact_summary
-
-
 @dataclass(frozen=True)
 class RecoveryTaskDTO:
     request_id: str
@@ -603,7 +612,7 @@ class RecoveryTaskDTO:
 
 
 @dataclass(frozen=True)
-class RecoveryRuntimeDTO:
+class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     project_key: str
     project_alias: str
     project_label: str
@@ -693,12 +702,6 @@ class RecoveryRuntimeDTO:
     active_task_phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     task_teams: List[RecoveryTaskDTO] = field(default_factory=list)
 
-    @property
-    def latest_planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.latest_planning_compact_summary
-
-
 @dataclass(frozen=True)
 class RecoverySummaryDTO:
     exists: bool
@@ -745,7 +748,7 @@ class ActionAuditPageDTO:
 
 
 @dataclass(frozen=True)
-class HistorySearchRowDTO:
+class HistorySearchRowDTO(_PlanningCompactSummaryCompatMixin):
     at: str
     scope: str
     source: str
@@ -767,12 +770,6 @@ class HistorySearchRowDTO:
     approved_plan_summary: str = ""
     pressure_kind_label: str = ""
     pressure_kind_note: str = ""
-
-    @property
-    def planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.planning_compact_summary
-
 
 @dataclass(frozen=True)
 class HistorySearchPageDTO:
@@ -856,7 +853,7 @@ class ChatSessionPresetDTO:
 
 
 @dataclass(frozen=True)
-class ChatConsolePageDTO:
+class ChatConsolePageDTO(_SelectedTaskPlanningCompactSummaryCompatMixin):
     selected_chat_id: str
     selected_chat_alias: str
     selected_room: str
@@ -902,12 +899,6 @@ class ChatConsolePageDTO:
     select_task_action_path: str = "/control/actions/chat/session-select-task"
     send_mode_options: Dict[str, str] = field(default_factory=dict)
     recent_chat_actions: List[ActionAuditRowDTO] = field(default_factory=list)
-
-    @property
-    def selected_task_planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.selected_task_planning_compact_summary
-
 
 @dataclass(frozen=True)
 class DashboardSnapshotDTO:

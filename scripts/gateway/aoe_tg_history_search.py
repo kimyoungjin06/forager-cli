@@ -40,6 +40,11 @@ _SOURCE_PRIORITY = {
 }
 
 
+def _legacy_planning_review_summary_alias(summary: str) -> str:
+    # Legacy compatibility helper for older state consumers.
+    return summary
+
+
 @dataclass
 class HistorySearchOptions:
     query: str
@@ -74,7 +79,7 @@ class HistoryRow:
 
     @property
     def planning_review_summary(self) -> str:
-        return self.planning_compact_summary
+        return _legacy_planning_review_summary_alias(self.planning_compact_summary)
 
 
 def _normalize_text(raw: Any) -> str:

@@ -39,6 +39,11 @@ _LAST_GOOD_COMMAND_RESOLUTION: Dict[str, Dict[str, str]] = {}
 _LAST_GOOD_ACTION_AUDIT: Dict[str, List[Dict[str, str]]] = {}
 
 
+def _legacy_planning_review_summary_alias(summary: str) -> str:
+    # Legacy compatibility helper for older state consumers.
+    return summary
+
+
 @dataclass(frozen=True)
 class FileFreshnessDTO:
     name: str
@@ -75,8 +80,7 @@ class ActionAuditRowDTO:
 
     @property
     def planning_review_summary(self) -> str:
-        # Legacy compatibility alias for older state consumers.
-        return self.planning_compact_summary
+        return _legacy_planning_review_summary_alias(self.planning_compact_summary)
 
 
 @dataclass(frozen=True)

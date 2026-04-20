@@ -148,6 +148,13 @@ def _parse_action_audit_at(raw: object) -> datetime | None:
     return parsed
 
 
+def _legacy_payload_planning_compact_summary(source: Dict[str, Any]) -> str:
+    return (
+        str(source.get("planning_review_summary", "")).strip()
+        or str(source.get("planning_review", "")).strip()
+    )
+
+
 
 def _load_existing_action_audit_rows(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
@@ -226,12 +233,6 @@ def _append_action_audit(
     planning_handoff = payload.get("planning_handoff") if isinstance(payload.get("planning_handoff"), dict) else {}
     if planning_handoff:
         row["planning_handoff"] = planning_handoff
-
-    def _legacy_payload_planning_compact_summary(source: Dict[str, Any]) -> str:
-        return (
-            str(source.get("planning_review_summary", "")).strip()
-            or str(source.get("planning_review", "")).strip()
-        )
 
     for source_key, row_key in (
         ("planning_compact_summary", "planning_compact_summary"),

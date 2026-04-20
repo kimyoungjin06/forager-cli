@@ -835,7 +835,10 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
 
 
-def test_action_audit_planning_compact_handoff_reads_legacy_top_level_review_key() -> None:
+# Legacy planning compact compatibility
+
+
+def test_legacy_action_audit_planning_compact_handoff_reads_top_level_review_key() -> None:
     summary = action_audit.summarize_retry_replan_planning_compact_handoff(
         {},
         row={
@@ -846,7 +849,7 @@ def test_action_audit_planning_compact_handoff_reads_legacy_top_level_review_key
     assert summary == "planning=draft via codex | review via claude | dispatch waits for critic-approved plan"
 
 
-def test_control_dashboard_append_action_audit_backfills_planning_compact_from_legacy_review_key(tmp_path: Path) -> None:
+def test_legacy_control_dashboard_append_action_audit_backfills_planning_compact_from_review_key(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     config = dashboard_app.DashboardAppConfig(
@@ -2471,7 +2474,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "Decision Signals" in text
 
 
-def test_control_dashboard_recovery_route_reads_legacy_nightly_planning_review_key(tmp_path: Path) -> None:
+def test_legacy_control_dashboard_recovery_route_reads_nightly_planning_review_key(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     summary = nightly_summary.build_nightly_session_summary(
