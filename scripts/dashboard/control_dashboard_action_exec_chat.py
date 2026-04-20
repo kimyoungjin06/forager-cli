@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import json
 from typing import Dict, Tuple
 
 import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
@@ -323,6 +324,28 @@ def _execute_chat_session_update_action(
             followup_actions.append(row)
         if not followup_actions:
             followup_actions = [chat_action, health_action, audit_action]
+        selected_task_ref = (
+            str(selected_task.get("short_id", "")).strip()
+            or str(selected_task.get("alias", "")).strip()
+            or str(_selected_request_id or "").strip()
+        )
+        if selected_task_ref:
+            support_note = task_view.planning_operator_note(
+                selected_task,
+                notes=["materialize bounded general_research evidence for the selected task before changing dispatch or apply state"],
+            )
+            followup_actions.append(
+                {
+                    "label": "Run Support Research",
+                    "path": "/control/actions/task/subagent-support-run",
+                    "payload_json": json.dumps({"task_ref": selected_task_ref}, ensure_ascii=False, separators=(",", ":")),
+                    "command": f"/task {selected_task_ref} | general-research-support",
+                    "mode": "safe",
+                    "note": support_note,
+                    "priority": "secondary",
+                    "pressure_kind_label": pressure_kind_label,
+                }
+            )
 
     return _json(
         {

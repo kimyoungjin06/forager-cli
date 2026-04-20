@@ -7262,6 +7262,18 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
     assert payload["auto_state"]["command"] == "next"
     assert payload["auto_state"]["recovery_grace_until"] != "-"
     assert payload["messages"][-1]["context"] == "auto-recover"
+    assert payload["planning_compact"].startswith("draft via codex, claude | review via codex, claude")
+    assert payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan")
+    assert payload["subagent_evidence_summary"] == "-"
+    assert [row.get("label") for row in (payload.get("actions") or [])][:2] == [
+        "Open Recovery",
+        "Open Offdesk Prep",
+    ]
+    assert any(
+        row.get("path") == "/control/actions/task/subagent-support-run"
+        and row.get("payload_json") == '{"task_ref":"T-001"}'
+        for row in (payload.get("actions") or [])
+    )
 
 
 def test_control_dashboard_post_background_queue_clean_marks_stale_tickets(tmp_path: Path) -> None:
@@ -7579,6 +7591,11 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     ]
     assert any(row.get("href") == "/control/health/view" for row in (apply_payload.get("actions") or []))
     assert any(row.get("href") == "/control/audit?focus=server-guard" for row in (apply_payload.get("actions") or []))
+    assert any(
+        row.get("path") == "/control/actions/task/subagent-support-run"
+        and row.get("payload_json") == '{"task_ref":"T-001"}'
+        for row in (apply_payload.get("actions") or [])
+    )
 
     assert overview_status == 200
     assert "Apply Global Direct | completed" in overview_text
