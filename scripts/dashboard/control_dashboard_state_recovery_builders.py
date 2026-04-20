@@ -107,12 +107,16 @@ def _worker_syncback_applied(
 
 
 def _recovery_latest_planning_compact_summary(row: Dict[str, Any]) -> str:
-    legacy_summary = str(row.get("latest_planning_review_summary", "")).strip()
+    legacy_summary = _legacy_recovery_latest_planning_compact_summary(row)
     return (
         str(row.get("latest_planning_compact_summary", "")).strip()
         or legacy_summary
         or "-"
     )
+
+
+def _legacy_recovery_latest_planning_compact_summary(row: Dict[str, Any]) -> str:
+    return str(row.get("latest_planning_review_summary", "")).strip()
 
 
 def _build_recovery_task_rows(

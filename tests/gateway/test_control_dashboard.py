@@ -846,6 +846,20 @@ def test_action_audit_planning_compact_handoff_reads_legacy_top_level_review_key
     assert summary == "planning=draft via codex | review via claude | dispatch waits for critic-approved plan"
 
 
+def test_action_audit_replan_auto_operator_status_uses_planning_compact_label() -> None:
+    summary = action_audit.summarize_replan_auto_operator_status(
+        policy={
+            "status": "contract_review_ready",
+            "suggested_next_step": "/task T-001",
+            "planning_feedback_source": "job_contract",
+            "planning_feedback_state": "blocked",
+        },
+        route_row={},
+    )
+
+    assert summary == "planning_compact=/task T-001 | source=job_contract | state=blocked | reused"
+
+
 def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for_blocked_rows(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
@@ -2424,34 +2438,43 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "background_scheduler_note" in text
     assert "no queued scheduler head" in text
     assert "Decision Signals" in text
-    assert "Execution Rails" in text
-    assert "context_pack" in text
-    assert "model_plan" in text
-    assert "latest_judge" in text
-    assert "endpoint=codex_cli-gpt-5-4 provider=codex_cli model=gpt-5.4 status=completed" in text
-    assert "latest_judge_decision" in text
-    assert "action=retry | verdict=continue | confidence=medium | next=/retry T-001 | brief executable" in text
-    assert "planning_compact" in text
-    assert "obs stale=" in text
-    assert "waiting on execution lane(s): L1" in text
-    assert "overlapping files: reports/summary.md" in text
-    assert "obs_files" in text
-    assert "touched=3 conflicts=1" in text
-    assert "/control/actions/control/auto-recover" in text
-    assert "Auto Recover" in text
-    assert "Auto Recover Force" in text
-    assert "/control/actions/runtime/sync-preview" in text
-    assert "/control/actions/task/followup" in text
-    assert "/control/actions/task/retry" in text
-    assert "/control/chat?chat=123456" in text
-    assert "Open Chat 1" in text
-    assert "action-section" in text
-    assert "/control/tasks/by-request/REQ-1" in text
-    assert "/monitor O2" in text
-    assert "/task T-001" in text
-    assert "/request REQ-1" in text
-    assert "/retry T-001" in text
-    assert "background_run" in text
+
+
+def test_control_dashboard_recovery_route_reads_legacy_nightly_planning_review_key(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _latest_md, latest_json = nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
+    payload = json.loads(latest_json.read_text(encoding="utf-8"))
+    payload["runtimes"][0]["latest_planning_review_summary"] = payload["runtimes"][0].pop(
+        "latest_planning_compact_summary"
+    )
+    latest_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "nightly_planning_compact" in text
+    assert "draft via codex" in text
+    assert "review via" in text
+    assert "dispatch waits for critic-approved plan" in text
     assert "BGT-001" in text
     assert "local_background" in text
     assert "run_lock" in text

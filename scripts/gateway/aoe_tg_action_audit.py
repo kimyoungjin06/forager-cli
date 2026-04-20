@@ -1236,7 +1236,7 @@ def summarize_replan_auto_operator_status(
     if ready_status in {"contract_review_ready", "debug_review_ready", "phase_review_ready"} and ready_next not in {"", "-"}:
         source = str(normalized_policy.get("planning_feedback_source", "")).strip() or "-"
         state = str(normalized_policy.get("planning_feedback_state", "")).strip() or "-"
-        return f"planning_review={ready_next} | source={source} | state={state} | reused"
+        return f"planning_compact={ready_next} | source={source} | state={state} | reused"
     if ready_status == "manual_ready" and ready_next not in {"", "-"}:
         suggested_action = str(normalized_policy.get("suggested_action", "")).strip().lower()
         if suggested_action in {"manual_review", "review", "judge"}:
