@@ -117,3 +117,68 @@ def test_harness_authoring_plan_detects_vendor_layout_and_selected_docs(tmp_path
     assert plan["general_subagent_contract"]["input_scope"]["doc_refs"] == ["spec-main"]
     assert plan["general_subagent_contract"]["backend"]["backend_kind"] == "filesystem"
     assert "vendor=ready" in plan["summary"]
+    assert plan["selected_doc_paths"][0].endswith("SPEC.md")
+
+
+def test_run_general_subagent_support_persists_bounded_evidence_artifact(tmp_path: Path) -> None:
+    project_root = tmp_path / "Gamma"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    vendor_root = tmp_path / "vendor" / "revfactory-harness"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (docs_dir / "SPEC.md").write_text("# spec\n", encoding="utf-8")
+    (vendor_root / "skills" / "harness").mkdir(parents=True, exist_ok=True)
+    (vendor_root / "README.md").write_text("# harness\n", encoding="utf-8")
+    (vendor_root / "skills" / "harness" / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    (team_dir / "document_registry.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "records": [
+                    {
+                        "doc_id": "spec-main",
+                        "path": str((docs_dir / "SPEC.md").resolve()),
+                        "doc_type": "spec",
+                        "canonical": True,
+                        "freshness_class": "fresh",
+                    }
+                ],
+                "summary": "indexed=1 canonical=1 stale=0 kinds=spec=1",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "workspace_key": "gamma",
+            "project_alias": "O7",
+            "project_root": str(project_root),
+            "doc_roots": [str(docs_dir)],
+            "background_runner_target": "local_background",
+            "onboarding_status": "active",
+        },
+        project_root=project_root,
+        entry={"project_alias": "O7", "project_root": str(project_root)},
+    )
+
+    payload = harness_authoring_adapter.run_general_subagent_support(
+        team_dir,
+        entry={"project_alias": "O7", "project_root": str(project_root)},
+        task={"request_id": "REQ-9", "short_id": "T-303", "phase2_team_preset": "review", "execution_brief_status": "executable"},
+        vendor_root=vendor_root,
+    )
+
+    artifact_path = team_dir / "harness_authoring" / "subagents" / "req-9-general-research.json"
+    assert artifact_path.exists()
+    assert payload["artifact_path"] == "harness_authoring/subagents/req-9-general-research.json"
+    assert payload["summary"].startswith("bounded evidence ready")
+    assert payload["recommended_next_step"] == "/task T-303"
+    assert any(source.endswith("SPEC.md") for source in payload["sources"])
+    assert any(source.endswith("README.md") for source in payload["sources"])
+    assert "context_pack=review | docs=1 | doc_ids=spec-main" in payload["key_findings"]
+    assert payload["blocking_issues"] == []

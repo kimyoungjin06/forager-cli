@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from aoe_tg_artifact_backend import artifact_backend
-from aoe_tg_harness_authoring_adapter import build_harness_authoring_plan
+from aoe_tg_harness_authoring_adapter import build_harness_authoring_plan, run_general_subagent_support
 from aoe_tg_runtime_core import resolve_default_team_dir, resolve_state_file
 from aoe_tg_runtime_read import load_manager_state
 from aoe_tg_task_state import normalize_task_alias_key
@@ -87,6 +87,7 @@ def export_harness_authoring_plan(
     task_ref: str = "",
     vendor_root: str = "",
     output_path: str = "",
+    run_general_subagent: bool = False,
 ) -> Dict[str, Any]:
     manager_state = load_manager_state(manager_state_file, project_root, team_dir)
     project_name, entry = _find_project_entry(
@@ -97,6 +98,11 @@ def export_harness_authoring_plan(
         team_dir=team_dir,
     )
     task = _find_task(entry, request_id=request_id, task_ref=task_ref)
+    general_subagent_artifact = (
+        run_general_subagent_support(team_dir, entry=entry, task=task, vendor_root=vendor_root)
+        if run_general_subagent
+        else {}
+    )
     plan = build_harness_authoring_plan(team_dir, entry=entry, task=task, vendor_root=vendor_root)
     plan["project_name"] = project_name
     plan["request_id"] = _trim(task.get("request_id"), 128)
@@ -118,6 +124,8 @@ def export_harness_authoring_plan(
         "artifact_path": str(artifact),
         "artifact_relative_path": backend.relative_artifact_path(artifact),
         "summary": _trim(plan.get("summary"), 400),
+        "general_subagent_executed": bool(general_subagent_artifact),
+        "general_subagent_artifact_path": _trim(general_subagent_artifact.get("artifact_path"), 240),
         "plan": plan,
     }
 
@@ -133,6 +141,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-ref", default="", help="Task short id or alias to export.")
     parser.add_argument("--vendor-root", default="", help="Optional override for vendored harness root.")
     parser.add_argument("--output-path", default="", help="Optional explicit output path.")
+    parser.add_argument(
+        "--run-general-subagent",
+        action="store_true",
+        help="Run the bounded general_research support lane and persist its artifact before exporting.",
+    )
     return parser
 
 
@@ -155,6 +168,7 @@ def main() -> int:
         task_ref=args.task_ref,
         vendor_root=args.vendor_root,
         output_path=args.output_path,
+        run_general_subagent=bool(args.run_general_subagent),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

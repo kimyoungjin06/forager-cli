@@ -189,3 +189,57 @@ def test_export_harness_authoring_plan_resolves_task_ref_and_vendor_root(tmp_pat
     assert payload["general_subagent_contract"]["input_scope"]["doc_refs"] == ["spec-main"]
     assert payload["general_subagent_artifact"]["summary"] == "repo scan complete"
     assert payload["general_subagent_artifact_summary"].startswith("general_research | confidence=medium")
+
+
+def test_export_harness_authoring_plan_can_run_general_subagent_support(tmp_path: Path) -> None:
+    project_root = tmp_path / "Delta"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    vendor_root = _write_vendor_root(tmp_path)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (docs_dir / "RUNBOOK.md").write_text("# runbook\n", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "workspace_key": "delta",
+            "project_alias": "O9",
+            "project_root": str(project_root),
+            "doc_roots": [str(docs_dir)],
+            "canonical_todo_path": str(project_root / "TODO.md"),
+            "onboarding_status": "active",
+        },
+        project_root=project_root,
+        entry={"project_alias": "O9", "project_root": str(project_root)},
+    )
+    state_path = _write_manager_state(
+        project_root,
+        team_dir,
+        {
+            "request_id": "REQ-9",
+            "short_id": "T-909",
+            "phase2_team_preset": "review",
+            "execution_brief_status": "executable",
+            "status": "pending",
+        },
+        project_alias="O9",
+    )
+
+    result = harness_authoring_export.export_harness_authoring_plan(
+        project_root=project_root,
+        team_dir=team_dir,
+        manager_state_file=state_path,
+        request_id="REQ-9",
+        vendor_root=str(vendor_root),
+        run_general_subagent=True,
+    )
+
+    artifact = team_dir / "harness_authoring" / "subagents" / "req-9-general-research.json"
+    assert result["general_subagent_executed"] is True
+    assert result["general_subagent_artifact_path"] == "harness_authoring/subagents/req-9-general-research.json"
+    assert artifact.exists()
+    payload = result["plan"]
+    assert payload["general_subagent_artifact"]["artifact_path"] == "harness_authoring/subagents/req-9-general-research.json"
+    assert payload["general_subagent_artifact"]["recommended_next_step"] == "/task T-909"
+    assert payload["general_subagent_artifact_summary"].startswith("general_research | confidence=high")

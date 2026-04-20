@@ -12,6 +12,7 @@ from aoe_tg_document_registry import load_document_registry
 from aoe_tg_subagent_contract import (
     build_general_research_subagent_contract,
     load_subagent_result_artifact,
+    persist_subagent_result_artifact,
     summarize_subagent_contract,
     summarize_subagent_result_artifact,
 )
@@ -31,6 +32,17 @@ REVFACTORY_HARNESS_PATTERNS = (
 
 def _trim(raw: Any, limit: int = 240) -> str:
     return str(raw or "").strip()[: max(0, int(limit or 0))]
+
+
+def _dedupe_rows(rows: List[str], *, limit: int = 8, item_limit: int = 240) -> List[str]:
+    out: List[str] = []
+    for item in rows:
+        token = _trim(item, item_limit)
+        if token and token not in out:
+            out.append(token)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _repo_root() -> Path:
@@ -146,6 +158,11 @@ def build_harness_authoring_plan(
             for item in relevant_docs
             if isinstance(item, dict) and _trim(item.get("doc_id"), 128)
         ][:6],
+        "selected_doc_paths": [
+            _trim(item.get("path"), 240)
+            for item in relevant_docs
+            if isinstance(item, dict) and _trim(item.get("path"), 240)
+        ][:6],
         "document_count": len(records),
         "general_subagent_contract": general_subagent_contract,
         "general_subagent_summary": summarize_subagent_contract(general_subagent_contract),
@@ -199,3 +216,88 @@ def summarize_general_subagent_surface(
         "artifact_summary": _trim(plan.get("general_subagent_artifact_summary"), 320) or "-",
         "artifact_path": _trim(artifact.get("artifact_path"), 240) or "-",
     }
+
+
+def run_general_subagent_support(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    vendor_root: Any = "",
+) -> Dict[str, Any]:
+    if not isinstance(task, dict) or not task:
+        return {}
+    plan = build_harness_authoring_plan(team_dir, entry=entry, task=task, vendor_root=vendor_root)
+    contract = plan.get("general_subagent_contract") if isinstance(plan.get("general_subagent_contract"), dict) else {}
+    if not contract:
+        return {}
+    backend = artifact_backend(team_dir)
+    project_alias = _trim(plan.get("project_alias"), 32) or "-"
+    context_profile = _trim(plan.get("context_pack_profile"), 64) or "on_desk_plan"
+    request_id = _trim(task.get("request_id"), 128)
+    task_ref = _trim(task.get("short_id"), 64) or _trim(task.get("alias"), 64)
+    selected_doc_ids = _dedupe_rows([str(item) for item in (plan.get("selected_doc_ids") or [])], limit=6, item_limit=128)
+    selected_doc_paths = _dedupe_rows([str(item) for item in (plan.get("selected_doc_paths") or [])], limit=6, item_limit=240)
+    vendor = plan.get("vendor") if isinstance(plan.get("vendor"), dict) else {}
+    vendor_available = bool(vendor.get("available"))
+    vendor_sources = _dedupe_rows(
+        [
+            _trim(vendor.get("readme_path"), 240),
+            _trim(vendor.get("skill_path"), 240),
+        ],
+        limit=2,
+        item_limit=240,
+    )
+    sources = _dedupe_rows([*selected_doc_paths, *vendor_sources], limit=8, item_limit=240)
+    key_findings = _dedupe_rows(
+        [
+            f"context_pack={context_profile} | docs={len(selected_doc_paths)} | doc_ids={','.join(selected_doc_ids[:3]) or '-'}",
+            f"vendor={'ready' if vendor_available else 'missing'} | patterns={len(list(plan.get('patterns') or []))}",
+            f"project={project_alias} | backend={_trim(((plan.get('artifact_backend') or {}) if isinstance(plan.get('artifact_backend'), dict) else {}).get('backend_kind'), 64) or 'filesystem'}",
+            _trim(plan.get("document_registry_summary"), 240),
+        ],
+        limit=6,
+        item_limit=240,
+    )
+    blocking_issues = _dedupe_rows(
+        [
+            (
+                f"vendor_harness_missing:{_trim(vendor.get('vendor_root'), 200)}"
+                if not vendor_available
+                else ""
+            ),
+            "no_selected_docs_in_context_pack" if not selected_doc_paths else "",
+            "document_registry_empty" if "indexed=0" in _trim(plan.get("document_registry_summary"), 240) else "",
+        ],
+        limit=6,
+        item_limit=240,
+    )
+    artifact_refs = _dedupe_rows(
+        [
+            backend.relative_artifact_path(
+                backend.harness_authoring_plan_path(request_id=request_id, task_ref=task_ref)
+            ),
+            backend.relative_artifact_path(
+                backend.context_pack_path(request_id=request_id or task_ref or "runtime", profile=context_profile)
+            ),
+        ],
+        limit=8,
+        item_limit=240,
+    )
+    raw_result = {
+        "subagent_kind": "general_research",
+        "summary": (
+            f"bounded evidence ready | vendor={'ready' if vendor_available else 'missing'} | "
+            f"docs={len(selected_doc_paths)} | findings={len(key_findings)}"
+        ),
+        "confidence": "medium" if blocking_issues else "high",
+        "sources": sources,
+        "key_findings": key_findings,
+        "blocking_issues": blocking_issues,
+        "recommended_next_step": f"/task {task_ref}" if task_ref else (f"/task {request_id}" if request_id else "/control/offdesk"),
+        "artifact_refs": artifact_refs,
+    }
+    payload = persist_subagent_result_artifact(team_dir, contract=contract, raw_result=raw_result)
+    if payload:
+        payload["contract_summary"] = summarize_subagent_contract(contract)
+    return payload
