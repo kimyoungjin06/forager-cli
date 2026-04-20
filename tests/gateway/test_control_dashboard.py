@@ -846,6 +846,37 @@ def test_action_audit_planning_compact_handoff_reads_legacy_top_level_review_key
     assert summary == "planning=draft via codex | review via claude | dispatch waits for critic-approved plan"
 
 
+def test_control_dashboard_append_action_audit_backfills_planning_compact_from_legacy_review_key(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    dashboard_app._append_action_audit(
+        config,
+        {
+            "path": "/control/actions/task/followup",
+            "status": "blocked",
+            "source_command": "/followup T-001",
+            "next_step": "/task T-001",
+            "remediation": "-",
+            "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+            "preview": {"detail_path": "/control/tasks/by-request/REQ-1"},
+        },
+    )
+
+    rows = [json.loads(line) for line in (team_dir / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    row = rows[-1]
+
+    assert row["planning_compact_summary"] == "draft via codex | review via claude | dispatch waits for critic-approved plan"
+    assert "planning_review_summary" not in row
+
+
 def test_action_audit_replan_auto_operator_status_uses_planning_compact_label() -> None:
     summary = action_audit.summarize_replan_auto_operator_status(
         policy={

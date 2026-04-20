@@ -208,6 +208,7 @@ class RuntimeCardDTO:
 
     @property
     def latest_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.latest_planning_compact_summary
 
 
@@ -382,6 +383,7 @@ class TaskDetailDTO:
 
     @property
     def planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.planning_compact_summary
 
 
@@ -556,10 +558,12 @@ class RuntimeDetailDTO:
 
     @property
     def active_task_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.active_task_planning_compact_summary
 
     @property
     def latest_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.latest_planning_compact_summary
 
 
@@ -691,6 +695,7 @@ class RecoveryRuntimeDTO:
 
     @property
     def latest_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.latest_planning_compact_summary
 
 
@@ -765,6 +770,7 @@ class HistorySearchRowDTO:
 
     @property
     def planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.planning_compact_summary
 
 
@@ -899,6 +905,7 @@ class ChatConsolePageDTO:
 
     @property
     def selected_task_planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.selected_task_planning_compact_summary
 
 

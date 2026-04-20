@@ -75,6 +75,7 @@ class ActionAuditRowDTO:
 
     @property
     def planning_review_summary(self) -> str:
+        # Legacy compatibility alias for older state consumers.
         return self.planning_compact_summary
 
 

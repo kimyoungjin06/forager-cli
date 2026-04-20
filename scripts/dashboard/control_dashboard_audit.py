@@ -226,11 +226,16 @@ def _append_action_audit(
     planning_handoff = payload.get("planning_handoff") if isinstance(payload.get("planning_handoff"), dict) else {}
     if planning_handoff:
         row["planning_handoff"] = planning_handoff
+
+    def _legacy_payload_planning_compact_summary(source: Dict[str, Any]) -> str:
+        return (
+            str(source.get("planning_review_summary", "")).strip()
+            or str(source.get("planning_review", "")).strip()
+        )
+
     for source_key, row_key in (
         ("planning_compact_summary", "planning_compact_summary"),
         ("planning_compact", "planning_compact_summary"),
-        ("planning_review_summary", "planning_compact_summary"),
-        ("planning_review", "planning_compact_summary"),
         ("planning_lanes_summary", "planning_lanes_summary"),
         ("planning_lanes", "planning_lanes_summary"),
         ("approved_plan_gate_summary", "approved_plan_gate_summary"),
@@ -245,6 +250,10 @@ def _append_action_audit(
         value = str(payload.get(source_key, "")).strip()
         if value:
             row[row_key] = value
+    if str(row.get("planning_compact_summary", "")).strip() in {"", "-"}:
+        legacy_summary = _legacy_payload_planning_compact_summary(payload)
+        if legacy_summary:
+            row["planning_compact_summary"] = legacy_summary
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:
         paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)
