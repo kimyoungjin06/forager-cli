@@ -490,16 +490,6 @@ def _action_audit_rows(
                             parsed.get("planning_compact_summary")
                             or parsed.get("planning_compact")
                             or parsed.get("planning_review_summary")
-                            or (
-                                (parsed.get("planning_handoff") or {}).get("planning_compact_summary")
-                                if isinstance(parsed.get("planning_handoff"), dict)
-                                else ""
-                            )
-                            or (
-                                (parsed.get("planning_handoff") or {}).get("planning_review_summary")
-                                if isinstance(parsed.get("planning_handoff"), dict)
-                                else ""
-                            )
                         )
                     )
                 approved_plan_handoff_summary = _action_audit_approved_plan_handoff_summary(parsed)

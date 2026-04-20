@@ -596,9 +596,13 @@ def summarize_retry_replan_planning_compact_handoff(raw: Any, *, row: Optional[D
     handoff = normalize_planning_handoff_snapshot(raw, row=row)
     if not isinstance(handoff, dict) or not handoff:
         return "-"
-    summary = str(handoff.get("planning_compact_summary", "")).strip() or str(
-        handoff.get("planning_review_summary", "")
-    ).strip()
+    summary = ""
+    if isinstance(raw, dict):
+        summary = str(raw.get("planning_compact_summary", "")).strip()
+    if summary in {"", "-"} and isinstance(row, dict):
+        summary = str(row.get("planning_compact_summary", "")).strip() or str(
+            row.get("planning_compact", "")
+        ).strip()
     if summary in {"", "-"}:
         parts: List[str] = []
         planning_lanes = str(handoff.get("planning_lanes_summary", "")).strip()
