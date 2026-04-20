@@ -7266,7 +7266,12 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
     assert payload["messages"][-1]["context"] == "auto-recover"
     assert payload["planning_compact"].startswith("draft via codex, claude | review via codex, claude")
     assert payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan")
-    assert payload["subagent_evidence_summary"] == "-"
+    assert payload["general_subagent_executed"] is True
+    assert payload["subagent_evidence_summary"].startswith("general_research | confidence=")
+    assert "sources=" in payload["subagent_evidence_summary"]
+    assert "findings=" in payload["subagent_evidence_summary"]
+    assert "blocking=" in payload["subagent_evidence_summary"]
+    assert payload["subagent_artifact_path"] == "harness_authoring/subagents/req-1-general-research.json"
     assert [row.get("label") for row in (payload.get("actions") or [])][:2] == [
         "Open Recovery",
         "Open Offdesk Prep",
@@ -7578,6 +7583,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert apply_payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan")
     assert apply_payload["subagent_evidence_summary"] == "general_research | confidence=high | sources=2 | findings=2 | blocking=1"
     assert apply_payload["subagent_artifact_path"] == "harness_authoring/subagents/req-1-general-research.json"
+    assert apply_payload["general_subagent_executed"] is False
     assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
         "Open Chat Console",
         "Open Server Guard Audit",
@@ -7727,6 +7733,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
 
     monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
 
+    executed_flags = []
     for pressure_kind in ("codex", "python"):
         preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
             "/control/actions/runtime/server-guard-pressure-preview",
@@ -7735,6 +7742,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
             config=config,
         )
         preview_payload = json.loads(preview_body.decode("utf-8"))
+        dashboard_app._append_action_audit(config, preview_payload)
         preset_payload = json.loads((preview_payload.get("actions") or [])[0]["payload_json"])
         apply_status, _apply_headers, _apply_body = dashboard_app.build_dashboard_action_response(
             "/control/actions/chat/session-update",
@@ -7743,8 +7751,14 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
             config=config,
         )
         apply_payload = json.loads(_apply_body.decode("utf-8"))
+        dashboard_app._append_action_audit(config, apply_payload)
         assert preview_status == 200
         assert apply_status == 200
+        executed_flags.append(bool(apply_payload.get("general_subagent_executed")))
+        assert apply_payload["subagent_evidence_summary"].startswith("general_research | confidence=")
+        assert "sources=" in apply_payload["subagent_evidence_summary"]
+        assert "findings=" in apply_payload["subagent_evidence_summary"]
+        assert "blocking=" in apply_payload["subagent_evidence_summary"]
         if pressure_kind == "python":
             assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
                 "Open Health View",
@@ -7761,8 +7775,9 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
                 "Python Pressure",
                 "Python Pressure",
             ]
-            assert [row.get("note") for row in (apply_payload.get("actions") or [])][:3] == [
-                "start with Health, then keep Package Rail narrow",
+            notes = [row.get("note") for row in (apply_payload.get("actions") or [])][:3]
+            assert notes[0].startswith("start with Health, then keep Package Rail narrow")
+            assert notes[1:] == [
                 "inspect the selected chat session after applying the server-guard preset",
                 "inspect the full server-guard action trail",
             ]
@@ -7771,6 +7786,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
                 "Python Pressure",
                 "Python Pressure",
             ]
+    assert any(executed_flags)
 
     recovery_status, _recovery_headers, recovery_body = dashboard_app.build_dashboard_response("/control/recovery", config)
     recovery_text = recovery_body.decode("utf-8")
@@ -7792,6 +7808,8 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "server-guard-mini-link health" in recovery_text
     assert "server-guard-mini-link chat priority" in recovery_text
     assert "action_copy" in recovery_text
+    assert "subagent_evidence" in recovery_text
+    assert "general_research | confidence=" in recovery_text
     assert "start with Chat, then keep Global Direct narrow" in recovery_text
     assert "start with Health, then keep Package Rail narrow" in recovery_text
 

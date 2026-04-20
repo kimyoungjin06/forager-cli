@@ -252,6 +252,16 @@ def _execute_chat_session_update_action(
         entry=selected_task_entry,
         task=selected_task,
     )
+    general_subagent_executed = False
+    if focus_badge == "server-guard" and isinstance(selected_task, dict) and selected_task:
+        ensured_surface = harness_authoring_adapter.ensure_general_subagent_support_surface(
+            str(selected_task_entry.get("team_dir", "")).strip() or paths.team_dir,
+            entry=selected_task_entry,
+            task=selected_task,
+        )
+        if isinstance(ensured_surface, dict):
+            subagent_surface = ensured_surface
+            general_subagent_executed = bool(ensured_surface.get("executed", False))
     effective_next_step = next_step or f"/control/chat?chat={chat_id}"
     effective_source_command = (
         f"server-guard-preset:{server_guard_pressure_kind or '-'}:{chat_id}:{server_guard_preset_label}"
@@ -378,6 +388,7 @@ def _execute_chat_session_update_action(
             "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
             "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
             "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
+            "general_subagent_executed": general_subagent_executed,
             "actions": followup_actions,
             "reply_text": (
                 f"{server_guard_preset_label + chr(10) if focus_badge == 'server-guard' and server_guard_preset_label else ''}"

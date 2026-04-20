@@ -837,6 +837,8 @@ class ServerGuardThreadDTO:
     exists: bool = False
     preview_headline: str = ""
     apply_headline: str = ""
+    subagent_evidence_summary: str = ""
+    subagent_artifact_path: str = ""
     pressure_kind_key: str = ""
     pressure_kind_label: str = ""
     action_sentence: str = ""

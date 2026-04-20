@@ -161,11 +161,12 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
     provider_state = management_handlers._load_provider_capacity_state(management_handlers._provider_capacity_state_path(args))
     active_task, active_entry, active_request_id = _latest_task_for_active_runtime(manager_state)
     planning_bundle = task_view.planning_operator_bundle(active_task)
-    subagent_surface = harness_authoring_adapter.summarize_general_subagent_surface(
+    subagent_surface = harness_authoring_adapter.ensure_general_subagent_support_surface(
         str(active_entry.get("team_dir", "")).strip() or paths.team_dir,
         entry=active_entry,
         task=active_task,
     )
+    general_subagent_executed = bool(subagent_surface.get("executed", False)) if isinstance(subagent_surface, dict) else False
     outcome = _latest_recorded_outcome(outcomes, kind="auto_recover")
     if not outcome:
         return _missing_outcome_response(
@@ -248,6 +249,7 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
             "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
             "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
             "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
+            "general_subagent_executed": general_subagent_executed,
             "team_dir": str(paths.team_dir),
             "next_step": next_step,
             "remediation": _auto_recover_remediation(blocked=blocked, provider_state=provider_state),

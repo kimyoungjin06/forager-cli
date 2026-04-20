@@ -570,6 +570,8 @@ def _build_server_guard_thread_cards(
                     exists=True,
                     preview_headline=str(older.headline or "-").strip() or "-",
                     apply_headline=str(action.headline or "-").strip() or "-",
+                    subagent_evidence_summary=str(action.subagent_evidence_summary or "-").strip() or "-",
+                    subagent_artifact_path=str(action.subagent_artifact_path or "-").strip() or "-",
                     pressure_kind_key=pressure_kind_key,
                     pressure_kind_label=pressure_labels.get(str(older.outcome_kind or "").strip(), ""),
                     action_sentence=str(pressure_policy.get("action_sentence", "")).strip(),

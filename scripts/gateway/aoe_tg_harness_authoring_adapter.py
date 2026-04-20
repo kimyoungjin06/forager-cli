@@ -218,6 +218,29 @@ def summarize_general_subagent_surface(
     }
 
 
+def ensure_general_subagent_support_surface(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    vendor_root: Any = "",
+) -> Dict[str, Any]:
+    surface = summarize_general_subagent_surface(team_dir, entry=entry, task=task, vendor_root=vendor_root)
+    executed = False
+    if (
+        isinstance(task, dict)
+        and task
+        and str(surface.get("artifact_summary", "")).strip() in {"", "-"}
+    ):
+        artifact = run_general_subagent_support(team_dir, entry=entry, task=task, vendor_root=vendor_root)
+        if artifact:
+            executed = True
+            surface = summarize_general_subagent_surface(team_dir, entry=entry, task=task, vendor_root=vendor_root)
+    result = dict(surface)
+    result["executed"] = executed
+    return result
+
+
 def run_general_subagent_support(
     team_dir: Any,
     *,
