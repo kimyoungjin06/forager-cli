@@ -99,3 +99,45 @@ def test_context_pack_loads_existing_artifact_for_request_profile(tmp_path: Path
     assert pack["compile_reason"] == "persisted_pack"
     assert pack["docs_summary"] == "docs/RUNBOOK.md"
     assert "excluded=1" in pack["summary"]
+
+
+def test_context_pack_persist_writes_backend_managed_artifact(tmp_path: Path) -> None:
+    project_root = tmp_path / "Gamma"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "RUNBOOK.md").write_text("# Runbook\n", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "project_root": str(project_root),
+            "project_alias": "O7",
+            "doc_roots": [str(docs_dir)],
+            "onboarding_status": "active",
+        },
+        project_root=project_root,
+        entry={"background_runner_target": "local_tmux"},
+    )
+
+    persisted = context_pack.persist_context_pack(
+        team_dir,
+        entry={"name": "gamma", "project_alias": "O7", "project_root": str(project_root)},
+        task={
+            "request_id": "REQ-11",
+            "short_id": "T-011",
+            "prompt": "Prepare review context.",
+            "phase2_team_preset": "review",
+        },
+        project_root=project_root,
+    )
+
+    artifact_path = runtime_core.context_pack_path(team_dir, request_id="REQ-11", profile="review")
+    assert artifact_path.exists()
+    assert persisted["artifact_path"] == str(artifact_path)
+    assert context_pack.load_context_pack(
+        team_dir,
+        entry={"name": "gamma", "project_alias": "O7", "project_root": str(project_root)},
+        task={"request_id": "REQ-11", "phase2_team_preset": "review"},
+        project_root=project_root,
+    )["profile"] == "review"

@@ -17,6 +17,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_chat_aliases as chat_aliases
 import aoe_tg_action_audit as action_audit
+from aoe_tg_artifact_backend import load_jsonl_rows
 import aoe_tg_operator_summary as operator_summary
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary_alias
 import aoe_tg_runtime_core as runtime_core
@@ -312,19 +313,7 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
     if not exists:
         return [], FileFreshnessDTO(name="action_audit", path=key, exists=False, updated_at="")
     try:
-        rows: List[ActionAuditRowDTO] = []
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                raw = str(line or "").strip()
-                if not raw:
-                    continue
-                try:
-                    parsed = json.loads(raw)
-                except Exception:
-                    continue
-                if not isinstance(parsed, dict):
-                    continue
-                rows.append(_normalize_action_audit_row(parsed))
+        rows = [_normalize_action_audit_row(parsed) for parsed in load_jsonl_rows(path)]
         rows = rows[-limit:]
         rows.reverse()
         _LAST_GOOD_ACTION_AUDIT[key] = [

@@ -18,6 +18,7 @@ if str(ROOT / "scripts" / "gateway") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts" / "gateway"))
 
 from aoe_tg_runtime_core import recovery_summary_dir as runtime_recovery_summary_dir
+from aoe_tg_artifact_backend import artifact_backend
 from control_dashboard_state import (
     DashboardSnapshotDTO,
     RuntimeDetailDTO,
@@ -659,15 +660,25 @@ def write_nightly_session_summary(
     output_dir: Path,
     write_timestamped_copy: bool = True,
 ) -> Tuple[Path, Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
     markdown = render_nightly_session_summary(summary)
     payload = json.dumps(summary, ensure_ascii=False, indent=2) + "\n"
+    team_dir = str(summary.get("team_dir", "")).strip()
+    backend = artifact_backend(team_dir) if team_dir else None
+    stamp = _safe_stamp(str(summary.get("generated_at", "")))
+    if backend is not None:
+        return backend.write_recovery_summary(
+            markdown=markdown,
+            payload=payload,
+            output_dir=output_dir,
+            stamp=stamp,
+            write_timestamped_copy=write_timestamped_copy,
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
     latest_md = output_dir / "latest.md"
     latest_json = output_dir / "latest.json"
     latest_md.write_text(markdown, encoding="utf-8")
     latest_json.write_text(payload, encoding="utf-8")
     if write_timestamped_copy:
-        stamp = _safe_stamp(str(summary.get("generated_at", "")))
         (output_dir / f"{stamp}.md").write_text(markdown, encoding="utf-8")
         (output_dir / f"{stamp}.json").write_text(payload, encoding="utf-8")
     return latest_md, latest_json

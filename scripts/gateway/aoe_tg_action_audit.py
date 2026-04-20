@@ -3,15 +3,14 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
-import os
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary
 from aoe_tg_runtime_core import action_audit_path as runtime_action_audit_path
 
@@ -882,26 +881,7 @@ def _load_action_audit_rows(team_dir: Any) -> List[Dict[str, Any]]:
     token = str(team_dir or "").strip()
     if not token:
         return []
-    path = _action_audit_path(token)
-    if not path.exists():
-        return []
-    rows: List[Dict[str, Any]] = []
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                raw = str(line or "").strip()
-                if not raw:
-                    continue
-                try:
-                    row = json.loads(raw)
-                except Exception:
-                    continue
-                if not isinstance(row, dict):
-                    continue
-                rows.append(row)
-    except Exception:
-        return []
-    return rows
+    return artifact_backend(token).load_action_audit_rows()
 
 
 def append_action_audit_row(
@@ -925,8 +905,6 @@ def append_action_audit_row(
     source = str(source_command or "").strip()
     if not token or not source:
         return False
-    path = _action_audit_path(token)
-    path.parent.mkdir(parents=True, exist_ok=True)
     row = {
         "at": str(at or "").strip() or _action_audit_now(),
         "headline": str(headline or "").strip() or "-",
@@ -947,16 +925,7 @@ def append_action_audit_row(
             if not token or token in row:
                 continue
             row[token] = value
-    try:
-        with path.open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except Exception:
-        return False
-    return True
+    return artifact_backend(team_dir).append_action_audit_row(row)
 
 
 def load_latest_action_audit_for_task(team_dir: Any, request_id: Any) -> Dict[str, str]:

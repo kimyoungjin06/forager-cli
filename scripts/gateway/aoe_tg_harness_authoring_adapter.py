@@ -6,8 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_context_pack import load_context_pack
 from aoe_tg_document_registry import load_document_registry
+from aoe_tg_subagent_contract import (
+    build_general_research_subagent_contract,
+    summarize_subagent_contract,
+)
 from aoe_tg_workspace_brief import load_workspace_brief
 
 
@@ -93,15 +98,39 @@ def build_harness_authoring_plan(
     )
     vendor = inspect_vendor_harness(vendor_root)
     project_root = _project_root(entry, workspace)
+    backend = artifact_backend(team_dir).descriptor()
     claude_root = (project_root / ".claude") if project_root is not None else Path(team_dir).expanduser().resolve() / ".claude"
     agents_dir = claude_root / "agents"
     skills_dir = claude_root / "skills"
     records = registry.get("records") if isinstance(registry.get("records"), list) else []
     relevant_docs = pack.get("relevant_docs") if isinstance(pack.get("relevant_docs"), list) else []
+    general_subagent_contract = build_general_research_subagent_contract(
+        request_id=(task or {}).get("request_id") if isinstance(task, dict) else "",
+        task_ref=(task or {}).get("short_id") if isinstance(task, dict) else "",
+        objective=(
+            "Collect bounded upstream harness references, relevant local docs, and reusable operator evidence "
+            "for harness authoring without owning dispatch/apply decisions."
+        ),
+        backend_descriptor=backend,
+        relevant_doc_ids=[
+            _trim(item.get("doc_id"), 128)
+            for item in relevant_docs
+            if isinstance(item, dict) and _trim(item.get("doc_id"), 128)
+        ],
+        relevant_doc_paths=[
+            _trim(item.get("path"), 240)
+            for item in relevant_docs
+            if isinstance(item, dict) and _trim(item.get("path"), 240)
+        ],
+        context_pack_profile=_trim(pack.get("profile"), 64),
+        context_pack_summary=_trim(pack.get("summary"), 320),
+        vendor_patterns=list(REVFACTORY_HARNESS_PATTERNS),
+    )
     return {
         "adapter_kind": "upstream_harness_authoring",
         "repo_url": REVFACTORY_HARNESS_REPO,
         "vendor": vendor,
+        "artifact_backend": backend,
         "workspace_key": _trim(workspace.get("workspace_key"), 128) or "default",
         "project_alias": _trim(workspace.get("project_alias"), 32) or "O1",
         "project_root": str(project_root) if project_root is not None else "",
@@ -115,6 +144,8 @@ def build_harness_authoring_plan(
             if isinstance(item, dict) and _trim(item.get("doc_id"), 128)
         ][:6],
         "document_count": len(records),
+        "general_subagent_contract": general_subagent_contract,
+        "general_subagent_summary": summarize_subagent_contract(general_subagent_contract),
         "authoring_targets": {
             "claude_root": str(claude_root),
             "agents_dir": str(agents_dir),

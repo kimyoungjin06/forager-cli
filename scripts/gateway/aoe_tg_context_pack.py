@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_document_registry import load_document_registry
 from aoe_tg_runtime_core import context_pack_path
 from aoe_tg_workspace_brief import load_workspace_brief
@@ -253,6 +254,7 @@ def sanitize_context_pack(
     source = raw if isinstance(raw, dict) else {}
     item = task if isinstance(task, dict) else {}
     runtime = entry if isinstance(entry, dict) else {}
+    backend = artifact_backend(team_dir)
     profile, compile_reason = _derive_profile(item)
     request_id = _safe_token(source.get("request_id") or item.get("request_id"), "")
     task_id = _safe_token(source.get("task_id") or item.get("short_id"), "")
@@ -292,11 +294,11 @@ def sanitize_context_pack(
     sanitized["excluded_summary"] = _pack_excluded_summary(sanitized)
     if request_id:
         sanitized["artifact_path"] = str(
-            context_pack_path(team_dir, request_id=request_id, profile=sanitized["profile"])
+            backend.context_pack_path(request_id=request_id, profile=sanitized["profile"])
         )
     elif task_id:
         sanitized["artifact_path"] = str(
-            context_pack_path(team_dir, request_id=task_id, profile=sanitized["profile"])
+            backend.context_pack_path(request_id=task_id, profile=sanitized["profile"])
         )
     else:
         sanitized["artifact_path"] = ""
@@ -350,18 +352,42 @@ def load_context_pack(
     project_root: Optional[Path | str] = None,
 ) -> Dict[str, Any]:
     team_path = Path(team_dir).expanduser().resolve()
+    backend = artifact_backend(team_path)
     project_path = _project_root_path(project_root) or _project_root_path((entry or {}).get("project_root"))
     profile, _compile_reason = _derive_profile(task)
     request_id = _safe_token((task or {}).get("request_id"), "")
     if request_id:
-        artifact_path = context_pack_path(team_path, request_id=request_id, profile=profile)
+        artifact_path = backend.context_pack_path(request_id=request_id, profile=profile)
         if artifact_path.exists():
-            try:
-                raw = json.loads(artifact_path.read_text(encoding="utf-8"))
-            except Exception:
-                raw = {}
+            raw = backend.load_context_pack(request_id=request_id, profile=profile)
             return sanitize_context_pack(raw, team_dir=team_path, project_root=project_path, entry=entry, task=task)
     return build_context_pack(team_path, entry=entry, task=task, project_root=project_path)
+
+
+def persist_context_pack(
+    team_dir: Path | str,
+    *,
+    pack: Optional[Dict[str, Any]] = None,
+    entry: Optional[Dict[str, Any]] = None,
+    task: Optional[Dict[str, Any]] = None,
+    project_root: Optional[Path | str] = None,
+) -> Dict[str, Any]:
+    team_path = Path(team_dir).expanduser().resolve()
+    backend = artifact_backend(team_path)
+    project_path = _project_root_path(project_root) or _project_root_path((entry or {}).get("project_root"))
+    sanitized = sanitize_context_pack(
+        pack if isinstance(pack, dict) else build_context_pack(team_path, entry=entry, task=task, project_root=project_path),
+        team_dir=team_path,
+        project_root=project_path,
+        entry=entry,
+        task=task,
+    )
+    request_id = _safe_token(sanitized.get("request_id"), "")
+    profile = _safe_token(sanitized.get("profile"), "default")
+    if request_id:
+        backend.write_context_pack(request_id=request_id, profile=profile, payload=sanitized)
+        sanitized["artifact_path"] = str(backend.context_pack_path(request_id=request_id, profile=profile))
+    return sanitized
 
 
 def summarize_context_pack(

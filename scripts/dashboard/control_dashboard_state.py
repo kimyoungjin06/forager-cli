@@ -16,6 +16,7 @@ if str(GW_DIR) not in sys.path:
 
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_action_audit as action_audit
+from aoe_tg_artifact_backend import load_jsonl_rows
 import aoe_tg_operator_summary as operator_summary
 import aoe_tg_history_search as history_search
 import aoe_tg_chat_aliases as chat_aliases
@@ -957,22 +958,7 @@ def _server_guard_row_summary(row: ActionAuditRowDTO, *, include_status: bool) -
 
 def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: int = 8) -> list[ActionAuditRowDTO]:
     rows: list[ActionAuditRowDTO] = []
-    raw_rows: list[dict[str, Any]] = []
-    if paths.action_audit_file.exists():
-        try:
-            with paths.action_audit_file.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    token = str(line or "").strip()
-                    if not token:
-                        continue
-                    try:
-                        parsed = json.loads(token)
-                    except Exception:
-                        continue
-                    if isinstance(parsed, dict):
-                        raw_rows.append(parsed)
-        except Exception:
-            raw_rows = []
+    raw_rows: list[dict[str, Any]] = load_jsonl_rows(paths.action_audit_file)
     for raw in reversed(raw_rows):
         if not isinstance(raw, dict):
             continue

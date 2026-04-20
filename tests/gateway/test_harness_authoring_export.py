@@ -95,6 +95,8 @@ def test_export_harness_authoring_plan_writes_runtime_artifact(tmp_path: Path) -
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     assert payload["context_pack_profile"] == "followup_preview"
     assert payload["request_id"] == "REQ-1"
+    assert payload["artifact_backend"]["backend_kind"] == "filesystem"
+    assert payload["general_subagent_contract"]["subagent_kind"] == "general_research"
 
 
 def test_export_harness_authoring_plan_resolves_task_ref_and_vendor_root(tmp_path: Path) -> None:
@@ -164,3 +166,4 @@ def test_export_harness_authoring_plan_resolves_task_ref_and_vendor_root(tmp_pat
     assert payload["request_id"] == "REQ-7"
     assert payload["task_short_id"] == "T-202"
     assert payload["selected_doc_ids"] == ["spec-main"]
+    assert payload["general_subagent_contract"]["input_scope"]["doc_refs"] == ["spec-main"]

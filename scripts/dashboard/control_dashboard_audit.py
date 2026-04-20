@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-import fcntl
-import json
 import os
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
 
+from aoe_tg_artifact_backend import artifact_backend, load_jsonl_rows
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths
 
@@ -150,24 +148,7 @@ def _parse_action_audit_at(raw: object) -> datetime | None:
 
 
 def _load_existing_action_audit_rows(path: Path) -> List[Dict[str, Any]]:
-    if not path.exists():
-        return []
-    rows: List[Dict[str, Any]] = []
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                raw = str(line or "").strip()
-                if not raw:
-                    continue
-                try:
-                    parsed = json.loads(raw)
-                except Exception:
-                    continue
-                if isinstance(parsed, dict):
-                    rows.append(parsed)
-    except Exception:
-        return []
-    return rows
+    return load_jsonl_rows(path)
 
 
 
@@ -250,27 +231,10 @@ def _append_action_audit(
             row["planning_compact_summary"] = legacy_summary
     loader = load_existing_rows or _load_existing_action_audit_rows
     try:
-        paths.action_audit_file.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = _action_audit_lock_path(paths.action_audit_file)
-        with lock_path.open("a+", encoding="utf-8") as lock_handle:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            rows = loader(paths.action_audit_file)
-            rows.append(row)
-            rows = _prune_action_audit_rows(rows)
-            with tempfile.NamedTemporaryFile(
-                "w",
-                encoding="utf-8",
-                dir=str(paths.action_audit_file.parent),
-                prefix=paths.action_audit_file.name + ".tmp.",
-                delete=False,
-            ) as tmp_handle:
-                tmp_path = Path(tmp_handle.name)
-                for item in rows:
-                    tmp_handle.write(json.dumps(item, ensure_ascii=False) + "\n")
-                tmp_handle.flush()
-                os.fsync(tmp_handle.fileno())
-            os.replace(tmp_path, paths.action_audit_file)
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        rows = loader(paths.action_audit_file)
+        rows.append(row)
+        rows = _prune_action_audit_rows(rows)
+        artifact_backend(paths.team_dir).rewrite_action_audit_rows(rows)
     except Exception:
         return
 

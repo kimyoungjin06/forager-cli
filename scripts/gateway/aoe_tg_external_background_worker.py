@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 from aoe_tg_action_audit import append_action_audit_row
+from aoe_tg_artifact_backend import artifact_backend, load_json_file
 from aoe_tg_background_runs import (
     advance_background_run_ticket,
     claim_background_run_ticket,
@@ -24,43 +25,19 @@ def _trim(raw: Any, limit: int) -> str:
 
 
 def external_background_handoff_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
-    ticket_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
-    ticket_token = "-".join(part for part in ticket_token.split("-") if part) or "run"
-    runner_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(runner_target or "").strip())
-    runner_token = "-".join(part for part in runner_token.split("-") if part) or "external"
-    return Path(team_dir).expanduser().resolve() / "background_run_handoffs" / f"{runner_token}-{ticket_token}.json"
+    return artifact_backend(team_dir).external_background_handoff_path(ticket_id=ticket_id, runner_target=runner_target)
 
 
 def external_background_result_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
-    ticket_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
-    ticket_token = "-".join(part for part in ticket_token.split("-") if part) or "run"
-    runner_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(runner_target or "").strip())
-    runner_token = "-".join(part for part in runner_token.split("-") if part) or "external"
-    return Path(team_dir).expanduser().resolve() / "background_run_results" / f"{runner_token}-{ticket_token}.json"
+    return artifact_backend(team_dir).external_background_result_path(ticket_id=ticket_id, runner_target=runner_target)
 
 
 def external_background_ack_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
-    ticket_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(ticket_id or "").strip())
-    ticket_token = "-".join(part for part in ticket_token.split("-") if part) or "run"
-    runner_token = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(runner_target or "").strip())
-    runner_token = "-".join(part for part in runner_token.split("-") if part) or "external"
-    return Path(team_dir).expanduser().resolve() / "background_run_acks" / f"{runner_token}-{ticket_token}.json"
+    return artifact_backend(team_dir).external_background_ack_path(ticket_id=ticket_id, runner_target=runner_target)
 
 
 def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
-    team_root = Path(team_dir).expanduser().resolve()
-    resolved = Path(artifact_path).expanduser().resolve()
-    try:
-        return str(resolved.relative_to(team_root)).strip()
-    except Exception:
-        return str(resolved).strip()
-
-
-def _write_json(path: Path, payload: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
+    return artifact_backend(team_dir).relative_artifact_path(artifact_path)
 def _append_external_background_audit(
     *,
     team_dir: Path,
@@ -98,10 +75,7 @@ def _append_external_background_audit(
 def read_external_background_result(result_path: Path) -> Dict[str, Any]:
     if not result_path.exists():
         return {}
-    try:
-        raw = json.loads(result_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    raw = load_json_file(result_path)
     if not isinstance(raw, dict):
         return {}
     status = _trim(raw.get("status", ""), 32).lower()
@@ -125,10 +99,7 @@ def read_external_background_result(result_path: Path) -> Dict[str, Any]:
 def read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
     if not ack_path.exists():
         return {}
-    try:
-        raw = json.loads(ack_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    raw = load_json_file(ack_path)
     if not isinstance(raw, dict):
         return {}
     status = _trim(raw.get("status", ""), 32).lower()
@@ -151,10 +122,7 @@ def read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
 def read_external_background_handoff(handoff_path: Path) -> Dict[str, Any]:
     if not handoff_path.exists():
         return {}
-    try:
-        raw = json.loads(handoff_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    raw = load_json_file(handoff_path)
     if not isinstance(raw, dict):
         return {}
     launch_spec = normalize_background_launch_spec_snapshot(raw.get("launch_spec"))
@@ -229,8 +197,8 @@ def emit_external_background_handoff(
             evidence_bundle=f"status=failed | reason=model_route_probe_failed | probe={probe_status or 'failed'}",
         )
 
+    backend = artifact_backend(team_dir)
     handoff_path = external_background_handoff_path(team_dir, token, target)
-    handoff_path.parent.mkdir(parents=True, exist_ok=True)
     handoff_payload = {
         "version": "2026-04-07.v1",
         "emitted_at": now_iso(),
@@ -246,7 +214,12 @@ def emit_external_background_handoff(
             "execution_brief_status": _trim(claimed.get("execution_brief_status", ""), 48),
         },
     }
-    handoff_path.write_text(json.dumps(handoff_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    backend.write_external_background_artifact(
+        kind="handoffs",
+        ticket_id=token,
+        runner_target=target,
+        payload=handoff_payload,
+    )
     handoff_artifact = _artifact_path_for_team(team_dir, handoff_path)
     runtime_summary = f"{target}_handoff={handoff_artifact}"
     if binding_summary:
@@ -287,6 +260,7 @@ def emit_external_background_ack(
     if not token or target not in {"github_runner", "remote_worker"}:
         return {}
     team_dir = queue_path.parent
+    backend = artifact_backend(team_dir)
     ack_path = external_background_ack_path(team_dir, token, target)
     payload = {
         "version": "2026-04-08.v1",
@@ -297,7 +271,12 @@ def emit_external_background_ack(
         "evidence_artifacts": [_trim(item, 240) for item in list(evidence_artifacts or []) if _trim(item, 240)],
         "emitted_at": now_iso(),
     }
-    _write_json(ack_path, payload)
+    backend.write_external_background_artifact(
+        kind="acks",
+        ticket_id=token,
+        runner_target=target,
+        payload=payload,
+    )
     return {
         "artifact_path": _artifact_path_for_team(team_dir, ack_path),
         "payload": payload,
@@ -322,6 +301,7 @@ def emit_external_background_result(
     if not token or target not in {"github_runner", "remote_worker"} or terminal_status not in {"completed", "failed"}:
         return {}
     team_dir = queue_path.parent
+    backend = artifact_backend(team_dir)
     result_path = external_background_result_path(team_dir, token, target)
     payload = {
         "version": "2026-04-08.v1",
@@ -343,7 +323,12 @@ def emit_external_background_result(
         "evidence_artifacts": [_trim(item, 240) for item in list(evidence_artifacts or []) if _trim(item, 240)],
         "emitted_at": now_iso(),
     }
-    _write_json(result_path, payload)
+    backend.write_external_background_artifact(
+        kind="results",
+        ticket_id=token,
+        runner_target=target,
+        payload=payload,
+    )
     return {
         "artifact_path": _artifact_path_for_team(team_dir, result_path),
         "payload": payload,

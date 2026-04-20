@@ -48,6 +48,10 @@ def test_harness_authoring_plan_reports_missing_vendor_with_explicit_missing_roo
 
     assert plan["vendor"]["available"] is False
     assert plan["context_pack_profile"] == "followup_preview"
+    assert plan["artifact_backend"]["backend_kind"] == "filesystem"
+    assert plan["general_subagent_contract"]["subagent_kind"] == "general_research"
+    assert plan["general_subagent_contract"]["output_artifact"]["path"].endswith("req-1-general-research.json")
+    assert plan["general_subagent_summary"].startswith("general_research | profile=followup_preview")
     assert plan["authoring_targets"]["agents_dir"].endswith("/.claude/agents")
     assert "vendor=missing" in plan["summary"]
 
@@ -108,4 +112,6 @@ def test_harness_authoring_plan_detects_vendor_layout_and_selected_docs(tmp_path
     assert plan["vendor"]["patterns"] == list(harness_authoring_adapter.REVFACTORY_HARNESS_PATTERNS)
     assert plan["context_pack_profile"] == "review"
     assert plan["selected_doc_ids"] == ["spec-main"]
+    assert plan["general_subagent_contract"]["input_scope"]["doc_refs"] == ["spec-main"]
+    assert plan["general_subagent_contract"]["backend"]["backend_kind"] == "filesystem"
     assert "vendor=ready" in plan["summary"]
