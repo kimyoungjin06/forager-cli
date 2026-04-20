@@ -268,12 +268,7 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         row=raw,
     )
     if planning_compact_summary in {"", "-"}:
-        planning_compact_summary = str(
-            raw.get("planning_compact_summary")
-            or raw.get("planning_review_summary")
-            or raw.get("planning_review")
-            or "-"
-        ).strip() or "-"
+        planning_compact_summary = str(raw.get("planning_compact_summary") or raw.get("planning_compact") or "-").strip() or "-"
     approved_plan_summary = action_audit.summarize_retry_replan_approved_plan_handoff(
         raw.get("planning_handoff"),
         row=raw,

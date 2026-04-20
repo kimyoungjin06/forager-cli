@@ -500,11 +500,6 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
     planning_compact_summary = str(payload.get("planning_compact_summary", "")).strip() or str(
         source.get("planning_compact_summary", "")
     ).strip()
-    planning_compact_summary = (
-        planning_compact_summary
-        or str(payload.get("planning_review_summary", "")).strip()
-        or str(source.get("planning_review_summary", "")).strip()
-    )
     if not any(
         (
             job_contract,
@@ -536,6 +531,12 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
     if planning_compact_summary:
         normalized["planning_compact_summary"] = planning_compact_summary[:320]
     return normalized
+
+
+def _legacy_top_level_planning_review_summary(raw: Any) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    return str(raw.get("planning_review_summary", "")).strip() or str(raw.get("planning_review", "")).strip()
 
 
 def summarize_planning_handoff_snapshot(raw: Any) -> str:
@@ -595,7 +596,10 @@ def summarize_retry_replan_approved_plan_handoff(raw: Any, *, row: Optional[Dict
 def summarize_retry_replan_planning_compact_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
     handoff = normalize_planning_handoff_snapshot(raw, row=row)
     if not isinstance(handoff, dict) or not handoff:
-        return "-"
+        summary = _legacy_top_level_planning_review_summary(row)
+        if summary in {"", "-"}:
+            summary = _legacy_top_level_planning_review_summary(raw)
+        return "planning=" + compact_action_text(summary, limit=132) if summary not in {"", "-"} else "-"
     summary = ""
     if isinstance(raw, dict):
         summary = str(raw.get("planning_compact_summary", "")).strip()
@@ -603,6 +607,10 @@ def summarize_retry_replan_planning_compact_handoff(raw: Any, *, row: Optional[D
         summary = str(row.get("planning_compact_summary", "")).strip() or str(
             row.get("planning_compact", "")
         ).strip()
+    if summary in {"", "-"}:
+        summary = _legacy_top_level_planning_review_summary(row)
+    if summary in {"", "-"}:
+        summary = _legacy_top_level_planning_review_summary(raw)
     if summary in {"", "-"}:
         parts: List[str] = []
         planning_lanes = str(handoff.get("planning_lanes_summary", "")).strip()

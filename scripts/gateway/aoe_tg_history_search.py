@@ -485,13 +485,7 @@ def _action_audit_rows(
                     summarize_retry_replan_planning_compact_handoff(parsed.get("planning_handoff"), row=parsed)
                 )
                 if planning_compact_summary in {"", "-"}:
-                    planning_compact_summary = _normalize_text(
-                        str(
-                            parsed.get("planning_compact_summary")
-                            or parsed.get("planning_compact")
-                            or parsed.get("planning_review_summary")
-                        )
-                    )
+                    planning_compact_summary = _normalize_text(str(parsed.get("planning_compact_summary") or parsed.get("planning_compact")))
                 approved_plan_handoff_summary = _action_audit_approved_plan_handoff_summary(parsed)
                 planning_compact_summary = _normalize_text(
                     planning_compact_operator_summary(

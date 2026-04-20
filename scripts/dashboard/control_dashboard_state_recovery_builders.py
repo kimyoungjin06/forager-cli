@@ -107,9 +107,10 @@ def _worker_syncback_applied(
 
 
 def _recovery_latest_planning_compact_summary(row: Dict[str, Any]) -> str:
+    legacy_summary = str(row.get("latest_planning_review_summary", "")).strip()
     return (
         str(row.get("latest_planning_compact_summary", "")).strip()
-        or str(row.get("latest_planning_review_summary", "")).strip()
+        or legacy_summary
         or "-"
     )
 

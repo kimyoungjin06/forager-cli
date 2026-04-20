@@ -835,6 +835,17 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
 
 
+def test_action_audit_planning_compact_handoff_reads_legacy_top_level_review_key() -> None:
+    summary = action_audit.summarize_retry_replan_planning_compact_handoff(
+        {},
+        row={
+            "planning_review_summary": "draft via codex | review via claude | dispatch waits for critic-approved plan",
+        },
+    )
+
+    assert summary == "planning=draft via codex | review via claude | dispatch waits for critic-approved plan"
+
+
 def test_control_dashboard_history_route_uses_approved_plan_headline_summary_for_blocked_rows(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
