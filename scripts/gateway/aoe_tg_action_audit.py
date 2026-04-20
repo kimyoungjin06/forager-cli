@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+from aoe_tg_planning_compact_compat import legacy_planning_review_summary
 from aoe_tg_runtime_core import action_audit_path as runtime_action_audit_path
 
 ACTION_AUDIT_DIRNAME = "dashboard"
@@ -532,13 +533,6 @@ def normalize_planning_handoff_snapshot(raw: Any, *, row: Optional[Dict[str, Any
         normalized["planning_compact_summary"] = planning_compact_summary[:320]
     return normalized
 
-
-def _legacy_top_level_planning_review_summary(raw: Any) -> str:
-    if not isinstance(raw, dict):
-        return ""
-    return str(raw.get("planning_review_summary", "")).strip() or str(raw.get("planning_review", "")).strip()
-
-
 def summarize_planning_handoff_snapshot(raw: Any) -> str:
     handoff = raw if isinstance(raw, dict) else normalize_planning_handoff_snapshot(raw)
     if not isinstance(handoff, dict) or not handoff:
@@ -596,9 +590,9 @@ def summarize_retry_replan_approved_plan_handoff(raw: Any, *, row: Optional[Dict
 def summarize_retry_replan_planning_compact_handoff(raw: Any, *, row: Optional[Dict[str, Any]] = None) -> str:
     handoff = normalize_planning_handoff_snapshot(raw, row=row)
     if not isinstance(handoff, dict) or not handoff:
-        summary = _legacy_top_level_planning_review_summary(row)
+        summary = legacy_planning_review_summary(row)
         if summary in {"", "-"}:
-            summary = _legacy_top_level_planning_review_summary(raw)
+            summary = legacy_planning_review_summary(raw)
         return "planning=" + compact_action_text(summary, limit=132) if summary not in {"", "-"} else "-"
     summary = ""
     if isinstance(raw, dict):
@@ -608,9 +602,9 @@ def summarize_retry_replan_planning_compact_handoff(raw: Any, *, row: Optional[D
             row.get("planning_compact", "")
         ).strip()
     if summary in {"", "-"}:
-        summary = _legacy_top_level_planning_review_summary(row)
+        summary = legacy_planning_review_summary(row)
     if summary in {"", "-"}:
-        summary = _legacy_top_level_planning_review_summary(raw)
+        summary = legacy_planning_review_summary(raw)
     if summary in {"", "-"}:
         parts: List[str] = []
         planning_lanes = str(handoff.get("planning_lanes_summary", "")).strip()

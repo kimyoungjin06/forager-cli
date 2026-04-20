@@ -18,6 +18,7 @@ if str(GW_DIR) not in sys.path:
 import aoe_tg_chat_aliases as chat_aliases
 import aoe_tg_action_audit as action_audit
 import aoe_tg_operator_summary as operator_summary
+from aoe_tg_planning_compact_compat import legacy_planning_review_summary_alias
 import aoe_tg_runtime_core as runtime_core
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_view as task_view
@@ -37,11 +38,6 @@ _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_COMMAND_RESOLUTION: Dict[str, Dict[str, str]] = {}
 _LAST_GOOD_ACTION_AUDIT: Dict[str, List[Dict[str, str]]] = {}
-
-
-def _legacy_planning_review_summary_alias(summary: str) -> str:
-    # Legacy compatibility helper for older state consumers.
-    return summary
 
 
 @dataclass(frozen=True)
@@ -80,7 +76,7 @@ class ActionAuditRowDTO:
 
     @property
     def planning_review_summary(self) -> str:
-        return _legacy_planning_review_summary_alias(self.planning_compact_summary)
+        return legacy_planning_review_summary_alias(self.planning_compact_summary)
 
 
 @dataclass(frozen=True)

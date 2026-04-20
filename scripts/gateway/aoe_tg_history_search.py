@@ -16,6 +16,7 @@ from aoe_tg_action_audit import (
     summarize_retry_replan_planning_compact_handoff,
 )
 from aoe_tg_operator_summary import load_latest_command_resolution
+from aoe_tg_planning_compact_compat import legacy_planning_review_summary_alias
 from aoe_tg_project_state import project_alias_for_key
 from aoe_tg_runtime_core import (
     action_audit_path as runtime_action_audit_path,
@@ -38,11 +39,6 @@ _SOURCE_PRIORITY = {
     "control": 2,
     "recovery": 1,
 }
-
-
-def _legacy_planning_review_summary_alias(summary: str) -> str:
-    # Legacy compatibility helper for older state consumers.
-    return summary
 
 
 @dataclass
@@ -79,7 +75,7 @@ class HistoryRow:
 
     @property
     def planning_review_summary(self) -> str:
-        return _legacy_planning_review_summary_alias(self.planning_compact_summary)
+        return legacy_planning_review_summary_alias(self.planning_compact_summary)
 
 
 def _normalize_text(raw: Any) -> str:

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
 
+from aoe_tg_planning_compact_compat import legacy_planning_review_summary
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths
 
 DEFAULT_ACTION_AUDIT_RETENTION_DAYS = 14
@@ -148,14 +149,6 @@ def _parse_action_audit_at(raw: object) -> datetime | None:
     return parsed
 
 
-def _legacy_payload_planning_compact_summary(source: Dict[str, Any]) -> str:
-    return (
-        str(source.get("planning_review_summary", "")).strip()
-        or str(source.get("planning_review", "")).strip()
-    )
-
-
-
 def _load_existing_action_audit_rows(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
         return []
@@ -252,7 +245,7 @@ def _append_action_audit(
         if value:
             row[row_key] = value
     if str(row.get("planning_compact_summary", "")).strip() in {"", "-"}:
-        legacy_summary = _legacy_payload_planning_compact_summary(payload)
+        legacy_summary = legacy_planning_review_summary(payload)
         if legacy_summary:
             row["planning_compact_summary"] = legacy_summary
     loader = load_existing_rows or _load_existing_action_audit_rows
