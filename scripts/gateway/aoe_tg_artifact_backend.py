@@ -15,11 +15,14 @@ from aoe_tg_runtime_core import (
     action_audit_path as runtime_action_audit_path,
     context_pack_dir as runtime_context_pack_dir,
     context_pack_path as runtime_context_pack_path,
+    document_registry_path as runtime_document_registry_path,
     harness_authoring_dir as runtime_harness_authoring_dir,
     harness_authoring_plan_path as runtime_harness_authoring_plan_path,
     model_endpoint_registry_path as runtime_model_endpoint_registry_path,
     model_routing_policy_path as runtime_model_routing_policy_path,
+    provider_capacity_state_path as runtime_provider_capacity_state_path,
     recovery_summary_dir as runtime_recovery_summary_dir,
+    workspace_brief_path as runtime_workspace_brief_path,
 )
 
 
@@ -121,11 +124,14 @@ class ArtifactBackendDescriptor:
     backend_kind: str
     team_dir: str
     context_pack_dir: str
+    workspace_brief_path: str
+    document_registry_path: str
     harness_authoring_dir: str
     action_audit_path: str
     recovery_summary_dir: str
     model_endpoint_registry_path: str
     model_routing_policy_path: str
+    provider_capacity_state_path: str
     summary: str
 
 
@@ -140,18 +146,24 @@ class FileSystemArtifactBackend:
             backend_kind=self.backend_kind,
             team_dir=str(self.team_dir),
             context_pack_dir=str(runtime_context_pack_dir(self.team_dir)),
+            workspace_brief_path=str(self.workspace_brief_path()),
+            document_registry_path=str(self.document_registry_path()),
             harness_authoring_dir=str(self.harness_authoring_dir()),
             action_audit_path=str(self.action_audit_path()),
             recovery_summary_dir=str(self.recovery_summary_dir()),
             model_endpoint_registry_path=str(self.model_endpoint_registry_path()),
             model_routing_policy_path=str(self.model_routing_policy_path()),
+            provider_capacity_state_path=str(self.provider_capacity_state_path()),
             summary=(
                 "backend=filesystem "
                 f"context={runtime_context_pack_dir(self.team_dir).name} "
+                f"workspace={self.workspace_brief_path().name} "
+                f"docs={self.document_registry_path().name} "
                 f"harness={self.harness_authoring_dir().name} "
                 f"audit={self.action_audit_path().name} "
                 f"recovery={self.recovery_summary_dir().name} "
-                f"model={self.model_routing_policy_path().name}"
+                f"model={self.model_routing_policy_path().name} "
+                f"capacity={self.provider_capacity_state_path().name}"
             ),
         )
         return asdict(descriptor)
@@ -164,6 +176,24 @@ class FileSystemArtifactBackend:
 
     def write_context_pack(self, *, request_id: str, profile: str, payload: Dict[str, Any]) -> Path:
         return _write_json(self.context_pack_path(request_id=request_id, profile=profile), payload)
+
+    def workspace_brief_path(self) -> Path:
+        return runtime_workspace_brief_path(self.team_dir)
+
+    def load_workspace_brief(self) -> Dict[str, Any]:
+        return load_json_file(self.workspace_brief_path())
+
+    def write_workspace_brief(self, payload: Dict[str, Any]) -> Path:
+        return _write_json(self.workspace_brief_path(), payload)
+
+    def document_registry_path(self) -> Path:
+        return runtime_document_registry_path(self.team_dir)
+
+    def load_document_registry(self) -> Dict[str, Any]:
+        return load_json_file(self.document_registry_path())
+
+    def write_document_registry(self, payload: Dict[str, Any]) -> Path:
+        return _write_json(self.document_registry_path(), payload)
 
     def harness_authoring_dir(self) -> Path:
         return runtime_harness_authoring_dir(self.team_dir)
@@ -238,6 +268,20 @@ class FileSystemArtifactBackend:
 
     def write_model_routing_policy(self, payload: Dict[str, Any]) -> Path:
         return _write_json(self.model_routing_policy_path(), payload)
+
+    def provider_capacity_state_path(self, *, filename: str = "provider_capacity.json") -> Path:
+        return runtime_provider_capacity_state_path(self.team_dir, filename=filename)
+
+    def load_provider_capacity_state(self, *, filename: str = "provider_capacity.json") -> Dict[str, Any]:
+        return load_json_file(self.provider_capacity_state_path(filename=filename))
+
+    def write_provider_capacity_state(
+        self,
+        payload: Dict[str, Any],
+        *,
+        filename: str = "provider_capacity.json",
+    ) -> Path:
+        return _write_json(self.provider_capacity_state_path(filename=filename), payload)
 
     def write_recovery_summary(
         self,

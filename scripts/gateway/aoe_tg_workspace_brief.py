@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_runtime_core import model_endpoint_registry_path, model_routing_policy_path, workspace_brief_path
 
 _WORKSPACE_STATUSES = {"draft", "validated", "active", "stale"}
@@ -254,13 +255,11 @@ def build_workspace_brief(*, project_root: Any, team_dir: Any, entry: Any = None
 
 
 def load_workspace_brief(team_dir: Any, *, entry: Any = None, project_root: Any = "") -> Dict[str, Any]:
-    path = workspace_brief_path(team_dir)
-    if not path.exists():
+    backend = artifact_backend(team_dir)
+    path = backend.workspace_brief_path()
+    payload = backend.load_workspace_brief()
+    if not payload and not path.exists():
         return build_workspace_brief(project_root=project_root, team_dir=team_dir, entry=entry)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        payload = {}
     return sanitize_workspace_brief(
         payload,
         project_root=project_root,
@@ -271,8 +270,7 @@ def load_workspace_brief(team_dir: Any, *, entry: Any = None, project_root: Any 
 
 
 def write_workspace_brief(team_dir: Any, payload: Any, *, project_root: Any = "", entry: Any = None) -> Dict[str, Any]:
-    path = workspace_brief_path(team_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = artifact_backend(team_dir).workspace_brief_path()
     normalized = sanitize_workspace_brief(
         payload,
         project_root=project_root,
@@ -280,7 +278,7 @@ def write_workspace_brief(team_dir: Any, payload: Any, *, project_root: Any = ""
         entry=entry,
         artifact_path=str(path),
     )
-    path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact_backend(team_dir).write_workspace_brief(normalized)
     return normalized
 
 

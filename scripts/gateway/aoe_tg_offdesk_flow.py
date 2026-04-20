@@ -24,6 +24,7 @@ from aoe_tg_action_audit import (
     load_latest_replan_auto_route_status_summary_for_runtime,
     load_latest_replan_auto_routing_policy_summary_for_runtime,
 )
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
 from aoe_tg_background_runs import (
     background_runs_state_path,
@@ -1751,11 +1752,16 @@ def save_offdesk_state(path: Path, state: Dict[str, Any]) -> None:
 
 
 def load_provider_capacity_state(path: Path) -> Dict[str, Any]:
+    payload = artifact_backend(path.parent).load_provider_capacity_state(filename=path.name)
+    if payload or path.exists():
+        return payload if isinstance(payload, dict) else {}
     return load_auto_state(path)
 
 
 def save_provider_capacity_state(path: Path, state: Dict[str, Any]) -> None:
-    save_auto_state(path, state)
+    payload = dict(state)
+    payload["updated_at"] = now_iso()
+    artifact_backend(path.parent).write_provider_capacity_state(payload, filename=path.name)
 
 
 def scheduler_session_name() -> str:

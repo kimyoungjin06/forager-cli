@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_runtime_core import provider_capacity_state_path
 
 
@@ -49,13 +50,10 @@ def load_provider_capacity_state(team_dir: Any) -> dict:
         path = provider_capacity_state_path(token)
     except Exception:
         return {}
-    if not path.exists():
+    payload = artifact_backend(path.parent).load_provider_capacity_state(filename=path.name)
+    if not payload and not path.exists():
         return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def extract_retry_after_sec(raw: object, *, default: int = 300) -> int:

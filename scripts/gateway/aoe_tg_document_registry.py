@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
-import json
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_runtime_core import document_registry_path
 from aoe_tg_workspace_brief import load_workspace_brief
 
@@ -281,13 +281,11 @@ def build_document_registry(*, team_dir: Any, project_root: Any = "", entry: Any
 
 
 def load_document_registry(team_dir: Any, *, project_root: Any = "", entry: Any = None) -> Dict[str, Any]:
-    path = document_registry_path(team_dir)
-    if not path.exists():
+    backend = artifact_backend(team_dir)
+    path = backend.document_registry_path()
+    payload = backend.load_document_registry()
+    if not payload and not path.exists():
         return build_document_registry(team_dir=team_dir, project_root=project_root, entry=entry)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        payload = {}
     return sanitize_document_registry(
         payload,
         team_dir=team_dir,
@@ -298,8 +296,7 @@ def load_document_registry(team_dir: Any, *, project_root: Any = "", entry: Any 
 
 
 def write_document_registry(team_dir: Any, payload: Any, *, project_root: Any = "", entry: Any = None) -> Dict[str, Any]:
-    path = document_registry_path(team_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = artifact_backend(team_dir).document_registry_path()
     normalized = sanitize_document_registry(
         payload,
         team_dir=team_dir,
@@ -307,7 +304,7 @@ def write_document_registry(team_dir: Any, payload: Any, *, project_root: Any = 
         entry=entry,
         artifact_path=str(path),
     )
-    path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact_backend(team_dir).write_document_registry(normalized)
     return normalized
 
 

@@ -43,6 +43,12 @@ def test_filesystem_backend_round_trips_context_pack_and_audit_rows(tmp_path: Pa
     )
     assert harness_written.name == "REQ-1.json"
     assert backend.load_harness_authoring_plan(request_id="REQ-1")["summary"] == "harness export"
+    workspace_written = backend.write_workspace_brief({"workspace_key": "alpha", "summary": "status=active"})
+    registry_written = backend.write_document_registry({"records": [{"doc_id": "spec-main"}], "summary": "indexed=1 canonical=1 stale=0"})
+    assert workspace_written.name == "workspace_brief.json"
+    assert registry_written.name == "document_registry.json"
+    assert backend.load_workspace_brief()["workspace_key"] == "alpha"
+    assert backend.load_document_registry()["records"][0]["doc_id"] == "spec-main"
 
 
 def test_filesystem_backend_writes_recovery_summary_and_external_artifacts(tmp_path: Path) -> None:
@@ -81,5 +87,8 @@ def test_filesystem_backend_writes_recovery_summary_and_external_artifacts(tmp_p
     assert routing_path.name == "model_routing.json"
     assert backend.load_model_endpoint_registry()["endpoints"][0]["endpoint_id"] == "ep-1"
     assert backend.load_model_routing_policy()["routes"]["background_worker_primary"]["endpoint_id"] == "ep-1"
+    capacity_path = backend.write_provider_capacity_state({"providers": {"claude": {"mode": "blocked"}}})
+    assert capacity_path.name == "provider_capacity.json"
+    assert backend.load_provider_capacity_state()["providers"]["claude"]["mode"] == "blocked"
     assert backend.read_json_artifact(relative_path="harness_authoring/subagents/req-1-general-research.json")["summary"] == "repo scan complete"
     assert backend.relative_artifact_path(subagent_path) == "harness_authoring/subagents/req-1-general-research.json"
