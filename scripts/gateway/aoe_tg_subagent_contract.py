@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from aoe_tg_artifact_backend import artifact_backend
+
 
 SUBAGENT_CONTRACT_VERSION = "2026-04-20.v1"
 SUBAGENT_RESULT_VERSION = "2026-04-20.v1"
@@ -123,3 +125,60 @@ def normalize_subagent_result_artifact(raw: Any) -> Dict[str, Any]:
         "artifact_refs": _normalize_rows(raw.get("artifact_refs"), limit=8, item_limit=200),
     }
     return artifact
+
+
+def summarize_subagent_result_artifact(raw: Any) -> str:
+    if not isinstance(raw, dict) or not raw:
+        return "-"
+    artifact = normalize_subagent_result_artifact(raw)
+    if not artifact:
+        return "-"
+    return (
+        f"{_trim(artifact.get('subagent_kind'), 64) or '-'} | "
+        f"confidence={_trim(artifact.get('confidence'), 32) or '-'} | "
+        f"sources={len(list(artifact.get('sources') or []))} | "
+        f"findings={len(list(artifact.get('key_findings') or []))} | "
+        f"blocking={len(list(artifact.get('blocking_issues') or []))}"
+    )
+
+
+def _contract_output_artifact_path(contract: Any) -> str:
+    item = contract if isinstance(contract, dict) else {}
+    output = item.get("output_artifact") if isinstance(item.get("output_artifact"), dict) else {}
+    return _trim(output.get("path"), 240)
+
+
+def persist_subagent_result_artifact(
+    team_dir: Any,
+    *,
+    contract: Any,
+    raw_result: Any,
+) -> Dict[str, Any]:
+    relative_path = _contract_output_artifact_path(contract)
+    if not relative_path:
+        return {}
+    normalized = normalize_subagent_result_artifact(raw_result)
+    if not normalized:
+        return {}
+    backend = artifact_backend(team_dir)
+    path = backend.write_json_artifact(relative_path=relative_path, payload=normalized)
+    payload = dict(normalized)
+    payload["artifact_path"] = backend.relative_artifact_path(path)
+    payload["artifact_summary"] = summarize_subagent_result_artifact(normalized)
+    return payload
+
+
+def load_subagent_result_artifact(team_dir: Any, *, contract: Any) -> Dict[str, Any]:
+    relative_path = _contract_output_artifact_path(contract)
+    if not relative_path:
+        return {}
+    backend = artifact_backend(team_dir)
+    raw = backend.read_json_artifact(relative_path=relative_path)
+    if not raw:
+        return {}
+    payload = normalize_subagent_result_artifact(raw)
+    if not payload:
+        return {}
+    payload["artifact_path"] = relative_path
+    payload["artifact_summary"] = summarize_subagent_result_artifact(payload)
+    return payload

@@ -37,6 +37,12 @@ def test_filesystem_backend_round_trips_context_pack_and_audit_rows(tmp_path: Pa
     assert backend.load_context_pack(request_id="REQ-1", profile="on_desk_plan")["summary"] == "profile=on_desk_plan"
     assert appended is True
     assert backend.load_action_audit_rows()[-1]["headline"] == "Retry | blocked"
+    harness_written = backend.write_harness_authoring_plan(
+        payload={"request_id": "REQ-1", "summary": "harness export"},
+        request_id="REQ-1",
+    )
+    assert harness_written.name == "REQ-1.json"
+    assert backend.load_harness_authoring_plan(request_id="REQ-1")["summary"] == "harness export"
 
 
 def test_filesystem_backend_writes_recovery_summary_and_external_artifacts(tmp_path: Path) -> None:
@@ -65,3 +71,15 @@ def test_filesystem_backend_writes_recovery_summary_and_external_artifacts(tmp_p
         ticket_id="BGT-1",
         runner_target="github_runner",
     )["ticket_id"] == "BGT-1"
+    registry_path = backend.write_model_endpoint_registry({"endpoints": [{"endpoint_id": "ep-1"}]})
+    routing_path = backend.write_model_routing_policy({"routes": {"background_worker_primary": {"endpoint_id": "ep-1"}}})
+    subagent_path = backend.write_json_artifact(
+        relative_path="harness_authoring/subagents/req-1-general-research.json",
+        payload={"summary": "repo scan complete"},
+    )
+    assert registry_path.name == "model_endpoints.json"
+    assert routing_path.name == "model_routing.json"
+    assert backend.load_model_endpoint_registry()["endpoints"][0]["endpoint_id"] == "ep-1"
+    assert backend.load_model_routing_policy()["routes"]["background_worker_primary"]["endpoint_id"] == "ep-1"
+    assert backend.read_json_artifact(relative_path="harness_authoring/subagents/req-1-general-research.json")["summary"] == "repo scan complete"
+    assert backend.relative_artifact_path(subagent_path) == "harness_authoring/subagents/req-1-general-research.json"

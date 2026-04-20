@@ -13,6 +13,7 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_harness_authoring_export as harness_authoring_export  # noqa: E402
+import aoe_tg_subagent_contract as subagent_contract  # noqa: E402
 import aoe_tg_workspace_brief as workspace_brief  # noqa: E402
 
 
@@ -92,6 +93,7 @@ def test_export_harness_authoring_plan_writes_runtime_artifact(tmp_path: Path) -
     artifact = Path(result["artifact_path"])
     assert artifact.exists()
     assert artifact.name == "REQ-1.json"
+    assert result["artifact_relative_path"] == "harness_authoring/REQ-1.json"
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     assert payload["context_pack_profile"] == "followup_preview"
     assert payload["request_id"] == "REQ-1"
@@ -151,6 +153,24 @@ def test_export_harness_authoring_plan_resolves_task_ref_and_vendor_root(tmp_pat
         project_alias="O5",
     )
     vendor_root = _write_vendor_root(tmp_path)
+    contract = subagent_contract.build_general_research_subagent_contract(
+        request_id="REQ-7",
+        task_ref="T-202",
+        objective="Collect bounded harness references and local doc evidence.",
+        backend_descriptor={"backend_kind": "filesystem", "summary": "backend=filesystem"},
+        relevant_doc_ids=["spec-main"],
+        context_pack_profile="review",
+    )
+    subagent_contract.persist_subagent_result_artifact(
+        team_dir,
+        contract=contract,
+        raw_result={
+            "summary": "repo scan complete",
+            "sources": ["docs/SPEC.md"],
+            "key_findings": ["vendor pattern matched"],
+            "recommended_next_step": "/task T-202",
+        },
+    )
 
     result = harness_authoring_export.export_harness_authoring_plan(
         project_root=project_root,
@@ -167,3 +187,5 @@ def test_export_harness_authoring_plan_resolves_task_ref_and_vendor_root(tmp_pat
     assert payload["task_short_id"] == "T-202"
     assert payload["selected_doc_ids"] == ["spec-main"]
     assert payload["general_subagent_contract"]["input_scope"]["doc_refs"] == ["spec-main"]
+    assert payload["general_subagent_artifact"]["summary"] == "repo scan complete"
+    assert payload["general_subagent_artifact_summary"].startswith("general_research | confidence=medium")

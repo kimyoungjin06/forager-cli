@@ -52,6 +52,8 @@ def test_harness_authoring_plan_reports_missing_vendor_with_explicit_missing_roo
     assert plan["general_subagent_contract"]["subagent_kind"] == "general_research"
     assert plan["general_subagent_contract"]["output_artifact"]["path"].endswith("req-1-general-research.json")
     assert plan["general_subagent_summary"].startswith("general_research | profile=followup_preview")
+    assert plan["general_subagent_artifact"] == {}
+    assert plan["general_subagent_artifact_summary"] == "-"
     assert plan["authoring_targets"]["agents_dir"].endswith("/.claude/agents")
     assert "vendor=missing" in plan["summary"]
 

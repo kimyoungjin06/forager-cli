@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_harness_authoring_adapter import build_harness_authoring_plan
-from aoe_tg_runtime_core import harness_authoring_plan_path, resolve_default_team_dir, resolve_state_file
+from aoe_tg_runtime_core import resolve_default_team_dir, resolve_state_file
 from aoe_tg_runtime_read import load_manager_state
 from aoe_tg_task_state import normalize_task_alias_key
 
@@ -100,14 +101,25 @@ def export_harness_authoring_plan(
     plan["project_name"] = project_name
     plan["request_id"] = _trim(task.get("request_id"), 128)
     plan["task_short_id"] = _trim(task.get("short_id"), 64)
-    artifact = Path(output_path).expanduser().resolve() if _trim(output_path, 400) else harness_authoring_plan_path(
-        team_dir,
-        request_id=plan["request_id"],
-        task_ref=plan["task_short_id"],
+    backend = artifact_backend(team_dir)
+    artifact = (
+        Path(output_path).expanduser().resolve()
+        if _trim(output_path, 400)
+        else backend.write_harness_authoring_plan(
+            payload=plan,
+            request_id=plan["request_id"],
+            task_ref=plan["task_short_id"],
+        )
     )
-    artifact.parent.mkdir(parents=True, exist_ok=True)
-    artifact.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return {"artifact_path": str(artifact), "summary": _trim(plan.get("summary"), 400), "plan": plan}
+    if _trim(output_path, 400):
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        "artifact_path": str(artifact),
+        "artifact_relative_path": backend.relative_artifact_path(artifact),
+        "summary": _trim(plan.get("summary"), 400),
+        "plan": plan,
+    }
 
 
 def _build_parser() -> argparse.ArgumentParser:

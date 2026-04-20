@@ -48,3 +48,31 @@ def test_normalize_subagent_result_artifact_coerces_missing_fields() -> None:
     assert artifact["summary"] == "repo scan complete"
     assert artifact["sources"] == ["docs/RUNBOOK.md", "docs/SPEC.md"]
     assert artifact["blocking_issues"] == []
+
+
+def test_persist_and_load_subagent_result_artifact_round_trip(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    contract = subagent_contract.build_general_research_subagent_contract(
+        request_id="REQ-7",
+        objective="Collect bounded harness references and local doc evidence.",
+        backend_descriptor={"backend_kind": "filesystem", "summary": "backend=filesystem"},
+        relevant_doc_ids=["spec-main"],
+        context_pack_profile="review",
+    )
+
+    persisted = subagent_contract.persist_subagent_result_artifact(
+        team_dir,
+        contract=contract,
+        raw_result={
+            "summary": "repo scan complete",
+            "sources": ["docs/RUNBOOK.md", "docs/SPEC.md"],
+            "key_findings": ["spec drift found"],
+            "recommended_next_step": "/task T-001",
+        },
+    )
+    loaded = subagent_contract.load_subagent_result_artifact(team_dir, contract=contract)
+
+    assert persisted["artifact_path"] == "harness_authoring/subagents/req-7-general-research.json"
+    assert persisted["artifact_summary"].startswith("general_research | confidence=medium")
+    assert loaded["summary"] == "repo scan complete"
+    assert loaded["artifact_path"] == "harness_authoring/subagents/req-7-general-research.json"

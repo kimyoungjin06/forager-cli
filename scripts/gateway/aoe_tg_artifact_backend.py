@@ -15,6 +15,10 @@ from aoe_tg_runtime_core import (
     action_audit_path as runtime_action_audit_path,
     context_pack_dir as runtime_context_pack_dir,
     context_pack_path as runtime_context_pack_path,
+    harness_authoring_dir as runtime_harness_authoring_dir,
+    harness_authoring_plan_path as runtime_harness_authoring_plan_path,
+    model_endpoint_registry_path as runtime_model_endpoint_registry_path,
+    model_routing_policy_path as runtime_model_routing_policy_path,
     recovery_summary_dir as runtime_recovery_summary_dir,
 )
 
@@ -117,8 +121,11 @@ class ArtifactBackendDescriptor:
     backend_kind: str
     team_dir: str
     context_pack_dir: str
+    harness_authoring_dir: str
     action_audit_path: str
     recovery_summary_dir: str
+    model_endpoint_registry_path: str
+    model_routing_policy_path: str
     summary: str
 
 
@@ -133,13 +140,18 @@ class FileSystemArtifactBackend:
             backend_kind=self.backend_kind,
             team_dir=str(self.team_dir),
             context_pack_dir=str(runtime_context_pack_dir(self.team_dir)),
+            harness_authoring_dir=str(self.harness_authoring_dir()),
             action_audit_path=str(self.action_audit_path()),
             recovery_summary_dir=str(self.recovery_summary_dir()),
+            model_endpoint_registry_path=str(self.model_endpoint_registry_path()),
+            model_routing_policy_path=str(self.model_routing_policy_path()),
             summary=(
                 "backend=filesystem "
                 f"context={runtime_context_pack_dir(self.team_dir).name} "
+                f"harness={self.harness_authoring_dir().name} "
                 f"audit={self.action_audit_path().name} "
-                f"recovery={self.recovery_summary_dir().name}"
+                f"recovery={self.recovery_summary_dir().name} "
+                f"model={self.model_routing_policy_path().name}"
             ),
         )
         return asdict(descriptor)
@@ -152,6 +164,47 @@ class FileSystemArtifactBackend:
 
     def write_context_pack(self, *, request_id: str, profile: str, payload: Dict[str, Any]) -> Path:
         return _write_json(self.context_pack_path(request_id=request_id, profile=profile), payload)
+
+    def harness_authoring_dir(self) -> Path:
+        return runtime_harness_authoring_dir(self.team_dir)
+
+    def harness_authoring_plan_path(
+        self,
+        *,
+        request_id: str = "",
+        task_ref: str = "",
+        filename: str = "",
+    ) -> Path:
+        return runtime_harness_authoring_plan_path(
+            self.team_dir,
+            request_id=request_id,
+            task_ref=task_ref,
+            filename=filename,
+        )
+
+    def load_harness_authoring_plan(
+        self,
+        *,
+        request_id: str = "",
+        task_ref: str = "",
+        filename: str = "",
+    ) -> Dict[str, Any]:
+        return load_json_file(
+            self.harness_authoring_plan_path(request_id=request_id, task_ref=task_ref, filename=filename)
+        )
+
+    def write_harness_authoring_plan(
+        self,
+        *,
+        payload: Dict[str, Any],
+        request_id: str = "",
+        task_ref: str = "",
+        filename: str = "",
+    ) -> Path:
+        return _write_json(
+            self.harness_authoring_plan_path(request_id=request_id, task_ref=task_ref, filename=filename),
+            payload,
+        )
 
     def action_audit_path(self) -> Path:
         return runtime_action_audit_path(self.team_dir)
@@ -167,6 +220,24 @@ class FileSystemArtifactBackend:
 
     def recovery_summary_dir(self) -> Path:
         return runtime_recovery_summary_dir(self.team_dir)
+
+    def model_endpoint_registry_path(self) -> Path:
+        return runtime_model_endpoint_registry_path(self.team_dir)
+
+    def load_model_endpoint_registry(self) -> Dict[str, Any]:
+        return load_json_file(self.model_endpoint_registry_path())
+
+    def write_model_endpoint_registry(self, payload: Dict[str, Any]) -> Path:
+        return _write_json(self.model_endpoint_registry_path(), payload)
+
+    def model_routing_policy_path(self) -> Path:
+        return runtime_model_routing_policy_path(self.team_dir)
+
+    def load_model_routing_policy(self) -> Dict[str, Any]:
+        return load_json_file(self.model_routing_policy_path())
+
+    def write_model_routing_policy(self, payload: Dict[str, Any]) -> Path:
+        return _write_json(self.model_routing_policy_path(), payload)
 
     def write_recovery_summary(
         self,
@@ -218,6 +289,16 @@ class FileSystemArtifactBackend:
     ) -> Dict[str, Any]:
         path = self._external_background_path(kind=kind, ticket_id=ticket_id, runner_target=runner_target)
         return load_json_file(path)
+
+    def artifact_path(self, relative_path: str) -> Path:
+        token = _trim(relative_path, 400).strip("/")
+        return self.team_dir / token if token else self.team_dir
+
+    def write_json_artifact(self, *, relative_path: str, payload: Dict[str, Any]) -> Path:
+        return _write_json(self.artifact_path(relative_path), payload)
+
+    def read_json_artifact(self, *, relative_path: str) -> Dict[str, Any]:
+        return load_json_file(self.artifact_path(relative_path))
 
     def relative_artifact_path(self, artifact_path: Path | str) -> str:
         resolved = Path(artifact_path).expanduser().resolve()

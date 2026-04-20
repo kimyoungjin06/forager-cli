@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from aoe_tg_artifact_backend import artifact_backend
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_workspace_brief as workspace_brief
 from aoe_tg_runtime_core import model_endpoint_registry_path, model_routing_policy_path
@@ -298,11 +299,9 @@ def compile_stack(
             "run_lock_mode": workspace_payload["run_lock_mode_default"],
         },
     )
-    registry_path = model_endpoint_registry_path(resolved_team_dir)
-    routing_path = model_routing_policy_path(resolved_team_dir)
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    routing_path.write_text(json.dumps(policy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    backend = artifact_backend(resolved_team_dir)
+    registry_path = backend.write_model_endpoint_registry(registry)
+    routing_path = backend.write_model_routing_policy(policy)
     harness_summary = "on_desk={on_desk} | off_desk={off_desk} | executor={executor}".format(
         on_desk=_trim(((harness_data.get("on_desk") or {}) if isinstance(harness_data.get("on_desk"), dict) else {}).get("kind"), 64) or "-",
         off_desk=_trim(((harness_data.get("off_desk") or {}) if isinstance(harness_data.get("off_desk"), dict) else {}).get("kind"), 64) or "-",

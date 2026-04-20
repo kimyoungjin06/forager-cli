@@ -11,7 +11,9 @@ from aoe_tg_context_pack import load_context_pack
 from aoe_tg_document_registry import load_document_registry
 from aoe_tg_subagent_contract import (
     build_general_research_subagent_contract,
+    load_subagent_result_artifact,
     summarize_subagent_contract,
+    summarize_subagent_result_artifact,
 )
 from aoe_tg_workspace_brief import load_workspace_brief
 
@@ -126,6 +128,7 @@ def build_harness_authoring_plan(
         context_pack_summary=_trim(pack.get("summary"), 320),
         vendor_patterns=list(REVFACTORY_HARNESS_PATTERNS),
     )
+    general_subagent_artifact = load_subagent_result_artifact(team_dir, contract=general_subagent_contract)
     return {
         "adapter_kind": "upstream_harness_authoring",
         "repo_url": REVFACTORY_HARNESS_REPO,
@@ -146,6 +149,8 @@ def build_harness_authoring_plan(
         "document_count": len(records),
         "general_subagent_contract": general_subagent_contract,
         "general_subagent_summary": summarize_subagent_contract(general_subagent_contract),
+        "general_subagent_artifact": general_subagent_artifact,
+        "general_subagent_artifact_summary": summarize_subagent_result_artifact(general_subagent_artifact),
         "authoring_targets": {
             "claude_root": str(claude_root),
             "agents_dir": str(agents_dir),
