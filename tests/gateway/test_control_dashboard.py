@@ -25,6 +25,7 @@ import aoe_tg_operator_summary as operator_summary  # noqa: E402
 import aoe_tg_orch_task_handlers as orch_task_handlers  # noqa: E402
 from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
+import aoe_tg_subagent_contract as subagent_contract  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
 import control_dashboard_action_exec_chat as chat_exec  # noqa: E402
 import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
@@ -391,6 +392,33 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         write_timestamped_copy=False,
     )
     return team_dir, manager_state_file, project_root
+
+
+def _persist_general_subagent_artifact(project_root: Path, *, request_id: str = "REQ-1", task_ref: str = "T-001") -> None:
+    project_team_dir = project_root / ".aoe-team"
+    contract = subagent_contract.build_general_research_subagent_contract(
+        request_id=request_id,
+        task_ref=task_ref,
+        objective="Collect bounded harness references and local doc evidence.",
+        backend_descriptor={"backend_kind": "filesystem", "summary": "backend=filesystem"},
+        relevant_doc_ids=["runbook", "spec-main"],
+        context_pack_profile="followup_preview",
+        context_pack_summary="profile=followup_preview docs=2 canonical=1",
+        vendor_patterns=["producer_reviewer", "supervisor"],
+    )
+    subagent_contract.persist_subagent_result_artifact(
+        project_team_dir,
+        contract=contract,
+        raw_result={
+            "summary": "repo scan complete",
+            "confidence": "high",
+            "sources": ["docs/RUNBOOK.md", "docs/SPEC.md"],
+            "key_findings": ["harness patterns mapped", "local docs aligned"],
+            "blocking_issues": ["vendor notes still need a local delta check"],
+            "recommended_next_step": "/task T-001",
+            "artifact_refs": ["harness_authoring/plan.json"],
+        },
+    )
 
 def test_runtime_read_matches_gateway_wrapper_state(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
@@ -1436,7 +1464,7 @@ def test_control_dashboard_history_route_renders_query_results(tmp_path: Path, m
 
 def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
-    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
     state = gw.load_manager_state(manager_state_file, control_root, team_dir)
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["followup_brief_status"] = "preview_only"
@@ -1544,6 +1572,7 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     task["background_run_worker_update_proposal_summary"] = "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md"
     task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
     gw.save_manager_state(manager_state_file, state)
+    _persist_general_subagent_artifact(project_root)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -1607,6 +1636,12 @@ def test_control_dashboard_task_detail_route_redirects_alias_to_request_id(tmp_p
     assert "/control/chat" in text
     assert "Open Chat Console" in text
     assert "context_pack_docs" in text
+    assert "subagent_contract" in text
+    assert "general_research | profile=followup_preview | backend=filesystem" in text
+    assert "subagent_evidence" in text
+    assert "general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_artifact" in text
+    assert "harness_authoring/subagents/req-1-general-research.json" in text
     assert "judge_binding" in text
     assert "judge=unbound:claude-opus-4.1" in text
     assert "judge_probe" in text
@@ -1771,7 +1806,7 @@ def test_control_dashboard_state_resolves_alias_route_via_request_id(tmp_path: P
 
 def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
-    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
     state = gw.load_manager_state(manager_state_file, control_root, team_dir)
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["followup_brief_status"] = "preview_only"
@@ -1879,6 +1914,7 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     task["background_run_worker_update_proposal_summary"] = "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md"
     task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
     gw.save_manager_state(manager_state_file, state)
+    _persist_general_subagent_artifact(project_root)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -1945,6 +1981,12 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "context_pack" in text
     assert "profile=followup_preview" in text
     assert "context_pack_docs" in text
+    assert "subagent_contract" in text
+    assert "general_research | profile=followup_preview | backend=filesystem" in text
+    assert "subagent_evidence" in text
+    assert "general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_artifact" in text
+    assert "harness_authoring/subagents/req-1-general-research.json" in text
     assert "reentry_rails" in text
     assert "retry=blocked:underspecified exec=L1 review=R1" in text
     assert "followup=preview_only exec=L2 review=R1" in text
@@ -2350,7 +2392,7 @@ def test_control_dashboard_offdesk_route_shows_execution_brief_snapshot(tmp_path
 
 def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
-    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     state["chat_sessions"] = {
         "123456": {
@@ -2405,6 +2447,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
         link_href="/control/runtimes/O2",
         at="2026-04-09T11:06:00+09:00",
     )
+    _persist_general_subagent_artifact(project_root)
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
         team_dir=team_dir,
@@ -2466,6 +2509,13 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "nightly_planning_compact" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "subagent_contract" in text
+    assert "general_research | profile=" in text
+    assert "backend=filesystem" in text
+    assert "subagent_evidence" in text
+    assert "general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_artifact" in text
+    assert "harness_authoring/subagents/req-1-general-research.json" in text
     assert "execution_brief_summary" in text
     assert "underspecified=1" in text
     assert "background_run_summary" in text

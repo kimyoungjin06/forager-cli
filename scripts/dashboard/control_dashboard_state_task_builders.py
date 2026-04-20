@@ -16,6 +16,7 @@ import aoe_tg_ops_policy as ops_policy
 import aoe_tg_action_audit as action_audit
 import aoe_tg_background_runs as background_runs
 import aoe_tg_context_pack as context_pack
+import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
@@ -57,6 +58,25 @@ from control_dashboard_state_common import (
     _worker_update_preview_button,
 )
 from control_dashboard_state_models import ActiveTaskRowDTO, LaneObservatoryDTO, TaskDetailDTO
+
+
+def _general_subagent_surface(
+    team_dir: Optional[Path],
+    *,
+    entry: Dict[str, Any],
+    task: Dict[str, Any],
+) -> Dict[str, str]:
+    if team_dir is None or not isinstance(task, dict) or not task:
+        return {
+            "summary": "-",
+            "artifact_summary": "-",
+            "artifact_path": "-",
+        }
+    return harness_authoring_adapter.summarize_general_subagent_surface(
+        team_dir,
+        entry=entry,
+        task=task,
+    )
 
 
 def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
@@ -792,6 +812,12 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
         latest_replan_auto_route_status_summary = "-"
         latest_replan_auto_operator_summary = "-"
         latest_planning_handoff_summary = "-"
+        general_subagent_surface = {
+            "summary": "-",
+            "artifact_summary": "-",
+            "artifact_path": "-",
+        }
+        team_dir: Optional[Path] = None
         team_dir_raw = str(entry.get("team_dir", "")).strip()
         if team_dir_raw:
             team_dir = Path(team_dir_raw)
@@ -840,6 +866,11 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 endpoint_id=str(endpoint.get("endpoint_id", "")).strip(),
                 probe_status="unsupported_probe" if judge_binding.get("bound") and provider_kind != "ollama" else ("deferred_live_probe" if judge_binding.get("bound") else "unbound"),
                 probe_summary=judge_probe_summary,
+            )
+            general_subagent_surface = _general_subagent_surface(
+                team_dir,
+                entry=entry,
+                task=task,
             )
         if isinstance(root_team_dir, Path):
             latest_replan_auto_routing_policy = action_audit.load_latest_replan_auto_routing_policy_for_runtime(
@@ -1061,6 +1092,9 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
             context_pack_summary=pack_summary,
             context_pack_docs=pack_docs,
             context_pack_excluded=pack_excluded,
+            general_subagent_summary=str(general_subagent_surface.get("summary", "")).strip() or "-",
+            general_subagent_artifact_summary=str(general_subagent_surface.get("artifact_summary", "")).strip() or "-",
+            general_subagent_artifact_path=str(general_subagent_surface.get("artifact_path", "")).strip() or "-",
             judge_binding_summary=judge_binding_summary,
             judge_probe_summary=judge_probe_summary,
             reentry_rails_summary=str(task.get("reentry_rails_summary", "")).strip() or "-",

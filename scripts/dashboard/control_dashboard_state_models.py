@@ -290,6 +290,9 @@ class TaskDetailDTO(_PlanningCompactSummaryCompatMixin):
     context_pack_summary: str = ""
     context_pack_docs: str = ""
     context_pack_excluded: str = ""
+    general_subagent_summary: str = ""
+    general_subagent_artifact_summary: str = ""
+    general_subagent_artifact_path: str = ""
     judge_binding_summary: str = ""
     judge_probe_summary: str = ""
     reentry_rails_summary: str = ""
@@ -477,6 +480,9 @@ class RuntimeDetailDTO(
     active_task_context_pack_summary: str
     active_task_context_pack_docs: str
     active_task_context_pack_excluded: str
+    active_task_general_subagent_summary: str
+    active_task_general_subagent_artifact_summary: str
+    active_task_general_subagent_artifact_path: str
     active_task_model_plan_summary: str
     active_task_judge_binding_summary: str
     active_task_judge_probe_summary: str
@@ -641,6 +647,9 @@ class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     active_task_phase2_shape: str
     active_task_phase2_quality: str
     active_task_context_pack_summary: str
+    active_task_general_subagent_summary: str
+    active_task_general_subagent_artifact_summary: str
+    active_task_general_subagent_artifact_path: str
     active_task_model_plan_summary: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str

@@ -177,3 +177,25 @@ def summarize_harness_authoring_plan(
 ) -> str:
     plan = build_harness_authoring_plan(team_dir, entry=entry, task=task, vendor_root=vendor_root)
     return _trim(plan.get("summary"), 400) or "-"
+
+
+def summarize_general_subagent_surface(
+    team_dir: Any,
+    *,
+    entry: Any = None,
+    task: Any = None,
+    vendor_root: Any = "",
+) -> Dict[str, str]:
+    if not isinstance(task, dict) or not task:
+        return {
+            "summary": "-",
+            "artifact_summary": "-",
+            "artifact_path": "-",
+        }
+    plan = build_harness_authoring_plan(team_dir, entry=entry, task=task, vendor_root=vendor_root)
+    artifact = plan.get("general_subagent_artifact") if isinstance(plan.get("general_subagent_artifact"), dict) else {}
+    return {
+        "summary": _trim(plan.get("general_subagent_summary"), 320) or "-",
+        "artifact_summary": _trim(plan.get("general_subagent_artifact_summary"), 320) or "-",
+        "artifact_path": _trim(artifact.get("artifact_path"), 240) or "-",
+    }

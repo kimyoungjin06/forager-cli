@@ -656,6 +656,15 @@ def _build_recovery_runtime_rows(
                 active_task_phase2_shape=str(row.get("active_task_phase2_shape", "")).strip() or "-",
                 active_task_phase2_quality=str(row.get("active_task_phase2_quality", "")).strip() or "-",
                 active_task_context_pack_summary=str(row.get("active_task_context_pack_summary", "")).strip() or "-",
+                active_task_general_subagent_summary=(
+                    str(row.get("active_task_general_subagent_summary", "")).strip() or "-"
+                ),
+                active_task_general_subagent_artifact_summary=(
+                    str(row.get("active_task_general_subagent_artifact_summary", "")).strip() or "-"
+                ),
+                active_task_general_subagent_artifact_path=(
+                    str(row.get("active_task_general_subagent_artifact_path", "")).strip() or "-"
+                ),
                 active_task_model_plan_summary=str(row.get("active_task_model_plan_summary", "")).strip() or "-",
                 active_task_reentry_rails_summary=str(row.get("active_task_reentry_rails_summary", "")).strip() or "-",
                 active_task_background_run_status=str(row.get("active_task_background_run_status", "")).strip() or "-",

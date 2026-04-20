@@ -19,6 +19,7 @@ import aoe_tg_background_runs as background_runs
 import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_document_registry as document_registry
+import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
@@ -61,6 +62,25 @@ from control_dashboard_state_common import (
     _worker_update_preview_button,
 )
 from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
+
+
+def _general_subagent_surface(
+    team_dir: Optional[Path],
+    *,
+    entry: Dict[str, Any],
+    task: Dict[str, Any],
+) -> Dict[str, str]:
+    if team_dir is None or not isinstance(task, dict) or not task:
+        return {
+            "summary": "-",
+            "artifact_summary": "-",
+            "artifact_path": "-",
+        }
+    return harness_authoring_adapter.summarize_general_subagent_surface(
+        team_dir,
+        entry=entry,
+        task=task,
+    )
 
 
 def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
@@ -1508,6 +1528,9 @@ def _build_runtime_detail(
     active_task_context_pack_summary = "-"
     active_task_context_pack_docs = "-"
     active_task_context_pack_excluded = "-"
+    active_task_general_subagent_summary = "-"
+    active_task_general_subagent_artifact_summary = "-"
+    active_task_general_subagent_artifact_path = "-"
     active_task_model_plan_summary = "-"
     active_task_judge_binding_summary = "-"
     active_task_judge_probe_summary = "-"
@@ -1528,6 +1551,20 @@ def _build_runtime_detail(
         active_task_context_pack_summary = str(pack.get("summary", "")).strip() or "-"
         active_task_context_pack_docs = str(pack.get("docs_summary", "")).strip() or "-"
         active_task_context_pack_excluded = str(pack.get("excluded_summary", "")).strip() or "-"
+        active_task_general_subagent_surface = _general_subagent_surface(
+            team_dir,
+            entry=entry,
+            task=active_task,
+        )
+        active_task_general_subagent_summary = (
+            str(active_task_general_subagent_surface.get("summary", "")).strip() or "-"
+        )
+        active_task_general_subagent_artifact_summary = (
+            str(active_task_general_subagent_surface.get("artifact_summary", "")).strip() or "-"
+        )
+        active_task_general_subagent_artifact_path = (
+            str(active_task_general_subagent_surface.get("artifact_path", "")).strip() or "-"
+        )
         active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
         active_task_judge_binding_summary = str(judge_binding.get("summary", "")).strip() or "-"
         endpoint = judge_binding.get("endpoint") if isinstance(judge_binding.get("endpoint"), dict) else {}
@@ -1931,6 +1968,9 @@ def _build_runtime_detail(
         active_task_context_pack_summary=active_task_context_pack_summary,
         active_task_context_pack_docs=active_task_context_pack_docs,
         active_task_context_pack_excluded=active_task_context_pack_excluded,
+        active_task_general_subagent_summary=active_task_general_subagent_summary,
+        active_task_general_subagent_artifact_summary=active_task_general_subagent_artifact_summary,
+        active_task_general_subagent_artifact_path=active_task_general_subagent_artifact_path,
         active_task_model_plan_summary=active_task_model_plan_summary,
         active_task_judge_binding_summary=active_task_judge_binding_summary,
         active_task_judge_probe_summary=active_task_judge_probe_summary,
