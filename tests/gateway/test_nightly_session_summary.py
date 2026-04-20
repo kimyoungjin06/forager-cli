@@ -17,12 +17,12 @@ for path in (GW_DIR, DASH_DIR, TEST_DIR):
 
 import aoe_tg_action_audit as action_audit  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
-from test_control_dashboard import _build_runtime  # noqa: E402
+from test_control_dashboard import _build_runtime, _persist_general_subagent_artifact  # noqa: E402
 
 
 def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
-    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["background_run_worker_syncback_status"] = "applied"
@@ -31,6 +31,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     )
     task["background_run_worker_syncback_at"] = "2026-04-09T11:07:00+09:00"
     manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _persist_general_subagent_artifact(project_root)
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Offdesk Judge",
@@ -217,6 +218,9 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert any(row["link_href"] == "/control/runtimes/O2" for row in summary["recent_action_audit"])
     assert runtimes[0]["project_alias"] == "O2"
     assert runtimes[0]["completed_task_count"] == 1
+    assert runtimes[0]["latest_subagent_evidence_summary"] == (
+        "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1"
+    )
     assert "/monitor O2" in runtimes[0]["operator_hints"]
     assert "/offdesk review O2" in runtimes[0]["operator_hints"]
     assert runtimes[0]["active_task_phase2_actions"] == []
@@ -240,6 +244,9 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert "draft via" in runtimes[0]["latest_planning_compact_summary"]
     assert "review via" in runtimes[0]["latest_planning_compact_summary"]
     assert "dispatch waits for critic-approved plan" in runtimes[0]["latest_planning_compact_summary"]
+    rendered = nightly_summary.render_nightly_session_summary(summary)
+    assert "## O2 Alpha | draft via" in rendered
+    assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in rendered
     assert "latest_planning_review_summary" not in runtimes[0]
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"

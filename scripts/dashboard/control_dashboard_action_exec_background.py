@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import aoe_tg_background_runs as background_runs
+import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
 import aoe_tg_ops_policy as ops_policy
+import aoe_tg_task_state as task_state
+import aoe_tg_task_view as task_view
 
 from control_dashboard_action_exec_shared import _json, _load_dashboard_manager_state
 from control_dashboard_common import DashboardAppConfig, _not_found_json
@@ -30,6 +33,11 @@ def _server_guard_pressure_preview_payload(
     chat_console_href: str,
     chat_id: str,
     preset_action: Dict[str, object] | None,
+    support_action: Dict[str, object] | None,
+    planning_compact_summary: str,
+    subagent_contract_summary: str,
+    subagent_evidence_summary: str,
+    subagent_artifact_path: str,
 ) -> Dict[str, object]:
     guard = snapshot.control_summary.server_guard
     links = {
@@ -77,9 +85,18 @@ def _server_guard_pressure_preview_payload(
         "chat_id": chat_id,
         "focus_badge": "server-guard",
         "payload": payload,
+        "planning_compact": planning_compact_summary,
+        "planning_compact_summary": planning_compact_summary,
+        "subagent_contract_summary": subagent_contract_summary,
+        "subagent_evidence_summary": subagent_evidence_summary,
+        "subagent_artifact_path": subagent_artifact_path,
         "next_step": next_step,
         "remediation": remediation,
-        "actions": [preset_action] if isinstance(preset_action, dict) else [],
+        "actions": [
+            action
+            for action in (preset_action, support_action)
+            if isinstance(action, dict)
+        ],
         "links": links,
         "preview": {
             "kind": outcome_kind,
@@ -104,6 +121,38 @@ def _server_guard_pressure_preview_payload(
             "detail": f"pressure_kind={pressure_kind} | reasons={' | '.join(matching_reasons) if matching_reasons else '-'} | process={guard.process_summary}",
         },
     }
+
+
+def _latest_task_for_active_runtime(manager_state: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any], str]:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    active_key = str(manager_state.get("active", "")).strip()
+    if not active_key:
+        return {}, {}, ""
+    entry = projects.get(active_key) if isinstance(projects.get(active_key), dict) else {}
+    if not isinstance(entry, dict):
+        return {}, {}, ""
+    request_id = str(entry.get("last_request_id", "")).strip()
+    task = task_state.get_task_record(entry, request_id) if request_id else {}
+    if isinstance(task, dict) and task:
+        return task, entry, request_id
+    tasks = task_state.ensure_project_tasks(entry)
+    latest_task: Dict[str, Any] = {}
+    latest_request_id = ""
+    latest_at = ""
+    for candidate_request_id, candidate_task in tasks.items():
+        if not isinstance(candidate_task, dict):
+            continue
+        status = str(candidate_task.get("status", "")).strip().lower()
+        if status == "completed":
+            continue
+        updated_at = str(candidate_task.get("updated_at", "")).strip() or str(candidate_task.get("created_at", "")).strip()
+        if updated_at >= latest_at:
+            latest_at = updated_at
+            latest_request_id = str(candidate_request_id).strip()
+            latest_task = candidate_task
+    if latest_task:
+        return latest_task, entry, latest_request_id
+    return {}, entry, ""
 
 
 def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: DashboardAppConfig) -> Tuple[int, Dict[str, str], bytes]:
@@ -139,6 +188,13 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
         manager_state_file=config.manager_state_file,
     )
     _paths, manager_state = _load_dashboard_manager_state(config)
+    active_task, active_entry, active_request_id = _latest_task_for_active_runtime(manager_state)
+    planning_bundle = task_view.planning_operator_bundle(active_task)
+    subagent_surface = harness_authoring_adapter.summarize_general_subagent_surface(
+        str(active_entry.get("team_dir", "")).strip() or str(config.team_dir),
+        entry=active_entry,
+        task=active_task,
+    )
     raw_sessions = manager_state.get("chat_sessions") if isinstance(manager_state.get("chat_sessions"), dict) else {}
     chat_ids = sorted(str(key).strip() for key in raw_sessions.keys() if str(key).strip())
     preferred_chat_id = chat_ids[0] if chat_ids else ""
@@ -192,6 +248,7 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
     }[pressure_kind]
     preset_spec = preset_specs[pressure_kind]
     preset_action = None
+    support_action = None
     if preferred_chat_id:
         preset_payload = {
             "chat_id": preferred_chat_id,
@@ -214,6 +271,26 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             "mode": "safe",
             "payload_json": json.dumps(preset_payload, ensure_ascii=False, separators=(",", ":")),
             "command": f"chat-session-preset:{preset_spec['label']}",
+        }
+    active_task_ref = (
+        str(active_task.get("short_id", "")).strip()
+        or str(active_task.get("alias", "")).strip()
+        or active_request_id
+    )
+    if active_task_ref:
+        support_action = {
+            "label": "Run Support Research",
+            "note": task_view.planning_operator_note(
+                active_task,
+                notes=[
+                    "materialize bounded general_research evidence for the active task before switching preset or forcing another recovery move"
+                ],
+            ),
+            "method": "POST",
+            "path": "/control/actions/task/subagent-support-run",
+            "mode": "safe",
+            "payload_json": json.dumps({"task_ref": active_task_ref}, ensure_ascii=False, separators=(",", ":")),
+            "command": f"/task {active_task_ref} | general-research-support",
         }
     guard = snapshot.control_summary.server_guard
     reasons = [token.strip() for token in str(guard.reason_summary or "").split("|") if token.strip()]
@@ -262,6 +339,11 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             chat_console_href=chat_preset_href,
             chat_id=preferred_chat_id,
             preset_action=preset_action,
+            support_action=support_action,
+            planning_compact_summary=str(planning_bundle.get("planning_compact", "")).strip() or "-",
+            subagent_contract_summary=str(subagent_surface.get("summary", "")).strip() or "-",
+            subagent_evidence_summary=str(subagent_surface.get("artifact_summary", "")).strip() or "-",
+            subagent_artifact_path=str(subagent_surface.get("artifact_path", "")).strip() or "-",
         ),
         status=200,
     )

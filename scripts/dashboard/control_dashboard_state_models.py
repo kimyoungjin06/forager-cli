@@ -679,6 +679,7 @@ class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     latest_replan_auto_operator_summary: str
     latest_planning_handoff_summary: str
     latest_planning_compact_summary: str
+    latest_subagent_evidence_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str

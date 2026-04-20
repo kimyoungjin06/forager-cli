@@ -2528,12 +2528,14 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "server-guard" in text
     assert "Open Health JSON" in text
     assert "nightly_planning_compact" in text
+    assert "nightly_subagent_evidence" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "subagent_contract" in text
     assert "general_research | profile=" in text
     assert "backend=filesystem" in text
     assert "subagent_evidence" in text
+    assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
     assert "general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
     assert "subagent_artifact" in text
     assert "harness_authoring/subagents/req-1-general-research.json" in text
@@ -7405,6 +7407,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
         config=config,
     )
     payload = json.loads(body.decode("utf-8"))
+    dashboard_app._append_action_audit(config, payload)
     overview_status, _overview_headers, overview_body = dashboard_app.build_dashboard_response("/control", config)
     health_status, _health_headers, health_body = dashboard_app.build_dashboard_response("/control/health", config)
     overview_text = overview_body.decode("utf-8")
@@ -7422,6 +7425,13 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert any(row.get("path") == "/control/actions/chat/session-update" for row in (payload.get("actions") or []))
     assert any("\"chat_id\":\"123456\"" in str(row.get("payload_json", "")) for row in (payload.get("actions") or []))
     assert any("\"default_mode\":\"direct\"" in str(row.get("payload_json", "")) for row in (payload.get("actions") or []))
+    assert any(
+        row.get("path") == "/control/actions/task/subagent-support-run"
+        and row.get("payload_json") == '{"task_ref":"T-001"}'
+        for row in (payload.get("actions") or [])
+    )
+    assert payload["planning_compact"].startswith("draft via codex, claude | review via codex, claude")
+    assert payload["subagent_evidence_summary"] == "-"
     assert any(row.get("href") == "/control/chat?chat=123456&preset=global-direct" for row in (payload.get("links") or []))
     assert any(row.get("href") == "/control/history?q=codex&scope=control" for row in (payload.get("links") or []))
     assert any(row.get("href") == "/control/health/view" for row in (payload.get("links") or []))
@@ -7436,6 +7446,7 @@ def test_control_dashboard_post_server_guard_pressure_preview_returns_host_conte
     assert "Codex Pressure Preview | preview" in overview_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Codex Pressure Preview")
+    assert "planning_compact=draft via" in health["server_guard_latest_result_summary"]
     assert any(
         row.get("path") == "/control/actions/runtime/server-guard-pressure-preview"
         and "\"pressure_kind\":\"codex\"" in str(row.get("payload_json", ""))

@@ -98,6 +98,16 @@ def _recent_action_planning_compact_summary(row: Dict[str, Any]) -> str:
     return str(row.get("planning_compact_summary", "")).strip() or "-"
 
 
+def _recent_action_subagent_evidence_summary(row: Dict[str, Any]) -> str:
+    return action_audit.summarize_subagent_evidence_compact(row)
+
+
+def _runtime_subagent_evidence_summary(detail: RuntimeDetailDTO) -> str:
+    return action_audit.summarize_subagent_evidence_compact(
+        {"subagent_evidence_summary": detail.active_task_general_subagent_artifact_summary}
+    )
+
+
 def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
     return {
         "request_id": task.request_id,
@@ -250,6 +260,7 @@ def build_nightly_session_summary(
             detail,
             approved_plan=latest_planning_review_approved_plan,
         )
+        latest_subagent_evidence_summary = _runtime_subagent_evidence_summary(detail)
         task_rows = _task_rows_for_runtime(manager_state, detail)
         runtimes.append(
             {
@@ -352,6 +363,7 @@ def build_nightly_session_summary(
                 "latest_replan_auto_routing_policy": latest_replan_policy,
                 "latest_planning_handoff_summary": latest_planning_handoff_summary,
                 "latest_planning_compact_summary": latest_planning_compact_summary,
+                "latest_subagent_evidence_summary": latest_subagent_evidence_summary,
                 "latest_replan_auto_route_summary": _latest_replan_auto_route_summary(snapshot.team_dir, detail.project_alias),
                 "latest_replan_auto_route_status_summary": action_audit.load_latest_replan_auto_route_status_summary_for_runtime(
                     snapshot.team_dir,
@@ -504,6 +516,9 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
             planning_compact = _recent_action_planning_compact_summary(row)
             if planning_compact and planning_compact != "-":
                 lines.append(f"  - planning_compact: {planning_compact}")
+            subagent_evidence = _recent_action_subagent_evidence_summary(row)
+            if subagent_evidence and subagent_evidence != "-":
+                lines.append(f"  - {subagent_evidence}")
             if str(row.get("link_href", "")).strip():
                 lines.append(
                     "  - link: {label} -> {href}".format(
@@ -519,6 +534,9 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
         runtime_planning_compact = str(runtime.get("latest_planning_compact_summary", "")).strip()
         if runtime_planning_compact and runtime_planning_compact != "-":
             runtime_heading = f"{runtime_heading} | {runtime_planning_compact}"
+        runtime_subagent_evidence = str(runtime.get("latest_subagent_evidence_summary", "")).strip()
+        if runtime_subagent_evidence and runtime_subagent_evidence != "-":
+            runtime_heading = f"{runtime_heading} | {runtime_subagent_evidence}"
         lines.extend(
             [
                 f"## {runtime_heading}",
@@ -538,6 +556,7 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- replan_auto_decision: {runtime.get('latest_replan_auto_decision_summary', '-')}",
                 f"- replan_auto_routing_policy: {runtime.get('latest_replan_auto_routing_policy_summary', '-')}",
                 f"- planning_compact: {runtime.get('latest_planning_compact_summary', '-')}",
+                f"- subagent_evidence: {runtime.get('latest_subagent_evidence_summary', '-')}",
                 f"- planning_handoff: {runtime.get('latest_planning_handoff_summary', '-')}",
                 f"- latest_replan_auto_route: {runtime.get('latest_replan_auto_route_summary', '-')}",
                 f"- auto_route_status: {runtime.get('latest_replan_auto_route_status_summary', '-')}",
