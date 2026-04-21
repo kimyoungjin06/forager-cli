@@ -11,6 +11,8 @@ import aoe_tg_management_handlers as management_handlers
 import aoe_tg_scheduler_control_handlers as scheduler_control_handlers
 import aoe_tg_task_state as task_state
 import aoe_tg_task_view as task_view
+import control_dashboard_server_guard as server_guard
+import control_dashboard_state as dashboard_state
 
 from control_dashboard_action_exec_shared import (
     _DASHBOARD_CHAT_ID,
@@ -161,7 +163,20 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
     provider_state = management_handlers._load_provider_capacity_state(management_handlers._provider_capacity_state_path(args))
     active_task, active_entry, active_request_id = _latest_task_for_active_runtime(manager_state)
     planning_bundle = task_view.planning_operator_bundle(active_task)
-    subagent_surface = harness_authoring_adapter.ensure_general_subagent_support_surface(
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=config.control_root,
+        team_dir=config.team_dir,
+        manager_state_file=config.manager_state_file,
+    )
+    pressure_kind = server_guard.server_guard_dominant_pressure_kind(
+        getattr(snapshot.control_summary.server_guard, "reason_summary", "")
+    )
+    subagent_loader = (
+        harness_authoring_adapter.ensure_general_subagent_support_surface
+        if server_guard.server_guard_should_auto_run_general_research(pressure_kind)
+        else harness_authoring_adapter.summarize_general_subagent_surface
+    )
+    subagent_surface = subagent_loader(
         str(active_entry.get("team_dir", "")).strip() or paths.team_dir,
         entry=active_entry,
         task=active_task,
@@ -244,11 +259,13 @@ def _execute_auto_recover_action(spec: Dict[str, object], *, config: DashboardAp
                 "next_retry_at": str(provider_state.get("next_retry_at", "")).strip() or "-",
                 "repeat_count": int(provider_state.get("recovery_repeat_count", 0) or 0),
             },
+            "server_guard_pressure_kind": pressure_kind or "-",
             "planning_compact": str(planning_bundle.get("planning_compact", "")).strip() or "-",
             "planning_compact_summary": str(planning_bundle.get("planning_compact", "")).strip() or "-",
             "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
             "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
             "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
+            "subagent_gate_summary": str(subagent_surface.get("gate_summary", "")).strip() or "-",
             "general_subagent_executed": general_subagent_executed,
             "team_dir": str(paths.team_dir),
             "next_step": next_step,

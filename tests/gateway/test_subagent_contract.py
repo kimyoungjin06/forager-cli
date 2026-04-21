@@ -48,6 +48,7 @@ def test_normalize_subagent_result_artifact_coerces_missing_fields() -> None:
     assert artifact["summary"] == "repo scan complete"
     assert artifact["sources"] == ["docs/RUNBOOK.md", "docs/SPEC.md"]
     assert artifact["blocking_issues"] == []
+    assert subagent_contract.summarize_subagent_gate_compact(artifact) == "subagent_gate=clear"
 
 
 def test_persist_and_load_subagent_result_artifact_round_trip(tmp_path: Path) -> None:
@@ -74,5 +75,6 @@ def test_persist_and_load_subagent_result_artifact_round_trip(tmp_path: Path) ->
 
     assert persisted["artifact_path"] == "harness_authoring/subagents/req-7-general-research.json"
     assert persisted["artifact_summary"].startswith("general_research | confidence=medium")
+    assert persisted["gate_summary"] == "subagent_gate=clear"
     assert loaded["summary"] == "repo scan complete"
     assert loaded["artifact_path"] == "harness_authoring/subagents/req-7-general-research.json"

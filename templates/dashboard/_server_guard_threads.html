@@ -19,6 +19,9 @@
     {% if row.subagent_evidence_summary and row.subagent_evidence_summary != '-' %}
     <p class="muted"><strong>subagent_evidence</strong> {{ row.subagent_evidence_summary }}</p>
     {% endif %}
+    {% if row.subagent_gate_summary and row.subagent_gate_summary != '-' %}
+    <p class="muted"><strong>subagent_gate</strong> {{ row.subagent_gate_summary }}</p>
+    {% endif %}
     <p><strong>preset_diff</strong></p>
     <div class="diff-badge-list">
       {% for token in row.preset_diff_summary.split(' | ') if token %}

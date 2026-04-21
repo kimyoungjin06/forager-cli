@@ -18,6 +18,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "group_note": "codex process pressure is elevated; consolidate chat and operator sessions before widening worker fanout",
         "operator_sentence": "trim chat fanout first, then widen operator surfaces",
         "action_sentence": "start with Chat, then keep Global Direct narrow",
+        "auto_run_general_research": True,
         "focus_preset_label": "Global Direct",
         "priority_link_label": "Chat",
         "priority_link_note": "trim chat fanout first",
@@ -28,6 +29,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "group_note": "python worker pressure is elevated; inspect local background churn before launching more package or worker rails",
         "operator_sentence": "check host churn first, then revisit package and worker rails",
         "action_sentence": "start with Health, then keep Package Rail narrow",
+        "auto_run_general_research": True,
         "focus_preset_label": "Package Rail",
         "priority_link_label": "Health",
         "priority_link_note": "check host churn first",
@@ -38,6 +40,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "group_note": "tmux session pressure is elevated; inspect detached runtime handles before starting more off-desk workers",
         "operator_sentence": "inspect detached actions first, then reopen tmux-backed rails",
         "action_sentence": "start with Audit, then reopen Review Rail carefully",
+        "auto_run_general_research": False,
         "focus_preset_label": "Review Rail",
         "priority_link_label": "Audit",
         "priority_link_note": "inspect detached actions first",
@@ -48,6 +51,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "group_note": "overall process pressure is elevated; reduce broad worker churn before adding more concurrency",
         "operator_sentence": "inspect broad churn first, then widen runtime fanout",
         "action_sentence": "start with Audit, then keep Analysis Rail narrow",
+        "auto_run_general_research": False,
         "focus_preset_label": "Analysis Rail",
         "priority_link_label": "Audit",
         "priority_link_note": "inspect broad churn first",
@@ -58,6 +62,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "group_note": "stale queue pressure is present; inspect cleanup preview before mutating queue state",
         "operator_sentence": "inspect cleanup pressure first, then mutate queue state",
         "action_sentence": "start with Health, then keep cleanup and Package Rail narrow",
+        "auto_run_general_research": False,
         "focus_preset_label": "Package Rail",
         "priority_link_label": "Health",
         "priority_link_note": "inspect cleanup pressure first",
@@ -68,6 +73,7 @@ _SERVER_GUARD_PRESSURE_POLICIES: Dict[str, Dict[str, Any]] = {
         "group_note": "",
         "operator_sentence": "inspect guard snapshot first",
         "action_sentence": "start with Health before widening host activity",
+        "auto_run_general_research": False,
         "focus_preset_label": "",
         "priority_link_label": "Health",
         "priority_link_note": "inspect guard snapshot first",
@@ -82,6 +88,19 @@ def server_guard_pressure_policy(key: str, *, fallback_note: str = "") -> Dict[s
     if token not in _SERVER_GUARD_PRESSURE_POLICIES and fallback_note and not str(base.get("group_note", "")).strip():
         base["group_note"] = fallback_note
     return base
+
+
+def server_guard_dominant_pressure_kind(reasons: Iterable[str] | str) -> str:
+    if isinstance(reasons, str):
+        values = [token.strip() for token in str(reasons or "").split("|") if token.strip()]
+    else:
+        values = [str(token or "").strip() for token in reasons if str(token or "").strip()]
+    return _dominant_pressure_key(values)
+
+
+def server_guard_should_auto_run_general_research(key: str) -> bool:
+    policy = server_guard_pressure_policy(key)
+    return bool(policy.get("auto_run_general_research", False))
 
 
 def _fmt_percent(value: float) -> str:

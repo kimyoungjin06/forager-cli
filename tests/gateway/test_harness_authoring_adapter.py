@@ -182,3 +182,4 @@ def test_run_general_subagent_support_persists_bounded_evidence_artifact(tmp_pat
     assert any(source.endswith("README.md") for source in payload["sources"])
     assert "context_pack=review | docs=1 | doc_ids=spec-main" in payload["key_findings"]
     assert payload["blocking_issues"] == []
+    assert payload["gate_summary"] == "subagent_gate=clear"

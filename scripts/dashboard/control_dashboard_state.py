@@ -572,6 +572,7 @@ def _build_server_guard_thread_cards(
                     apply_headline=str(action.headline or "-").strip() or "-",
                     subagent_evidence_summary=str(action.subagent_evidence_summary or "-").strip() or "-",
                     subagent_artifact_path=str(action.subagent_artifact_path or "-").strip() or "-",
+                    subagent_gate_summary=str(action.subagent_gate_summary or "-").strip() or "-",
                     pressure_kind_key=pressure_kind_key,
                     pressure_kind_label=pressure_labels.get(str(older.outcome_kind or "").strip(), ""),
                     action_sentence=str(pressure_policy.get("action_sentence", "")).strip(),
@@ -937,6 +938,15 @@ def _subagent_evidence_suffix(value: str) -> str:
     return f"subagent_evidence={token}"
 
 
+def _subagent_gate_suffix(value: str) -> str:
+    token = str(value or "").strip()
+    if not token or token == "-":
+        return "-"
+    if token.startswith("subagent_gate="):
+        return token
+    return f"subagent_gate={token}"
+
+
 def _row_planning_compact_summary(row: ActionAuditRowDTO) -> str:
     compact = str(getattr(row, "planning_compact_summary", "")).strip()
     if compact and compact != "-":
@@ -956,6 +966,7 @@ def _server_guard_row_summary(row: ActionAuditRowDTO, *, include_status: bool) -
     )
     planning_summary = _planning_compact_suffix(_row_planning_compact_summary(row))
     subagent_summary = _subagent_evidence_suffix(str(getattr(row, "subagent_evidence_summary", "")).strip())
+    subagent_gate_summary = _subagent_gate_suffix(str(getattr(row, "subagent_gate_summary", "")).strip())
     at = str(getattr(row, "at", "")).strip() or "-"
     next_step = str(getattr(row, "next_step", "")).strip() or "-"
     parts = [headline]
@@ -967,6 +978,8 @@ def _server_guard_row_summary(row: ActionAuditRowDTO, *, include_status: bool) -
         parts.append(planning_summary)
     if subagent_summary != "-" and subagent_summary not in headline:
         parts.append(subagent_summary)
+    if subagent_gate_summary != "-" and subagent_gate_summary not in headline:
+        parts.append(subagent_gate_summary)
     return " | ".join(parts)
 
 
@@ -1024,6 +1037,11 @@ def _load_recent_chat_action_rows(paths: ControlPaths, *, chat_id: str, limit: i
                 raw.get("subagent_artifact_path") or raw.get("general_subagent_artifact_path") or "-"
             ).strip()
             or "-",
+            subagent_gate_summary=(
+                str(raw.get("subagent_gate_summary") or raw.get("subagent_blocking_issue_summary") or "").strip()
+                or action_audit.summarize_subagent_gate_compact_row(raw)
+                or "-"
+            ),
             approved_plan_summary=approved_plan_summary,
             status=str(raw.get("status", "")).strip() or "unknown",
             outcome_kind=outcome_kind or "-",
@@ -1487,6 +1505,7 @@ def load_dashboard_history_page(
                 subagent_contract_summary=getattr(row, "subagent_contract_summary", ""),
                 subagent_evidence_summary=getattr(row, "subagent_evidence_summary", ""),
                 subagent_artifact_path=getattr(row, "subagent_artifact_path", ""),
+                subagent_gate_summary=getattr(row, "subagent_gate_summary", ""),
                 approved_plan_summary=getattr(row, "approved_plan_summary", ""),
                 followup_hint=row.followup_hint,
                 raw_ref=row.raw_ref,

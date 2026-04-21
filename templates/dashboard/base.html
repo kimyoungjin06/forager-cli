@@ -69,6 +69,7 @@
               data-planning-compact="{{ row.planning_compact_summary }}"
               data-subagent-contract="{{ row.subagent_contract_summary }}"
               data-subagent-evidence="{{ row.subagent_evidence_summary }}"
+              data-subagent-gate="{{ row.subagent_gate_summary }}"
               data-subagent-artifact="{{ row.subagent_artifact_path }}"
               data-next-step="{{ row.next_step }}"
               data-link-label="{{ row.link_label }}"
@@ -89,6 +90,9 @@
               {% endif %}
               {% if row.subagent_evidence_summary and row.subagent_evidence_summary != '-' %}
               <div class="muted">subagent_evidence: {{ row.subagent_evidence_summary }}</div>
+              {% endif %}
+              {% if row.subagent_gate_summary and row.subagent_gate_summary != '-' %}
+              <div class="muted">subagent_gate: {{ row.subagent_gate_summary }}</div>
               {% endif %}
               {% if row.subagent_artifact_path and row.subagent_artifact_path != '-' %}
               <div class="muted">subagent_artifact: {{ row.subagent_artifact_path }}</div>
@@ -150,6 +154,7 @@
               planningCompact: item.dataset.planningCompact || "-",
               subagentContract: item.dataset.subagentContract || "-",
               subagentEvidence: item.dataset.subagentEvidence || "-",
+              subagentGate: item.dataset.subagentGate || "-",
               subagentArtifact: item.dataset.subagentArtifact || "-",
               nextStep: item.dataset.nextStep || "-",
               linkLabel: item.dataset.linkLabel || "-",
@@ -429,6 +434,12 @@
               evidence.textContent = `subagent_evidence: ${entry.subagentEvidence}`;
               item.appendChild(evidence);
             }
+            if (entry.subagentGate && entry.subagentGate !== "-") {
+              const gate = document.createElement("div");
+              gate.className = "muted";
+              gate.textContent = `subagent_gate: ${entry.subagentGate}`;
+              item.appendChild(gate);
+            }
             if (entry.subagentArtifact && entry.subagentArtifact !== "-") {
               const artifact = document.createElement("div");
               artifact.className = "muted";
@@ -483,6 +494,7 @@
           planningCompact,
           subagentContract,
           subagentEvidence,
+          subagentGate,
           subagentArtifact,
           nextStep,
           linkLabel,
@@ -495,6 +507,7 @@
             planningCompact: planningCompact || "-",
             subagentContract: subagentContract || "-",
             subagentEvidence: subagentEvidence || "-",
+            subagentGate: subagentGate || "-",
             subagentArtifact: subagentArtifact || "-",
             nextStep: nextStep || "-",
             linkLabel: linkLabel || "-",
@@ -531,6 +544,7 @@
                   : buildPlanningCompact(entry.planningCompact, entry.approvedPlan, null),
                 subagentContract: asText(entry.subagentContract || entry.subagent_contract || entry.subagentContractSummary || entry.subagent_contract_summary),
                 subagentEvidence: asText(entry.subagentEvidence || entry.subagent_evidence || entry.subagentEvidenceSummary || entry.subagent_evidence_summary),
+                subagentGate: asText(entry.subagentGate || entry.subagent_gate || entry.subagentGateSummary || entry.subagent_gate_summary),
                 subagentArtifact: asText(entry.subagentArtifact || entry.subagent_artifact || entry.subagentArtifactPath || entry.subagent_artifact_path),
                 nextStep: asText(entry.nextStep),
                 linkLabel: asText(entry.linkLabel),
@@ -563,6 +577,11 @@
             payload?.subagent_artifact_path ||
             payload?.general_subagent_artifact_path
           );
+          const subagentGate = asText(
+            payload?.subagent_gate ||
+            payload?.subagent_gate_summary ||
+            payload?.subagent_blocking_issue_summary
+          );
           const planningLanes = asText(payload?.planning_lanes || payload?.planning_handoff?.planning_lanes_summary);
           const approvedPlanGate = asText(payload?.approved_plan_gate || payload?.planning_handoff?.approved_plan_gate_summary);
           const contexts = Array.isArray(payload?.messages)
@@ -593,6 +612,9 @@
           if (subagentEvidence !== "-" && !headline.includes("subagent_evidence=")) {
             headline = `${headline} | subagent_evidence=${renderSubagentEvidenceText(subagentEvidence)}`;
           }
+          if (subagentGate !== "-" && !headline.includes("subagent_gate=")) {
+            headline = `${headline} | ${subagentGate}`;
+          }
           const rowsData = [
             ["status", status],
             ["mode", asText(payload?.mode)],
@@ -603,6 +625,7 @@
             ["approved_plan_gate", approvedPlanGate],
             ["subagent_contract", subagentContract],
             ["subagent_evidence", subagentEvidence],
+            ["subagent_gate", subagentGate],
             ["subagent_artifact", subagentArtifact],
             ["next_step", asText(payload?.next_step)],
             ["remediation", asText(payload?.remediation)],
@@ -626,6 +649,7 @@
             planningCompact,
             subagentContract,
             subagentEvidence,
+            subagentGate,
             subagentArtifact,
           };
         };
@@ -641,6 +665,7 @@
             planningCompact,
             subagentContract,
             subagentEvidence,
+            subagentGate,
             subagentArtifact,
           } = buildSummary(label, status, payload);
           summary.textContent = headline;
@@ -678,6 +703,7 @@
               planningCompact,
               subagentContract,
               subagentEvidence,
+              subagentGate,
               subagentArtifact,
               asText(payload?.next_step),
               linkLabel,

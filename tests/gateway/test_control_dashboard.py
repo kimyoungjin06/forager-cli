@@ -7242,6 +7242,7 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
         port=8765,
     )
     monkeypatch.setattr(dashboard_app.management_handlers, "_tmux_auto_command", lambda args, action: (True, f"stub:{action}"))
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
 
     status, _headers, body = dashboard_app.build_dashboard_action_response(
         "/control/actions/control/auto-recover",
@@ -7264,10 +7265,12 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
     assert payload["auto_state"]["command"] == "next"
     assert payload["auto_state"]["recovery_grace_until"] != "-"
     assert payload["messages"][-1]["context"] == "auto-recover"
+    assert payload["server_guard_pressure_kind"] == "codex"
     assert payload["planning_compact"].startswith("draft via codex, claude | review via codex, claude")
     assert payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan")
     assert payload["general_subagent_executed"] is True
     assert payload["subagent_evidence_summary"].startswith("general_research | confidence=")
+    assert payload["subagent_gate_summary"].startswith("subagent_gate=")
     assert "sources=" in payload["subagent_evidence_summary"]
     assert "findings=" in payload["subagent_evidence_summary"]
     assert "blocking=" in payload["subagent_evidence_summary"]
@@ -7281,6 +7284,35 @@ def test_control_dashboard_post_auto_recover_executes_with_default_force_false(t
         and row.get("payload_json") == '{"task_ref":"T-001"}'
         for row in (payload.get("actions") or [])
     )
+
+
+def test_control_dashboard_post_auto_recover_skips_auto_subagent_when_process_pressure_is_dominant(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    monkeypatch.setattr(dashboard_app.management_handlers, "_tmux_auto_command", lambda args, action: (True, f"stub:{action}"))
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 980, "python": 20, "tmux": 10, "codex": 10})
+
+    status, _headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/auto-recover",
+        body=b"{}",
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert payload["executed"] is True
+    assert payload["server_guard_pressure_kind"] == "process"
+    assert payload["general_subagent_executed"] is False
+    assert payload["subagent_evidence_summary"] == "-"
+    assert payload["subagent_gate_summary"] == "-"
 
 
 def test_control_dashboard_post_background_queue_clean_marks_stale_tickets(tmp_path: Path) -> None:
@@ -7583,6 +7615,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert apply_payload["subagent_contract_summary"].startswith("general_research | profile=on_desk_plan")
     assert apply_payload["subagent_evidence_summary"] == "general_research | confidence=high | sources=2 | findings=2 | blocking=1"
     assert apply_payload["subagent_artifact_path"] == "harness_authoring/subagents/req-1-general-research.json"
+    assert apply_payload["subagent_gate_summary"] == "subagent_gate=vendor notes still need a local delta check"
     assert apply_payload["general_subagent_executed"] is False
     assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
         "Open Chat Console",
@@ -7623,6 +7656,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "planning_compact: draft via" in overview_text
     assert "approved_plan=" in overview_text
     assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in overview_text
+    assert "subagent_gate: subagent_gate=vendor notes still need a local delta check" in overview_text
     assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in overview_text
     assert chat_status == 200
     assert "Server Guard Preset Threads" in chat_text
@@ -7634,6 +7668,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "/control/health/view" in chat_text
     assert "server-guard-preset:codex:123456:Apply Global Direct" in chat_text
     assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in chat_text
+    assert "subagent_gate: subagent_gate=vendor notes still need a local delta check" in chat_text
     assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in chat_text
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
@@ -7655,6 +7690,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert "/control/chat?chat=123456" in recovery_text
     assert "/control/health/view" in recovery_text
     assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in recovery_text
+    assert "subagent_gate: subagent_gate=vendor notes still need a local delta check" in recovery_text
     assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in recovery_text
 
 
@@ -7756,6 +7792,7 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
         assert apply_status == 200
         executed_flags.append(bool(apply_payload.get("general_subagent_executed")))
         assert apply_payload["subagent_evidence_summary"].startswith("general_research | confidence=")
+        assert apply_payload["subagent_gate_summary"].startswith("subagent_gate=")
         assert "sources=" in apply_payload["subagent_evidence_summary"]
         assert "findings=" in apply_payload["subagent_evidence_summary"]
         assert "blocking=" in apply_payload["subagent_evidence_summary"]
@@ -7809,9 +7846,66 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert "server-guard-mini-link chat priority" in recovery_text
     assert "action_copy" in recovery_text
     assert "subagent_evidence" in recovery_text
+    assert "subagent_gate" in recovery_text
     assert "general_research | confidence=" in recovery_text
     assert "start with Chat, then keep Global Direct narrow" in recovery_text
     assert "start with Health, then keep Package Rail narrow" in recovery_text
+
+
+def test_control_dashboard_server_guard_preset_apply_skips_auto_subagent_for_process_pressure(tmp_path: Path, monkeypatch) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {
+        "123456": {
+            "updated_at": "2026-04-15T11:10:00+09:00",
+            "default_mode": "on",
+            "pending_mode": "direct",
+            "lang": "ko",
+            "report_level": "full",
+            "room": "O2/analysis",
+            "selected_task_refs": {"active": "REQ-1"},
+        }
+    }
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 980, "python": 20, "tmux": 10, "codex": 10})
+
+    preview_status, _preview_headers, preview_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/runtime/server-guard-pressure-preview",
+        body=b'{"pressure_kind":"process"}',
+        content_type="application/json",
+        config=config,
+    )
+    preview_payload = json.loads(preview_body.decode("utf-8"))
+    preset_payload = json.loads((preview_payload.get("actions") or [])[0]["payload_json"])
+
+    apply_status, _apply_headers, apply_body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/chat/session-update",
+        body=json.dumps(preset_payload).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    apply_payload = json.loads(apply_body.decode("utf-8"))
+
+    assert preview_status == 200
+    assert apply_status == 200
+    assert apply_payload["server_guard_pressure_kind"] == "process"
+    assert apply_payload["general_subagent_executed"] is False
+    assert apply_payload["subagent_evidence_summary"] == "-"
+    assert apply_payload["subagent_gate_summary"] == "-"
+    assert [row.get("label") for row in (apply_payload.get("actions") or [])][:3] == [
+        "Open Server Guard Audit",
+        "Open Health View",
+        "Open Chat Console",
+    ]
 
 
 def test_control_dashboard_audit_and_recovery_surface_server_guard_latest_result(tmp_path: Path, monkeypatch) -> None:

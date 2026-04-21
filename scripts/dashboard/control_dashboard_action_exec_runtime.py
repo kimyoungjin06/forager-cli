@@ -1218,6 +1218,7 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
                 "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
                 "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
                 "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
+                "subagent_gate_summary": str(subagent_surface.get("gate_summary", "")).strip() or "-",
                 "planning_lanes": planning_lanes_summary,
                 "approved_plan_gate": approved_plan_gate_summary,
                 "job_contract": planning_handoff["job_contract"]["summary"],
@@ -1279,6 +1280,7 @@ def _execute_analysis_review_action(spec: Dict[str, object], *, config: Dashboar
             "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
             "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
             "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
+            "subagent_gate_summary": str(subagent_surface.get("gate_summary", "")).strip() or "-",
             "preview": {
                 "kind": "task_review",
                 "review_kind": review_kind,
@@ -1418,6 +1420,7 @@ def _execute_general_subagent_support_action(
             "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or str(artifact.get("contract_summary", "")).strip() or "-",
             "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or str(artifact.get("artifact_summary", "")).strip() or "-",
             "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or str(artifact.get("artifact_path", "")).strip() or "-",
+            "subagent_gate_summary": str(subagent_surface.get("gate_summary", "")).strip() or str(artifact.get("gate_summary", "")).strip() or "-",
             "subagent_sources": list(artifact.get("sources") or []),
             "subagent_key_findings": list(artifact.get("key_findings") or []),
             "subagent_blocking_issues": list(artifact.get("blocking_issues") or []),

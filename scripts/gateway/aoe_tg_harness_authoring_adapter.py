@@ -14,6 +14,7 @@ from aoe_tg_subagent_contract import (
     load_subagent_result_artifact,
     persist_subagent_result_artifact,
     summarize_subagent_contract,
+    summarize_subagent_gate_compact,
     summarize_subagent_result_artifact,
 )
 from aoe_tg_workspace_brief import load_workspace_brief
@@ -215,6 +216,7 @@ def summarize_general_subagent_surface(
         "summary": _trim(plan.get("general_subagent_summary"), 320) or "-",
         "artifact_summary": _trim(plan.get("general_subagent_artifact_summary"), 320) or "-",
         "artifact_path": _trim(artifact.get("artifact_path"), 240) or "-",
+        "gate_summary": _trim(artifact.get("gate_summary"), 240) or summarize_subagent_gate_compact(artifact),
     }
 
 

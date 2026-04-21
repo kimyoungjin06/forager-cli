@@ -15,7 +15,10 @@ import aoe_tg_task_view as task_view
 
 from control_dashboard_action_exec_shared import _load_dashboard_manager_state, _load_gateway_main_module
 from control_dashboard_common import DashboardAppConfig, _dashboard_paths, _json
-from control_dashboard_server_guard import server_guard_pressure_policy
+from control_dashboard_server_guard import (
+    server_guard_pressure_policy,
+    server_guard_should_auto_run_general_research,
+)
 
 
 def _resolve_chat_project(manager_state: Dict[str, object], project_ref: str) -> tuple[str, str, Dict[str, object]]:
@@ -253,7 +256,11 @@ def _execute_chat_session_update_action(
         task=selected_task,
     )
     general_subagent_executed = False
-    if focus_badge == "server-guard" and isinstance(selected_task, dict) and selected_task:
+    auto_subagent_allowed = (
+        focus_badge == "server-guard"
+        and server_guard_should_auto_run_general_research(server_guard_pressure_kind)
+    )
+    if auto_subagent_allowed and isinstance(selected_task, dict) and selected_task:
         ensured_surface = harness_authoring_adapter.ensure_general_subagent_support_surface(
             str(selected_task_entry.get("team_dir", "")).strip() or paths.team_dir,
             entry=selected_task_entry,
@@ -388,6 +395,7 @@ def _execute_chat_session_update_action(
             "subagent_contract_summary": str(subagent_surface.get("summary", "")).strip() or "-",
             "subagent_evidence_summary": str(subagent_surface.get("artifact_summary", "")).strip() or "-",
             "subagent_artifact_path": str(subagent_surface.get("artifact_path", "")).strip() or "-",
+            "subagent_gate_summary": str(subagent_surface.get("gate_summary", "")).strip() or "-",
             "general_subagent_executed": general_subagent_executed,
             "actions": followup_actions,
             "reply_text": (

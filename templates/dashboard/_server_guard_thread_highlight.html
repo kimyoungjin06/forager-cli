@@ -32,6 +32,9 @@
   {% if thread.subagent_evidence_summary and thread.subagent_evidence_summary != '-' %}
   <p class="muted server-guard-thread-priority-note"><strong>subagent_evidence</strong> {{ thread.subagent_evidence_summary }}</p>
   {% endif %}
+  {% if thread.subagent_gate_summary and thread.subagent_gate_summary != '-' %}
+  <p class="muted server-guard-thread-priority-note"><strong>subagent_gate</strong> {{ thread.subagent_gate_summary }}</p>
+  {% endif %}
   {% if thread.subagent_artifact_path and thread.subagent_artifact_path != '-' %}
   <p class="muted server-guard-thread-priority-note"><strong>subagent_artifact</strong> {{ thread.subagent_artifact_path }}</p>
   {% endif %}

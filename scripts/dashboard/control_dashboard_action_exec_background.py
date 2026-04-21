@@ -38,6 +38,7 @@ def _server_guard_pressure_preview_payload(
     subagent_contract_summary: str,
     subagent_evidence_summary: str,
     subagent_artifact_path: str,
+    subagent_gate_summary: str,
 ) -> Dict[str, object]:
     guard = snapshot.control_summary.server_guard
     links = {
@@ -90,6 +91,7 @@ def _server_guard_pressure_preview_payload(
         "subagent_contract_summary": subagent_contract_summary,
         "subagent_evidence_summary": subagent_evidence_summary,
         "subagent_artifact_path": subagent_artifact_path,
+        "subagent_gate_summary": subagent_gate_summary,
         "next_step": next_step,
         "remediation": remediation,
         "actions": [
@@ -344,6 +346,7 @@ def _preview_server_guard_pressure_action(spec: Dict[str, object], *, config: Da
             subagent_contract_summary=str(subagent_surface.get("summary", "")).strip() or "-",
             subagent_evidence_summary=str(subagent_surface.get("artifact_summary", "")).strip() or "-",
             subagent_artifact_path=str(subagent_surface.get("artifact_path", "")).strip() or "-",
+            subagent_gate_summary=str(subagent_surface.get("gate_summary", "")).strip() or "-",
         ),
         status=200,
     )

@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from aoe_tg_action_audit import (
     normalize_planning_handoff_snapshot,
     summarize_action_audit_headline,
+    summarize_subagent_gate_compact_row,
     summarize_retry_replan_planning_compact_handoff,
 )
 from aoe_tg_operator_summary import load_latest_command_resolution
@@ -72,6 +73,7 @@ class HistoryRow:
     subagent_contract_summary: str = ""
     subagent_evidence_summary: str = ""
     subagent_artifact_path: str = ""
+    subagent_gate_summary: str = ""
     approved_plan_summary: str = ""
     followup_hint: str = ""
     raw_ref: str = ""
@@ -507,6 +509,9 @@ def _action_audit_rows(
                 subagent_artifact_path = _normalize_text(
                     str(parsed.get("subagent_artifact_path") or parsed.get("general_subagent_artifact_path") or "")
                 )
+                subagent_gate_summary = _normalize_text(
+                    summarize_subagent_gate_compact_row(parsed)
+                )
                 detail = _normalize_text(
                     " ".join(
                         str(item).strip()
@@ -542,6 +547,7 @@ def _action_audit_rows(
                         subagent_contract_summary=subagent_contract_summary or "",
                         subagent_evidence_summary=subagent_evidence_summary or "",
                         subagent_artifact_path=subagent_artifact_path or "",
+                        subagent_gate_summary=subagent_gate_summary or "",
                         approved_plan_summary=approved_plan_handoff_summary or "",
                         followup_hint=str(parsed.get("next_step", "")).strip() or (f"/task {task_short_id}" if task_short_id else ""),
                         raw_ref=f"{path}:{str(parsed.get('at', '')).strip()}",

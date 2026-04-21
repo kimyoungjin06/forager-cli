@@ -13,6 +13,7 @@ from urllib.parse import quote
 from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary
 from aoe_tg_runtime_core import action_audit_path as runtime_action_audit_path
+from aoe_tg_subagent_contract import summarize_subagent_gate_compact
 
 ACTION_AUDIT_DIRNAME = "dashboard"
 ACTION_AUDIT_FILENAME = "action-history.jsonl"
@@ -638,6 +639,25 @@ def summarize_subagent_evidence_compact(raw: Any) -> str:
     return f"subagent_evidence={summary}"
 
 
+def summarize_subagent_gate_compact_row(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(
+        str(row.get("subagent_gate_summary", "")).strip()
+        or str(row.get("subagent_blocking_issue_summary", "")).strip(),
+        limit=120,
+    )
+    if summary not in {"", "-"}:
+        if summary.startswith("subagent_gate="):
+            return summary
+        return f"subagent_gate={summary}"
+    blocking_issues = row.get("subagent_blocking_issues") if isinstance(row.get("subagent_blocking_issues"), list) else []
+    if blocking_issues:
+        return summarize_subagent_gate_compact({"blocking_issues": blocking_issues})
+    return "-"
+
+
 def summarize_action_audit_headline(raw: Any) -> str:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -670,6 +690,9 @@ def summarize_action_audit_headline(raw: Any) -> str:
     subagent_evidence_summary = summarize_subagent_evidence_compact(row)
     if subagent_evidence_summary not in {"", "-"} and subagent_evidence_summary not in headline:
         headline = f"{headline} | {subagent_evidence_summary}"
+    subagent_gate_summary = summarize_subagent_gate_compact_row(row)
+    if subagent_gate_summary not in {"", "-"} and subagent_gate_summary not in headline:
+        headline = f"{headline} | {subagent_gate_summary}"
     return headline
 
 

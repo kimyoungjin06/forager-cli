@@ -219,6 +219,8 @@ def _append_action_audit(
         ("general_subagent_artifact_summary", "subagent_evidence_summary"),
         ("subagent_artifact_path", "subagent_artifact_path"),
         ("general_subagent_artifact_path", "subagent_artifact_path"),
+        ("subagent_gate_summary", "subagent_gate_summary"),
+        ("subagent_blocking_issue_summary", "subagent_gate_summary"),
         ("planning_lanes_summary", "planning_lanes_summary"),
         ("planning_lanes", "planning_lanes_summary"),
         ("approved_plan_gate_summary", "approved_plan_gate_summary"),
@@ -233,6 +235,12 @@ def _append_action_audit(
         value = str(payload.get(source_key, "")).strip()
         if value:
             row[row_key] = value
+    if isinstance(payload.get("subagent_blocking_issues"), list):
+        row["subagent_blocking_issues"] = [
+            str(item).strip()
+            for item in list(payload.get("subagent_blocking_issues") or [])
+            if str(item).strip()
+        ]
     if str(row.get("planning_compact_summary", "")).strip() in {"", "-"}:
         legacy_summary = legacy_planning_review_summary(payload)
         if legacy_summary:

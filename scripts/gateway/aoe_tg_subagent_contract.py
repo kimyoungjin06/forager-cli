@@ -34,6 +34,13 @@ def _normalize_rows(raw: Any, *, limit: int = 8, item_limit: int = 160) -> List[
     return out[: max(1, int(limit or 1))]
 
 
+def _compact_summary(raw: Any, limit: int = 120) -> str:
+    text = " ".join(str(raw or "").strip().split())
+    if len(text) > limit:
+        return text[: max(0, int(limit) - 3)].rstrip() + "..."
+    return text
+
+
 def build_general_research_subagent_contract(
     *,
     request_id: Any = "",
@@ -142,6 +149,20 @@ def summarize_subagent_result_artifact(raw: Any) -> str:
     )
 
 
+def summarize_subagent_gate_compact(raw: Any) -> str:
+    if not isinstance(raw, dict) or not raw:
+        return "-"
+    artifact = normalize_subagent_result_artifact(raw)
+    if not artifact:
+        return "-"
+    blocking_issues = list(artifact.get("blocking_issues") or [])
+    if not blocking_issues:
+        return "subagent_gate=clear"
+    lead = _compact_summary(blocking_issues[0], limit=108) or "blocked"
+    suffix = f" | +{len(blocking_issues) - 1} more" if len(blocking_issues) > 1 else ""
+    return f"subagent_gate={lead}{suffix}"
+
+
 def _contract_output_artifact_path(contract: Any) -> str:
     item = contract if isinstance(contract, dict) else {}
     output = item.get("output_artifact") if isinstance(item.get("output_artifact"), dict) else {}
@@ -165,6 +186,7 @@ def persist_subagent_result_artifact(
     payload = dict(normalized)
     payload["artifact_path"] = backend.relative_artifact_path(path)
     payload["artifact_summary"] = summarize_subagent_result_artifact(normalized)
+    payload["gate_summary"] = summarize_subagent_gate_compact(normalized)
     return payload
 
 
