@@ -1532,6 +1532,7 @@ def _build_runtime_detail(
     active_task_general_subagent_summary = "-"
     active_task_general_subagent_artifact_summary = "-"
     active_task_general_subagent_artifact_path = "-"
+    active_task_general_subagent_gate_summary = "-"
     active_task_model_plan_summary = "-"
     active_task_judge_binding_summary = "-"
     active_task_judge_probe_summary = "-"
@@ -1565,6 +1566,9 @@ def _build_runtime_detail(
         )
         active_task_general_subagent_artifact_path = (
             str(active_task_general_subagent_surface.get("artifact_path", "")).strip() or "-"
+        )
+        active_task_general_subagent_gate_summary = (
+            str(active_task_general_subagent_surface.get("gate_summary", "")).strip() or "-"
         )
         active_task_model_plan_summary = str(model_plan.get("summary", "")).strip() or "-"
         active_task_judge_binding_summary = str(judge_binding.get("summary", "")).strip() or "-"
@@ -1986,6 +1990,7 @@ def _build_runtime_detail(
         active_task_general_subagent_summary=active_task_general_subagent_summary,
         active_task_general_subagent_artifact_summary=active_task_general_subagent_artifact_summary,
         active_task_general_subagent_artifact_path=active_task_general_subagent_artifact_path,
+        active_task_general_subagent_gate_summary=active_task_general_subagent_gate_summary,
         active_task_model_plan_summary=active_task_model_plan_summary,
         active_task_judge_binding_summary=active_task_judge_binding_summary,
         active_task_judge_probe_summary=active_task_judge_probe_summary,

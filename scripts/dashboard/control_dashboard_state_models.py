@@ -483,6 +483,7 @@ class RuntimeDetailDTO(
     active_task_general_subagent_summary: str
     active_task_general_subagent_artifact_summary: str
     active_task_general_subagent_artifact_path: str
+    active_task_general_subagent_gate_summary: str
     active_task_model_plan_summary: str
     active_task_judge_binding_summary: str
     active_task_judge_probe_summary: str
@@ -650,6 +651,7 @@ class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     active_task_general_subagent_summary: str
     active_task_general_subagent_artifact_summary: str
     active_task_general_subagent_artifact_path: str
+    active_task_general_subagent_gate_summary: str
     active_task_model_plan_summary: str
     active_task_reentry_rails_summary: str
     active_task_background_run_status: str
@@ -680,6 +682,7 @@ class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     latest_planning_handoff_summary: str
     latest_planning_compact_summary: str
     latest_subagent_evidence_summary: str
+    latest_subagent_gate_summary: str
     latest_manual_step_summary: str
     latest_canonical_writeback_summary: str
     latest_canonical_mutation_summary: str

@@ -680,6 +680,9 @@ def _build_recovery_runtime_rows(
                 active_task_general_subagent_artifact_path=(
                     str(row.get("active_task_general_subagent_artifact_path", "")).strip() or "-"
                 ),
+                active_task_general_subagent_gate_summary=(
+                    str(row.get("active_task_general_subagent_gate_summary", "")).strip() or "-"
+                ),
                 active_task_model_plan_summary=str(row.get("active_task_model_plan_summary", "")).strip() or "-",
                 active_task_reentry_rails_summary=str(row.get("active_task_reentry_rails_summary", "")).strip() or "-",
                 active_task_background_run_status=str(row.get("active_task_background_run_status", "")).strip() or "-",
@@ -722,6 +725,7 @@ def _build_recovery_runtime_rows(
                 latest_planning_handoff_summary=str(row.get("latest_planning_handoff_summary", "")).strip() or "-",
                 latest_planning_compact_summary=_recovery_latest_planning_compact_summary(row),
                 latest_subagent_evidence_summary=str(row.get("latest_subagent_evidence_summary", "")).strip() or "-",
+                latest_subagent_gate_summary=str(row.get("latest_subagent_gate_summary", "")).strip() or "-",
                 latest_manual_step_summary=str(row.get("latest_manual_step_summary", "")).strip() or "-",
                 latest_canonical_writeback_summary=(
                     str(row.get("latest_canonical_writeback_summary", "")).strip() or "-"

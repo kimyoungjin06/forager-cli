@@ -32,6 +32,9 @@
 - readiness/recovery posture
 - completed task count
 - blocked/parked task count
+- latest planning compact
+- latest bounded support evidence summary when present
+- latest bounded support gate summary when present
 - repeat-capacity signal if present
 - first action / next focus
 
@@ -40,6 +43,7 @@
 - preset
 - final phase reached
 - critic/verdict summary
+- support research contract/evidence/gate snapshot when present
 - rerun/manual followup targets if unresolved
 - backend contract note when relevant
 

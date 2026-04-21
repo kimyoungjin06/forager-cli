@@ -56,6 +56,7 @@ Primary docs:
 - Core decomposition plan: `docs/CORE_DECOMPOSITION_PLAN.md`
 - AutoGen Core adoption note: `docs/AUTOGEN_CORE_ADOPTION.md`
 - AutoGen Core sandbox pilot criteria: `docs/AUTOGEN_CORE_PILOT.md`
+- LangChain deepagents benchmark note: `docs/LANGCHAIN_DEEPAGENTS_BENCHMARK_20260421.md`
 
 ## Repository Layout
 - `scripts/gateway/`

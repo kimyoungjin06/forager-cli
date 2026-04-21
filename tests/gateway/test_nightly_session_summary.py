@@ -221,6 +221,8 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["latest_subagent_evidence_summary"] == (
         "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1"
     )
+    assert runtimes[0]["latest_subagent_gate_summary"] == "subagent_gate=vendor notes still need a local delta check"
+    assert runtimes[0]["active_task_general_subagent_gate_summary"] == "subagent_gate=vendor notes still need a local delta check"
     assert "/monitor O2" in runtimes[0]["operator_hints"]
     assert "/offdesk review O2" in runtimes[0]["operator_hints"]
     assert runtimes[0]["active_task_phase2_actions"] == []
@@ -247,6 +249,7 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     rendered = nightly_summary.render_nightly_session_summary(summary)
     assert "## O2 Alpha | draft via" in rendered
     assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in rendered
+    assert "subagent_gate=vendor notes still need a local delta check" in rendered
     assert "latest_planning_review_summary" not in runtimes[0]
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"

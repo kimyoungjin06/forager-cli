@@ -2529,6 +2529,7 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "Open Health JSON" in text
     assert "nightly_planning_compact" in text
     assert "nightly_subagent_evidence" in text
+    assert "nightly_subagent_gate" in text
     assert "first_focus" in text
     assert "오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
     assert "subagent_contract" in text
@@ -2536,6 +2537,8 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
     assert "backend=filesystem" in text
     assert "subagent_evidence" in text
     assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "subagent_gate" in text
+    assert "subagent_gate=vendor notes still need a local delta check" in text
     assert "general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
     assert "subagent_artifact" in text
     assert "harness_authoring/subagents/req-1-general-research.json" in text
@@ -6133,6 +6136,8 @@ def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_p
     )
     recovery_runtime = next(row for row in recovery.runtimes if row.project_alias == "O2")
     recovery_task = next(row for row in recovery_runtime.task_teams if row.request_id == "REQ-1")
+    assert recovery_runtime.latest_subagent_gate_summary.startswith("subagent_gate=")
+    assert recovery_runtime.active_task_general_subagent_gate_summary.startswith("subagent_gate=")
     assert any(
         btn.label == "Resolve Writing Blocker"
         and btn.path == "/control/actions/task/followup"
