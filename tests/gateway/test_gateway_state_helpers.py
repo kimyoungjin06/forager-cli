@@ -612,7 +612,7 @@ def test_load_manager_state_preserves_todo_proposals_and_lineage_fields(tmp_path
 
 
 def test_extract_followup_todo_proposals_normalizes_json_payload() -> None:
-    def _fake_run_codex_exec(args, prompt, timeout_sec=0):
+    def _fake_run_control_exec(args, prompt, timeout_sec=0, stage=""):
         return json.dumps(
             {
                 "proposals": [
@@ -635,8 +635,8 @@ def test_extract_followup_todo_proposals_normalizes_json_payload() -> None:
             ensure_ascii=False,
         )
 
-    original = gw.run_codex_exec
-    gw.run_codex_exec = _fake_run_codex_exec
+    original = gw.run_control_plane_exec
+    gw.run_control_plane_exec = _fake_run_control_exec
     try:
         rows = gw.extract_followup_todo_proposals(
             argparse.Namespace(orch_command_timeout_sec=120),
@@ -646,7 +646,7 @@ def test_extract_followup_todo_proposals_normalizes_json_payload() -> None:
             reply_lang="en",
         )
     finally:
-        gw.run_codex_exec = original
+        gw.run_control_plane_exec = original
 
     assert len(rows) == 1
     assert rows[0]["summary"] == "prepare deployment checklist"

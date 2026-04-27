@@ -159,6 +159,11 @@ bash scripts/gateway_error_test.sh
 bash scripts/gateway_dashboard_test.sh
 ```
 
+- Full gateway suite:
+```bash
+bash scripts/gateway_full_test.sh
+```
+
 - CI workflow:
   - `.github/workflows/gateway-tests.yml`
 
