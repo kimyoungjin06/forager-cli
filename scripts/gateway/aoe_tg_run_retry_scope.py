@@ -131,6 +131,13 @@ def filter_phase2_retry_scope(
         for row in execution_rows
         if isinstance(row, dict) and (not target_exec_ids or _lane_id_token(row) in target_exec_ids)
     ]
+    if is_followup and target_exec_ids and not filtered_execution and len(execution_rows) == 1:
+        # FollowupBrief is the canonical follow-up source. Some legacy plans
+        # normalize a single execution lane to E1 while the brief names an L#
+        # lane; keep the execution slice and still drop review lanes.
+        only_row = execution_rows[0]
+        if isinstance(only_row, dict):
+            filtered_execution = [copy.deepcopy(only_row)]
     if not filtered_execution:
         return plan_data, {}
 

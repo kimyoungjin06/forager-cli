@@ -9,15 +9,15 @@
   - `manual_followup`
   - `execute_surface`
 - status:
-  - `bounded_replay_pass`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - promotion_gate:
-  - `FollowupBrief is now the canonical lane/reason source and gateway-full CI covers the full gateway suite`
+  - `FollowupBrief is the canonical lane/reason source, and local_tmux followup-exec now closes with a completed background ticket`
 - live_gate:
-  - `not opened yet; next step is an isolated local_tmux followup-exec launch with run_lock=open and slot limit 1`
+  - `opened and passed in an isolated local_tmux runtime with run_lock=open and slot limit 1`
 - executed_at:
-  - `2026-04-27 KST`
+  - `2026-04-28 KST`
 - operator:
   - `Codex`
 
@@ -27,7 +27,17 @@
 - normalized action:
   - `followup_execute`
 - target runtime:
-  - `/tmp/b3_seed_probe`
+  - `/tmp/b3_live_followup_20260428_final`
+- source task:
+  - `REQ-B3-001`
+  - `T-601`
+- child task:
+  - `r_20260428000831_2c1f3da2`
+  - `T-602`
+- background ticket:
+  - `BGT-REQ-B3-001-20260428000830.8624990900`
+- runtime handle:
+  - `aoe_bg_bgt-req-b3-001-20260428000830-8624990900`
 
 ## 3. Expected Contract
 - expected preset:
@@ -56,153 +66,135 @@
 - expected completion branch:
   - `manual_followup`
 - expected reentry rail:
-  - `retry=none | followup=partially_executable exec=L2 review=R1 | bg=-`
+  - `retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
 - expected evidence:
-  - `FollowupBrief` alone declares the follow-up lane ids and reason
-  - `/task` and `/followup` agree on `L2` and `R1`
-  - `/followup-exec` is visible for the executable follow-up lane, but review lane `R1` remains manual
-  - no background ticket is created during the bounded replay
+  - `FollowupBrief` declares the executable lane id and the manual remainder
+  - `/followup-exec T-601 lane L2` launches only `L2`
+  - child task `T-602` runs as execution-only with `roles=Codex-Dev` and `verifier_roles=-`
+  - review lane `R1` remains visible and manual after launch
+  - background ticket closes with `exit_code=0`
 
 ## 4. Runtime Evidence
-- request_id:
-  - `REQ-B3-001`
-- task_short_id:
-  - `T-601`
 - planning:
   - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3`
+  - source task has approved planning fields and dispatch/manual gates ready before launch
 - execution brief:
   - `partially_executable | do=tests/session.test.js,report.md | blocked=operator-owned release acceptance`
 - followup brief:
   - `partially_executable | execution=L2 | review=R1`
-- reentry rails:
-  - `retry=none | followup=partially_executable exec=L2 review=R1`
-- stage progression:
-  - planning:
-    - `seeded build manual-followup candidate in isolated runtime`
-  - execution:
-    - `not launched in this proof mode`
-  - verification:
-    - `bounded surface parity captured through gateway simulate commands and regression tests`
-  - integration:
-    - `not launched`
-  - close:
-    - `not launched`
-- critic/verifier verdict:
-  - `normalized exec critic stays fail/escalate with empty legacy manual lane fields; FollowupBrief still opens /followup and /followup-exec lane controls`
+- trigger:
+  - dashboard followup-execute launched `/followup-exec REQ-B3-001 lane L2`
+  - background command argv included `--no-owner-only` and `--no-deny-by-default`
+- source task after completion:
+  - `T-601`
+  - `status=failed`
+  - `team_phase=manual_intervention`
+  - `phase2_execution: lane L2 [Codex-Dev] -> S2`
+  - `phase2_review: review R1 [Claude-Reviewer/verifier]`
+  - `background_run=completed`
+  - `reentry_rails=retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
+- child task after completion:
+  - `T-602`
+  - `status=completed`
+  - `team_phase=completed`
+  - `roles=Codex-Dev`
+  - `verifier_roles=-`
+  - `requested_roles=Codex-Dev`
+  - `executed_roles=Codex-Dev`
+  - `exec_critic=success (action=none)`
+- background queue:
+  - `background_slots: local_tmux=0/1`
+  - `background_queue: depth=0 | status completed=1 | target local_tmux=1`
+  - result artifact: `{"ticket_id":"BGT-REQ-B3-001-20260428000830.8624990900","exit_code":0}`
 - final branch:
   - `manual_followup`
 
 ## 5. Surface Evidence
-- `/task`:
+- `/task T-601`:
   - `shows team_phase=manual_intervention`
-  - `shows reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1`
+  - `shows background_run=completed`
+  - `shows reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
   - `shows followup_brief_targets: execution=L2 review=R1`
-  - keyboard includes `/followup-exec T-601` and lane buttons for `L2` and `R1`
-- `/monitor`:
-  - `not required for bounded replay`
-- `/offdesk review`:
-  - `first action stays /followup T-601 | build-manual-followup`
-  - `does not redirect the operator into retry`
-- `/orch status`:
-  - `run_lock=test_only`
+  - keyboard keeps `/followup T-601` and lane buttons for `L2` and `R1`
+- `/task T-602`:
+  - `shows status=completed`
+  - `shows roles=Codex-Dev`
+  - `shows verifier_roles=-`
+  - `shows requested_roles=Codex-Dev and executed_roles=Codex-Dev`
+- `/followup T-601`:
+  - `shows execution lanes: L2`
+  - `shows review lanes: R1`
+  - `shows operator-owned release acceptance reason`
+- `/orch status O6`:
+  - `run_lock=open`
   - `background_slots local_tmux=0/1 github_runner=0/1 remote_worker=0/1`
-  - `roles are available from the seeded orchestrator config`
+  - `background_queue depth=0 | status completed=1 | target local_tmux=1`
 - dashboard `Task Detail`:
-  - `bounded replay coverage includes followup-execute transition and local_tmux route tests`
-- dashboard `Recovery`:
-  - `not required for bounded replay`
+  - `followup-execute action uses local_tmux background launch for the selected execution lane`
 - background run ticket / runner:
-  - `none created in this proof`
+  - `runner=local_tmux`
+  - `ticket=BGT-REQ-B3-001-20260428000830.8624990900`
+  - `runtime_handle=aoe_bg_bgt-req-b3-001-20260428000830-8624990900`
 - launch spec / evidence bundle:
-  - `background_run_launch_spec: externalizable=no before a task-specific launch is created`
+  - `background_dispatch | mode=tmux_session_json | entry=aoe-background-worker | externalizable=yes`
+  - `status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-req-b3-001-20260428000830-8624990900.log`
 
 ## 6. Result
 - result:
   - `pass`
 - mismatch class:
-  - `not_live_launched`
-- mismatch notes:
-  - `B3 is written and replay-proven, but no local_tmux background ticket has been launched yet`
-  - `the bounded proof intentionally keeps run_lock=test_only and avoids mutating background state`
-  - `prelaunch /orch status still reports pref=local_tmux | effective=local_background until a task-specific launch spec exists`
+  - `resolved_live_rehearsal_findings`
+- resolved findings:
+  - `seed B3 source task needed approved planning and checkpoint metadata so dispatch/manual gates could open`
+  - `dashboard local_tmux followup-execute needed internal gateway ACL bypass flags for the synthetic dashboard-http chat`
+  - `B3/R3 seeds needed explicit subtasks and lane subtask_ids so normalized plans preserve L2 instead of drifting to E1`
+  - `followup execution-only rerun scope must clear verifier roles when review scope is empty`
+  - `legacy single-lane alias drift should not block a FollowupBrief execution-only selection`
+- residual note:
+  - `source task remains manual_intervention by design because review lane R1 and release wording remain operator-owned`
 - next fix:
-  - `promote B3 to live_rehearsal by launching exactly one /followup-exec T-601 lane L2 over local_tmux in an isolated runtime`
+  - `continue to the next highest-risk runtime verification gap; B3 no longer blocks launch-bearing manual-followup proof`
 
 ## 7. Raw References
 - runtime state refs:
-  - `/tmp/b3_seed_probe/.aoe-team/orch_manager_state.json`
+  - `/tmp/b3_live_followup_20260428_final/.aoe-team/orch_manager_state.json`
+  - `/tmp/b3_live_followup_20260428_final/Alpha/.aoe-team/background_runs.json`
+  - `/tmp/b3_live_followup_20260428_final/Alpha/.aoe-team/background_run_logs/bgt-req-b3-001-20260428000830-8624990900.log`
+  - `/tmp/b3_live_followup_20260428_final/Alpha/.aoe-team/background_run_results/bgt-req-b3-001-20260428000830-8624990900.json`
+- test refs:
   - `tests/gateway/test_live_rehearsal_seed.py::test_seed_b3_build_manual_followup_runtime_creates_canonical_followup_candidate`
-  - `tests/gateway/test_gateway_state_helpers.py::test_build_followup_brief_snapshot_prefers_existing_followup_brief_fields`
-  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_followup_summarizes_allowed_lane_targets`
-  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_uses_execution_slice_only`
-  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_rejects_review_lane_selection`
-  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_runs_partially_executable_brief`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_filter_phase2_retry_scope_keeps_single_followup_execution_when_lane_alias_drifted`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_build_gateway_simulation_command_argv_can_permit_internal_background_chat`
   - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_uses_local_tmux_background_when_preferred`
 - log refs:
-  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3 --control-root /tmp/b3_seed_probe --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
-  - `bounded replay command: bash scripts/gateway_pytest.sh tests/gateway/test_live_rehearsal_seed.py -q`
-  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_seed_probe/Alpha --workspace-root /tmp/b3_seed_probe --team-dir /tmp/b3_seed_probe/.aoe-team --manager-state-file /tmp/b3_seed_probe/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-601'`
-  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_seed_probe/Alpha --workspace-root /tmp/b3_seed_probe --team-dir /tmp/b3_seed_probe/.aoe-team --manager-state-file /tmp/b3_seed_probe/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-601'`
-  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_seed_probe/Alpha --workspace-root /tmp/b3_seed_probe --team-dir /tmp/b3_seed_probe/.aoe-team --manager-state-file /tmp/b3_seed_probe/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O6'`
+  - `regression command: bash scripts/gateway_full_test.sh`
+  - `regression result: 942 passed in 76.31s`
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3 --control-root /tmp/b3_live_followup_20260428_final --run-lock-mode open --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_live_followup_20260428_final/Alpha --workspace-root /tmp/b3_live_followup_20260428_final --team-dir /tmp/b3_live_followup_20260428_final/Alpha/.aoe-team --manager-state-file /tmp/b3_live_followup_20260428_final/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-601'`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_live_followup_20260428_final/Alpha --workspace-root /tmp/b3_live_followup_20260428_final --team-dir /tmp/b3_live_followup_20260428_final/Alpha/.aoe-team --manager-state-file /tmp/b3_live_followup_20260428_final/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-602'`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_live_followup_20260428_final/Alpha --workspace-root /tmp/b3_live_followup_20260428_final --team-dir /tmp/b3_live_followup_20260428_final/Alpha/.aoe-team --manager-state-file /tmp/b3_live_followup_20260428_final/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-601'`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_live_followup_20260428_final/Alpha --workspace-root /tmp/b3_live_followup_20260428_final --team-dir /tmp/b3_live_followup_20260428_final/Alpha/.aoe-team --manager-state-file /tmp/b3_live_followup_20260428_final/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O6'`
 - artifact refs:
-  - `none yet; expected after live rehearsal: background_run_logs/<ticket>.log`
-  - `none yet; expected after live rehearsal: background_run_results/<ticket>.json`
+  - `background_run_logs/bgt-req-b3-001-20260428000830-8624990900.log`
+  - `background_run_results/bgt-req-b3-001-20260428000830-8624990900.json`
 
-## 8. Live Rehearsal Runbook
+## 8. Completed Live Rehearsal Runbook
 - rehearsal scope:
   - `single build evidence followup over local_tmux only`
 - safety posture:
-  - use an isolated runtime
-  - seed it with:
-    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3 --control-root tmp/b3_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
-  - before launch, explicitly set:
-    - `run_lock_mode=open`
-    - `background_runner_target=local_tmux`
-    - `background_runner_slot_limits.local_tmux=1`
-  - keep:
-    - `github_runner=0/disabled for this rehearsal`
-    - `remote_worker=0/disabled for this rehearsal`
-- required target state:
-  - a build task exists with:
-    - `ExecutionBrief.status=partially_executable`
-    - `FollowupBrief.status=partially_executable`
-    - `followup_brief_execution_lane_ids=["L2"]`
-    - `followup_brief_review_lane_ids=["R1"]`
-    - `exec_critic.manual_followup_*` may be empty because `FollowupBrief` is canonical
-- preflight:
-  - verify `/orch status <orch>` shows:
-    - `run_lock=open`
-    - `background_slots` with `local_tmux=0/1`
-    - seeded build/reviewer roles available
-  - verify `/task <task>` shows:
-    - `followup_brief=partially_executable`
-    - `followup_brief_targets: execution=L2 review=R1`
-  - verify `/followup <task>` opens and reports:
-    - execution lane `L2`
-    - review lane `R1`
-    - operator-owned release acceptance reason
+  - isolated runtime
+  - `run_lock=open`
+  - `background_runner_target=local_tmux`
+  - `background_runner_slot_limits.local_tmux=1`
+  - `github_runner` and `remote_worker` not used
 - trigger:
-  - launch exactly one bounded followup execute through one operator surface:
-    - `/followup-exec <task> lane L2`
-    - or dashboard followup-execute action with `lane_ids=["L2"]`
-  - do not launch `R1`
-- capture during rehearsal:
-  - `/orch status <orch>` before launch
-  - `/task <task>` before launch
-  - `/followup <task>` before launch
-  - followup-execute trigger response
-  - `/orch status <orch>` after launch
-  - dashboard `Task Detail`
-  - dashboard `Runtime Detail`
+  - dashboard followup-execute action selected lane `L2`
+  - resulting gateway command ran `/followup-exec REQ-B3-001 lane L2`
 - pass criteria:
-  - followup execute stays build execution-only
-  - runner target is `local_tmux`
-  - exactly one background ticket is created
-  - `reentry_rails_summary` remains `manual_followup`
-  - review/manual remainder `R1` stays visible after launch
-  - no retry branch replaces the followup branch
-- fail conditions:
-  - followup execute launches review lane `R1`
-  - runner target drifts to `github_runner` or `remote_worker`
-  - background launch exceeds one local_tmux slot
-  - `/task`, `/followup`, and dashboard disagree on lane ids or next step
+  - followup execute stayed build execution-only
+  - runner target stayed `local_tmux`
+  - exactly one background ticket was created
+  - background ticket completed with `exit_code=0`
+  - source task kept `manual_followup`
+  - review/manual remainder `R1` stayed visible after launch
+  - no retry branch replaced the followup branch

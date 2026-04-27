@@ -6938,6 +6938,23 @@ def test_build_gateway_simulation_command_argv_uses_gateway_entrypoint() -> None
     assert "local-bg" in argv
     assert "--simulate-text" in argv
     assert "/retry T-101" in argv
+    assert "--no-owner-only" not in argv
+    assert "--no-deny-by-default" not in argv
+
+
+def test_build_gateway_simulation_command_argv_can_permit_internal_background_chat() -> None:
+    argv = build_gateway_simulation_command_argv(
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        simulate_text="/followup-exec T-101 lane L2",
+        simulate_chat_id="dashboard-http",
+        no_owner_only=True,
+        no_deny_by_default=True,
+    )
+
+    assert "--no-owner-only" in argv
+    assert "--no-deny-by-default" in argv
 
 
 def test_build_local_tmux_gateway_command_launch_spec_embeds_gateway_payload() -> None:
@@ -8263,6 +8280,49 @@ def test_filter_phase2_retry_scope_uses_execution_only_slice_for_followup() -> N
     assert exec_plan["review_lanes"] == []
     assert scope["rerun_execution_lane_ids"] == ["L2"]
     assert scope["rerun_review_lane_ids"] == []
+
+
+def test_filter_phase2_retry_scope_keeps_single_followup_execution_when_lane_alias_drifted() -> None:
+    plan_data = {
+        "summary": "ready",
+        "subtasks": [
+            {"id": "S1", "owner_role": "Codex-Dev", "title": "Implement", "goal": "do impl"},
+        ],
+        "meta": {
+            "phase2_execution_plan": {
+                "execution_mode": "single",
+                "execution_lanes": [
+                    {"lane_id": "E1", "role": "Codex-Dev", "subtask_ids": ["S1"], "parallel": False},
+                ],
+                "review_mode": "single",
+                "review_lanes": [
+                    {"lane_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["E1"], "parallel": False},
+                ],
+                "parallel_workers": False,
+                "parallel_reviews": False,
+                "readonly": False,
+            },
+        },
+    }
+
+    filtered, scope = run_handlers._filter_phase2_retry_scope(
+        plan_data=plan_data,
+        run_control_mode="followup",
+        run_source_task={
+            "exec_critic": {
+                "manual_followup_execution_lane_ids": ["L2"],
+                "manual_followup_review_lane_ids": ["R1"],
+            }
+        },
+        selected_execution_lane_ids=["L2"],
+    )
+
+    assert filtered is not None
+    exec_plan = filtered["meta"]["phase2_execution_plan"]
+    assert [row["lane_id"] for row in exec_plan["execution_lanes"]] == ["E1"]
+    assert exec_plan["review_lanes"] == []
+    assert scope["review_roles"] == []
+    assert scope["planned_roles"] == ["Codex-Dev"]
 
 
 def test_handle_run_or_unknown_command_retry_filters_phase2_dispatch_to_target_lanes(tmp_path: Path) -> None:

@@ -1150,6 +1150,8 @@ def build_gateway_simulation_command_argv(
     simulate_text: str,
     simulate_chat_id: str = "local-background",
     simulate_live: bool = True,
+    no_owner_only: bool = False,
+    no_deny_by_default: bool = False,
 ) -> List[str]:
     argv: List[str] = [
         str(sys.executable or "python3"),
@@ -1167,6 +1169,10 @@ def build_gateway_simulation_command_argv(
     ]
     if simulate_live:
         argv.append("--simulate-live")
+    if no_owner_only:
+        argv.append("--no-owner-only")
+    if no_deny_by_default:
+        argv.append("--no-deny-by-default")
     return [item for item in argv if str(item).strip()]
 
 
@@ -1217,6 +1223,8 @@ def build_local_tmux_gateway_command_launch_spec(
     manager_state_file: str = "",
     command_text: str,
     simulate_chat_id: str = "local-background",
+    no_owner_only: bool = False,
+    no_deny_by_default: bool = False,
     launch_mode: str = "offdesk_manual",
     source_surface: str = "",
     created_by: str = "",
@@ -1237,6 +1245,8 @@ def build_local_tmux_gateway_command_launch_spec(
             simulate_text=command_text,
             simulate_chat_id=simulate_chat_id,
             simulate_live=True,
+            no_owner_only=no_owner_only,
+            no_deny_by_default=no_deny_by_default,
         ),
         command_cwd=project_root,
     )
@@ -1256,6 +1266,8 @@ def build_local_tmux_gateway_run_launch_spec(
     timeout_sec: int | None = None,
     force_mode: str = "dispatch",
     simulate_chat_id: str = "local-background",
+    no_owner_only: bool = False,
+    no_deny_by_default: bool = False,
     launch_mode: str = "offdesk_manual",
     source_surface: str = "",
     created_by: str = "",
@@ -1275,6 +1287,8 @@ def build_local_tmux_gateway_run_launch_spec(
             force_mode=force_mode,
         ),
         simulate_chat_id=simulate_chat_id,
+        no_owner_only=no_owner_only,
+        no_deny_by_default=no_deny_by_default,
         launch_mode=launch_mode,
         source_surface=source_surface,
         created_by=created_by,
@@ -1291,6 +1305,8 @@ def build_external_runner_gateway_command_launch_spec(
     manager_state_file: str = "",
     command_text: str,
     simulate_chat_id: str = "local-background",
+    no_owner_only: bool = False,
+    no_deny_by_default: bool = False,
     launch_mode: str = "offdesk_manual",
     source_surface: str = "",
     created_by: str = "",
@@ -1315,6 +1331,8 @@ def build_external_runner_gateway_command_launch_spec(
             simulate_text=command_text,
             simulate_chat_id=simulate_chat_id,
             simulate_live=True,
+            no_owner_only=no_owner_only,
+            no_deny_by_default=no_deny_by_default,
         ),
         command_cwd=project_root,
     )

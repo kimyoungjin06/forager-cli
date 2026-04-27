@@ -1290,6 +1290,8 @@ def _maybe_execute_retry_background_runner(
         manager_state_file=manager_state_file,
         command_text=command_text,
         simulate_chat_id=_DASHBOARD_CHAT_ID,
+        no_owner_only=True,
+        no_deny_by_default=True,
         launch_mode=launch_mode,
         source_surface=source_surface,
         created_by=f"dashboard:{_DASHBOARD_CHAT_ID}",

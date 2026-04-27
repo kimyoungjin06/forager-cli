@@ -41,12 +41,12 @@
       - `/task`, `/offdesk review`, and dashboard task/runtime detail all kept the branch on `rerun`
       - the prelaunch `pref=local_tmux | effective=local_background` status nuance is now documented as a task-specific launch-spec limitation, not a build rerun blocker
   - `build/B3_manual_followup_path.md`
-    - `bounded_replay_pass`
+    - `executed_done`
     - finding:
-      - first build manual-followup artifact is now written as a launch-bearing candidate
-      - seeded B3 proves `FollowupBrief` can be the canonical lane/reason source even when legacy `exec_critic.manual_followup_*` lane fields are empty
-      - `/task`, `/followup`, `/offdesk review`, and bounded dashboard transition tests agree on `followup=partially_executable exec=L2 review=R1`
-      - live local_tmux launch is intentionally deferred to the next promotion step
+      - isolated `local_tmux` live rehearsal launched exactly one build evidence followup lane and closed the background ticket with `exit_code=0`
+      - child task ran execution-only as `Codex-Dev` with no verifier roles while source task stayed on `manual_followup`
+      - `/task`, `/followup`, `/orch status`, and dashboard followup-execute evidence agree on `followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
+      - release acceptance decision and release wording remain operator-owned on review lane `R1`
   - `data/D1_happy_path.md`
     - `executed_done`
     - finding:
@@ -132,13 +132,13 @@
 - runbook:
   - embedded in `review/R2_rerun_path.md`
 - still bounded replay only:
-  - `none in the review rail first wave`
+  - `none in the review/build first wave rerun or manual-followup rails`
 - next live candidate:
-  - `build/B3_manual_followup_path.md`
+  - `data/D2_rerun_path.md`
 - candidate reason:
-  - `B3 is now written and replay-proven as a launch-bearing build manual-followup candidate`
+  - `data rerun remains the largest unresolved non-happy-path gap after B3's launch-bearing manual-followup proof`
 - remaining gate:
-  - `run the isolated local_tmux followup-exec launch for B3 and record the background ticket/result artifacts`
+  - `decide whether the D2 blocker should be solved by a reusable evidence-format contract or kept scenario-specific`
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
 

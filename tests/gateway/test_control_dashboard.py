@@ -11758,6 +11758,13 @@ def test_control_dashboard_post_followup_execute_route_uses_local_tmux_backgroun
     assert task["background_run_model_plan_summary"] == (
         "pack=followup_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
     )
+    queue_path = Path(updated["projects"]["alpha"]["team_dir"]) / "background_runs.json"
+    rows = background_runs.load_background_runs_state(queue_path).get("runs") or []
+    launched = [row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-1-")]
+    assert len(launched) == 1
+    command_argv = list(launched[0]["launch_spec"].get("command_argv") or [])
+    assert "--no-owner-only" in command_argv
+    assert "--no-deny-by-default" in command_argv
 
 
 def test_control_dashboard_post_action_route_appends_file_backed_audit_row(tmp_path: Path) -> None:
