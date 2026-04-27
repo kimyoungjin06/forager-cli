@@ -937,14 +937,49 @@ def _normalize_lane_ids(lane_ids: Optional[List[str]]) -> tuple[List[str], List[
     return execution, review
 
 
+def _compact_followup_lane_ids(raw: Any) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    out: List[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        token = str(row or "").strip()[:32]
+        if not token:
+            continue
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(token)
+    return out
+
+
+def _followup_lane_targets(task: Dict[str, Any], exec_critic: Dict[str, Any]) -> tuple[List[str], List[str]]:
+    brief_execution = _compact_followup_lane_ids(task.get("followup_brief_execution_lane_ids"))
+    brief_review = _compact_followup_lane_ids(task.get("followup_brief_review_lane_ids"))
+    if brief_execution or brief_review:
+        return brief_execution, brief_review
+    return (
+        _compact_followup_lane_ids(exec_critic.get("manual_followup_execution_lane_ids")),
+        _compact_followup_lane_ids(exec_critic.get("manual_followup_review_lane_ids")),
+    )
+
+
+def _followup_reason(task: Dict[str, Any], exec_critic: Dict[str, Any]) -> str:
+    return (
+        str(task.get("followup_brief_reason", "")).strip()
+        or str(exec_critic.get("reason", "")).strip()
+        or str(exec_critic.get("note", "")).strip()
+        or "-"
+    )
+
+
 def _orch_task_reply_markup(key: str, entry: Dict[str, Any], request_id: str, task: Dict[str, Any]) -> Dict[str, Any]:
     alias = _project_alias(entry, key)
     ref = _task_ref_for_actions(task, request_id)
     exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
     rerun_exec = [str(x).strip() for x in (exec_critic.get("rerun_execution_lane_ids") or []) if str(x).strip()]
     rerun_review = [str(x).strip() for x in (exec_critic.get("rerun_review_lane_ids") or []) if str(x).strip()]
-    manual_exec = [str(x).strip() for x in (exec_critic.get("manual_followup_execution_lane_ids") or []) if str(x).strip()]
-    manual_review = [str(x).strip() for x in (exec_critic.get("manual_followup_review_lane_ids") or []) if str(x).strip()]
+    manual_exec, manual_review = _followup_lane_targets(task, exec_critic)
     followup_brief_status = str(task.get("followup_brief_status", "")).strip().lower()
     followup_execute_enabled = followup_brief_status in {"executable", "partially_executable"}
     verdict = str(exec_critic.get("verdict", "")).strip().lower()
@@ -3580,16 +3615,7 @@ def handle_orch_task_command(
             return True
         key, entry, _req_ref, req_id, task, exec_critic = loaded
 
-        allowed_execution_lane_ids = [
-            str(item).strip()[:32]
-            for item in (exec_critic.get("manual_followup_execution_lane_ids") or [])
-            if str(item).strip()
-        ]
-        allowed_review_lane_ids = [
-            str(item).strip()[:32]
-            for item in (exec_critic.get("manual_followup_review_lane_ids") or [])
-            if str(item).strip()
-        ]
+        allowed_execution_lane_ids, allowed_review_lane_ids = _followup_lane_targets(task, exec_critic)
         if not allowed_execution_lane_ids and not allowed_review_lane_ids:
             send(
                 f"manual follow-up lanes are not available for this task.\nrequest_id={req_id}\nallowed: none",
@@ -3630,7 +3656,7 @@ def handle_orch_task_command(
             save_manager_state(args.manager_state_file, manager_state)
 
         label = task_display_label(task or {}, fallback_request_id=req_id)
-        reason = str(exec_critic.get("reason", "")).strip() or str(exec_critic.get("note", "")).strip() or "-"
+        reason = _followup_reason(task, exec_critic)
         lines = [
             f"runtime: {key}",
             "manual follow-up",
@@ -3669,16 +3695,7 @@ def handle_orch_task_command(
             return True
         key, entry, _req_ref, req_id, task, exec_critic = loaded
 
-        allowed_execution_lane_ids = [
-            str(item).strip()[:32]
-            for item in (exec_critic.get("manual_followup_execution_lane_ids") or [])
-            if str(item).strip()
-        ]
-        allowed_review_lane_ids = [
-            str(item).strip()[:32]
-            for item in (exec_critic.get("manual_followup_review_lane_ids") or [])
-            if str(item).strip()
-        ]
+        allowed_execution_lane_ids, allowed_review_lane_ids = _followup_lane_targets(task, exec_critic)
         if not allowed_execution_lane_ids and not allowed_review_lane_ids:
             send(
                 f"manual follow-up execute is not available for this task.\nrequest_id={req_id}\nallowed: none",
@@ -3714,12 +3731,7 @@ def handle_orch_task_command(
             selected_review_lane_ids = list(allowed_review_lane_ids)
 
         label = task_display_label(task or {}, fallback_request_id=req_id)
-        reason = (
-            str(task.get("followup_brief_reason", "")).strip()
-            or str(exec_critic.get("reason", "")).strip()
-            or str(exec_critic.get("note", "")).strip()
-            or "-"
-        )
+        reason = _followup_reason(task, exec_critic)
         followup_brief_status = str(task.get("followup_brief_status", "")).strip().lower() or "preview_only"
         alias = _project_alias(entry, key)
         team_dir_raw = str(entry.get("team_dir", "") or "").strip()
