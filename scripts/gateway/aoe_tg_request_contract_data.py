@@ -26,6 +26,21 @@ _DATA_MARKERS = (
 )
 
 _FORMAT_MARKERS = ("YYYY/MM", "YYYY-MM", "YYYY.MM")
+_ARTIFACT_FIELD_STOP_WORDS = {
+    "json",
+    "md",
+    "csv",
+    "schema_report",
+    "null_summary",
+    "sample_5",
+}
+_SCHEMA_REPORT_EXPLICIT_FIELD_MAP = {
+    "expected_type": "columns[].expected_type",
+    "observed_inferred_type": "columns[].observed_inferred_type",
+    "schema_drift": "columns[].schema_drift",
+    "rerun_required": "columns[].rerun_required",
+    "violations": "columns[].violations[]",
+}
 
 
 def _trim(raw: Any, limit: int) -> str:
@@ -173,6 +188,87 @@ def _extract_schema_column_expectations(prompt: str) -> Dict[str, str]:
         if column and inferred_type:
             out[column] = inferred_type
     return out
+
+
+def _extract_declared_artifact_fields(
+    prompt: str,
+    *,
+    artifact_path: str,
+    skip_tokens: List[str] | None = None,
+) -> List[str]:
+    src = str(prompt or "")
+    path = _trim(artifact_path, 120)
+    if not src.strip() or not path:
+        return []
+    match = re.search(
+        re.escape(path)
+        + r"\s*(?:에는|은|는|에|:|=)\s*(.*?)(?=(?:[A-Za-z0-9_./-]+\.(?:json|md|csv)\s*(?:에는|은|는|에|:|=))|[.。]|$)",
+        src,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    segment = match.group(1)
+    segment = re.split(r"(?:를|을)\s*(?:남기|기록|작성)", segment, maxsplit=1)[0]
+    skip = {str(item or "").strip().lower() for item in (skip_tokens or []) if str(item or "").strip()}
+    out: List[str] = []
+    for raw in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", segment):
+        token = _trim(raw, 80)
+        low = token.lower()
+        if not token or low in skip or low in _ARTIFACT_FIELD_STOP_WORDS:
+            continue
+        if token not in out:
+            out.append(token)
+    return out[:12]
+
+
+def _apply_declared_artifact_field_requirements(
+    artifact_contracts: Dict[str, Dict[str, Any]],
+    *,
+    source_prompt: str,
+    schema_column_expectations: Dict[str, str],
+) -> None:
+    if not isinstance(artifact_contracts, dict):
+        return
+    skip_columns = list((schema_column_expectations or {}).keys())
+    if isinstance(artifact_contracts.get("schema_report"), dict):
+        schema_path = _trim(artifact_contracts["schema_report"].get("path", ""), 200)
+        declared = _extract_declared_artifact_fields(
+            source_prompt,
+            artifact_path=schema_path,
+            skip_tokens=skip_columns,
+        )
+        if declared:
+            required = list(artifact_contracts["schema_report"].get("required_fields") or [])
+            mapped = [
+                _SCHEMA_REPORT_EXPLICIT_FIELD_MAP.get(_trim(item, 80), _trim(item, 80))
+                for item in declared
+                if _trim(item, 80)
+            ]
+            artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(
+                mapped + required,
+                limit=24,
+            )
+            notes = list(artifact_contracts["schema_report"].get("acceptance_notes") or [])
+            notes.append("schema_report.json preserves explicitly requested schema evidence fields from the operator prompt.")
+            artifact_contracts["schema_report"]["acceptance_notes"] = _dedupe_rows(notes, limit=8)
+
+    if isinstance(artifact_contracts.get("null_summary"), dict):
+        null_path = _trim(artifact_contracts["null_summary"].get("path", ""), 200)
+        declared = _extract_declared_artifact_fields(
+            source_prompt,
+            artifact_path=null_path,
+            skip_tokens=skip_columns,
+        )
+        if declared:
+            required = list(artifact_contracts["null_summary"].get("required_fields") or [])
+            artifact_contracts["null_summary"]["required_fields"] = _dedupe_rows(
+                declared + required,
+                limit=24,
+            )
+            notes = list(artifact_contracts["null_summary"].get("acceptance_notes") or [])
+            notes.append("null_summary.md preserves explicitly requested rerun evidence field names from the operator prompt.")
+            artifact_contracts["null_summary"]["acceptance_notes"] = _dedupe_rows(notes, limit=8)
 
 
 def _data_output_artifacts(prompt: str) -> List[str]:
@@ -463,7 +559,7 @@ def _apply_quality_gate_artifact_requirements(
                 "schema_drift.rerun_required",
             ]
         )
-        artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(required, limit=16)
+        artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(required, limit=24)
         notes = list(artifact_contracts["schema_report"].get("acceptance_notes") or [])
         notes.append("schema_report.json declares whether schema drift blocks done and requires rerun.")
         artifact_contracts["schema_report"]["acceptance_notes"] = _dedupe_rows(notes, limit=8, )
@@ -478,7 +574,7 @@ def _apply_quality_gate_artifact_requirements(
                 "null_heavy.reason",
             ]
         )
-        artifact_contracts["null_summary"]["required_fields"] = _dedupe_rows(required, limit=16)
+        artifact_contracts["null_summary"]["required_fields"] = _dedupe_rows(required, limit=24)
         notes = list(artifact_contracts["null_summary"].get("acceptance_notes") or [])
         notes.append("null_summary.md declares whether null-heavy output blocks done and requires rerun.")
         artifact_contracts["null_summary"]["acceptance_notes"] = _dedupe_rows(notes, limit=8)
@@ -522,10 +618,15 @@ def extract_data_request_contract(prompt: str) -> Optional[Dict[str, Any]]:
     )
     output_artifacts = _data_output_artifacts(source_prompt)
     artifact_contracts = _artifact_contracts(output_artifacts, target_column=target_column)
+    _apply_declared_artifact_field_requirements(
+        artifact_contracts,
+        source_prompt=source_prompt,
+        schema_column_expectations=schema_column_expectations,
+    )
     if schema_column_expectations and isinstance(artifact_contracts.get("schema_report"), dict):
         required = list(artifact_contracts["schema_report"].get("required_fields") or [])
         required.extend(["columns[].expected_type", "schema_drift.violations[]"])
-        artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(required, limit=16)
+        artifact_contracts["schema_report"]["required_fields"] = _dedupe_rows(required, limit=24)
         notes = list(artifact_contracts["schema_report"].get("acceptance_notes") or [])
         notes.append("schema_report.json compares declared schema expectations against observed output types.")
         artifact_contracts["schema_report"]["acceptance_notes"] = _dedupe_rows(notes, limit=8)
@@ -977,6 +1078,23 @@ def data_request_contract_acceptance_floor(
             + (_trim(schema_value_quality_policy.get("null_or_invalid_count_field", ""), 48) or "null_or_invalid_count")
             + " via trim-empty/null-like/non-numeric"
         )
+    null_required_fields = [
+        _trim(item, 80)
+        for item in (null_contract.get("required_fields") or [])
+        if _trim(item, 80)
+    ]
+    explicit_null_summary_fields = [
+        field
+        for field in ("affected_columns", "null_or_invalid_count", "null_heavy", "rerun_required", "reason")
+        if field in null_required_fields
+    ]
+    explicit_null_field_clause = ""
+    if explicit_null_summary_fields:
+        explicit_null_field_clause = (
+            " It writes explicit fields "
+            + ", ".join(f"`{field}`" for field in explicit_null_summary_fields)
+            + "."
+        )
 
     if combined_evidence:
         floor = []
@@ -988,6 +1106,8 @@ def data_request_contract_acceptance_floor(
                 null_line = (
                     f"`{null_contract.get('path', 'null_summary.md')}` records affected columns, null counts, invalid month examples, and the rerun-required decision for null-heavy output under request-contract `quality_gate_policy` while preserving the requested row/value policy and the request-contract `month_bucket_policy`."
                 )
+                if explicit_null_field_clause:
+                    null_line += explicit_null_field_clause
             floor.append(null_line)
         if "schema" in evidence_targets and schema_contract:
             schema_line = (
@@ -1034,11 +1154,20 @@ def data_request_contract_acceptance_floor(
                 f"`{anomaly_field_path or 'target_anomalies[]'}`, marks whether output is null-heavy{threshold_clause} under request-contract `quality_gate_policy`, and leaves the rerun-required decision instead of claiming `done`."
             )
             if value_quality_summary:
-                floor.append(
-                    "Null-heavy evidence computes per-column invalid counts from "
-                    + value_quality_summary
-                    + " and reports `affected_columns` plus `reason` using the same rule."
-                )
+                if explicit_null_summary_fields:
+                    floor.append(
+                        "Null-heavy evidence writes fields "
+                        + ", ".join(f"`{field}`" for field in explicit_null_summary_fields)
+                        + "; counts use "
+                        + value_quality_summary
+                        + "."
+                    )
+                else:
+                    floor.append(
+                        "Null-heavy evidence computes per-column invalid counts from "
+                        + value_quality_summary
+                        + " and reports `affected_columns` plus `reason` using the same rule."
+                    )
         else:
             floor.append(
                 "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "
@@ -1142,11 +1271,20 @@ def data_request_contract_acceptance_floor(
                 f"`{anomaly_field_path or 'target_anomalies[]'}`, marks whether output is null-heavy{threshold_clause} under request-contract `quality_gate_policy`, and leaves the rerun-required decision instead of claiming `done`."
             )
             if value_quality_summary:
-                floor.append(
-                    "Null-heavy evidence computes per-column invalid counts from "
-                    + value_quality_summary
-                    + " and reports `affected_columns` plus `reason` using the same rule."
-                )
+                if explicit_null_summary_fields:
+                    floor.append(
+                        "Null-heavy evidence writes fields "
+                        + ", ".join(f"`{field}`" for field in explicit_null_summary_fields)
+                        + "; counts use "
+                        + value_quality_summary
+                        + "."
+                    )
+                else:
+                    floor.append(
+                        "Null-heavy evidence computes per-column invalid counts from "
+                        + value_quality_summary
+                        + " and reports `affected_columns` plus `reason` using the same rule."
+                    )
         else:
             floor.append(
                 "Null/anomaly evidence reads canonical anomaly buckets/count/examples from `schema_report.json` "

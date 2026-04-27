@@ -138,7 +138,7 @@
 - candidate reason:
   - `data rerun remains the largest unresolved non-happy-path gap after B3's launch-bearing manual-followup proof`
 - remaining gate:
-  - `decide whether the D2 blocker should be solved by a reusable evidence-format contract or kept scenario-specific`
+  - `rerun D2 after the scenario-specific null_summary evidence format is bounded-tested`
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
 

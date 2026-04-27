@@ -1396,6 +1396,14 @@ def test_data_request_contract_quality_gate_extracts_explicit_null_heavy_thresho
     assert contract["fields"]["quality_gate_policy"]["null_heavy_comparison"] == ">="
     assert contract["fields"]["quality_gate_policy"]["null_heavy_scope_columns"] == ["orders", "revenue"]
     assert contract["fields"]["schema_value_quality_policy"]["scope_columns"] == ["orders", "revenue"]
+    assert "columns[].observed_inferred_type" in contract["artifact_contracts"]["schema_report"]["required_fields"]
+    assert contract["artifact_contracts"]["null_summary"]["required_fields"][:5] == [
+        "affected_columns",
+        "null_or_invalid_count",
+        "null_heavy",
+        "rerun_required",
+        "reason",
+    ]
 
     null_floor = request_contract_data_mod.data_request_contract_acceptance_floor(
         request_contract=contract,
@@ -1404,6 +1412,40 @@ def test_data_request_contract_quality_gate_extracts_explicit_null_heavy_thresho
     )
     assert any("threshold orders,revenue >= 2 by null-or-invalid-row-count" in item for item in null_floor)
     assert any("`schema_value_quality_policy` orders,revenue -> null_or_invalid_count via trim-empty/null-like/non-numeric" in item for item in null_floor)
+    assert any(
+        "`affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, `reason`" in item
+        for item in null_floor
+    )
+
+    plan = gw.normalize_task_plan_payload(
+        {
+            "summary": "normalize monthly csv with rerun evidence",
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "title": "Write null_summary.md",
+                    "goal": "summarize null_summary.md for orders/revenue null-heavy rerun evidence",
+                    "owner_role": "DataEngineer",
+                    "acceptance": ["null summary exists"],
+                },
+            ],
+        },
+        user_prompt="월별 CSV의 null-heavy rerun evidence를 남겨라.",
+        workers=["DataEngineer", "Codex-Reviewer"],
+        max_subtasks=1,
+        meta_overrides={
+            "request_contract": contract,
+            "phase1_role_preset": "data",
+            "phase2_team_preset": "data",
+        },
+    )
+
+    acceptance = plan["subtasks"][0]["acceptance"]
+    assert any("threshold orders,revenue >= 2 by null-or-invalid-row-count" in item for item in acceptance)
+    assert any(
+        "`affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, `reason`" in item
+        for item in acceptance
+    )
 
 
 def test_review_risk_prompt_prefers_review_preset_over_build_context_words() -> None:
