@@ -100,6 +100,7 @@ Focused gateway suites:
 bash scripts/gateway_smoke_test.sh
 bash scripts/gateway_error_test.sh
 bash scripts/gateway_dashboard_test.sh
+bash scripts/gateway_full_test.sh
 ```
 
 Minimum release check:

@@ -77,12 +77,14 @@ provider capacity override 후 재개:
 `aoe-team-stack --project-root /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control stop`
 7. Gateway regression tests (pytest via uv):
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_pytest.sh`
-8. Smoke/Error subset wrappers:
+8. Gateway suite wrappers:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_smoke_test.sh`
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_error_test.sh`
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_dashboard_test.sh`
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_full_test.sh`
 9. CI workflow definition:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.github/workflows/gateway-tests.yml`
-- job shape: `gateway-smoke`, `gateway-error` (matrix parallel run)
+- job shape: `gateway-smoke`, `gateway-error`, `gateway-dashboard`, `gateway-full` (matrix parallel run)
 
 ## 2.1 Systemd User Mode (recommended)
 1. Install:
