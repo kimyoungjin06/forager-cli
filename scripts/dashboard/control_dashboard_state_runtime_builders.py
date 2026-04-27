@@ -1383,15 +1383,65 @@ def _runtime_active_task_rate_limit_summary(row: Dict[str, Any]) -> str:
     )
 
 
-def _resolve_runtime_entry(manager_state: Dict[str, Any], project_alias: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+def _resolve_runtime_entry(
+    manager_state: Dict[str, Any],
+    project_alias: str,
+    *,
+    include_hidden: bool = False,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
     token = str(project_alias or "").strip().upper()
     if not token:
         return None
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
-    for key, entry in ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False):
+    entries = (
+        [(str(key), entry) for key, entry in projects.items() if isinstance(entry, dict)]
+        if include_hidden
+        else ops_policy.list_ops_projects(projects, skip_paused=False, require_ready=False)
+    )
+    for key, entry in entries:
         if ops_policy.project_alias(entry, str(key)).upper() == token:
             return str(key), entry
     return None
+
+
+def _runtime_detail_report(
+    manager_state: Dict[str, Any],
+    provider_state: Dict[str, Any],
+    *,
+    key: str,
+    entry: Dict[str, Any],
+    target_alias: str,
+) -> Optional[Dict[str, Any]]:
+    reports = _runtime_reports(manager_state, provider_state)
+    row = next((report for report in reports if str(report.get("alias", "")).strip().upper() == target_alias), None)
+    if row is None:
+        row = dict(offdesk_flow.offdesk_prepare_project_report(manager_state, key, entry))
+        row["alias"] = target_alias
+        row["capacity_repeat_count"] = int(_provider_repeat_counts(provider_state).get(target_alias, 0) or 0)
+    else:
+        row = dict(row)
+
+    if not ops_policy.project_schedulable(entry, skip_paused=False, require_ready=False):
+        reason = ops_policy.project_ops_exclusion_reason(entry)
+        notice = f"ops_hidden: {reason}"
+        runtime_label = str(row.get("runtime_label", "")).strip() or "ready"
+        if notice not in runtime_label:
+            row["runtime_label"] = f"{runtime_label} | {notice}" if runtime_label != "-" else notice
+        attention = str(row.get("attention_summary", "")).strip()
+        if attention in {"", "-"}:
+            row["attention_summary"] = notice
+        elif notice not in attention:
+            row["attention_summary"] = f"{notice}, {attention}"
+        notes = [str(item).strip() for item in (row.get("notes") or []) if str(item).strip()]
+        if notice not in notes:
+            notes.insert(0, notice)
+        row["notes"] = notes
+        lines = [str(item) for item in (row.get("lines") or []) if str(item).strip()]
+        scope_line = f"  ops_scope: {notice}"
+        if scope_line not in lines:
+            lines.append(scope_line)
+        row["lines"] = lines
+    return row
 
 
 def _build_runtime_detail(
@@ -1401,13 +1451,18 @@ def _build_runtime_detail(
     *,
     root_team_dir: Path | str | None = None,
 ) -> Optional[RuntimeDetailDTO]:
-    resolved = _resolve_runtime_entry(manager_state, project_alias)
+    resolved = _resolve_runtime_entry(manager_state, project_alias, include_hidden=True)
     if resolved is None:
         return None
     key, entry = resolved
-    reports = _runtime_reports(manager_state, provider_state)
     target_alias = ops_policy.project_alias(entry, key).upper()
-    row = next((report for report in reports if str(report.get("alias", "")).strip().upper() == target_alias), None)
+    row = _runtime_detail_report(
+        manager_state,
+        provider_state,
+        key=key,
+        entry=entry,
+        target_alias=target_alias,
+    )
     if row is None:
         return None
     queue_snapshot = ops_policy.project_queue_snapshot(entry)

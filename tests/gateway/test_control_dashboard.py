@@ -3879,6 +3879,47 @@ def test_control_dashboard_task_detail_route_loads_hidden_project_by_request_id(
     assert "/offdesk review" in text
 
 
+def test_control_dashboard_runtime_detail_route_loads_hidden_project_by_alias(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    alpha = state["projects"]["alpha"]
+    alpha["ops_hidden"] = True
+    alpha["ops_hidden_reason"] = "project on hold"
+    alpha["paused"] = True
+    alpha["paused_reason"] = "awaiting archive decision"
+    for task in alpha["tasks"].values():
+        task["status"] = "completed"
+        task["stage"] = "completed"
+    alpha["todos"][0]["status"] = "done"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    detail_status, detail_headers, detail_body = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)
+    text = detail_body.decode("utf-8")
+
+    assert "O2" not in {card.project_alias for card in snapshot.runtime_cards}
+    assert detail_status == 200
+    assert detail_headers["Content-Type"].startswith("text/html")
+    assert "O2 Alpha" in text
+    assert "ops_hidden: project on hold" in text
+    assert "ops_scope" in text
+    assert "analysis-check" in text
+    assert "analysis-followup" in text
+
+
 def test_control_dashboard_state_resolves_alias_route_via_request_id(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
