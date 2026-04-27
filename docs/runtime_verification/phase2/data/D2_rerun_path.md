@@ -9,6 +9,8 @@
   - `rerun`
 - status:
   - `executed_blocked`
+- current_fix_branch:
+  - `task/data-d2-rerun-evidence-1`
 - executed_at:
   - `2026-03-31T07:46:09+09:00`
 - operator:
@@ -86,13 +88,19 @@
   - `T-043` blocked because `null_or_invalid_count` arithmetic and non-numeric classification for `orders`/`revenue` were still not explicit enough for reviewer-owned rerun evidence.
   - `T-044` blocked even after `quality_gate_policy`, `schema_column_expectations`, numeric threshold extraction, and `schema_value_quality_policy` landed.
   - The remaining gap is not a reusable core abstraction; it is scenario-specific evidence formatting for `null_summary.md` and should be handled by stricter prompt discipline or operator-authored validator policy, not additional core expansion.
+- follow-up fix attempt:
+  - `2026-04-28 KST`: request-contract extraction now preserves explicit operator-authored artifact fields from `schema_report.json에는 ...` and `null_summary.md에는 ...`
+  - `null_summary.md` required fields are ordered as `affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, `reason` when the prompt declares that shape
+  - data acceptance floor now repeats the explicit null-heavy evidence fields together with `orders,revenue >= 2` and `null-or-invalid-row-count`
 - next fix:
-  - `freeze core changes for D2 and revisit only with scenario-specific prompt/validator guidance`
+  - `rerun D2 in an isolated runtime and promote to executed_done only if planning reaches dispatch and the final branch remains rerun with concrete null_summary evidence`
 
 ## 7. Raw References
 - runtime state refs:
   - `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/.aoe-team/orch_manager_state.json`
 - log refs:
   - `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/.aoe-team/logs/gateway_events.jsonl`
+  - `bounded regression command: bash scripts/gateway_pytest.sh tests/gateway/test_phase1_planning.py -q`
+  - `bounded regression command: bash scripts/gateway_pytest.sh tests/gateway/test_gateway_state_helpers.py -k 'request_contract or execution_brief' -q`
 - artifact refs:
   - `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/data/monthly_raw.csv`
