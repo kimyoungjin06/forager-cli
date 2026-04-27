@@ -9826,6 +9826,58 @@ def test_control_dashboard_preferences_browser_submit_updates_action_result(tmp_
         assert cancel_result["ok"] is True
         assert cancel_result["confirmMessage"] == "Delete preference rule legend_position for chart?"
         assert cancel_result["fetchCount"] == 0
+
+        refresh_click = _cdp_eval(
+            cdp,
+            """
+            (() => {
+              const link = Array.from(document.querySelectorAll("#action-result-links a")).find((anchor) => (
+                (anchor.textContent || "").trim() === "refresh preferences"
+                && anchor.getAttribute("href") === "/control/preferences?project=O2&artifact=chart"
+              ));
+              if (!link) {
+                return { ok: false, reason: "refresh_link_missing" };
+              }
+              link.click();
+              return { ok: true, href: link.getAttribute("href") || "" };
+            })()
+            """,
+        )
+        assert isinstance(refresh_click, dict)
+        assert refresh_click == {"ok": True, "href": "/control/preferences?project=O2&artifact=chart"}
+
+        refreshed_page = _wait_for_cdp_eval(
+            cdp,
+            """
+            (() => {
+              if (document.readyState !== "complete" && document.readyState !== "interactive") {
+                return false;
+              }
+              if (window.location.pathname !== "/control/preferences" || window.location.search !== "?project=O2&artifact=chart") {
+                return false;
+              }
+              const body = document.body ? (document.body.textContent || "") : "";
+              const promotedRule = document.querySelector('form[data-action-command="pref-rule:show_source_note:auto"]');
+              const staleCandidate = document.querySelector('form[data-action-command^="pref-candidate:show_source_note:"]');
+              if (!promotedRule || staleCandidate) {
+                return false;
+              }
+              return {
+                href: window.location.pathname + window.location.search,
+                hasPromotedRule: Boolean(promotedRule),
+                hasStaleCandidate: Boolean(staleCandidate),
+                hasEmptyCandidateCopy: body.includes("no candidate recommendations")
+              };
+            })()
+            """,
+            timeout=8,
+        )
+        assert refreshed_page == {
+            "href": "/control/preferences?project=O2&artifact=chart",
+            "hasPromotedRule": True,
+            "hasStaleCandidate": False,
+            "hasEmptyCandidateCopy": True,
+        }
     finally:
         if cdp is not None:
             cdp.close()
