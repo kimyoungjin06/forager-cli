@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 GW_DIR = ROOT / "scripts" / "gateway"
@@ -39,6 +41,7 @@ _LAST_GOOD_JSON: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_MANAGER_STATE: Dict[str, Dict[str, Any]] = {}
 _LAST_GOOD_COMMAND_RESOLUTION: Dict[str, Dict[str, str]] = {}
 _LAST_GOOD_ACTION_AUDIT: Dict[str, List[Dict[str, str]]] = {}
+_PROJECT_ALIAS_PATTERN = re.compile(r"^O\d+$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,9 @@ class ActionAuditRowDTO:
     at: str
     headline: str
     headline_summary: str
+    chat_reply_summary: str
+    chat_room_change_summary: str
+    project_alias: str
     planning_compact_summary: str
     subagent_contract_summary: str
     subagent_evidence_summary: str
@@ -78,6 +84,13 @@ class ActionAuditRowDTO:
     chat_preset_diff_summary: str = ""
     thread_href: str = ""
     thread_label: str = ""
+    applied_preferences_summary: str = ""
+    preference_candidate_summary: str = ""
+    preference_candidate_scope_summary: str = ""
+    preference_decision_summary: str = ""
+    preference_artifact_kind: str = ""
+    preference_memory_scope_summary: str = ""
+    preference_refresh_diff_summary: str = ""
 
     @property
     def planning_review_summary(self) -> str:
@@ -250,6 +263,35 @@ def _load_latest_command_resolution(
 
 
 
+def _normalize_project_alias(raw: Any) -> str:
+    token = str(raw or "").strip().upper()
+    return token if _PROJECT_ALIAS_PATTERN.match(token) else ""
+
+
+def _infer_action_audit_project_alias(raw: Dict[str, Any]) -> str:
+    explicit = _normalize_project_alias(raw.get("project_alias") or raw.get("project"))
+    if explicit:
+        return explicit
+    for candidate in (
+        raw.get("link_href"),
+        raw.get("next_step"),
+        raw.get("thread_href"),
+    ):
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        parsed = urlparse(text)
+        project_token = _normalize_project_alias((parse_qs(parsed.query or "").get("project") or [""])[0])
+        if project_token:
+            return project_token
+        parts = [token for token in str(parsed.path or "").split("/") if token]
+        if len(parts) >= 3 and parts[0] == "control" and parts[1] in {"runtimes", "tasks"}:
+            project_token = _normalize_project_alias(parts[2])
+            if project_token:
+                return project_token
+    return ""
+
+
 def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
     outcome_kind = str(raw.get("outcome_kind", "")).strip() or "-"
     focus_badge = str(raw.get("focus_badge", "")).strip()
@@ -295,10 +337,22 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         or action_audit.summarize_subagent_gate_compact_row(raw)
         or "-"
     )
+    applied_preferences_summary = action_audit.summarize_applied_preferences_compact(raw)
+    preference_candidate_summary = action_audit.summarize_preference_candidates_compact(raw)
+    preference_candidate_scope_summary = action_audit.summarize_preference_candidate_scopes_compact(raw)
+    preference_decision_summary = action_audit.summarize_preference_decisions_compact(raw)
+    preference_memory_scope_summary = action_audit.summarize_preference_memory_scope_compact(raw)
+    preference_refresh_diff_summary = action_audit.summarize_preference_refresh_diff_compact(raw)
+    chat_reply_summary = action_audit.summarize_chat_reply_compact(raw)
+    chat_room_change_summary = action_audit.summarize_chat_room_change_compact(raw)
+    project_alias = _infer_action_audit_project_alias(raw)
     return ActionAuditRowDTO(
         at=str(raw.get("at", "")).strip() or "-",
         headline=str(raw.get("headline", "")).strip() or "-",
         headline_summary=action_audit.summarize_action_audit_headline(raw),
+        chat_reply_summary=chat_reply_summary,
+        chat_room_change_summary=chat_room_change_summary,
+        project_alias=project_alias or "-",
         planning_compact_summary=planning_compact_summary,
         subagent_contract_summary=subagent_contract_summary,
         subagent_evidence_summary=subagent_evidence_summary,
@@ -318,6 +372,13 @@ def _normalize_action_audit_row(raw: Dict[str, Any]) -> ActionAuditRowDTO:
         focus_badge=focus_badge,
         chat_id=str(raw.get("chat_id", "")).strip(),
         transcript_preview=str(raw.get("transcript_preview", "")).strip(),
+        applied_preferences_summary=applied_preferences_summary,
+        preference_candidate_summary=preference_candidate_summary,
+        preference_candidate_scope_summary=preference_candidate_scope_summary,
+        preference_decision_summary=preference_decision_summary,
+        preference_artifact_kind=str(raw.get("preference_artifact_kind") or raw.get("artifact_kind") or "").strip(),
+        preference_memory_scope_summary=preference_memory_scope_summary,
+        preference_refresh_diff_summary=preference_refresh_diff_summary,
     )
 
 
@@ -336,6 +397,9 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
             {
                 "at": row.at,
                 "headline": row.headline,
+                "chat_reply_summary": row.chat_reply_summary,
+                "chat_room_change_summary": row.chat_room_change_summary,
+                "project_alias": row.project_alias,
                 "planning_compact_summary": row.planning_compact_summary,
                 "subagent_contract_summary": row.subagent_contract_summary,
                 "subagent_evidence_summary": row.subagent_evidence_summary,
@@ -356,6 +420,13 @@ def _load_recent_action_audit(path: Path, *, limit: int = 5) -> Tuple[List[Actio
                 "chat_id": row.chat_id,
                 "transcript_preview": row.transcript_preview,
                 "chat_preset_diff_summary": row.chat_preset_diff_summary,
+                "applied_preferences_summary": row.applied_preferences_summary,
+                "preference_candidate_summary": row.preference_candidate_summary,
+                "preference_candidate_scope_summary": row.preference_candidate_scope_summary,
+                "preference_decision_summary": row.preference_decision_summary,
+                "preference_artifact_kind": row.preference_artifact_kind,
+                "preference_memory_scope_summary": row.preference_memory_scope_summary,
+                "preference_refresh_diff_summary": row.preference_refresh_diff_summary,
             }
             for row in rows
         ]

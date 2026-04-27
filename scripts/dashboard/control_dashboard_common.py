@@ -27,6 +27,7 @@ ACTION_PATHS = {
     "/control/actions/task/analysis-review",
     "/control/actions/task/worker-update-preview",
     "/control/actions/task/worker-apply-preview",
+    "/control/actions/task/operator-preference-decision",
     "/control/actions/task/worker-apply-propose",
     "/control/actions/task/worker-apply-accept",
     "/control/actions/runtime/judge",
@@ -39,6 +40,8 @@ ACTION_PATHS = {
     "/control/actions/runtime/background-queue-clean-preview",
     "/control/actions/runtime/background-queue-clean",
     "/control/actions/control/auto-recover",
+    "/control/actions/control/operator-preference-rule",
+    "/control/actions/control/operator-preference-candidate",
 }
 
 

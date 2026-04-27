@@ -14,6 +14,11 @@ from control_dashboard_action_exec_chat import (
     _execute_chat_session_select_task_action,
     _execute_chat_session_update_action,
 )
+from control_dashboard_action_exec_preferences import (
+    _execute_operator_preference_candidate_action,
+    _execute_operator_preference_decision_action,
+    _execute_operator_preference_rule_action,
+)
 from control_dashboard_action_exec_runtime import (
     _execute_analysis_review_action,
     _execute_general_subagent_support_action,
@@ -37,6 +42,9 @@ from control_dashboard_action_exec_shared import _load_dashboard_manager_state
 __all__ = [
     "_execute_analysis_review_action",
     "_execute_general_subagent_support_action",
+    "_execute_operator_preference_candidate_action",
+    "_execute_operator_preference_decision_action",
+    "_execute_operator_preference_rule_action",
     "_execute_background_queue_clean_action",
     "_preview_background_queue_clean_action",
     "_preview_server_guard_pressure_action",

@@ -17,7 +17,7 @@ for path in (GW_DIR, DASH_DIR, TEST_DIR):
 
 import aoe_tg_action_audit as action_audit  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
-from test_control_dashboard import _build_runtime, _persist_general_subagent_artifact  # noqa: E402
+from test_control_dashboard import _build_runtime, _mark_task_planning_gate_blocked, _persist_general_subagent_artifact  # noqa: E402
 
 
 def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path) -> None:
@@ -25,11 +25,21 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     team_dir, manager_state_file, project_root = _build_runtime(control_root)
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    _mark_task_planning_gate_blocked(task)
     task["background_run_worker_syncback_status"] = "applied"
     task["background_run_worker_syncback_summary"] = (
         "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T11:07:00+09:00"
     )
     task["background_run_worker_syncback_at"] = "2026-04-09T11:07:00+09:00"
+    task["background_run_operator_preference_artifact_kind"] = "chart"
+    task["background_run_operator_preference_preflight_summary"] = "preflight=chart | auto=1 | confirm=0 | manual=0 | disabled=0"
+    task["background_run_operator_preference_applied_summary"] = "applied_preferences=show_source_note=true | on | auto | artifact_kind:chart"
+    task["background_run_operator_preference_candidate_summary"] = (
+        "preference_candidates=legend_position=bottom | hits=2 | issue=legend keeps overlapping the plotted bars"
+    )
+    task["background_run_operator_preference_decision_summary"] = (
+        "preference_decisions=legend_position=bottom | 앞으로도 적용 | artifact_kind:chart"
+    )
     manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _persist_general_subagent_artifact(project_root)
     assert action_audit.append_action_audit_row(
@@ -245,9 +255,11 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     )
     assert "draft via" in runtimes[0]["latest_planning_compact_summary"]
     assert "review via" in runtimes[0]["latest_planning_compact_summary"]
-    assert "dispatch waits for critic-approved plan" in runtimes[0]["latest_planning_compact_summary"]
+    assert "dispatch blocked until critic clears issues" in runtimes[0]["latest_planning_compact_summary"]
     rendered = nightly_summary.render_nightly_session_summary(summary)
     assert "## O2 Alpha | draft via" in rendered
+    assert "preference_preflight: preflight=chart" in rendered
+    assert "preference_candidates: preference_candidates=legend_position=bottom" in rendered
     assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in rendered
     assert "subagent_gate=vendor notes still need a local delta check" in rendered
     assert "latest_planning_review_summary" not in runtimes[0]
@@ -259,6 +271,11 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["active_task_background_run_worker_syncback_summary"].startswith(
         "state=applied | todo=TODO-002 | path=TODO.md"
     )
+    assert runtimes[0]["active_task_background_run_operator_preference_artifact_kind"] == "chart"
+    assert "preflight=chart" in runtimes[0]["active_task_background_run_operator_preference_preflight_summary"]
+    assert "applied_preferences=show_source_note=true" in runtimes[0]["active_task_background_run_operator_preference_applied_summary"]
+    assert "preference_candidates=legend_position=bottom" in runtimes[0]["active_task_background_run_operator_preference_candidate_summary"]
+    assert "preference_decisions=legend_position=bottom" in runtimes[0]["active_task_background_run_operator_preference_decision_summary"]
     assert runtimes[0]["active_task_reentry_rails_summary"] == "retry=blocked:underspecified exec=L1 review=R1 | followup=none | bg=running/local_background"
     assert runtimes[0]["run_lock_mode"] == "open"
     assert runtimes[0]["background_slot_limit"] == 1
@@ -275,6 +292,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    _mark_task_planning_gate_blocked(task)
     task["background_run_worker_syncback_status"] = "applied"
     task["background_run_worker_syncback_summary"] = (
         "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T11:07:00+09:00"
@@ -454,7 +472,7 @@ def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_
     assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | auto=yes" in markdown
     assert "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes" in markdown
     assert "planning_compact: draft via" in markdown
-    assert "dispatch waits for critic-approved plan" in markdown
+    assert "dispatch blocked until critic clears issues" in markdown
     assert "planning_handoff: contract=status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0 | debug=state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review | phase=status=blocked | current=plan | plan=blocked|note=contract_gap | approved_plan=blocked | subtasks=0 | reviews=1 | issue=contract_gap" in markdown
     assert "latest_replan_auto_route: Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001" in markdown
     assert "auto_route_status: ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00" in markdown

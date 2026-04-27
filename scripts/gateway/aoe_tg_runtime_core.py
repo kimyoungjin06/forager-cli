@@ -156,6 +156,14 @@ def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
 
 
+def operator_preferences_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "control" / "operator_preferences.json"
+
+
+def operator_preference_candidates_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "control" / "operator_preference_candidates.json"
+
+
 def action_audit_path(team_dir: Path | str) -> Path:
     return Path(team_dir).expanduser().resolve() / "dashboard" / "action-history.jsonl"
 

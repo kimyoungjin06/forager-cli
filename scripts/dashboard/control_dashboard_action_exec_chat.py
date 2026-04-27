@@ -150,7 +150,8 @@ def _execute_chat_send_action(
     raw_text = str(payload.get("text", "")).strip()
     mode = str(payload.get("mode", "")).strip().lower() or "raw"
     command_text = _chat_send_command_text(mode=mode, text=raw_text)
-    paths = _dashboard_paths(config)
+    paths, manager_state = _load_dashboard_manager_state(config)
+    previous_room = chat_state.get_chat_room(manager_state, chat_id)
     argv = request_contract.build_gateway_simulation_command_argv(
         project_root=str(config.control_root),
         team_dir=str(paths.team_dir),
@@ -168,11 +169,22 @@ def _execute_chat_send_action(
         ]
     )
     result = _run_gateway_chat_send(argv)
+    _paths_after, manager_state_after = _load_dashboard_manager_state(config)
+    chat_state.set_chat_last_send_mode(manager_state_after, chat_id, mode)
+    gateway_main = _load_gateway_main_module()
+    gateway_main.save_manager_state(paths.manager_state_file, manager_state_after)
+    selected_room = chat_state.get_chat_room(manager_state_after, chat_id)
     stdout = str(result.stdout or "").strip()
     stderr = str(result.stderr or "").strip()
     reply_text = stdout or stderr or "-"
     reply_lines = [line for line in reply_text.splitlines() if str(line).strip()][:40]
     ok = result.returncode == 0
+    room_changed = mode == "room_use" and ok and selected_room != previous_room
+    room_change_summary = (
+        f"switched from {previous_room or room_handlers.DEFAULT_ROOM_NAME} to {selected_room or room_handlers.DEFAULT_ROOM_NAME}"
+        if room_changed
+        else "-"
+    )
     return _json(
         {
             "ok": ok,
@@ -181,6 +193,12 @@ def _execute_chat_send_action(
             "source_command": command_text,
             "chat_id": chat_id,
             "mode": mode,
+            "last_send_mode": mode,
+            "previous_room": previous_room or room_handlers.DEFAULT_ROOM_NAME,
+            "selected_room": selected_room or room_handlers.DEFAULT_ROOM_NAME,
+            "room_target": raw_text or "",
+            "room_changed": room_changed,
+            "room_change_summary": room_change_summary,
             "reply_text": reply_text,
             "reply_lines": reply_lines,
             "gateway_returncode": int(result.returncode),

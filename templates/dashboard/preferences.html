@@ -1,0 +1,340 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Registry Summary</h2>
+  <form class="action-form" method="get" action="/control/preferences">
+    <label>
+      <span>Project Filter</span>
+      <select name="project">
+        <option value="" {% if not preferences.project_filter %}selected{% endif %}>all runtimes</option>
+        {% for project in preferences.projects %}
+        <option value="{{ project.filter_value }}" {% if preferences.project_filter == project.filter_value %}selected{% endif %}>
+          {{ project.project_alias }} {{ project.project_label }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Artifact Filter</span>
+      <select name="artifact">
+        <option value="" {% if not preferences.artifact_filter %}selected{% endif %}>all artifacts</option>
+        {% for row in preferences.artifact_rows %}
+        <option value="{{ row.filter_value }}" {% if preferences.artifact_filter == row.filter_value %}selected{% endif %}>
+          {{ row.artifact_kind }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Memory Scope</span>
+      <select name="scope">
+        <option value="" {% if not preferences.memory_scope_filter %}selected{% endif %}>all scopes</option>
+        {% for row in preferences.memory_scope_rows %}
+        <option value="{{ row.filter_value }}" {% if preferences.memory_scope_filter == row.filter_value %}selected{% endif %}>
+          {{ row.scope }} · {{ row.scope_label }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Apply Filters</button>
+  </form>
+  <ul class="kv-list">
+    <li><span>active_runtime</span><strong>{{ preferences.project_alias }} {{ preferences.project_label }}</strong></li>
+    <li><span>selected_scope</span><strong>{{ preferences.selected_scope_summary or 'all runtimes' }}</strong></li>
+    <li><span>selected_artifact</span><strong>{{ preferences.selected_artifact_summary or 'all artifacts' }}</strong></li>
+    <li><span>selected_memory_scope</span><strong>{{ preferences.selected_memory_scope_summary or 'all scopes' }}</strong></li>
+    <li><span>visible_projects</span><strong>{{ preferences.visible_project_count }} / {{ preferences.total_project_count }}</strong></li>
+    <li><span>rule_summary</span><strong>{{ preferences.rule_summary }}</strong></li>
+    <li><span>candidate_summary</span><strong>{{ preferences.candidate_summary }}</strong></li>
+    <li><span>scope_summary</span><strong>{{ preferences.scope_summary }}</strong></li>
+    <li><span>artifact_summary</span><strong>{{ preferences.artifact_summary }}</strong></li>
+    <li><span>registry_files</span><strong>{{ preferences.registry_file_summary or '-' }}</strong></li>
+    <li><span>candidate_files</span><strong>{{ preferences.candidate_file_summary or '-' }}</strong></li>
+    <li><span>active_team_dir</span><strong>{{ preferences.project_team_dir }}</strong></li>
+    <li><span>active_registry_path</span><strong>{{ preferences.registry_file.path }}</strong></li>
+    <li><span>active_registry_updated_at</span><strong>{{ preferences.registry_file.updated_at or 'missing' }}</strong></li>
+    <li><span>active_candidate_path</span><strong>{{ preferences.candidate_file.path }}</strong></li>
+    <li><span>active_candidate_updated_at</span><strong>{{ preferences.candidate_file.updated_at or 'missing' }}</strong></li>
+    {% if preferences.registry_file.stale %}<li><span>active_registry_stale</span><strong>yes | {{ preferences.registry_file.error or '-' }}</strong></li>{% endif %}
+    {% if preferences.candidate_file.stale %}<li><span>active_candidate_stale</span><strong>yes | {{ preferences.candidate_file.error or '-' }}</strong></li>{% endif %}
+  </ul>
+</section>
+
+<section class="panel">
+  <h2>Artifact Breakdown</h2>
+  {% if preferences.artifact_rows %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Artifact</th>
+        <th>Rules</th>
+        <th>Candidates</th>
+        <th>Rule Modes</th>
+        <th>Projects</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preferences.artifact_rows %}
+      <tr>
+        <td>
+          <strong>{{ row.artifact_kind }}</strong>
+          {% if row.is_selected %}
+          <br><span class="muted">included in current filter</span>
+          <br><a href="{{ preferences.clear_artifact_href }}">clear filter</a>
+          {% else %}
+          <br><a href="{{ row.filter_href }}">filter</a>
+          {% endif %}
+          <br><a href="{{ row.audit_href }}">open audit</a>
+          <br><a href="{{ row.history_href }}">open history</a>
+        </td>
+        <td>{{ row.rule_count }}</td>
+        <td>{{ row.candidate_count }}<br><span class="muted">ready={{ row.ready_candidate_count }}</span></td>
+        <td>{{ row.prompt_mode_summary }}</td>
+        <td>{{ row.project_summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no artifact preferences in the selected scope</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Memory Scope Breakdown</h2>
+  {% if preferences.memory_scope_rows %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Scope</th>
+        <th>Rules</th>
+        <th>Candidates</th>
+        <th>Rule Modes</th>
+        <th>Artifacts</th>
+        <th>Projects</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preferences.memory_scope_rows %}
+      <tr>
+        <td>
+          <strong>{{ row.scope }}</strong>
+          <br><span class="muted">{{ row.scope_label }}</span>
+          {% if row.is_selected %}
+          <br><span class="muted">included in current filter</span>
+          <br><a href="{{ preferences.clear_memory_scope_href }}">clear filter</a>
+          {% else %}
+          <br><a href="{{ row.filter_href }}">filter</a>
+          {% endif %}
+          <br><a href="{{ row.audit_href }}">open audit</a>
+          <br><a href="{{ row.history_href }}">open history</a>
+        </td>
+        <td>{{ row.rule_count }}<br><span class="muted">enabled={{ row.enabled_count }} | disabled={{ row.disabled_count }}</span></td>
+        <td>{{ row.candidate_count }}<br><span class="muted">ready={{ row.ready_candidate_count }}</span></td>
+        <td>{{ row.prompt_mode_summary }}</td>
+        <td>{{ row.artifact_summary }}</td>
+        <td>{{ row.project_summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no registered rules in the selected scope</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Project Registries</h2>
+  {% if preferences.projects %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Registry</th>
+        <th>Candidate Queue</th>
+        <th>Rules</th>
+        <th>Candidates</th>
+        <th>Coverage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preferences.projects %}
+      <tr>
+        <td>
+          {% if row.runtime_path and row.runtime_path != '-' %}
+          <a href="{{ row.runtime_path }}">{{ row.project_alias }} {{ row.project_label }}</a>
+          {% else %}
+          <strong>{{ row.project_alias }} {{ row.project_label }}</strong>
+          {% endif %}
+          {% if row.is_active %}<br><span class="muted">active runtime</span>{% endif %}
+          {% if row.is_selected %}<br><span class="muted">included in current filter</span>{% endif %}
+          <br><span class="muted">{{ row.project_team_dir }}</span>
+          {% if row.filter_value %}
+            {% if preferences.project_filter == row.filter_value %}
+            <br><a href="{{ preferences.clear_project_href }}">clear filter</a>
+            {% else %}
+            <br><a href="{{ row.filter_href }}">filter</a>
+            {% endif %}
+          {% endif %}
+        </td>
+        <td>
+          {{ 'present' if row.registry_file.exists else 'missing' }}
+          {% if row.registry_file.stale %}<br><span class="muted">stale | {{ row.registry_file.error or '-' }}</span>{% endif %}
+          <br><span class="muted">{{ row.registry_file.updated_at or 'missing' }}</span>
+          <br><span class="muted">{{ row.registry_file.path }}</span>
+        </td>
+        <td>
+          {{ 'present' if row.candidate_file.exists else 'missing' }}
+          {% if row.candidate_file.stale %}<br><span class="muted">stale | {{ row.candidate_file.error or '-' }}</span>{% endif %}
+          <br><span class="muted">{{ row.candidate_file.updated_at or 'missing' }}</span>
+          <br><span class="muted">{{ row.candidate_file.path }}</span>
+        </td>
+        <td>{{ row.rule_count }}<br><span class="muted">{{ row.rule_summary }}</span></td>
+        <td>{{ row.candidate_count }}<br><span class="muted">{{ row.candidate_summary }}</span></td>
+        <td>{{ row.scope_summary }}<br><span class="muted">{{ row.artifact_summary }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no runtimes registered</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Registered Rules</h2>
+  {% if preferences.rules %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Rule</th>
+        <th>Scope</th>
+        <th>Value</th>
+        <th>State</th>
+        <th>Source</th>
+        <th>Updated</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preferences.rules %}
+      <tr>
+        <td>
+          {% if row.runtime_path and row.runtime_path != '-' %}
+          <a href="{{ row.runtime_path }}">{{ row.project_alias }} {{ row.project_label }}</a>
+          {% else %}
+          <strong>{{ row.project_alias }} {{ row.project_label }}</strong>
+          {% endif %}
+          <br><span class="muted">{{ row.project_team_dir }}</span>
+        </td>
+        <td>
+          <strong>{{ row.key }}</strong><br>
+          <span class="muted">artifact={{ row.artifact_kind }}</span><br>
+          <span class="muted">{{ row.description }}</span><br>
+          <span class="muted">{{ row.summary }}</span>
+        </td>
+        <td>{{ row.scope }}{% if row.scope_ref and row.scope_ref != '-' %}<br><span class="muted">{{ row.scope_ref }}</span>{% endif %}</td>
+        <td><code>{{ row.value_summary }}</code></td>
+        <td>{{ 'on' if row.enabled else 'off' }}<br><span class="muted">{{ row.prompt_mode }}</span></td>
+        <td>{{ row.source }}<br><span class="muted">{{ row.confidence }}</span></td>
+        <td>{{ row.updated_at }}</td>
+        <td>
+          <div class="preference-action-stack">
+            {% for mode, label in [('auto', 'auto'), ('confirm', 'confirm'), ('manual_only', 'manual'), ('disable', 'off'), ('delete', 'delete')] %}
+            <form class="action-form preference-inline-form" data-dashboard-action data-action-label="Rule {{ row.key }} -> {{ label }}" data-action-command="pref-rule:{{ row.key }}:{{ mode }}" data-action-mode="safe" method="post" action="{{ preferences.rule_action_path }}">
+              <input type="hidden" name="runtime_ref" value="{{ row.runtime_ref if row.runtime_ref != '-' else '' }}">
+              <input type="hidden" name="return_path" value="{{ preferences.return_path }}">
+              <input type="hidden" name="artifact_kind" value="{{ row.artifact_kind }}">
+              <input type="hidden" name="key" value="{{ row.key }}">
+              <input type="hidden" name="scope" value="{{ row.scope }}">
+              <input type="hidden" name="scope_ref" value="{{ row.scope_ref }}">
+              <input type="hidden" name="value_json" value="{{ row.value_json }}">
+              <input type="hidden" name="description" value="{{ row.description }}">
+              <input type="hidden" name="mode" value="{{ mode }}">
+              <button type="submit" class="action-button safe">{{ label }}</button>
+            </form>
+            {% endfor %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no registered rules</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Candidate Queue</h2>
+  {% if preferences.candidates %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Candidate</th>
+        <th>Runtime</th>
+        <th>Expected Scope</th>
+        <th>Suggested Value</th>
+        <th>Hits</th>
+        <th>Sources</th>
+        <th>Updated</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preferences.candidates %}
+      <tr>
+        <td>
+          <strong>{{ row.key }}</strong><br>
+          <span class="muted">artifact={{ row.artifact_kind }}</span><br>
+          <span class="muted">issue={{ row.issue }}</span><br>
+          <span class="muted">{{ row.summary }}</span>
+        </td>
+        <td>
+          {% if row.runtime_path and row.runtime_path != '-' %}
+          <a href="{{ row.runtime_path }}">{{ row.project_alias }} {{ row.project_label }}</a>
+          {% else %}
+          <strong>{{ row.project_alias }} {{ row.project_label }}</strong>
+          {% endif %}
+          {% if row.project_ref and row.project_ref != '-' and row.project_ref != row.project_alias %}
+          <br><span class="muted">source_ref={{ row.project_ref }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {{ row.expected_scope }}<br>
+          <span class="muted">{{ row.expected_scope_label }}</span>
+          {% if row.expected_scope_ref and row.expected_scope_ref != '-' and row.expected_scope_ref != '*' and row.expected_scope_ref != row.expected_scope and row.expected_scope_ref != row.artifact_kind and row.expected_scope_ref != row.project_alias %}
+          <br><span class="muted">{{ row.expected_scope_ref }}</span>
+          {% endif %}
+        </td>
+        <td><code>{{ row.suggested_value_summary }}</code></td>
+        <td>{{ row.hits }}</td>
+        <td>{{ row.source_refs_summary }}</td>
+        <td>{{ row.updated_at }}</td>
+        <td>
+          <div class="preference-action-stack">
+            {% for mode, label in [('auto', 'promote auto'), ('confirm', 'promote confirm'), ('disable', 'mute'), ('dismiss', 'dismiss')] %}
+            <form class="action-form preference-inline-form" data-dashboard-action data-action-label="Candidate {{ row.key }} -> {{ label }}" data-action-command="pref-candidate:{{ row.key }}:{{ mode }}" data-action-mode="safe" method="post" action="{{ preferences.candidate_action_path }}">
+              <input type="hidden" name="runtime_ref" value="{{ row.runtime_ref if row.runtime_ref != '-' else '' }}">
+              <input type="hidden" name="return_path" value="{{ preferences.return_path }}">
+              <input type="hidden" name="artifact_kind" value="{{ row.artifact_kind }}">
+              <input type="hidden" name="key" value="{{ row.key }}">
+              <input type="hidden" name="project_ref" value="{{ row.project_ref if row.project_ref != '-' else '' }}">
+              <input type="hidden" name="value_json" value="{{ row.suggested_value_json }}">
+              <input type="hidden" name="description" value="{{ row.issue }}">
+              <input type="hidden" name="mode" value="{{ mode }}">
+              <button type="submit" class="action-button safe">{{ label }}</button>
+            </form>
+            {% endfor %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no candidate recommendations</p>
+  {% endif %}
+</section>
+{% endblock %}

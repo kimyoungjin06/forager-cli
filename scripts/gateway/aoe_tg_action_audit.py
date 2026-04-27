@@ -11,6 +11,11 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 from aoe_tg_artifact_backend import artifact_backend
+from aoe_tg_operator_preferences import normalize_preference_decision
+from aoe_tg_operator_preferences import summarize_applied_preferences as summarize_operator_applied_preferences
+from aoe_tg_operator_preferences import summarize_preference_candidates as summarize_operator_preference_candidates
+from aoe_tg_operator_preferences import summarize_preference_candidate_scopes as summarize_operator_preference_candidate_scopes
+from aoe_tg_operator_preferences import summarize_preference_decisions as summarize_operator_preference_decisions
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary
 from aoe_tg_runtime_core import action_audit_path as runtime_action_audit_path
 from aoe_tg_subagent_contract import summarize_subagent_gate_compact
@@ -46,6 +51,14 @@ def _normalize_latest_action_row(row: Dict[str, Any]) -> Dict[str, str]:
     return {
         "headline": str(row.get("headline", "")).strip() or "-",
         "headline_summary": summarize_action_audit_headline(row),
+        "chat_reply_summary": summarize_chat_reply_compact(row),
+        "chat_room_change_summary": summarize_chat_room_change_compact(row),
+        "applied_preferences_summary": summarize_applied_preferences_compact(row),
+        "preference_candidate_summary": summarize_preference_candidates_compact(row),
+        "preference_candidate_scope_summary": summarize_preference_candidate_scopes_compact(row),
+        "preference_decision_summary": summarize_preference_decisions_compact(row),
+        "preference_memory_scope_summary": summarize_preference_memory_scope_compact(row),
+        "preference_refresh_diff_summary": summarize_preference_refresh_diff_compact(row),
         "status": str(row.get("status", "")).strip() or "unknown",
         "outcome_kind": str(row.get("outcome_kind", "")).strip() or "-",
         "outcome_status": str(row.get("outcome_status", "")).strip() or str(row.get("status", "")).strip() or "unknown",
@@ -658,6 +671,139 @@ def summarize_subagent_gate_compact_row(raw: Any) -> str:
     return "-"
 
 
+def summarize_applied_preferences_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("applied_preferences_summary", "")).strip(), limit=160)
+    if summary not in {"", "-"}:
+        return summary if summary.startswith("applied_preferences=") else f"applied_preferences={summary}"
+    return summarize_operator_applied_preferences(row.get("applied_preferences"))
+
+
+def summarize_preference_decisions_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("preference_decision_summary", "")).strip(), limit=160)
+    if summary not in {"", "-"}:
+        return summary if summary.startswith("preference_decisions=") else f"preference_decisions={summary}"
+    return summarize_operator_preference_decisions(row.get("preference_decisions"))
+
+
+def _preference_memory_scope_labels(raw: Any) -> List[str]:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return []
+    summary = compact_action_text(str(row.get("preference_memory_scope_summary", "")).strip(), limit=160)
+    prefix = "preference_memory_scope="
+    if summary not in {"", "-"}:
+        if summary.startswith(prefix):
+            summary = summary[len(prefix):].strip()
+        return [
+            str(item).strip()
+            for item in str(summary).split("||")
+            if str(item).strip() and str(item).strip() not in {"-"}
+        ][:3]
+    decisions = row.get("preference_decisions") if isinstance(row.get("preference_decisions"), list) else []
+    labels: List[str] = []
+    for item in decisions:
+        decision = normalize_preference_decision(item)
+        if not decision:
+            continue
+        scope = str(decision.get("scope", "")).strip().lower() or "session"
+        scope_ref = str(decision.get("scope_ref", "")).strip()
+        if scope == "session":
+            label = "session"
+        elif scope_ref and scope_ref not in {"-", "*"}:
+            label = f"{scope}:{scope_ref}"
+        else:
+            label = scope
+        if label not in labels:
+            labels.append(label)
+    return labels[:3]
+
+
+def summarize_preference_memory_scope_compact(raw: Any) -> str:
+    labels = _preference_memory_scope_labels(raw)
+    if not labels:
+        return "-"
+    return "preference_memory_scope=" + " || ".join(labels)
+
+
+def summarize_preference_candidates_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("preference_candidate_summary", "")).strip(), limit=160)
+    if summary not in {"", "-"}:
+        return summary if summary.startswith("preference_candidates=") else f"preference_candidates={summary}"
+    return summarize_operator_preference_candidates(row.get("preference_candidates"))
+
+
+def summarize_preference_candidate_scopes_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("preference_candidate_scope_summary", "")).strip(), limit=160)
+    if summary not in {"", "-"}:
+        return (
+            summary
+            if summary.startswith("preference_candidate_scopes=")
+            else f"preference_candidate_scopes={summary}"
+        )
+    return summarize_operator_preference_candidate_scopes(row.get("preference_candidates"))
+
+
+def summarize_preference_refresh_diff_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("preference_refresh_diff_summary", "")).strip(), limit=220)
+    if summary not in {"", "-"}:
+        return (
+            summary
+            if summary.startswith("preference_refresh_diff=")
+            else f"preference_refresh_diff={summary}"
+        )
+    return "-"
+
+
+def summarize_chat_reply_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("chat_reply_summary", "")).strip(), limit=160)
+    if summary not in {"", "-"}:
+        return summary if summary.startswith("chat_reply=") else f"chat_reply={summary}"
+    transcript_preview = str(row.get("transcript_preview", "")).strip()
+    if transcript_preview:
+        first_line = next((line.strip() for line in transcript_preview.splitlines() if line.strip()), "")
+        if first_line:
+            return f"chat_reply={compact_action_text(first_line, limit=160)}"
+    reply_text = str(row.get("reply_text", "")).strip()
+    if reply_text:
+        return f"chat_reply={compact_action_text(reply_text, limit=160)}"
+    return "-"
+
+
+def summarize_chat_room_change_compact(raw: Any) -> str:
+    row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
+    if not isinstance(row, dict) or not row:
+        return "-"
+    summary = compact_action_text(str(row.get("chat_room_change_summary", "")).strip(), limit=160)
+    if summary not in {"", "-"}:
+        return summary if summary.startswith("chat_room_change=") else f"chat_room_change={summary}"
+    room_change_summary = compact_action_text(str(row.get("room_change_summary", "")).strip(), limit=160)
+    if room_change_summary not in {"", "-"}:
+        return f"chat_room_change={room_change_summary}"
+    previous_room = str(row.get("previous_room", "")).strip()
+    selected_room = str(row.get("selected_room", "")).strip()
+    if previous_room and selected_room and previous_room != selected_room:
+        return f"chat_room_change=switched from {previous_room} to {selected_room}"
+    return "-"
+
+
 def summarize_action_audit_headline(raw: Any) -> str:
     row = raw if isinstance(raw, dict) else _parse_json_object_from_text(raw)
     if not isinstance(row, dict) or not row:
@@ -693,6 +839,24 @@ def summarize_action_audit_headline(raw: Any) -> str:
     subagent_gate_summary = summarize_subagent_gate_compact_row(row)
     if subagent_gate_summary not in {"", "-"} and subagent_gate_summary not in headline:
         headline = f"{headline} | {subagent_gate_summary}"
+    applied_preferences_summary = summarize_applied_preferences_compact(row)
+    if applied_preferences_summary not in {"", "-"} and applied_preferences_summary not in headline:
+        headline = f"{headline} | {applied_preferences_summary}"
+    preference_candidate_summary = summarize_preference_candidates_compact(row)
+    if preference_candidate_summary not in {"", "-"} and preference_candidate_summary not in headline:
+        headline = f"{headline} | {preference_candidate_summary}"
+    preference_decision_summary = summarize_preference_decisions_compact(row)
+    if preference_decision_summary not in {"", "-"} and preference_decision_summary not in headline:
+        headline = f"{headline} | {preference_decision_summary}"
+    preference_memory_scope_summary = summarize_preference_memory_scope_compact(row)
+    if preference_memory_scope_summary not in {"", "-"} and preference_memory_scope_summary not in headline:
+        headline = f"{headline} | {preference_memory_scope_summary}"
+    preference_refresh_diff_summary = summarize_preference_refresh_diff_compact(row)
+    if preference_refresh_diff_summary not in {"", "-"} and preference_refresh_diff_summary not in headline:
+        headline = f"{headline} | {preference_refresh_diff_summary}"
+    chat_room_change_summary = summarize_chat_room_change_compact(row)
+    if chat_room_change_summary not in {"", "-"} and chat_room_change_summary not in headline:
+        headline = f"{headline} | {chat_room_change_summary}"
     return headline
 
 

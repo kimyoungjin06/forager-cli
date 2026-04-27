@@ -91,6 +91,18 @@ def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
     )
 
 
+def _operator_preference_task_summary(task: Dict[str, Any], key: str, *, result_key: str = "") -> str:
+    summary = str(task.get(key, "")).strip()
+    if summary:
+        return summary
+    if result_key:
+        result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        summary = str(result.get(result_key, "")).strip()
+        if summary:
+            return summary
+    return "-"
+
+
 def _worker_module_summary(task: Dict[str, Any]) -> str:
     module_summary = str(task.get("background_run_task_contract_module_summary", "")).strip()
     module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
@@ -1267,6 +1279,39 @@ def _build_task_detail(manager_state: Dict[str, Any], request_id: str, *, root_t
                 if str(item).strip()
             ],
             background_run_worker_update_operator_summary=_worker_update_operator_summary(task),
+            background_run_operator_preference_artifact_kind=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_artifact_kind",
+            ),
+            background_run_operator_preference_preflight_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_preflight_summary",
+            ),
+            background_run_operator_preference_applied_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_applied_summary",
+            ),
+            background_run_operator_preference_candidate_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_candidate_summary",
+            ),
+            background_run_operator_preference_confirm_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_confirm_summary",
+            ),
+            background_run_operator_preference_manual_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_manual_summary",
+            ),
+            background_run_operator_preference_disabled_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_disabled_summary",
+            ),
+            background_run_operator_preference_decision_summary=_operator_preference_task_summary(
+                task,
+                "background_run_operator_preference_decision_summary",
+                result_key="background_run_operator_preference_decision_summary",
+            ),
             background_run_worker_apply_accept_summary=_worker_apply_accept_summary(task),
             background_run_worker_syncback_summary=_worker_syncback_summary(task),
             background_run_manual_step_execution_summary=_manual_step_execution_summary(task),

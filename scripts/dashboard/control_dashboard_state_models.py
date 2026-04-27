@@ -196,6 +196,14 @@ class RuntimeCardDTO(_LatestPlanningCompactSummaryCompatMixin):
     active_task_background_run_evidence_artifacts: str
     active_task_background_run_launch_spec_summary: str
     active_task_background_run_worker_update_operator_summary: str
+    active_task_background_run_operator_preference_artifact_kind: str
+    active_task_background_run_operator_preference_preflight_summary: str
+    active_task_background_run_operator_preference_applied_summary: str
+    active_task_background_run_operator_preference_candidate_summary: str
+    active_task_background_run_operator_preference_confirm_summary: str
+    active_task_background_run_operator_preference_manual_summary: str
+    active_task_background_run_operator_preference_disabled_summary: str
+    active_task_background_run_operator_preference_decision_summary: str
     active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_worker_apply_accept_summary: str
     active_task_background_run_worker_syncback_summary: str
@@ -373,6 +381,14 @@ class TaskDetailDTO(_PlanningCompactSummaryCompatMixin):
     background_run_worker_update_proposal_summary: str = ""
     background_run_worker_update_proposal_ids: List[str] = field(default_factory=list)
     background_run_worker_update_operator_summary: str = ""
+    background_run_operator_preference_artifact_kind: str = ""
+    background_run_operator_preference_preflight_summary: str = ""
+    background_run_operator_preference_applied_summary: str = ""
+    background_run_operator_preference_candidate_summary: str = ""
+    background_run_operator_preference_confirm_summary: str = ""
+    background_run_operator_preference_manual_summary: str = ""
+    background_run_operator_preference_disabled_summary: str = ""
+    background_run_operator_preference_decision_summary: str = ""
     background_run_worker_apply_accept_summary: str = ""
     background_run_worker_syncback_summary: str = ""
     background_run_manual_step_execution_summary: str = ""
@@ -528,6 +544,14 @@ class RuntimeDetailDTO(
     active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_worker_update_proposal_ids: List[str]
     active_task_background_run_worker_update_operator_summary: str
+    active_task_background_run_operator_preference_artifact_kind: str
+    active_task_background_run_operator_preference_preflight_summary: str
+    active_task_background_run_operator_preference_applied_summary: str
+    active_task_background_run_operator_preference_candidate_summary: str
+    active_task_background_run_operator_preference_confirm_summary: str
+    active_task_background_run_operator_preference_manual_summary: str
+    active_task_background_run_operator_preference_disabled_summary: str
+    active_task_background_run_operator_preference_decision_summary: str
     active_task_background_run_worker_apply_accept_summary: str
     active_task_background_run_worker_syncback_summary: str
     active_task_background_run_model_plan_summary: str
@@ -663,6 +687,14 @@ class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     active_task_background_run_external_note: str
     active_task_background_run_launch_spec_summary: str
     active_task_background_run_worker_update_operator_summary: str
+    active_task_background_run_operator_preference_artifact_kind: str
+    active_task_background_run_operator_preference_preflight_summary: str
+    active_task_background_run_operator_preference_applied_summary: str
+    active_task_background_run_operator_preference_candidate_summary: str
+    active_task_background_run_operator_preference_confirm_summary: str
+    active_task_background_run_operator_preference_manual_summary: str
+    active_task_background_run_operator_preference_disabled_summary: str
+    active_task_background_run_operator_preference_decision_summary: str
     active_task_background_run_worker_update_proposal_summary: str
     active_task_background_run_worker_apply_accept_summary: str
     active_task_background_run_worker_syncback_summary: str
@@ -755,8 +787,26 @@ class ActionAuditPageDTO:
     status_summary: str
     focus_summary: str
     focus_filter: str
+    project_filter: str
+    artifact_filter: str
+    memory_scope_filter: str
+    refresh_diff_filter: str
+    chat_event_filter: str
+    chat_mode_filter: str
     chat_filter: str
+    query_filter: str
+    artifact_query_base: str
+    memory_scope_query_base: str
+    refresh_diff_query_base: str
+    chat_event_query_base: str
+    chat_mode_query_base: str
     focus_counts: Dict[str, int]
+    project_counts: Dict[str, int]
+    artifact_counts: Dict[str, int]
+    memory_scope_counts: Dict[str, int]
+    refresh_diff_counts: Dict[str, int]
+    chat_event_counts: Dict[str, int]
+    chat_mode_counts: Dict[str, int]
     rows: List[ActionAuditRowDTO] = field(default_factory=list)
 
 
@@ -765,6 +815,10 @@ class HistorySearchRowDTO(_PlanningCompactSummaryCompatMixin):
     at: str
     scope: str
     source: str
+    chat_id: str
+    chat_mode: str
+    room: str
+    actor: str
     project_alias: str
     project_key: str
     request_id: str
@@ -779,6 +833,8 @@ class HistorySearchRowDTO(_PlanningCompactSummaryCompatMixin):
     detail: str
     followup_hint: str
     raw_ref: str
+    summary_highlight_html: str = ""
+    detail_highlight_html: str = ""
     planning_compact_summary: str = ""
     subagent_contract_summary: str = ""
     subagent_evidence_summary: str = ""
@@ -791,12 +847,171 @@ class HistorySearchRowDTO(_PlanningCompactSummaryCompatMixin):
 @dataclass(frozen=True)
 class HistorySearchPageDTO:
     query: str
+    compact_mode: bool
+    chat_event_filter: str
+    chat_event_query_base: str
+    chat_mode_filter: str
+    chat_mode_query_base: str
+    room_kind_filter: str
+    room_kind_query_base: str
+    room_actor_filter: str
+    room_actor_query_base: str
+    room_text_filters: List[str]
+    room_text_query_base: str
+    chat_filter: str
     project_filter: str
     since_label: str
     scope: str
     limit: int
     total_rows: int
+    chat_event_counts: Dict[str, int] = field(default_factory=dict)
+    chat_mode_counts: Dict[str, int] = field(default_factory=dict)
+    room_kind_counts: Dict[str, int] = field(default_factory=dict)
+    room_kind_values: List[str] = field(default_factory=list)
+    room_actor_counts: Dict[str, int] = field(default_factory=dict)
+    room_actor_values: List[str] = field(default_factory=list)
+    room_text_counts: Dict[str, int] = field(default_factory=dict)
+    room_text_values: List[str] = field(default_factory=list)
+    room_text_hints: Dict[str, str] = field(default_factory=dict)
     rows: List[HistorySearchRowDTO] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class OperatorPreferenceRuleDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    project_team_dir: str
+    runtime_ref: str
+    runtime_path: str
+    id: str
+    key: str
+    artifact_kind: str
+    scope: str
+    scope_ref: str
+    value_summary: str
+    value_json: str
+    description: str
+    enabled: bool
+    prompt_mode: str
+    source: str
+    confidence: str
+    summary: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class OperatorPreferenceCandidateDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    project_team_dir: str
+    runtime_ref: str
+    runtime_path: str
+    id: str
+    key: str
+    artifact_kind: str
+    project_ref: str
+    expected_scope: str
+    expected_scope_label: str
+    expected_scope_ref: str
+    suggested_value_summary: str
+    suggested_value_json: str
+    issue: str
+    hits: int
+    source_refs_summary: str
+    summary: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class OperatorPreferenceProjectSummaryDTO:
+    project_key: str
+    project_alias: str
+    project_label: str
+    project_team_dir: str
+    runtime_ref: str
+    runtime_path: str
+    filter_value: str
+    filter_href: str
+    is_active: bool
+    is_selected: bool
+    registry_file: FileFreshnessDTO
+    candidate_file: FileFreshnessDTO
+    rule_count: int
+    candidate_count: int
+    rule_summary: str
+    candidate_summary: str
+    scope_summary: str
+    artifact_summary: str
+
+
+@dataclass(frozen=True)
+class OperatorPreferenceArtifactSummaryDTO:
+    artifact_kind: str
+    filter_value: str
+    filter_href: str
+    audit_href: str
+    history_href: str
+    is_selected: bool
+    rule_count: int
+    candidate_count: int
+    ready_candidate_count: int
+    prompt_mode_summary: str
+    project_summary: str
+
+
+@dataclass(frozen=True)
+class OperatorPreferenceMemoryScopeSummaryDTO:
+    scope: str
+    scope_label: str
+    filter_value: str
+    filter_href: str
+    audit_href: str
+    history_href: str
+    is_selected: bool
+    rule_count: int
+    candidate_count: int
+    ready_candidate_count: int
+    enabled_count: int
+    disabled_count: int
+    prompt_mode_summary: str
+    artifact_summary: str
+    project_summary: str
+
+
+@dataclass(frozen=True)
+class OperatorPreferencesPageDTO:
+    project_alias: str
+    project_label: str
+    project_team_dir: str
+    return_path: str
+    registry_file: FileFreshnessDTO
+    candidate_file: FileFreshnessDTO
+    rule_summary: str
+    candidate_summary: str
+    scope_summary: str
+    artifact_summary: str
+    project_filter: str = ""
+    artifact_filter: str = ""
+    memory_scope_filter: str = ""
+    selected_scope_summary: str = ""
+    selected_artifact_summary: str = ""
+    selected_memory_scope_summary: str = ""
+    visible_project_count: int = 0
+    total_project_count: int = 0
+    registry_file_summary: str = ""
+    candidate_file_summary: str = ""
+    clear_project_href: str = "/control/preferences"
+    clear_artifact_href: str = "/control/preferences"
+    clear_memory_scope_href: str = "/control/preferences"
+    rule_action_path: str = "/control/actions/control/operator-preference-rule"
+    candidate_action_path: str = "/control/actions/control/operator-preference-candidate"
+    projects: List[OperatorPreferenceProjectSummaryDTO] = field(default_factory=list)
+    artifact_rows: List[OperatorPreferenceArtifactSummaryDTO] = field(default_factory=list)
+    memory_scope_rows: List[OperatorPreferenceMemoryScopeSummaryDTO] = field(default_factory=list)
+    rules: List[OperatorPreferenceRuleDTO] = field(default_factory=list)
+    candidates: List[OperatorPreferenceCandidateDTO] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -873,6 +1088,14 @@ class ChatSessionPresetDTO:
 
 
 @dataclass(frozen=True)
+class ChatRoomOptionDTO:
+    room: str
+    lane_label: str
+    difference_summary: str
+    is_selected: bool = False
+
+
+@dataclass(frozen=True)
 class ChatConsolePageDTO(_SelectedTaskPlanningCompactSummaryCompatMixin):
     selected_chat_id: str
     selected_chat_alias: str
@@ -882,6 +1105,7 @@ class ChatConsolePageDTO(_SelectedTaskPlanningCompactSummaryCompatMixin):
     selected_task_ref: str
     selected_default_mode: str
     selected_pending_mode: str
+    selected_send_mode: str
     selected_lang: str
     selected_report_level: str
     selected_task_planning_lanes_summary: str = "-"
@@ -891,7 +1115,10 @@ class ChatConsolePageDTO(_SelectedTaskPlanningCompactSummaryCompatMixin):
     selected_task_critic_lane_summary: str = "-"
     selected_task_approved_plan_summary: str = "-"
     rooms: List[str] = field(default_factory=list)
+    room_options: List[ChatRoomOptionDTO] = field(default_factory=list)
+    room_options_summary: str = "-"
     room_presets: List[str] = field(default_factory=list)
+    room_preset_options: List[ChatRoomOptionDTO] = field(default_factory=list)
     session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
     recommended_session_presets: List[ChatSessionPresetDTO] = field(default_factory=list)
     deep_link_preset_label: str = ""

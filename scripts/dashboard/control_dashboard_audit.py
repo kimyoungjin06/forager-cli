@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 from aoe_tg_artifact_backend import artifact_backend, load_jsonl_rows
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary
-from control_dashboard_common import DashboardAppConfig, _dashboard_paths
+from control_dashboard_common import DashboardAppConfig, _dashboard_paths, _truncate_text
 
 DEFAULT_ACTION_AUDIT_RETENTION_DAYS = 14
 DEFAULT_ACTION_AUDIT_KEEP_ROWS = 500
@@ -65,6 +66,12 @@ def _action_audit_headline(payload: Dict[str, Any]) -> str:
         return f"Support Research | {status}"
     if path == "/control/actions/task/worker-apply-preview":
         return f"Worker Apply Preview | {status}"
+    if path == "/control/actions/task/operator-preference-decision":
+        return f"Preference Decision | {status}"
+    if path == "/control/actions/control/operator-preference-rule":
+        return f"Preference Rule Update | {status}"
+    if path == "/control/actions/control/operator-preference-candidate":
+        return f"Preference Candidate Review | {status}"
     if path == "/control/actions/task/worker-apply-propose":
         return f"Worker Apply Proposal | {status}"
     if path == "/control/actions/task/worker-apply-accept":
@@ -116,6 +123,8 @@ def _action_audit_link(payload: Dict[str, Any]) -> Tuple[str, str]:
     path = str(payload.get("path", "")).strip()
     if path == "/control/actions/runtime/server-guard-pressure-preview":
         return "health", "/control/health"
+    if path in {"/control/actions/control/operator-preference-rule", "/control/actions/control/operator-preference-candidate"}:
+        return "preferences", "/control/preferences"
     if path == "/control/actions/chat/session-update":
         next_step = str(payload.get("next_step", "")).strip()
         if next_step.startswith("/control/chat"):
@@ -191,6 +200,7 @@ def _append_action_audit(
     row = {
         "at": _action_audit_now(),
         "headline": _action_audit_headline(payload),
+        "project_alias": str(payload.get("project_alias", "")).strip().upper(),
         "status": str(payload.get("status", "")).strip() or "unknown",
         "outcome_kind": str(outcome.get("kind", "")).strip() or "-",
         "outcome_status": str(outcome.get("status", "")).strip() or str(payload.get("status", "")).strip() or "unknown",
@@ -204,6 +214,8 @@ def _append_action_audit(
         "focus_badge": str(payload.get("focus_badge", "")).strip(),
         "chat_id": str(payload.get("chat_id", "")).strip() or "",
         "transcript_preview": str(payload.get("reply_text", "")).strip()[:4000],
+        "chat_reply_summary": _truncate_text(str(payload.get("reply_text", "")).strip(), limit=160) or "-",
+        "chat_room_change_summary": str(payload.get("room_change_summary", "")).strip() or "-",
         "chat_preset_diff_summary": str(payload.get("chat_preset_diff_summary", "")).strip(),
     }
     planning_handoff = payload.get("planning_handoff") if isinstance(payload.get("planning_handoff"), dict) else {}
@@ -231,10 +243,23 @@ def _append_action_audit(
         ("critic_lane", "critic_lane_summary"),
         ("approved_plan_summary", "approved_plan_summary"),
         ("approved_plan", "approved_plan_summary"),
+        ("preference_artifact_kind", "preference_artifact_kind"),
+        ("artifact_kind", "preference_artifact_kind"),
+        ("applied_preferences_summary", "applied_preferences_summary"),
+        ("preference_candidate_summary", "preference_candidate_summary"),
+        ("preference_candidate_scope_summary", "preference_candidate_scope_summary"),
+        ("preference_decision_summary", "preference_decision_summary"),
+        ("preference_refresh_diff_summary", "preference_refresh_diff_summary"),
     ):
         value = str(payload.get(source_key, "")).strip()
         if value:
             row[row_key] = value
+    if isinstance(payload.get("applied_preferences"), list):
+        row["applied_preferences"] = list(payload.get("applied_preferences") or [])
+    if isinstance(payload.get("preference_candidates"), list):
+        row["preference_candidates"] = list(payload.get("preference_candidates") or [])
+    if isinstance(payload.get("preference_decisions"), list):
+        row["preference_decisions"] = list(payload.get("preference_decisions") or [])
     if isinstance(payload.get("subagent_blocking_issues"), list):
         row["subagent_blocking_issues"] = [
             str(item).strip()
@@ -245,12 +270,10 @@ def _append_action_audit(
         legacy_summary = legacy_planning_review_summary(payload)
         if legacy_summary:
             row["planning_compact_summary"] = legacy_summary
-    loader = load_existing_rows or _load_existing_action_audit_rows
+    backend = artifact_backend(paths.team_dir)
     try:
-        rows = loader(paths.action_audit_file)
-        rows.append(row)
-        rows = _prune_action_audit_rows(rows)
-        artifact_backend(paths.team_dir).rewrite_action_audit_rows(rows)
+        if not backend.append_pruned_action_audit_row(row, _prune_action_audit_rows):
+            return
     except Exception:
         return
 
@@ -269,6 +292,8 @@ def _with_action_audit(
     except Exception:
         return response
     if not isinstance(payload, dict):
+        return response
+    if bool(payload.get("audit_recorded")):
         return response
     _append_action_audit(config, payload)
     return response

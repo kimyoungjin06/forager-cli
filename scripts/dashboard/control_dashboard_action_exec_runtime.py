@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any, Dict, Tuple
+from urllib.parse import quote, urlparse
 
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_model_provider_adapter as model_provider_adapter
+import aoe_tg_operator_preferences as operator_preferences
 import aoe_tg_todo_state as todo_state
 import aoe_tg_worker_task_contract as worker_task_contract
 import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
@@ -24,6 +27,7 @@ import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as gateway_task_state
 import aoe_tg_task_view as gateway_task_view
 
+from control_dashboard_audit import _append_action_audit as _append_dashboard_action_audit
 from control_dashboard_action_exec_shared import (
     _DASHBOARD_CHAT_ID,
     _load_gateway_main_module,
@@ -39,6 +43,903 @@ from control_dashboard_common import DashboardAppConfig
 
 def _now_iso() -> str:
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def _parse_json_value(raw: Any) -> Any:
+    if isinstance(raw, (dict, list, bool, int, float)) or raw is None:
+        return raw
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return text
+
+
+def _preference_text(value: Any, limit: int = 160) -> str:
+    return str(value or "").strip()[: max(0, int(limit or 0))]
+
+
+def _preference_memory_scope_summary(scope: Any, scope_ref: Any = "") -> str:
+    scope_token = _preference_text(scope, 32).lower() or "session"
+    scope_ref_token = _preference_text(scope_ref, 64)
+    if scope_token == "session":
+        return "preference_memory_scope=session"
+    if scope_ref_token and scope_ref_token not in {"-", "*"}:
+        return f"preference_memory_scope={scope_token}:{scope_ref_token}"
+    return f"preference_memory_scope={scope_token}"
+
+
+def _preference_memory_scope_label(scope: Any) -> str:
+    scope_token = _preference_text(scope, 32).lower()
+    if scope_token == "session":
+        return "this task"
+    if scope_token == "project":
+        return "this project"
+    if scope_token == "artifact_kind":
+        return "this artifact kind"
+    if scope_token == "user_global":
+        return "all projects"
+    return scope_token or "-"
+
+
+def _preference_candidate_query(
+    *,
+    artifact_kind: Any,
+    expected_scope: Any,
+    key: Any,
+) -> str:
+    tokens = []
+    artifact_token = _preference_text(artifact_kind, 64).lower()
+    if artifact_token:
+        tokens.append(f"artifact_kind:{artifact_token}")
+    scope_token = _preference_text(expected_scope, 32).lower()
+    if scope_token:
+        tokens.append(f"memory_scope:{scope_token}")
+    key_token = _preference_text(key, 96).lower()
+    if key_token:
+        tokens.append(key_token)
+    return " ".join(token for token in tokens if token)
+
+
+def _preference_candidate_drilldown_links(
+    *,
+    project_alias: Any,
+    artifact_kind: Any,
+    expected_scope: Any,
+    key: Any,
+) -> Dict[str, str]:
+    project_token = _preference_text(project_alias, 64).upper()
+    query = _preference_candidate_query(
+        artifact_kind=artifact_kind,
+        expected_scope=expected_scope,
+        key=key,
+    )
+    encoded_query = quote(query, safe="") if query else ""
+    audit_href = "/control/audit?focus=preferences"
+    if project_token:
+        audit_href += f"&project={quote(project_token, safe='')}"
+    if encoded_query:
+        audit_href += f"&q={encoded_query}"
+    audit_href += "&limit=50"
+    history_href = "/control/history"
+    if encoded_query:
+        history_href += f"?q={encoded_query}"
+    else:
+        history_href += "?"
+    if project_token:
+        history_href += f"{'&' if '?' in history_href and not history_href.endswith('?') else ''}project={quote(project_token, safe='')}"
+    history_href += f"{'&' if '?' in history_href and not history_href.endswith('?') else ''}scope=dashboard&limit=20"
+    return {
+        "audit_href": audit_href,
+        "history_href": history_href,
+    }
+
+
+def _preference_candidate_management_return_path(
+    *,
+    project_alias: Any,
+    artifact_kind: Any,
+    expected_scope: Any,
+) -> str:
+    params = []
+    project_token = _preference_text(project_alias, 64).upper()
+    if project_token:
+        params.append(f"project={quote(project_token, safe='')}")
+    artifact_token = _preference_text(artifact_kind, 64).lower()
+    if artifact_token:
+        params.append(f"artifact={quote(artifact_token, safe='')}")
+    scope_token = _preference_text(expected_scope, 32).lower()
+    if scope_token:
+        params.append(f"scope={quote(scope_token, safe='')}")
+    return "/control/preferences" + (f"?{'&'.join(params)}" if params else "")
+
+
+def _preference_value_signature(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        return _preference_text(value, 240)
+
+
+def _effective_applied_preferences(
+    preference_state: Any,
+    *,
+    artifact_kind: Any,
+    project_ref: Any = "",
+) -> list[Dict[str, Any]]:
+    applicable = operator_preferences.list_applicable_preferences(
+        preference_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_ref,
+        include_disabled=True,
+    )
+    return [
+        row
+        for row in applicable
+        if bool(row.get("enabled", False))
+        and (
+            _preference_text(row.get("prompt_mode"), 32).lower() == "auto"
+            or _preference_text(row.get("scope"), 32).lower() == "session"
+        )
+    ]
+
+
+def _effective_preference_candidates(
+    candidate_state: Any,
+    *,
+    preference_state: Any,
+    artifact_kind: Any,
+    project_ref: Any = "",
+) -> list[Dict[str, Any]]:
+    return operator_preferences.build_preference_candidate_recommendations(
+        candidate_state,
+        preference_state=preference_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_ref,
+    )
+
+
+def _preference_refresh_row_signature(row: Dict[str, Any], *, kind: str) -> str:
+    artifact = _preference_text(row.get("artifact_kind"), 64).lower()
+    key = _preference_text(row.get("key"), 96).lower()
+    if kind == "applied":
+        return "|".join(
+            [
+                artifact,
+                key,
+                _preference_text(row.get("scope"), 32).lower(),
+                _preference_text(row.get("scope_ref"), 64),
+                _preference_text(row.get("prompt_mode"), 32).lower(),
+                str(bool(row.get("enabled", False))).lower(),
+                _preference_value_signature(row.get("value")),
+            ]
+        )
+    return "|".join(
+        [
+            artifact,
+            key,
+            _preference_text(row.get("expected_scope") or row.get("scope"), 32).lower(),
+            _preference_text(row.get("expected_scope_ref") or row.get("scope_ref"), 64),
+            _preference_value_signature(row.get("suggested_value", row.get("value"))),
+        ]
+    )
+
+
+def _preference_refresh_delta(
+    before_rows: list[Dict[str, Any]],
+    after_rows: list[Dict[str, Any]],
+    *,
+    kind: str,
+) -> tuple[list[str], list[str]]:
+    summarize = (
+        operator_preferences.summarize_preference_rule
+        if kind == "applied"
+        else operator_preferences.summarize_preference_candidate
+    )
+    before_map = {
+        _preference_refresh_row_signature(row, kind=kind): summarize(row)
+        for row in before_rows
+        if _preference_refresh_row_signature(row, kind=kind)
+    }
+    after_map = {
+        _preference_refresh_row_signature(row, kind=kind): summarize(row)
+        for row in after_rows
+        if _preference_refresh_row_signature(row, kind=kind)
+    }
+    added = [
+        str(summary).strip()
+        for signature, summary in after_map.items()
+        if signature not in before_map and str(summary).strip() not in {"", "-"}
+    ]
+    removed = [
+        str(summary).strip()
+        for signature, summary in before_map.items()
+        if signature not in after_map and str(summary).strip() not in {"", "-"}
+    ]
+    return added, removed
+
+
+def _summarize_preference_refresh_diff_sections(sections: Dict[str, list[str]]) -> str:
+    labels = []
+    for key in ("applied_added", "applied_removed", "candidates_added", "candidates_removed"):
+        rows = [str(item).strip() for item in list(sections.get(key) or []) if str(item).strip() not in {"", "-"}]
+        if not rows:
+            continue
+        visible = rows[:2]
+        summary = f"{key}={' || '.join(visible)}"
+        if len(rows) > len(visible):
+            summary += f" | total={len(rows)}"
+        labels.append(summary)
+    return f"preference_refresh_diff={' ; '.join(labels)}" if labels else "-"
+
+
+def _build_preference_refresh_diff_summary(
+    *,
+    before_preference_state: Any,
+    after_preference_state: Any,
+    before_candidate_state: Any,
+    after_candidate_state: Any,
+    artifact_kind: Any,
+    project_ref: Any = "",
+) -> str:
+    before_applied = _effective_applied_preferences(
+        before_preference_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_ref,
+    )
+    after_applied = _effective_applied_preferences(
+        after_preference_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_ref,
+    )
+    before_candidates = _effective_preference_candidates(
+        before_candidate_state,
+        preference_state=before_preference_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_ref,
+    )
+    after_candidates = _effective_preference_candidates(
+        after_candidate_state,
+        preference_state=after_preference_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_ref,
+    )
+    applied_added, applied_removed = _preference_refresh_delta(before_applied, after_applied, kind="applied")
+    candidates_added, candidates_removed = _preference_refresh_delta(before_candidates, after_candidates, kind="candidate")
+    return _summarize_preference_refresh_diff_sections(
+        {
+            "applied_added": applied_added,
+            "applied_removed": applied_removed,
+            "candidates_added": candidates_added,
+            "candidates_removed": candidates_removed,
+        }
+    )
+
+
+def _json_with_dashboard_audit(
+    payload: Dict[str, Any],
+    *,
+    config: DashboardAppConfig,
+    status: int,
+) -> Tuple[int, Dict[str, str], bytes]:
+    try:
+        _append_dashboard_action_audit(config, payload)
+    except Exception:
+        pass
+    response_payload = dict(payload)
+    response_payload["audit_recorded"] = True
+    return _json(response_payload, status=status)
+
+
+def _preference_candidate_action_rows(
+    *,
+    task_ref: Any,
+    runtime_ref: Any,
+    project_ref: Any,
+    artifact_kind: Any,
+    key: Any,
+    suggested_value: Any,
+    description: Any,
+    return_path: Any,
+) -> list[Dict[str, Any]]:
+    runtime_token = _preference_text(runtime_ref, 64)
+    project_token = _preference_text(project_ref, 64)
+    artifact_token = _preference_text(artifact_kind, 64).lower()
+    key_token = _preference_text(key, 96).lower()
+    description_token = _preference_text(description, 240)
+    payload_value = json.dumps(suggested_value, ensure_ascii=False)
+    rows = []
+    for mode, label in (
+        ("auto", "promote auto"),
+        ("confirm", "promote confirm"),
+        ("disable", "mute"),
+        ("dismiss", "dismiss"),
+    ):
+        payload = {
+            "task_ref": _preference_text(task_ref, 64),
+            "runtime_ref": runtime_token,
+            "return_path": _preference_text(return_path, 240),
+            "project_ref": project_token,
+            "artifact_kind": artifact_token,
+            "key": key_token,
+            "value_json": payload_value,
+            "description": description_token,
+            "mode": mode,
+        }
+        rows.append(
+            {
+                "label": label,
+                "path": "/control/actions/control/operator-preference-candidate",
+                "payload_json": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                "mode": "safe",
+                "priority": "primary" if mode in {"auto", "confirm"} else "secondary",
+                "command": f"/prefs candidate {artifact_token}:{key_token} {mode}",
+                "note": "promote, mute, or dismiss this adaptive preference candidate",
+            }
+        )
+    return rows
+
+
+def _worker_preview_refresh_action(task_ref: Any) -> Dict[str, Any]:
+    task_token = _preference_text(task_ref, 64)
+    if not task_token:
+        return {}
+    return {
+        "label": "Reopen Preview",
+        "path": "/control/actions/task/worker-apply-preview",
+        "payload_json": json.dumps({"task_ref": task_token}, ensure_ascii=False, separators=(",", ":")),
+        "mode": "safe",
+        "priority": "secondary",
+        "command": f"/task {task_token} | reopen-preview",
+        "note": "refresh the current preview with the updated preference state",
+    }
+
+
+def _preference_management_return_path(value: Any) -> str:
+    text = _preference_text(value, 240)
+    if not text:
+        return "/control/preferences"
+    parsed = urlparse(text)
+    if parsed.scheme or parsed.netloc:
+        return "/control/preferences"
+    path = str(parsed.path or "").strip() or "/control/preferences"
+    if path != "/control/preferences":
+        return "/control/preferences"
+    return f"{path}?{parsed.query}" if parsed.query else path
+
+
+def _same_preference_subject(raw: Any, *, artifact_kind: str, key: str) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    return (
+        _preference_text(raw.get("artifact_kind"), 64).lower() == artifact_kind
+        and _preference_text(raw.get("key"), 96).lower() == key
+    )
+
+
+def _load_task_operator_preference_session_rules(task: Dict[str, Any]) -> list[Dict[str, Any]]:
+    raw_rules = task.get("background_run_operator_preference_session_rules")
+    if not isinstance(raw_rules, list):
+        return []
+    rules: list[Dict[str, Any]] = []
+    for item in raw_rules:
+        row = operator_preferences.normalize_preference_rule(item)
+        if row and not any(
+            _same_preference_subject(existing, artifact_kind=_preference_text(row.get("artifact_kind"), 64).lower(), key=_preference_text(row.get("key"), 96).lower())
+            for existing in rules
+        ):
+            rules.append(row)
+    return rules
+
+
+def _store_task_operator_preference_session_rule(task: Dict[str, Any], raw_rule: Any) -> list[Dict[str, Any]]:
+    rule = operator_preferences.normalize_preference_rule(raw_rule)
+    rules = _load_task_operator_preference_session_rules(task)
+    if not rule:
+        task["background_run_operator_preference_session_rules"] = rules
+        return rules
+    artifact_kind = _preference_text(rule.get("artifact_kind"), 64).lower()
+    key = _preference_text(rule.get("key"), 96).lower()
+    rules = [
+        existing
+        for existing in rules
+        if not _same_preference_subject(existing, artifact_kind=artifact_kind, key=key)
+    ]
+    rules.append(rule)
+    task["background_run_operator_preference_session_rules"] = rules[-8:]
+    return list(task.get("background_run_operator_preference_session_rules") or [])
+
+
+def _load_task_operator_preference_decisions(task: Dict[str, Any]) -> list[Dict[str, Any]]:
+    raw_rows = task.get("background_run_operator_preference_decisions")
+    if not isinstance(raw_rows, list):
+        return []
+    decisions: list[Dict[str, Any]] = []
+    for item in raw_rows:
+        row = operator_preferences.normalize_preference_decision(item)
+        if row:
+            decisions.append(row)
+    return decisions
+
+
+def _record_task_operator_preference_decision(task: Dict[str, Any], raw_decision: Any) -> list[Dict[str, Any]]:
+    decision = operator_preferences.normalize_preference_decision(raw_decision)
+    if not decision:
+        return _load_task_operator_preference_decisions(task)
+    artifact_kind = _preference_text(decision.get("artifact_kind"), 64).lower()
+    key = _preference_text(decision.get("key"), 96).lower()
+    decisions = [
+        row
+        for row in _load_task_operator_preference_decisions(task)
+        if not _same_preference_subject(row, artifact_kind=artifact_kind, key=key)
+    ]
+    decisions.insert(0, decision)
+    task["background_run_operator_preference_decisions"] = decisions[:8]
+    return list(task.get("background_run_operator_preference_decisions") or [])
+
+
+def _operator_preferences_team_dir_for_ref(paths: Any, manager_state: Dict[str, Any], project_ref: Any = "") -> str:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    project_token = _preference_text(project_ref, 64).strip().lower()
+    if project_token:
+        for key, entry in projects.items():
+            if not isinstance(entry, dict):
+                continue
+            if project_token in {
+                _preference_text(key, 64).lower(),
+                _preference_text(entry.get("project_alias"), 64).lower(),
+                _preference_text(entry.get("display_name"), 64).lower(),
+                _preference_text(entry.get("name"), 64).lower(),
+            }:
+                resolved = _preference_text(entry.get("team_dir"), 512)
+                if resolved:
+                    return resolved
+    active_key = _preference_text(manager_state.get("active"), 64)
+    active_entry = projects.get(active_key) if active_key and isinstance(projects.get(active_key), dict) else {}
+    return _preference_text(active_entry.get("team_dir"), 512) or _preference_text(getattr(paths, "team_dir", ""), 512)
+
+
+def _operator_preferences_project_alias_for_ref(manager_state: Dict[str, Any], project_ref: Any = "") -> str:
+    projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
+    project_token = _preference_text(project_ref, 64).strip().lower()
+    if project_token:
+        for key, entry in projects.items():
+            if not isinstance(entry, dict):
+                continue
+            if project_token in {
+                _preference_text(key, 64).lower(),
+                _preference_text(entry.get("project_alias"), 64).lower(),
+                _preference_text(entry.get("display_name"), 64).lower(),
+                _preference_text(entry.get("name"), 64).lower(),
+            }:
+                return _preference_text(entry.get("project_alias"), 64).upper() or _preference_text(key, 64).upper()
+    active_key = _preference_text(manager_state.get("active"), 64)
+    active_entry = projects.get(active_key) if active_key and isinstance(projects.get(active_key), dict) else {}
+    return _preference_text(active_entry.get("project_alias"), 64).upper() or active_key.upper()
+
+
+def _derive_operator_preference_artifact_kind(*, task: Dict[str, Any], update_stub: Dict[str, Any]) -> str:
+    explicit = _preference_text(task.get("background_run_operator_preference_artifact_kind"), 64).lower()
+    if explicit:
+        return explicit
+    target_artifacts = [
+        _preference_text(item, 240).lower()
+        for item in list(update_stub.get("target_artifacts") or [])
+        if _preference_text(item, 240)
+    ]
+    for token in target_artifacts:
+        suffix = Path(token).suffix.lower()
+        if any(marker in token for marker in ("chart", "plot", "graph", "figure")) or suffix in {
+            ".png",
+            ".svg",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+        }:
+            return "chart"
+        if suffix in {".md", ".txt", ".doc", ".docx", ".pdf"}:
+            return "document"
+        if suffix in {".csv", ".tsv", ".xls", ".xlsx"}:
+            return "spreadsheet"
+    module_kind = _preference_text(task.get("background_run_task_contract_module"), 32).lower()
+    return {
+        "writing": "document",
+        "package": "package",
+        "analysis": "analysis",
+        "general": "artifact",
+    }.get(module_kind, "artifact")
+
+
+def _derive_operator_preference_artifact_profile(
+    *,
+    task: Dict[str, Any],
+    update_stub: Dict[str, Any],
+    artifact_kind: str,
+) -> str:
+    explicit = _preference_text(task.get("background_run_operator_preference_artifact_profile"), 64).lower()
+    if explicit:
+        return explicit
+    target_artifacts = [
+        _preference_text(item, 240).lower()
+        for item in list(update_stub.get("target_artifacts") or [])
+        if _preference_text(item, 240)
+    ]
+    hint_fields = [
+        *target_artifacts,
+        _preference_text(task.get("prompt"), 240).lower(),
+        _preference_text(task.get("job_contract_goal"), 240).lower(),
+        _preference_text(task.get("job_contract_summary"), 240).lower(),
+        _preference_text(task.get("background_run_worker_update_stub_summary"), 240).lower(),
+    ]
+    hints = " | ".join(token for token in hint_fields if token)
+    if artifact_kind == "chart":
+        if any(marker in hints for marker in ("bar", "histogram", "column")):
+            return "chart_bar"
+        if any(marker in hints for marker in ("line", "timeseries", "trend")):
+            return "chart_line"
+        if "scatter" in hints:
+            return "chart_scatter"
+    if artifact_kind == "document":
+        if any(marker in hints for marker in ("brief", "one-pager", "summary")):
+            return "document_brief"
+        if "report" in hints:
+            return "document_report"
+        if any(marker in hints for marker in ("runbook", "guide", "playbook")):
+            return "document_guide"
+    if artifact_kind == "spreadsheet":
+        if any(marker in hints for marker in ("model", "forecast", "projection")):
+            return "spreadsheet_model"
+        if any(marker in hints for marker in ("tracker", "inventory", "ledger", "backlog")):
+            return "spreadsheet_tracker"
+    return ""
+
+
+def _summarize_operator_preference_bucket(prefix: str, rows: list[Dict[str, Any]]) -> str:
+    labels = [_preference_text(row.get("summary"), 160) for row in rows if _preference_text(row.get("summary"), 160)]
+    if not labels:
+        return "-"
+    return f"{prefix}=" + " || ".join(labels[:3])
+
+
+def _operator_preference_decision_origin_label(origin: str) -> str:
+    token = _preference_text(origin, 32).lower()
+    if token == "candidate":
+        return "repeated correction"
+    if token == "confirm":
+        return "remembered option"
+    return "adaptive preference"
+
+
+def _operator_preference_decision_scope_variants(
+    *,
+    choice: str,
+    label: str,
+    artifact_kind: str,
+    project_ref: str,
+) -> list[Dict[str, str]]:
+    token = _preference_text(choice, 32).lower()
+    clean_label = _preference_text(label, 64)
+    artifact = _preference_text(artifact_kind, 64).lower() or "artifact"
+    project = _preference_text(project_ref, 64)
+    if token in {"apply_once", "skip_once"}:
+        return [
+            {
+                "label": clean_label,
+                "scope": "session",
+                "scope_ref": "-",
+                "memory_scope": "session",
+                "memory_scope_label": "this task",
+            }
+        ]
+    variants = [
+        {
+            "label": f"{clean_label} · this artifact",
+            "scope": "artifact_kind",
+            "scope_ref": artifact,
+            "memory_scope": "artifact_kind",
+            "memory_scope_label": "this artifact kind",
+        }
+    ]
+    if project:
+        variants.append(
+            {
+                "label": f"{clean_label} · this project",
+                "scope": "project",
+                "scope_ref": project,
+                "memory_scope": "project",
+                "memory_scope_label": "this project",
+            }
+        )
+    return variants
+
+
+def _operator_preference_decision_effect_summary(
+    *,
+    choice: str,
+    artifact_kind: str,
+    memory_scope: str,
+    project_ref: str = "",
+) -> str:
+    artifact_label = _preference_text(artifact_kind, 32) or "artifact"
+    token = _preference_text(choice, 32).lower()
+    scope = _preference_text(memory_scope, 32).lower()
+    project = _preference_text(project_ref, 64)
+    if token == "apply_once":
+        return f"apply on this {artifact_label} task only"
+    if token == "apply_always":
+        if scope == "project" and project:
+            return f"apply now and remember across project {project}"
+        return f"apply now and remember for future {artifact_label} work"
+    if token == "skip_once":
+        return f"skip on this {artifact_label} task only"
+    if token == "skip_always":
+        if scope == "project" and project:
+            return f"skip now and suppress future prompts in project {project}"
+        return f"skip now and suppress future {artifact_label} prompts"
+    return "-"
+
+
+def _build_operator_preference_decision_groups(
+    *,
+    task_ref: str,
+    artifact_kind: str,
+    project_ref: str,
+    prompt_groups: list[tuple[str, list[Dict[str, Any]]]],
+    return_path: str,
+) -> list[Dict[str, Any]]:
+    groups: list[Dict[str, Any]] = []
+    for origin, prompt_rows in prompt_groups:
+        origin_label = _operator_preference_decision_origin_label(origin)
+        for row in prompt_rows:
+            key = _preference_text(row.get("key"), 96).lower()
+            if not key:
+                continue
+            description = _preference_text(row.get("description"), 240) or key
+            summary = _preference_text(row.get("summary"), 240) or description
+            source_scope = _preference_text(row.get("scope"), 32).lower() or origin
+            scope_ref = _preference_text(row.get("scope_ref"), 64)
+            option_actions: list[Dict[str, Any]] = []
+            for option in list(row.get("options") or []):
+                choice = _preference_text(option.get("choice"), 32).lower()
+                label = _preference_text(option.get("label"), 64)
+                if choice not in operator_preferences.PREFERENCE_DECISION_CHOICES or not label:
+                    continue
+                for variant in _operator_preference_decision_scope_variants(
+                    choice=choice,
+                    label=label,
+                    artifact_kind=artifact_kind,
+                    project_ref=project_ref,
+                ):
+                    effect = _operator_preference_decision_effect_summary(
+                        choice=choice,
+                        artifact_kind=artifact_kind,
+                        memory_scope=_preference_text(variant.get("memory_scope"), 32),
+                        project_ref=project_ref,
+                    )
+                    decision_payload = {
+                        "task_ref": task_ref,
+                        "artifact_kind": artifact_kind,
+                        "key": key,
+                        "value": row.get("value"),
+                        "description": description,
+                        "choice": choice,
+                        "scope": variant.get("scope"),
+                        "scope_ref": variant.get("scope_ref"),
+                        "return_path": return_path,
+                    }
+                    option_actions.append(
+                        {
+                            "label": f"{key} · {variant.get('label')}",
+                            "path": "/control/actions/task/operator-preference-decision",
+                            "payload_json": json.dumps(decision_payload, ensure_ascii=False, separators=(",", ":")),
+                            "mode": "safe",
+                            "priority": "primary" if choice in {"apply_once", "apply_always"} else "secondary",
+                            "command": f"/task {task_ref} | pref {key} {choice} {variant.get('memory_scope')}",
+                            "note": f"{origin_label} | {effect}" if effect != "-" else origin_label,
+                            "memory_policy": choice,
+                            "memory_scope": _preference_text(variant.get("memory_scope"), 32),
+                            "memory_scope_label": _preference_text(variant.get("memory_scope_label"), 64),
+                            "memory_effect": effect,
+                            "preference_origin": origin,
+                            "preference_key": key,
+                        }
+                    )
+            if not option_actions:
+                continue
+            groups.append(
+                {
+                    "key": key,
+                    "artifact_kind": artifact_kind,
+                    "origin": origin,
+                    "origin_label": origin_label,
+                    "description": description,
+                    "summary": summary,
+                    "source_scope": source_scope or "-",
+                    "scope_ref": scope_ref or "-",
+                    "actions": option_actions,
+                }
+            )
+    return groups
+
+
+def _summarize_operator_preference_decision_groups(groups: list[Dict[str, Any]]) -> str:
+    if not groups:
+        return "-"
+    labels = []
+    for row in groups:
+        key = _preference_text(row.get("key"), 96)
+        origin = _preference_text(row.get("origin"), 32)
+        if not key:
+            continue
+        labels.append(f"{key}({origin or 'preference'})")
+    if not labels:
+        return "-"
+    summary = "decision_prompts=" + " || ".join(labels[:3])
+    if len(labels) > 3:
+        summary += f" | total={len(labels)}"
+    return summary
+
+
+def _build_operator_preference_surface(
+    *,
+    entry: Dict[str, Any],
+    alias: str,
+    task_ref: str,
+    task: Dict[str, Any],
+    update_stub: Dict[str, Any],
+    return_path: str,
+) -> Dict[str, Any]:
+    artifact_kind = _derive_operator_preference_artifact_kind(task=task, update_stub=update_stub)
+    artifact_profile = _derive_operator_preference_artifact_profile(
+        task=task,
+        update_stub=update_stub,
+        artifact_kind=artifact_kind,
+    )
+    team_dir = _preference_text(entry.get("team_dir"), 512)
+    registry_state = operator_preferences.load_operator_preferences(team_dir) if team_dir else {"rules": []}
+    candidate_state = operator_preferences.load_operator_preference_candidates(team_dir) if team_dir else {"candidates": []}
+    session_rules = _load_task_operator_preference_session_rules(task)
+    combined_state = {
+        "rules": [*list(registry_state.get("rules") or []), *session_rules],
+    }
+    preflight = operator_preferences.build_adaptive_preference_preflight(
+        combined_state,
+        artifact_kind=artifact_kind,
+        artifact_profile=artifact_profile,
+        project_ref=alias,
+    )
+    candidate_rows = operator_preferences.build_preference_candidate_recommendations(
+        candidate_state,
+        preference_state=combined_state,
+        artifact_kind=artifact_kind,
+        project_ref=alias,
+    )
+    candidate_rows = [
+        (
+            lambda expected_scope, expected_scope_ref: {
+            **row,
+            "runtime_ref": alias,
+            "expected_scope": expected_scope,
+            "expected_scope_ref": expected_scope_ref,
+            "expected_scope_label": _preference_memory_scope_label(expected_scope),
+            **_preference_candidate_drilldown_links(
+                project_alias=alias,
+                artifact_kind=_preference_text(row.get("artifact_kind"), 64).lower() or artifact_kind,
+                expected_scope=expected_scope,
+                key=row.get("key"),
+            ),
+            "actions": _preference_candidate_action_rows(
+                task_ref=task_ref,
+                runtime_ref=alias,
+                project_ref=row.get("project_ref"),
+                artifact_kind=_preference_text(row.get("artifact_kind"), 64).lower() or artifact_kind,
+                key=row.get("key"),
+                suggested_value=row.get("suggested_value"),
+                description=row.get("issue") or row.get("description"),
+                return_path=_preference_candidate_management_return_path(
+                    project_alias=alias,
+                    artifact_kind=_preference_text(row.get("artifact_kind"), 64).lower() or artifact_kind,
+                    expected_scope=expected_scope,
+                ),
+            ),
+        }
+        )(
+            _preference_text(row.get("expected_scope"), 32).lower()
+            or _preference_text(row.get("scope"), 32).lower()
+            or "artifact_kind",
+            _preference_text(row.get("expected_scope_ref"), 64)
+            or _preference_text(row.get("scope_ref"), 64)
+            or _preference_text(row.get("artifact_kind"), 64).lower()
+            or "*",
+        )
+        for row in candidate_rows
+    ]
+    candidate_keys = {
+        _preference_text(row.get("key"), 96).lower()
+        for row in candidate_rows
+        if _preference_text(row.get("key"), 96)
+    }
+    confirm_rows = [
+        row
+        for row in list(preflight.get("confirm") or [])
+        if _preference_text(row.get("key"), 96).lower() not in candidate_keys
+    ]
+    manual_rows = [
+        row
+        for row in list(preflight.get("manual_only") or [])
+        if _preference_text(row.get("scope"), 32).lower() != "session"
+        and _preference_text(row.get("key"), 96).lower() not in candidate_keys
+    ]
+    disabled_rows = [
+        row
+        for row in list(preflight.get("disabled_defaults") or [])
+        if _preference_text(row.get("key"), 96).lower() not in candidate_keys
+    ]
+    preflight = {
+        **preflight,
+        "confirm": confirm_rows,
+        "manual_only": manual_rows,
+        "disabled_defaults": disabled_rows,
+    }
+    applicable = operator_preferences.list_applicable_preferences(
+        combined_state,
+        artifact_kind=artifact_kind,
+        project_ref=alias,
+        include_disabled=True,
+    )
+    applied_preferences = [
+        row
+        for row in applicable
+        if bool(row.get("enabled", False))
+        and (
+            _preference_text(row.get("prompt_mode"), 32).lower() == "auto"
+            or _preference_text(row.get("scope"), 32).lower() == "session"
+        )
+    ]
+    decision_groups = _build_operator_preference_decision_groups(
+        task_ref=task_ref,
+        artifact_kind=artifact_kind,
+        project_ref=alias,
+        prompt_groups=[
+            ("confirm", confirm_rows),
+            ("candidate", candidate_rows),
+        ],
+        return_path=return_path,
+    )
+    decision_actions = [
+        action
+        for group in decision_groups
+        for action in list(group.get("actions") or [])
+    ]
+    surface = {
+        "artifact_kind": artifact_kind,
+        "artifact_profile": artifact_profile,
+        "preflight": preflight,
+        "candidate_preferences": candidate_rows,
+        "preflight_summary": operator_preferences.summarize_preference_preflight(preflight),
+        "applied_preferences": applied_preferences,
+        "applied_preferences_summary": operator_preferences.summarize_applied_preferences(applied_preferences),
+        "candidate_summary": operator_preferences.summarize_preference_candidates(candidate_rows),
+        "candidate_scope_summary": operator_preferences.summarize_preference_candidate_scopes(candidate_rows),
+        "confirm_summary": _summarize_operator_preference_bucket("confirm_preferences", confirm_rows),
+        "manual_summary": _summarize_operator_preference_bucket("manual_preferences", manual_rows),
+        "disabled_summary": _summarize_operator_preference_bucket("disabled_preferences", disabled_rows),
+        "decision_groups": decision_groups,
+        "decision_prompt_summary": _summarize_operator_preference_decision_groups(decision_groups),
+        "decision_actions": decision_actions,
+    }
+    task["background_run_operator_preference_artifact_kind"] = artifact_kind
+    task["background_run_operator_preference_artifact_profile"] = artifact_profile or "-"
+    task["background_run_operator_preference_preflight_summary"] = surface["preflight_summary"]
+    task["background_run_operator_preference_applied_summary"] = surface["applied_preferences_summary"]
+    task["background_run_operator_preference_candidate_summary"] = surface["candidate_summary"]
+    task["background_run_operator_preference_confirm_summary"] = surface["confirm_summary"]
+    task["background_run_operator_preference_manual_summary"] = surface["manual_summary"]
+    task["background_run_operator_preference_disabled_summary"] = surface["disabled_summary"]
+    return surface
 
 
 def _worker_blocker_lane_ids(value: Any) -> list[str]:
@@ -1515,6 +2416,15 @@ def _execute_worker_update_preview_action(spec: Dict[str, object], *, config: Da
             },
             status=409,
         )
+    preference_surface = _build_operator_preference_surface(
+        entry=entry,
+        alias=alias,
+        task_ref=label,
+        task=task,
+        update_stub=update_stub,
+        return_path=str(spec.get("path", "")).strip() or "/control/actions/task/worker-update-preview",
+    )
+    _save_manager_state(config, manager_state)
     next_step = f"/todo {alias} accept {proposal_ids[0]}" if proposal_ids else f"/task {label}"
     return _json(
         {
@@ -1540,6 +2450,20 @@ def _execute_worker_update_preview_action(spec: Dict[str, object], *, config: Da
                 "label": label,
                 "detail_path": f"/control/tasks/by-request/{request_id}",
             },
+            "actions": list(preference_surface.get("decision_actions") or []),
+            "preference_decision_groups": list(preference_surface.get("decision_groups") or []),
+            "applied_preferences": list(preference_surface.get("applied_preferences") or []),
+            "preference_candidates": list(preference_surface.get("candidate_preferences") or []),
+            "applied_preferences_summary": str(preference_surface.get("applied_preferences_summary", "")).strip() or "-",
+            "preference_candidate_summary": str(preference_surface.get("candidate_summary", "")).strip() or "-",
+            "preference_candidate_scope_summary": str(preference_surface.get("candidate_scope_summary", "")).strip() or "-",
+            "preference_decision_prompt_summary": str(preference_surface.get("decision_prompt_summary", "")).strip() or "-",
+            "preference_artifact_kind": str(preference_surface.get("artifact_kind", "")).strip() or "-",
+            "preference_artifact_profile": str(preference_surface.get("artifact_profile", "")).strip() or "-",
+            "preference_preflight_summary": str(preference_surface.get("preflight_summary", "")).strip() or "-",
+            "preference_confirm_summary": str(preference_surface.get("confirm_summary", "")).strip() or "-",
+            "preference_manual_summary": str(preference_surface.get("manual_summary", "")).strip() or "-",
+            "preference_disabled_summary": str(preference_surface.get("disabled_summary", "")).strip() or "-",
             "preview": {
                 "kind": "worker_update_preview",
                 "project_alias": alias,
@@ -1555,6 +2479,17 @@ def _execute_worker_update_preview_action(spec: Dict[str, object], *, config: Da
                 "actions": list(update_stub.get("actions") or []),
                 "cautions": list(update_stub.get("cautions") or []),
                 "evidence_refs": list(update_stub.get("evidence_refs") or []),
+                "preference_decision_groups": list(preference_surface.get("decision_groups") or []),
+                "preference_artifact_kind": str(preference_surface.get("artifact_kind", "")).strip() or "-",
+                "preference_artifact_profile": str(preference_surface.get("artifact_profile", "")).strip() or "-",
+                "preference_preflight_summary": str(preference_surface.get("preflight_summary", "")).strip() or "-",
+                "applied_preferences_summary": str(preference_surface.get("applied_preferences_summary", "")).strip() or "-",
+                "preference_candidate_summary": str(preference_surface.get("candidate_summary", "")).strip() or "-",
+                "preference_candidate_scope_summary": str(preference_surface.get("candidate_scope_summary", "")).strip() or "-",
+                "preference_decision_prompt_summary": str(preference_surface.get("decision_prompt_summary", "")).strip() or "-",
+                "preference_confirm_summary": str(preference_surface.get("confirm_summary", "")).strip() or "-",
+                "preference_manual_summary": str(preference_surface.get("manual_summary", "")).strip() or "-",
+                "preference_disabled_summary": str(preference_surface.get("disabled_summary", "")).strip() or "-",
             },
         },
         status=200,
@@ -1836,6 +2771,15 @@ def _execute_worker_apply_preview_action(spec: Dict[str, object], *, config: Das
         update_stub=update_stub,
         proposal_ids=proposal_ids,
     )
+    preference_surface = _build_operator_preference_surface(
+        entry=entry,
+        alias=alias,
+        task_ref=label,
+        task=task,
+        update_stub=update_stub,
+        return_path=str(spec.get("path", "")).strip() or "/control/actions/task/worker-apply-preview",
+    )
+    _save_manager_state(config, manager_state)
     return _json(
         {
             "ok": True,
@@ -1860,6 +2804,20 @@ def _execute_worker_apply_preview_action(spec: Dict[str, object], *, config: Das
                 "label": label,
                 "detail_path": f"/control/tasks/by-request/{request_id}",
             },
+            "actions": list(preference_surface.get("decision_actions") or []),
+            "preference_decision_groups": list(preference_surface.get("decision_groups") or []),
+            "applied_preferences": list(preference_surface.get("applied_preferences") or []),
+            "preference_candidates": list(preference_surface.get("candidate_preferences") or []),
+            "applied_preferences_summary": str(preference_surface.get("applied_preferences_summary", "")).strip() or "-",
+            "preference_candidate_summary": str(preference_surface.get("candidate_summary", "")).strip() or "-",
+            "preference_candidate_scope_summary": str(preference_surface.get("candidate_scope_summary", "")).strip() or "-",
+            "preference_decision_prompt_summary": str(preference_surface.get("decision_prompt_summary", "")).strip() or "-",
+            "preference_artifact_kind": str(preference_surface.get("artifact_kind", "")).strip() or "-",
+            "preference_artifact_profile": str(preference_surface.get("artifact_profile", "")).strip() or "-",
+            "preference_preflight_summary": str(preference_surface.get("preflight_summary", "")).strip() or "-",
+            "preference_confirm_summary": str(preference_surface.get("confirm_summary", "")).strip() or "-",
+            "preference_manual_summary": str(preference_surface.get("manual_summary", "")).strip() or "-",
+            "preference_disabled_summary": str(preference_surface.get("disabled_summary", "")).strip() or "-",
             "preview": {
                 "kind": "worker_apply_preview",
                 "project_alias": alias,
@@ -1875,6 +2833,17 @@ def _execute_worker_apply_preview_action(spec: Dict[str, object], *, config: Das
                 "actions": list(preview_payload.get("actions") or []),
                 "cautions": list(preview_payload.get("cautions") or []),
                 "evidence_refs": list(preview_payload.get("evidence_refs") or []),
+                "preference_decision_groups": list(preference_surface.get("decision_groups") or []),
+                "preference_artifact_kind": str(preference_surface.get("artifact_kind", "")).strip() or "-",
+                "preference_artifact_profile": str(preference_surface.get("artifact_profile", "")).strip() or "-",
+                "preference_preflight_summary": str(preference_surface.get("preflight_summary", "")).strip() or "-",
+                "applied_preferences_summary": str(preference_surface.get("applied_preferences_summary", "")).strip() or "-",
+                "preference_candidate_summary": str(preference_surface.get("candidate_summary", "")).strip() or "-",
+                "preference_candidate_scope_summary": str(preference_surface.get("candidate_scope_summary", "")).strip() or "-",
+                "preference_decision_prompt_summary": str(preference_surface.get("decision_prompt_summary", "")).strip() or "-",
+                "preference_confirm_summary": str(preference_surface.get("confirm_summary", "")).strip() or "-",
+                "preference_manual_summary": str(preference_surface.get("manual_summary", "")).strip() or "-",
+                "preference_disabled_summary": str(preference_surface.get("disabled_summary", "")).strip() or "-",
             },
         },
         status=200,

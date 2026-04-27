@@ -233,6 +233,45 @@ def clear_default_mode(state: Dict[str, Any], chat_id: str) -> bool:
     return existed
 
 
+def get_last_cmd_arg(state: Dict[str, Any], chat_id: str, key: str) -> str:
+    row = get_chat_session_row(state, chat_id, create=False)
+    last = row.get("last_cmd_args")
+    if not isinstance(last, dict):
+        return ""
+    token = str(key or "").strip().lower()
+    if not token:
+        return ""
+    return str(last.get(token, "")).strip()
+
+
+def set_last_cmd_arg(state: Dict[str, Any], chat_id: str, key: str, value: str) -> bool:
+    cid = str(chat_id or "").strip()
+    token = str(key or "").strip().lower()
+    val = str(value or "").strip()
+    if not cid or not token or not val:
+        return False
+    row = get_chat_session_row(state, cid, create=True)
+    last = row.get("last_cmd_args")
+    if not isinstance(last, dict):
+        last = {}
+        row["last_cmd_args"] = last
+    last[token] = val[:800]
+    row["updated_at"] = now_iso()
+    return True
+
+
+def get_chat_last_send_mode(state: Dict[str, Any], chat_id: str) -> str:
+    token = get_last_cmd_arg(state, chat_id, "chat_send_mode").lower()
+    return token if token in {"raw", "direct", "dispatch", "room_post", "room_use"} else ""
+
+
+def set_chat_last_send_mode(state: Dict[str, Any], chat_id: str, mode: str) -> bool:
+    token = str(mode or "").strip().lower()
+    if token not in {"raw", "direct", "dispatch", "room_post", "room_use"}:
+        return False
+    return set_last_cmd_arg(state, chat_id, "chat_send_mode", token)
+
+
 def get_chat_lang(state: Dict[str, Any], chat_id: str, fallback: str = DEFAULT_UI_LANG) -> str:
     row = get_chat_session_row(state, chat_id, create=False)
     mode = normalize_chat_lang_token(row.get("lang", ""), fallback)

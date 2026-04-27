@@ -16,16 +16,19 @@ from control_dashboard_action_exec import (
     _execute_auto_recover_action,
     _execute_background_queue_clean_action,
     _execute_general_subagent_support_action,
+    _execute_operator_preference_candidate_action,
     _preview_background_queue_clean_action,
     _preview_server_guard_pressure_action,
     _execute_chat_send_action,
     _execute_chat_session_select_task_action,
     _execute_chat_session_update_action,
     _execute_followup_action,
+    _execute_operator_preference_rule_action,
     _execute_runtime_judge_action,
     _execute_runtime_syncback_apply_action,
     _execute_runtime_syncback_preview_action,
     _execute_retry_action,
+    _execute_operator_preference_decision_action,
     _execute_todo_proposal_action,
     _execute_worker_apply_accept_action,
     _execute_worker_apply_preview_action,
@@ -240,6 +243,38 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
             "payload": {"task_ref": task_ref},
         }
 
+    if path == "/control/actions/task/operator-preference-decision":
+        task_ref = str(payload.get("task_ref", "")).strip()
+        if not task_ref:
+            raise ValueError("task_ref is required")
+        artifact_kind = str(payload.get("artifact_kind", "")).strip().lower()
+        if not artifact_kind:
+            raise ValueError("artifact_kind is required")
+        key = str(payload.get("key", "")).strip().lower()
+        if not key:
+            raise ValueError("key is required")
+        choice = str(payload.get("choice", "")).strip().lower()
+        if choice not in {"apply_once", "apply_always", "skip_once", "skip_always"}:
+            raise ValueError("choice must be one of apply_once, apply_always, skip_once, skip_always")
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"/task {task_ref} | pref {key} {choice}",
+            "note": "record an adaptive operator preference decision for the current task and project",
+            "payload": {
+                "task_ref": task_ref,
+                "artifact_kind": artifact_kind,
+                "key": key,
+                "value": payload.get("value"),
+                "description": payload.get("description"),
+                "choice": choice,
+                "scope": str(payload.get("scope", "")).strip().lower() or "artifact_kind",
+                "scope_ref": payload.get("scope_ref"),
+                "return_path": str(payload.get("return_path", "")).strip(),
+            },
+        }
+
     if path == "/control/actions/task/worker-apply-propose":
         task_ref = str(payload.get("task_ref", "")).strip()
         if not task_ref:
@@ -367,6 +402,77 @@ def _action_spec_for_request(path: str, payload: Dict[str, object]) -> Dict[str,
         if spec is None:
             raise ValueError("unsupported auto recover action contract")
         return spec
+
+    if path == "/control/actions/control/operator-preference-rule":
+        artifact_kind = str(payload.get("artifact_kind", "")).strip().lower()
+        key = str(payload.get("key", "")).strip().lower()
+        scope = str(payload.get("scope", "")).strip().lower() or "artifact_kind"
+        mode = str(payload.get("mode", "")).strip().lower()
+        if not artifact_kind:
+            raise ValueError("artifact_kind is required")
+        if not key:
+            raise ValueError("key is required")
+        if mode not in {"auto", "confirm", "manual_only", "disable", "delete"}:
+            raise ValueError("mode must be one of auto, confirm, manual_only, disable, delete")
+        value = payload.get("value_json")
+        if isinstance(value, str) and str(value).strip():
+            try:
+                value = json.loads(str(value))
+            except Exception:
+                value = str(value)
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"/prefs rule {artifact_kind}:{key} {mode}",
+            "note": "update or remove a persisted adaptive operator preference rule",
+            "payload": {
+                "runtime_ref": str(payload.get("runtime_ref", "")).strip(),
+                "return_path": str(payload.get("return_path", "")).strip(),
+                "artifact_kind": artifact_kind,
+                "key": key,
+                "scope": scope,
+                "scope_ref": payload.get("scope_ref"),
+                "value_json": value,
+                "description": payload.get("description"),
+                "mode": mode,
+            },
+        }
+
+    if path == "/control/actions/control/operator-preference-candidate":
+        artifact_kind = str(payload.get("artifact_kind", "")).strip().lower()
+        key = str(payload.get("key", "")).strip().lower()
+        mode = str(payload.get("mode", "")).strip().lower()
+        if not artifact_kind:
+            raise ValueError("artifact_kind is required")
+        if not key:
+            raise ValueError("key is required")
+        if mode not in {"auto", "confirm", "disable", "dismiss"}:
+            raise ValueError("mode must be one of auto, confirm, disable, dismiss")
+        value = payload.get("value_json")
+        if isinstance(value, str) and str(value).strip():
+            try:
+                value = json.loads(str(value))
+            except Exception:
+                value = str(value)
+        return {
+            "path": path,
+            "method": "POST",
+            "mode": "safe",
+            "command": f"/prefs candidate {artifact_kind}:{key} {mode}",
+            "note": "promote, mute, or dismiss an adaptive operator preference candidate",
+            "payload": {
+                "task_ref": str(payload.get("task_ref", "")).strip(),
+                "runtime_ref": str(payload.get("runtime_ref", "")).strip(),
+                "return_path": str(payload.get("return_path", "")).strip(),
+                "project_ref": str(payload.get("project_ref", "")).strip(),
+                "artifact_kind": artifact_kind,
+                "key": key,
+                "value_json": value,
+                "description": payload.get("description"),
+                "mode": mode,
+            },
+        }
 
     raise ValueError("unknown action path")
 
@@ -591,6 +697,9 @@ def build_dashboard_action_response(
     if path == "/control/actions/task/worker-apply-preview":
         return _with_action_audit(_execute_worker_apply_preview_action(spec, config=config), config=config)
 
+    if path == "/control/actions/task/operator-preference-decision":
+        return _with_action_audit(_execute_operator_preference_decision_action(spec, config=config), config=config)
+
     if path == "/control/actions/task/worker-apply-propose":
         return _with_action_audit(_execute_worker_apply_propose_action(spec, config=config), config=config)
 
@@ -629,6 +738,12 @@ def build_dashboard_action_response(
 
     if path == "/control/actions/control/auto-recover":
         return _with_action_audit(_execute_auto_recover_action(spec, config=config), config=config)
+
+    if path == "/control/actions/control/operator-preference-rule":
+        return _with_action_audit(_execute_operator_preference_rule_action(spec, config=config), config=config)
+
+    if path == "/control/actions/control/operator-preference-candidate":
+        return _with_action_audit(_execute_operator_preference_candidate_action(spec, config=config), config=config)
 
     return _with_action_audit(
         _json(

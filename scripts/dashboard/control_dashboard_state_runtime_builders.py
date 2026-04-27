@@ -95,6 +95,18 @@ def _worker_update_operator_summary(task: Dict[str, Any]) -> str:
     )
 
 
+def _operator_preference_task_summary(task: Dict[str, Any], key: str, *, result_key: str = "") -> str:
+    summary = str(task.get(key, "")).strip()
+    if summary:
+        return summary
+    if result_key:
+        result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        summary = str(result.get(result_key, "")).strip()
+        if summary:
+            return summary
+    return "-"
+
+
 def _worker_module_summary(task: Dict[str, Any]) -> str:
     module_summary = str(task.get("background_run_task_contract_module_summary", "")).strip()
     module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
@@ -1024,6 +1036,13 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                 proposal_ids=(active_task or {}).get("background_run_worker_update_proposal_ids") or [],
             ),
         )
+        runtime_safe_action_buttons = _append_unique_action_button(
+            runtime_safe_action_buttons,
+            _general_subagent_support_button(
+                label=str(row.get("active_task_label", "")).strip(),
+                request_id=active_request_id,
+            ),
+        )
         if not worker_apply_applied and worker_apply_ready:
             runtime_phase2_action_buttons = _append_unique_action_button(
                 runtime_phase2_action_buttons,
@@ -1201,6 +1220,39 @@ def _build_runtime_cards(manager_state: Dict[str, Any], provider_state: Dict[str
                     str((active_task or {}).get("background_run_launch_spec_summary", "")).strip() or "-"
                 ),
                 active_task_background_run_worker_update_operator_summary=_worker_update_operator_summary(active_task or {}),
+                active_task_background_run_operator_preference_artifact_kind=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_artifact_kind",
+                ),
+                active_task_background_run_operator_preference_preflight_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_preflight_summary",
+                ),
+                active_task_background_run_operator_preference_applied_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_applied_summary",
+                ),
+                active_task_background_run_operator_preference_candidate_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_candidate_summary",
+                ),
+                active_task_background_run_operator_preference_confirm_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_confirm_summary",
+                ),
+                active_task_background_run_operator_preference_manual_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_manual_summary",
+                ),
+                active_task_background_run_operator_preference_disabled_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_disabled_summary",
+                ),
+                active_task_background_run_operator_preference_decision_summary=_operator_preference_task_summary(
+                    active_task or {},
+                    "background_run_operator_preference_decision_summary",
+                    result_key="background_run_operator_preference_decision_summary",
+                ),
                 active_task_background_run_worker_update_proposal_summary=(
                     str((active_task or {}).get("background_run_worker_update_proposal_summary", "")).strip() or "-"
                 ),
@@ -2106,6 +2158,39 @@ def _build_runtime_detail(
             if str(item).strip()
         ],
         active_task_background_run_worker_update_operator_summary=_worker_update_operator_summary(active_task or {}),
+        active_task_background_run_operator_preference_artifact_kind=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_artifact_kind",
+        ),
+        active_task_background_run_operator_preference_preflight_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_preflight_summary",
+        ),
+        active_task_background_run_operator_preference_applied_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_applied_summary",
+        ),
+        active_task_background_run_operator_preference_candidate_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_candidate_summary",
+        ),
+        active_task_background_run_operator_preference_confirm_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_confirm_summary",
+        ),
+        active_task_background_run_operator_preference_manual_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_manual_summary",
+        ),
+        active_task_background_run_operator_preference_disabled_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_disabled_summary",
+        ),
+        active_task_background_run_operator_preference_decision_summary=_operator_preference_task_summary(
+            active_task or {},
+            "background_run_operator_preference_decision_summary",
+            result_key="background_run_operator_preference_decision_summary",
+        ),
         active_task_background_run_worker_apply_accept_summary=_worker_apply_accept_summary(active_task or {}),
         active_task_background_run_worker_syncback_summary=_worker_syncback_summary(active_task or {}),
         active_task_background_run_model_plan_summary=(

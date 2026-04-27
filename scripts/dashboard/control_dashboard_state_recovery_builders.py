@@ -696,6 +696,30 @@ def _build_recovery_runtime_rows(
                 active_task_background_run_worker_update_operator_summary=(
                     str(row.get("active_task_background_run_worker_update_operator_summary", "")).strip() or "-"
                 ),
+                active_task_background_run_operator_preference_artifact_kind=(
+                    str(row.get("active_task_background_run_operator_preference_artifact_kind", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_preflight_summary=(
+                    str(row.get("active_task_background_run_operator_preference_preflight_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_applied_summary=(
+                    str(row.get("active_task_background_run_operator_preference_applied_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_candidate_summary=(
+                    str(row.get("active_task_background_run_operator_preference_candidate_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_confirm_summary=(
+                    str(row.get("active_task_background_run_operator_preference_confirm_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_manual_summary=(
+                    str(row.get("active_task_background_run_operator_preference_manual_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_disabled_summary=(
+                    str(row.get("active_task_background_run_operator_preference_disabled_summary", "")).strip() or "-"
+                ),
+                active_task_background_run_operator_preference_decision_summary=(
+                    str(row.get("active_task_background_run_operator_preference_decision_summary", "")).strip() or "-"
+                ),
                 active_task_background_run_worker_update_proposal_summary=(
                     str(row.get("active_task_background_run_worker_update_proposal_summary", "")).strip() or "-"
                 ),

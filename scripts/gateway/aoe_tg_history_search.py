@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -13,12 +14,17 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from aoe_tg_action_audit import (
     normalize_planning_handoff_snapshot,
     summarize_action_audit_headline,
+    summarize_chat_reply_compact,
+    summarize_chat_room_change_compact,
+    summarize_preference_refresh_diff_compact,
+    summarize_preference_memory_scope_compact,
     summarize_subagent_gate_compact_row,
     summarize_retry_replan_planning_compact_handoff,
 )
 from aoe_tg_operator_summary import load_latest_command_resolution
 from aoe_tg_planning_compact_compat import legacy_planning_review_summary_alias
 from aoe_tg_project_state import project_alias_for_key
+from aoe_tg_room_handlers import normalize_room_token
 from aoe_tg_runtime_core import (
     action_audit_path as runtime_action_audit_path,
     latest_intent_snapshot_path as runtime_latest_intent_snapshot_path,
@@ -29,22 +35,35 @@ from aoe_tg_task_view import planning_compact_operator_summary, task_display_lab
 
 HISTORY_USAGE = (
     "usage: /history search <query> [--project O#|name] [--since 12h] "
-    "[--limit N] [--scope control|runtime|task|dashboard|recovery|all]"
+    "[--limit N] [--scope control|runtime|task|dashboard|room|recovery|all]"
 )
 
-_SCOPE_VALUES = {"control", "runtime", "task", "dashboard", "recovery", "all"}
+_SCOPE_VALUES = {"control", "runtime", "task", "dashboard", "room", "recovery", "all"}
 _SOURCE_PRIORITY = {
     "dashboard": 5,
     "task": 4,
+    "room": 4,
     "runtime": 3,
     "control": 2,
     "recovery": 1,
+}
+
+_ROOM_TEXT_PREFERRED_TOKENS = ("decision", "checkpoint", "followup")
+_ROOM_TEXT_STOPWORDS = {
+    "room",
+    "tail",
+    "line",
+    "detail",
+    "global",
+    "note",
+    "reply",
 }
 
 
 @dataclass
 class HistorySearchOptions:
     query: str
+    chat_filter: str = ""
     project_filter: str = ""
     since_seconds: int = 0
     since_label: str = ""
@@ -57,6 +76,10 @@ class HistoryRow:
     at: str
     scope: str
     source: str
+    chat_id: str = ""
+    chat_mode: str = ""
+    room: str = ""
+    actor: str = ""
     project_alias: str = ""
     project_key: str = ""
     request_id: str = ""
@@ -85,6 +108,27 @@ class HistoryRow:
 
 def _normalize_text(raw: Any) -> str:
     return " ".join(str(raw or "").strip().split())
+
+
+def _room_text_tokens(text: Any, *, room: str = "", actor: str = "", kind: str = "") -> List[str]:
+    body = str(text or "").strip().lower()
+    if not body:
+        return []
+    blocked = set(_ROOM_TEXT_STOPWORDS)
+    blocked.update(str(part).strip().lower() for part in str(room or "").split("/") if str(part).strip())
+    if actor:
+        blocked.add(str(actor).strip().lower())
+    if kind and str(kind).strip().lower() not in _ROOM_TEXT_PREFERRED_TOKENS:
+        blocked.add(str(kind).strip().lower())
+    tokens = re.findall(r"[a-z][a-z0-9_-]{2,}", body)
+    seen: set[str] = set()
+    out: List[str] = []
+    for token in tokens:
+        if token in blocked or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
 
 
 def _safe_json_loads(raw: str) -> Dict[str, Any]:
@@ -204,6 +248,8 @@ def _parse_since_seconds(raw: str) -> int:
 
 def _history_target(row: HistoryRow) -> str:
     parts: List[str] = []
+    if row.room:
+        parts.append(row.room)
     if row.project_alias:
         parts.append(row.project_alias)
     if row.task_short_id:
@@ -236,6 +282,7 @@ def parse_history_search_options(rest: Any) -> HistorySearchOptions:
         raise RuntimeError(HISTORY_USAGE)
 
     project_filter = ""
+    chat_filter = ""
     since_seconds = 0
     since_label = ""
     limit = 8
@@ -253,6 +300,13 @@ def parse_history_search_options(rest: Any) -> HistorySearchOptions:
             project_filter = str(tokens[i] or "").strip()
         elif low.startswith("--project="):
             project_filter = token.split("=", 1)[1].strip()
+        elif low == "--chat":
+            i += 1
+            if i >= len(tokens):
+                raise RuntimeError(HISTORY_USAGE)
+            chat_filter = str(tokens[i] or "").strip()
+        elif low.startswith("--chat="):
+            chat_filter = token.split("=", 1)[1].strip()
         elif low == "--since":
             i += 1
             if i >= len(tokens):
@@ -299,6 +353,7 @@ def parse_history_search_options(rest: Any) -> HistorySearchOptions:
         raise RuntimeError(HISTORY_USAGE)
     return HistorySearchOptions(
         query=query,
+        chat_filter=chat_filter,
         project_filter=project_filter,
         since_seconds=since_seconds,
         since_label=since_label,
@@ -351,8 +406,19 @@ def _project_matches(project_filter: str, row: HistoryRow) -> bool:
     }
 
 
+def _chat_matches(chat_filter: str, row: HistoryRow) -> bool:
+    token = str(chat_filter or "").strip()
+    if not token:
+        return True
+    return token == str(row.chat_id or "").strip()
+
+
 def _row_text(row: HistoryRow) -> str:
     fields = (
+        row.chat_id,
+        row.chat_mode,
+        row.room,
+        row.actor,
         row.request_id,
         row.task_short_id,
         row.task_title,
@@ -380,6 +446,34 @@ def _scope_for_event(row: Dict[str, Any]) -> str:
     if project:
         return "runtime"
     return "control"
+
+
+def _chat_mode_from_action(action: Any, *, summary: Any = "", detail: Any = "", chat_id: Any = "") -> str:
+    mode = str(action or "").strip().lower()
+    if mode.startswith("/direct "):
+        return "direct"
+    if mode.startswith("/dispatch "):
+        return "dispatch"
+    if mode.startswith("/room post "):
+        return "room_post"
+    if mode.startswith("/room use "):
+        return "room_use"
+    blob = " ".join(
+        str(token or "").strip().lower()
+        for token in (summary, detail)
+        if str(token or "").strip()
+    )
+    if "chat_mode:direct" in blob:
+        return "direct"
+    if "chat_mode:dispatch" in blob:
+        return "dispatch"
+    if "chat_mode:room_post" in blob:
+        return "room_post"
+    if "chat_mode:room_use" in blob:
+        return "room_use"
+    if str(chat_id or "").strip() and "chat send" in blob:
+        return "raw"
+    return ""
 
 
 def _extract_reason_code(detail: Any, error_code: Any = "") -> str:
@@ -437,6 +531,13 @@ def _gateway_event_rows(
                         at=str(parsed.get("timestamp", "")).strip(),
                         scope=_scope_for_event(parsed),
                         source="gateway_events",
+                        chat_id=str(parsed.get("chat_id", "")).strip(),
+                        chat_mode=_chat_mode_from_action(
+                            str(parsed.get("event", "")).strip(),
+                            summary=summary,
+                            detail=detail,
+                            chat_id=str(parsed.get("chat_id", "")).strip(),
+                        ),
                         project_alias=project_alias,
                         project_key=project_key,
                         request_id=request_id,
@@ -512,16 +613,82 @@ def _action_audit_rows(
                 subagent_gate_summary = _normalize_text(
                     summarize_subagent_gate_compact_row(parsed)
                 )
+                preference_artifact_kind = _normalize_text(
+                    str(parsed.get("preference_artifact_kind") or parsed.get("artifact_kind") or "")
+                )
+                preference_memory_scope_summary = _normalize_text(
+                    summarize_preference_memory_scope_compact(parsed)
+                )
+                preference_refresh_diff_summary = _normalize_text(
+                    summarize_preference_refresh_diff_compact(parsed)
+                )
+                chat_reply_summary = _normalize_text(
+                    summarize_chat_reply_compact(parsed)
+                )
+                chat_room_change_summary = _normalize_text(
+                    summarize_chat_room_change_compact(parsed)
+                )
+                outcome_kind = _normalize_text(str(parsed.get("outcome_kind", "")).strip().lower())
+                chat_mode = _normalize_text(str(parsed.get("chat_mode", "")).strip()) or _chat_mode_from_action(
+                    str(parsed.get("source_command", "")).strip(),
+                    summary=summary,
+                    detail=" ".join(
+                        part for part in (chat_reply_summary, chat_room_change_summary) if part not in {"", "-"}
+                    ),
+                    chat_id=str(parsed.get("chat_id", "")).strip(),
+                )
+                chat_event_alias = " | ".join(
+                    token
+                    for token in (
+                        "chat_event:reply" if chat_reply_summary not in {"", "-"} else "",
+                        "chat_event:room_change" if chat_room_change_summary not in {"", "-"} else "",
+                        "chat_event:session" if outcome_kind in {"chat_session_update", "chat_session_select_task"} else "",
+                    )
+                    if token
+                )
+                chat_mode_alias = f"chat_mode:{chat_mode}" if chat_mode else ""
+                preference_memory_scope_alias = ""
+                prefix = "preference_memory_scope="
+                if preference_memory_scope_summary.startswith(prefix):
+                    labels = [
+                        _normalize_text(item)
+                        for item in preference_memory_scope_summary[len(prefix):].split("||")
+                        if _normalize_text(item)
+                    ]
+                    preference_memory_scope_alias = " | ".join(
+                        f"memory_scope:{label}" for label in labels
+                    )
                 detail = _normalize_text(
                     " ".join(
                         str(item).strip()
                         for item in (
                             parsed.get("outcome_detail", ""),
+                            (
+                                f"artifact_kind:{preference_artifact_kind}"
+                                if preference_artifact_kind
+                                and f"artifact_kind:{preference_artifact_kind}" not in str(parsed.get("outcome_detail", ""))
+                                else ""
+                            ),
                             "" if debug_handoff_detail and debug_handoff_detail in str(parsed.get("outcome_detail", "")) else debug_handoff_detail,
                             ""
                             if approved_plan_handoff_detail
                             and approved_plan_handoff_detail in str(parsed.get("outcome_detail", ""))
                             else approved_plan_handoff_detail,
+                            ""
+                            if preference_memory_scope_summary in {"", "-"}
+                            else preference_memory_scope_summary,
+                            ""
+                            if preference_refresh_diff_summary in {"", "-"}
+                            else preference_refresh_diff_summary,
+                            ""
+                            if chat_reply_summary in {"", "-"}
+                            else chat_reply_summary,
+                            ""
+                            if chat_room_change_summary in {"", "-"}
+                            else chat_room_change_summary,
+                            chat_mode_alias,
+                            chat_event_alias,
+                            preference_memory_scope_alias,
                             parsed.get("remediation", ""),
                             parsed.get("source_command", ""),
                         )
@@ -533,6 +700,8 @@ def _action_audit_rows(
                         at=str(parsed.get("at", "")).strip(),
                         scope="dashboard",
                         source="action_audit",
+                        chat_id=str(parsed.get("chat_id", "")).strip(),
+                        chat_mode=chat_mode,
                         project_alias=project_alias,
                         project_key=str(meta.get("project_key", "")).strip(),
                         request_id=request_id,
@@ -735,6 +904,70 @@ def _manager_state_rows(
     return rows
 
 
+def _room_log_rows(team_dir: Path) -> List[HistoryRow]:
+    root = (team_dir / "logs" / "rooms").resolve()
+    if not root.exists() or not root.is_dir():
+        return []
+    rows: List[HistoryRow] = []
+    for path in sorted(root.rglob("*.jsonl"), reverse=True):
+        if not path.is_file():
+            continue
+        try:
+            rel = path.parent.relative_to(root)
+        except Exception:
+            continue
+        room = normalize_room_token("/".join(rel.parts))
+        project_alias = ""
+        if room and room != "global":
+            project_alias = str(room.split("/", 1)[0]).strip()
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            continue
+        for raw_line in lines:
+            parsed = _safe_json_loads(raw_line)
+            if not parsed:
+                continue
+            text = _normalize_text(parsed.get("text", ""))
+            actor = (_normalize_text(parsed.get("actor", "")) or "-").lower()
+            kind = _normalize_text(parsed.get("kind", "")) or "-"
+            room_text_tokens = _room_text_tokens(text, room=room, actor=actor, kind=kind)
+            room_alias = f"room:{room}" if room else ""
+            room_kind_alias = f"room_kind:{kind.lower()}" if kind else ""
+            room_actor_alias = f"room_actor:{actor}" if actor and actor != "-" else ""
+            room_text_aliases = " ".join(f"room_text:{token}" for token in room_text_tokens)
+            detail = _normalize_text(
+                " ".join(
+                    token
+                    for token in (
+                        room_alias,
+                        room_kind_alias,
+                        room_actor_alias,
+                        room_text_aliases,
+                        text,
+                    )
+                    if token
+                )
+            )
+            rows.append(
+                HistoryRow(
+                    at=str(parsed.get("ts", "")).strip() or path.stem,
+                    scope="room",
+                    source="room_log",
+                    room=room,
+                    actor=actor,
+                    project_alias=project_alias,
+                    action=f"room_{kind}",
+                    status="logged",
+                    summary=f"room tail | {room or '-'} | {actor}/{kind}",
+                    detail=detail,
+                    followup_hint="/room tail 20",
+                    raw_ref=f"{path}:{str(parsed.get('ts', '')).strip() or '-'}",
+                )
+            )
+    return rows
+
+
 def load_history_rows(*, team_dir: Path, manager_state: Dict[str, Any]) -> List[HistoryRow]:
     project_index, task_index = _manager_indexes(manager_state)
     rows: List[HistoryRow] = []
@@ -743,6 +976,7 @@ def load_history_rows(*, team_dir: Path, manager_state: Dict[str, Any]) -> List[
     rows.extend(_nightly_summary_rows(team_dir))
     rows.extend(_latest_intent_rows(team_dir))
     rows.extend(_manager_state_rows(manager_state=manager_state, project_index=project_index))
+    rows.extend(_room_log_rows(team_dir))
     return rows
 
 
@@ -760,19 +994,22 @@ def search_history_rows(
 
 def _filter_rows(rows: Iterable[HistoryRow], *, options: HistorySearchOptions) -> List[HistoryRow]:
     out: List[HistoryRow] = []
-    query = options.query.lower().strip()
+    query_tokens = [token for token in options.query.lower().strip().split() if token]
     cutoff: Optional[datetime] = None
     if options.since_seconds > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=options.since_seconds)
     for row in rows:
         if options.scope != "all" and row.scope != options.scope:
             continue
+        if not _chat_matches(options.chat_filter, row):
+            continue
         if not _project_matches(options.project_filter, row):
             continue
         row_dt = _parse_iso_dt(row.at)
         if cutoff is not None and row_dt is not None and row_dt < cutoff:
             continue
-        if query and query not in _row_text(row):
+        haystack = _row_text(row)
+        if query_tokens and not all(token in haystack for token in query_tokens):
             continue
         out.append(row)
     out.sort(

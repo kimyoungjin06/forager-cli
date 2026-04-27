@@ -9,7 +9,7 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 from aoe_tg_runtime_core import (
     action_audit_path as runtime_action_audit_path,
@@ -105,6 +105,43 @@ def rewrite_jsonl_rows(path: Path, rows: List[Dict[str, Any]]) -> bool:
                 tmp_path = Path(handle.name)
                 for row in rows:
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, path)
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return False
+    return True
+
+
+def update_jsonl_rows(path: Path, update_rows: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]]) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".lock")
+    tmp_path = None
+    try:
+        with lock_path.open("a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            rows = load_jsonl_rows(path)
+            updated_rows = update_rows(rows)
+            if not isinstance(updated_rows, list):
+                updated_rows = rows
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(path.parent),
+                prefix=path.name + ".tmp.",
+                suffix=".jsonl",
+                delete=False,
+            ) as handle:
+                tmp_path = Path(handle.name)
+                for row in updated_rows:
+                    if isinstance(row, dict):
+                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_path, path)
@@ -247,6 +284,17 @@ class FileSystemArtifactBackend:
 
     def rewrite_action_audit_rows(self, rows: List[Dict[str, Any]]) -> bool:
         return rewrite_jsonl_rows(self.action_audit_path(), rows)
+
+    def append_pruned_action_audit_row(
+        self,
+        row: Dict[str, Any],
+        prune_rows: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]],
+    ) -> bool:
+        def _append_and_prune(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            rows.append(row)
+            return prune_rows(rows)
+
+        return update_jsonl_rows(self.action_audit_path(), _append_and_prune)
 
     def recovery_summary_dir(self) -> Path:
         return runtime_recovery_summary_dir(self.team_dir)

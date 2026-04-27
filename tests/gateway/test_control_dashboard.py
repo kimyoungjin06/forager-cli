@@ -27,6 +27,7 @@ from aoe_tg_request_contract import build_background_run_ticket  # noqa: E402
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
 import aoe_tg_subagent_contract as subagent_contract  # noqa: E402
 import control_dashboard as dashboard_app  # noqa: E402
+import control_dashboard_audit as dashboard_action_audit  # noqa: E402
 import control_dashboard_action_exec_chat as chat_exec  # noqa: E402
 import control_dashboard_action_exec_retry as retry_exec  # noqa: E402
 import control_dashboard_action_exec_runtime as runtime_exec  # noqa: E402
@@ -34,6 +35,7 @@ import control_dashboard_server_guard as server_guard  # noqa: E402
 import control_dashboard_state as dashboard_state  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
 import aoe_tg_document_registry as document_registry  # noqa: E402
+import aoe_tg_operator_preferences as operator_preferences  # noqa: E402
 import aoe_tg_workspace_brief as workspace_brief  # noqa: E402
 from _dashboard_planning_compat import (  # noqa: E402
     LEGACY_PLANNING_REVIEW_SUMMARY,
@@ -94,6 +96,32 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                     "execution_brief_executable_slice": ["reports/summary.md"],
                     "execution_brief_blocked_slice": ["acceptance_gap"],
                     "execution_brief_operator_decision": "confirm acceptance scope before off-desk execution",
+                    "job_contract_status": "ready",
+                    "job_contract_planning_mode": "standard",
+                    "job_contract_summary": "status=ready | plan=standard | scope=1 | checks=1 | artifacts=1",
+                    "job_contract_goal": "Summarize findings and highlight weak spots with evidence.",
+                    "job_contract_scope": ["reports/summary.md"],
+                    "job_contract_non_goals": ["publish final report"],
+                    "job_contract_risks": ["evidence gaps may require manual follow-up"],
+                    "job_contract_acceptance_checks": ["findings are supported by concrete evidence"],
+                    "job_contract_artifacts_to_touch": ["reports/summary.md"],
+                    "job_contract_rollback_hint": "limit mutations to the declared summary artifact",
+                    "debug_packet_state": "active",
+                    "debug_packet_summary": "state=active | symptom=review_retry_requested | next=/task T-001",
+                    "debug_packet_symptom": "review_retry_requested",
+                    "debug_packet_root_cause": "review lane requested a targeted rerun",
+                    "debug_packet_evidence": ["exec_critic=retry", "lane=L1"],
+                    "debug_packet_failed_attempt": "background run BGT-001 is awaiting review",
+                    "debug_packet_next_step": "/task T-001",
+                    "phase_checkpoint_status": "active",
+                    "phase_checkpoint_current_phase": "verify",
+                    "phase_checkpoint_summary": "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready",
+                    "phase_checkpoint_rows": [
+                        "plan=done|note=approved plan",
+                        "implement=done|note=execution complete",
+                        "verify=active|note=review retry ready",
+                        "handoff=ready|note=handoff ready",
+                    ],
                     "background_run_ticket_id": "BGT-001",
                     "background_run_status": "running",
                     "background_run_runner_target": "local_background",
@@ -107,6 +135,13 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                     "created_at": "2026-03-16T09:55:00+09:00",
                     "plan": {
                         "summary": "analysis plan",
+                        "subtasks": [
+                            {
+                                "id": "S1",
+                                "owner_role": "Codex-Analyst",
+                                "title": "Refresh findings summary",
+                            }
+                        ],
                         "evidence_required": [
                             "Findings are summarized with concrete evidence.",
                             "Open questions or weak spots are called out explicitly.",
@@ -138,6 +173,14 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
                             },
                         },
                     },
+                    "plan_critic": {
+                        "approved": True,
+                        "issues": [],
+                        "recommendations": ["ready for targeted retry"],
+                    },
+                    "plan_review_count": 3,
+                    "plan_convergence_status": "ready",
+                    "plan_gate_passed": True,
                     "lane_states": {
                         "execution": [
                             {
@@ -392,6 +435,20 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
         write_timestamped_copy=False,
     )
     return team_dir, manager_state_file, project_root
+
+
+def _mark_task_planning_gate_blocked(task: dict) -> None:
+    plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    plan["subtasks"] = []
+    task["plan"] = plan
+    task["plan_critic"] = {
+        "approved": False,
+        "issues": ["contract_gap"],
+        "recommendations": [],
+    }
+    task["plan_review_count"] = 1
+    task["plan_convergence_status"] = "blocked"
+    task["plan_gate_passed"] = False
 
 
 def _persist_general_subagent_artifact(project_root: Path, *, request_id: str = "REQ-1", task_ref: str = "T-001") -> None:
@@ -726,6 +783,36 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
         + "\n",
         encoding="utf-8",
     )
+    other_room_dir = team_dir / "logs" / "rooms" / "O2" / "review"
+    other_room_dir.mkdir(parents=True, exist_ok=True)
+    (other_room_dir / "2026-04-14.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-04-14T09:00:00+09:00",
+                "actor": "operator",
+                "kind": "note",
+                "text": "review rail tail line",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cross_project_room_dir = team_dir / "logs" / "rooms" / "O3" / "analysis"
+    cross_project_room_dir.mkdir(parents=True, exist_ok=True)
+    (cross_project_room_dir / "2026-04-13.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-04-13T08:00:00+09:00",
+                "actor": "operator",
+                "kind": "note",
+                "text": "cross project rail tail line",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (team_dir / "dashboard" / "action-history.jsonl").write_text(
         "\n".join(
             [
@@ -806,8 +893,11 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert status == 200
     assert headers["Content-Type"].startswith("text/html")
     assert "Chat Console" in text
-    assert "Server Guard + Chat Rails" in text
-    assert "Ops Manager Rail" in text
+    assert "Chat Composer" in text
+    assert "Advanced Ops Manager" in text
+    assert 'class="panel info-fold chat-ops-details" open' in text
+    assert "auto-opened for blocked" in text
+    assert "Ops Manager Rail" not in text
     assert "server_guard_latest_action" in text
     assert "server_guard_latest_result" in text
     assert "123456" in text
@@ -820,12 +910,67 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "approved_plan" in text
     assert "/control/actions/chat/send" in text
     assert "/control/actions/chat/session-update" in text
+    assert '<option value="direct" selected>One-shot Direct</option>' in text
     assert "One-shot Direct" in text
+    assert "quick room rails" in text
+    assert "quick-room-options" in text
+    assert "O2 root rail" in text
+    assert "active room rail" in text
+    assert "all room rails" not in text
+    assert "chat-room-focus-card" in text
+    assert "other room rails" in text
+    assert "O2 / review rail" in text
+    assert "O3 / analysis rail" in text
+    assert "same project | target O2 / review rail" in text
+    assert "project O2 -&gt; O3 | same lane" in text or "project O2 -> O3 | same lane" in text
+    assert "injectChatSendReplyIntoFeed" in text
+    assert "injectChatRoomSwitchBanner" in text
+    assert "syncChatRoomOptionUI" in text
+    assert "data-chat-selected-room-badge" in text
+    assert "data-chat-selected-room-label" in text
+    assert "data-chat-room-option-list" in text
+    assert "data-chat-reply-preview" in text
+    assert "data-chat-room-change" in text
+    assert "data-chat-id" in text
+    assert "data-chat-mode" in text
+    assert "data-source-command" in text
+    assert "chatReplyPreview" in text
+    assert "chatRoomChange" in text
+    assert "deriveChatMode" in text
+    assert "buildChatEventFacetLinks" in text
+    assert "appendChatEventHistoryLinks" in text
+    assert "appendInlineLinks" in text
+    assert "appendChatModeBadge" in text
+    assert "buildChatModeFacetLinks" in text
+    assert "appendChatModeHistoryLinks" in text
+    assert "appendChatActionHistoryLinks" in text
+    assert "chat-room-option-hidden" in text
+    assert "scrollChatFeedToReply" in text
+    assert "chat-message-transient" in text
+    assert "chat-mode-badge" in text
+    assert "chat-mode-direct" in text
+    assert "/control/audit?chat=123456&amp;q=chat_event%3Areply&amp;limit=20" in text
+    assert "/control/history?chat=123456&amp;q=chat_event%3Areply&amp;scope=dashboard&amp;limit=20" in text
+    assert "/control/audit?chat=123456&amp;q=chat_event%3Asession&amp;limit=20" in text
+    assert "/control/history?chat=123456&amp;q=chat_event%3Asession&amp;scope=dashboard&amp;limit=20" in text
+    assert "/control/audit?chat=123456&amp;q=chat_mode%3Adirect&amp;limit=20" in text
+    assert "/control/history?chat=123456&amp;q=chat_mode%3Adirect&amp;scope=dashboard&amp;limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis&amp;scope=room&amp;limit=20" in text
+    assert "buildChatModeFacetLinks(" in text
+    assert "mode audit" in text
+    assert "mode history" in text
+    assert "event audit" in text
+    assert "event history" in text
+    assert "room history" in text
     assert "Send Chat Message" in text
     assert "Update Session Controls" in text
     assert "Update Selected Task" in text
     assert "/control/actions/chat/session-select-task" in text
-    assert "Chat Timeline" in text
+    assert "Conversation Feed" in text
+    assert "Recent Room Rails" not in text
+    assert "chat-message-bubble" in text
+    assert "chat-message-command" in text
+    assert "chat-feed-event" in text
     assert "direct reply ok" in text
     assert "session updated" in text
     assert "selected task updated" in text
@@ -845,6 +990,141 @@ def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp
     assert "planning_compact" in text
     assert "active planner=codex critic=claude" in text
     assert "preset_planning_compact" in text
+
+
+def test_control_dashboard_overview_seeds_action_result_history_with_preference_memory_scope(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | project",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/actions/task/worker-apply-preview",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always project",
+        link_label="task detail",
+        link_href="/control/tasks/by-request/REQ-1",
+        at="2026-04-09T11:10:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert 'data-preference-artifact-kind="chart"' in text
+    assert "data-preference-memory-scope=\"preference_memory_scope=project:O2\"" in text
+    assert "preference_memory_scope=project:O2" in text
+    assert "memory audit" in text
+    assert "memory history" in text
+    assert "Preference Decision | project" in text
+
+
+def test_control_dashboard_overview_seeds_action_result_history_with_preference_candidate_scopes(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Candidate | project",
+        status="preview",
+        outcome_kind="worker_apply_preview",
+        outcome_status="preview",
+        outcome_reason_code="ready",
+        outcome_detail="show_source_note=true",
+        next_step="/task T-001",
+        remediation="-",
+        source_command="/control/actions/task/worker-apply-preview",
+        link_label="task detail",
+        link_href="/control/tasks/by-request/REQ-1",
+        at="2026-04-09T11:12:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "preference_candidates": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "show_source_note",
+                    "expected_scope": "project",
+                    "expected_scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert 'data-preference-artifact-kind="chart"' in text
+    assert 'data-preference-candidate-scopes="preference_candidate_scopes=show_source_note:project:O2"' in text
+    assert "preference_candidate_scopes=show_source_note:project:O2" in text
+    assert "scope audit" in text
+    assert "scope history" in text
+    assert "Preference Candidate | project" in text
+
+
+def test_control_dashboard_overview_embeds_preference_candidate_renderer(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "preference_candidates" in text
+    assert "Expected Scope" in text
+    assert "Suggested Value" in text
+    assert "open audit" in text
+    assert "open history" in text
+    assert "Actions" in text
+    assert "actionRows" in text
+    assert "preference_refresh_diff" in text
+    assert "buildPreferenceRefreshDiff" in text
+    assert "preferenceRefreshDiff" in text
+    assert "data-preference-refresh-diff" in text
+    assert "preference-refresh-diff-group" in text
+    assert "preference-refresh-diff-badge" in text
 
 
 def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() -> None:
@@ -867,6 +1147,52 @@ def test_action_audit_headline_appends_approved_plan_for_generic_blocked_rows() 
     assert "planning=draft via codex | review via claude | dispatch waits for critic-approved plan" in summary
     assert "approved_plan=blocked | subtasks=1 | reviews=2 | issue=missing acceptance" in summary
     assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in summary
+
+
+def test_action_audit_headline_appends_operator_preference_summaries() -> None:
+    row = {
+        "headline": "Chart Render | executed",
+        "status": "executed",
+        "outcome_kind": "artifact_render",
+        "outcome_status": "executed",
+        "outcome_reason_code": "chart_ready",
+        "applied_preferences": [
+            {
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "value": "bottom",
+                "enabled": True,
+                "prompt_mode": "auto",
+                "scope": "artifact_kind",
+            }
+        ],
+        "preference_candidates": [
+            {
+                "artifact_kind": "chart",
+                "key": "show_source_note",
+                "suggested_value": True,
+                "issue": "source note keeps getting re-added during review",
+                "occurrence_count": 2,
+            }
+        ],
+        "preference_decisions": [
+            {
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "value": "bottom",
+                "choice": "apply_always",
+                "scope": "artifact_kind",
+            }
+        ],
+    }
+
+    summary = action_audit.summarize_action_audit_headline(row)
+
+    assert "reason=chart_ready" in summary
+    assert "applied_preferences=legend_position=bottom" in summary
+    assert "preference_candidates=show_source_note=true" in summary
+    assert "preference_decisions=legend_position=bottom" in summary
+    assert "preference_memory_scope=artifact_kind:chart" in summary
 
 
 # Legacy planning compact compatibility
@@ -1029,10 +1355,104 @@ def test_control_dashboard_post_chat_send_route_executes_gateway_simulation(
     assert payload["mode"] == "direct"
     assert payload["chat_id"] == "123456"
     assert payload["source_command"] == "/direct how is the runtime?"
+    assert payload["last_send_mode"] == "direct"
     assert "direct reply ok" in payload["reply_text"]
     assert "--simulate-chat-id" in argv
     assert "123456" in argv
     assert "--chat-aliases-file" in argv
+    updated_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    audit_rows = [
+        json.loads(line)
+        for line in (team_dir / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert updated_state["chat_sessions"]["123456"]["last_cmd_args"]["chat_send_mode"] == "direct"
+    assert audit_rows[-1]["chat_reply_summary"].startswith("direct reply ok")
+
+    audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?chat=123456", config)
+    audit_text = audit_body.decode("utf-8")
+    assert audit_status == 200
+    assert "chat_reply=direct reply ok" in audit_text
+
+
+def test_control_dashboard_post_chat_send_room_use_preserves_room_state(
+    tmp_path: Path, monkeypatch
+) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    state["chat_sessions"] = {"123456": {"room": "O2/analysis"}}
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (team_dir / "telegram_chat_aliases.json").write_text(
+        json.dumps({"1": "123456"}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    def _fake_run_gateway_chat_send(argv: list[str], *, timeout_sec: int = 180) -> subprocess.CompletedProcess[str]:
+        updated = json.loads(manager_state_file.read_text(encoding="utf-8"))
+        updated.setdefault("chat_sessions", {}).setdefault("123456", {})["room"] = "O2/review"
+        manager_state_file.write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout="room switched to O2/review\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(chat_exec, "_run_gateway_chat_send", _fake_run_gateway_chat_send)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/chat/send",
+        body=json.dumps(
+            {
+                "chat_id": "123456",
+                "mode": "room_use",
+                "text": "O2/review",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+    updated_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    audit_rows = [
+        json.loads(line)
+        for line in (team_dir / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["mode"] == "room_use"
+    assert payload["previous_room"] == "O2/analysis"
+    assert payload["selected_room"] == "O2/review"
+    assert payload["room_target"] == "O2/review"
+    assert payload["room_changed"] is True
+    assert payload["room_change_summary"] == "switched from O2/analysis to O2/review"
+    assert updated_state["chat_sessions"]["123456"]["room"] == "O2/review"
+    assert updated_state["chat_sessions"]["123456"]["last_cmd_args"]["chat_send_mode"] == "room_use"
+    assert audit_rows[-1]["chat_room_change_summary"] == "switched from O2/analysis to O2/review"
+
+    audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?chat=123456", config)
+    audit_text = audit_body.decode("utf-8")
+    assert audit_status == 200
+    assert "chat_room_change=switched from O2/analysis to O2/review" in audit_text
+
+    history_status, _history_headers, history_body = dashboard_app.build_dashboard_response(
+        "/control/history?q=O2%2Freview&scope=dashboard",
+        config,
+    )
+    history_text = history_body.decode("utf-8")
+    assert history_status == 200
+    assert "chat_room_change=switched from O2/analysis to O2/review" in history_text
 
 
 def test_control_dashboard_post_chat_session_update_route_persists_defaults(tmp_path: Path) -> None:
@@ -1083,6 +1503,26 @@ def test_control_dashboard_post_chat_session_update_route_persists_defaults(tmp_
     assert session["room"] == "O2/writing"
     assert session["lang"] == "en"
     assert session["report_level"] == "long"
+
+    audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response(
+        "/control/audit?chat=123456&q=chat_event%3Asession&limit=20",
+        config,
+    )
+    audit_text = audit_body.decode("utf-8")
+    assert audit_status == 200
+    assert "chat_event_filter" in audit_text
+    assert "session=1" in audit_text
+    assert "O2/writing" in audit_text
+
+    history_status, _history_headers, history_body = dashboard_app.build_dashboard_response(
+        "/control/history?chat=123456&q=chat_event%3Asession&scope=dashboard&limit=20",
+        config,
+    )
+    history_text = history_body.decode("utf-8")
+    assert history_status == 200
+    assert "chat_event_filter" in history_text
+    assert "session=1" in history_text
+    assert "O2/writing" in history_text
 
 
 def test_control_dashboard_post_chat_session_select_task_route_persists_selected_task(tmp_path: Path) -> None:
@@ -1180,6 +1620,25 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
             "subagent_contract_summary": "general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json",
             "subagent_evidence_summary": "general_research | confidence=high | sources=2 | findings=2 | blocking=1",
             "subagent_artifact_path": "harness_authoring/subagents/req-1-general-research.json",
+            "applied_preferences": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "enabled": True,
+                    "prompt_mode": "auto",
+                    "scope": "artifact_kind",
+                }
+            ],
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "artifact_kind",
+                }
+            ],
         },
     )
     config = dashboard_app.DashboardAppConfig(
@@ -1207,10 +1666,68 @@ def test_control_dashboard_audit_route_renders_recent_file_backed_actions(tmp_pa
     assert "retry_command=/retry T-001" in text
     assert "subagent_contract: general_research | profile=followup_preview | backend=filesystem | artifact=harness_authoring/subagents/req-1-general-research.json" in text
     assert "subagent_evidence: general_research | confidence=high | sources=2 | findings=2 | blocking=1" in text
+    assert "applied_preferences=legend_position=bottom" in text
+    assert "preference_decisions=legend_position=bottom" in text
     assert "subagent_artifact: harness_authoring/subagents/req-1-general-research.json" in text
     assert "/sync preview O2 24h" in text
     assert "/control/runtimes/O2" in text
     assert "auto-route" in text
+
+
+def test_control_dashboard_action_audit_wrapper_records_json_payload(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    audit_path = team_dir / "dashboard" / "action-history.jsonl"
+    before_rows = [
+        json.loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    body = json.dumps(
+        {
+            "ok": True,
+            "status": "completed",
+            "path": "/control/actions/chat/send",
+            "source_command": "/direct wrapper smoke test",
+            "chat_id": "123456",
+            "reply_text": "wrapper reply ok",
+            "room_change_summary": "switched from O2/analysis to O2/review",
+            "outcome": {
+                "kind": "chat_send",
+                "status": "completed",
+                "reason_code": "-",
+                "detail": "wrapper reply ok",
+            },
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    status, headers, wrapped = dashboard_action_audit._with_action_audit(
+        (200, {"Content-Type": "application/json; charset=utf-8"}, body),
+        config=config,
+    )
+
+    after_rows = [
+        json.loads(line)
+        for line in audit_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert wrapped == body
+    assert after_rows
+    assert before_rows[-1]["source_command"] != after_rows[-1]["source_command"]
+    assert after_rows[-1]["source_command"] == "/direct wrapper smoke test"
+    assert after_rows[-1]["chat_reply_summary"] == "wrapper reply ok"
+    assert after_rows[-1]["chat_room_change_summary"] == "switched from O2/analysis to O2/review"
 
 
 def test_control_dashboard_history_route_surfaces_debug_packet_handoff_details(tmp_path: Path) -> None:
@@ -1453,6 +1970,1557 @@ def test_control_dashboard_audit_route_preserves_focus_and_limit_query(tmp_path:
     assert "<span>limit</span><strong>1</strong>" in text
     assert "/control/audit?limit=1" in text
     assert "/control/audit?focus=judge&amp;limit=1" in text
+
+
+def test_control_dashboard_audit_route_filters_preferences_by_query(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Rule | chart",
+        status="executed",
+        outcome_kind="operator_preference_rule",
+        outcome_status="executed",
+        outcome_reason_code="rule_updated",
+        outcome_detail="legend_position=bottom | artifact_kind:chart",
+        next_step="/control/preferences?artifact=chart",
+        remediation="-",
+        source_command="/prefs rule chart:legend_position auto",
+        link_label="preferences",
+        link_href="/control/preferences?artifact=chart",
+        at="2026-04-09T11:06:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "applied_preferences_summary": "applied_preferences=legend_position=bottom | artifact_kind:chart",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Rule | document",
+        status="executed",
+        outcome_kind="operator_preference_rule",
+        outcome_status="executed",
+        outcome_reason_code="rule_updated",
+        outcome_detail="preserve_heading_structure=true | artifact_kind:document",
+        next_step="/control/preferences?artifact=document",
+        remediation="-",
+        source_command="/prefs rule document:preserve_heading_structure confirm",
+        link_label="preferences",
+        link_href="/control/preferences?artifact=document",
+        at="2026-04-09T11:07:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "document",
+            "applied_preferences_summary": "applied_preferences=preserve_heading_structure=true | artifact_kind:document",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?focus=preferences&q=artifact_kind:chart&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "query_filter" in text
+    assert "artifact_kind:chart" in text
+    assert "Preference Rule | chart" in text
+    assert "<span>total_rows</span><strong>1</strong>" in text
+    assert "q=artifact_kind%3Achart" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="artifact_kind:chart",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert audit.query_filter == "artifact_kind:chart"
+    assert len(audit.rows) == 1
+    assert audit.rows[0].headline == "Preference Rule | chart"
+    assert audit.rows[0].preference_artifact_kind == "chart"
+
+
+def test_control_dashboard_audit_route_surfaces_chat_event_facets_with_chat_context(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | reply",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="direct reply ok",
+        next_step="-",
+        remediation="-",
+        source_command="/direct how is the runtime?",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:08:00+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "direct reply ok",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | dispatch",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="dispatch reply ok",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="/dispatch summarize the pending work",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:08:30+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "dispatch reply ok",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | room post",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="room post reply",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="/room post recap status",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:08:45+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "room post reply",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | room use",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="room changed",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="/room use O2/review",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:09:00+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_room_change_summary": "switched from O2/analysis to O2/review",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | raw",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="plain text reply",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="how is the runtime?",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:10:00+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "plain text reply",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?chat=123456&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "chat_event_filter" in text
+    assert "chat_mode_filter" in text
+    assert "reply=4" in text
+    assert "room_change=1" in text
+    assert "direct=1" in text
+    assert "dispatch=1" in text
+    assert "room_post=1" in text
+    assert "room_use=1" in text
+    assert "raw=1" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_event%3Areply&limit=20" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_event%3Aroom_change&limit=20" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_mode%3Adirect&limit=20" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_mode%3Adispatch&limit=20" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_mode%3Aroom_post&limit=20" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_mode%3Aroom_use&limit=20" in text
+    assert "/control/audit?focus=all&chat=123456&q=chat_mode%3Araw&limit=20" in text
+    assert "chat-mode-direct" in text
+    assert "chat-mode-dispatch" in text
+    assert "chat-mode-room_post" in text
+    assert "chat-mode-room_use" in text
+    assert "chat-mode-raw" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        chat_id="123456",
+        limit=20,
+    )
+    assert audit.chat_filter == "123456"
+    assert audit.chat_event_filter == ""
+    assert audit.chat_event_query_base == ""
+    assert audit.chat_mode_filter == ""
+    assert audit.chat_mode_query_base == ""
+    assert audit.chat_event_counts == {"reply": 4, "room_change": 1}
+    assert audit.chat_mode_counts == {"direct": 1, "dispatch": 1, "room_post": 1, "room_use": 1, "raw": 1}
+    assert audit.total_rows == 5
+
+    _snapshot, selected_audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        chat_id="123456",
+        query="chat_event:room_change chat_mode:room_use",
+        limit=20,
+    )
+    assert selected_audit.chat_event_filter == "room_change"
+    assert selected_audit.chat_event_query_base == "chat_mode:room_use"
+    assert selected_audit.chat_mode_filter == "room_use"
+    assert selected_audit.chat_mode_query_base == "chat_event:room_change"
+    assert selected_audit.chat_event_counts == {"room_change": 1}
+    assert selected_audit.chat_mode_counts == {"room_use": 1}
+    assert selected_audit.total_rows == 1
+    assert len(selected_audit.rows) == 1
+    assert selected_audit.rows[0].chat_room_change_summary == "chat_room_change=switched from O2/analysis to O2/review"
+
+
+def test_control_dashboard_audit_route_filters_preferences_by_memory_scope_query(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | project",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/actions/task/worker-apply-preview",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always project",
+        link_label="task detail",
+        link_href="/control/tasks/by-request/REQ-1",
+        at="2026-04-09T11:08:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | artifact",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/actions/task/worker-apply-preview",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always artifact_kind",
+        link_label="task detail",
+        link_href="/control/tasks/by-request/REQ-2",
+        at="2026-04-09T11:09:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "artifact_kind",
+                    "scope_ref": "chart",
+                }
+            ],
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?focus=preferences&q=memory_scope:project&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "memory_scope:project" in text
+    assert "Preference Decision | project" in text
+    assert "preference_memory_scope=project:O2" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="memory_scope:project",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert len(audit.rows) == 1
+    assert audit.rows[0].preference_memory_scope_summary == "preference_memory_scope=project:O2"
+
+    _snapshot, combined_audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="memory_scope:project artifact_kind:chart",
+        limit=20,
+    )
+    assert combined_audit.total_rows == 1
+    assert len(combined_audit.rows) == 1
+
+
+def test_control_dashboard_audit_route_filters_preferences_by_project(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Rule | O2 chart",
+        status="executed",
+        outcome_kind="operator_preference_rule",
+        outcome_status="executed",
+        outcome_reason_code="rule_updated",
+        outcome_detail="legend_position=bottom | artifact_kind:chart",
+        next_step="/control/preferences?project=O2&artifact=chart",
+        remediation="-",
+        source_command="/prefs rule chart:legend_position auto",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=chart",
+        at="2026-04-09T11:06:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "chart",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Rule | O3 document",
+        status="executed",
+        outcome_kind="operator_preference_rule",
+        outcome_status="executed",
+        outcome_reason_code="rule_updated",
+        outcome_detail="preserve_heading_structure=true | artifact_kind:document",
+        next_step="/control/preferences?project=O3&artifact=document",
+        remediation="-",
+        source_command="/prefs rule document:preserve_heading_structure confirm",
+        link_label="preferences",
+        link_href="/control/preferences?project=O3&artifact=document",
+        at="2026-04-09T11:07:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O3",
+            "preference_artifact_kind": "document",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?focus=preferences&project=O3&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "project_filter" in text
+    assert "O3" in text
+    assert "Preference Rule | O3 document" in text
+    assert "<span>total_rows</span><strong>1</strong>" in text
+    assert 'name="project" value="O3"' in text
+    assert "/control/audit?focus=all&project=O3&limit=20" in text
+    assert "O2=1" in text
+    assert "O3=1" in text
+    assert "/control/audit?focus=preferences&project=O2&limit=20" in text
+    assert "/control/audit?focus=preferences&limit=20" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O3",
+        limit=20,
+    )
+    assert audit.project_filter == "O3"
+    assert audit.total_rows == 1
+    assert len(audit.rows) == 1
+    assert audit.rows[0].project_alias == "O3"
+    assert audit.project_counts == {"O2": 1, "O3": 1}
+    assert audit.artifact_counts == {"document": 1}
+
+
+def test_control_dashboard_audit_route_surfaces_artifact_facets_with_project_and_query_context(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 chart",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/preferences?project=O2&artifact=chart",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=chart",
+        at="2026-04-09T11:08:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 document",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="preserve_heading_structure=true",
+        next_step="/control/preferences?project=O2&artifact=document",
+        remediation="-",
+        source_command="/task T-001 | pref preserve_heading_structure apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=document",
+        at="2026-04-09T11:09:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "document",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "document",
+                    "key": "preserve_heading_structure",
+                    "value": True,
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O3 chart",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/preferences?project=O3&artifact=chart",
+        remediation="-",
+        source_command="/task T-002 | pref legend_position apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O3&artifact=chart",
+        at="2026-04-09T11:10:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O3",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O3",
+                }
+            ],
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?focus=preferences&project=O2&q=memory_scope:project&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "artifact_filter" in text
+    assert "chart=1" in text
+    assert "document=1" in text
+    assert "/control/audit?focus=preferences&project=O2&q=memory_scope%3Aproject%20artifact_kind%3Achart&limit=20" in text
+    assert "/control/audit?focus=preferences&project=O2&q=memory_scope%3Aproject%20artifact_kind%3Adocument&limit=20" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O2",
+        query="memory_scope:project",
+        limit=20,
+    )
+    assert audit.project_filter == "O2"
+    assert audit.artifact_filter == ""
+    assert audit.artifact_query_base == "memory_scope:project"
+    assert audit.artifact_counts == {"chart": 1, "document": 1}
+    assert audit.total_rows == 2
+
+    _snapshot, selected_audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O2",
+        query="memory_scope:project artifact_kind:chart",
+        limit=20,
+    )
+    assert selected_audit.artifact_filter == "chart"
+    assert selected_audit.artifact_query_base == "memory_scope:project"
+    assert selected_audit.artifact_counts == {"chart": 1, "document": 1}
+    assert selected_audit.total_rows == 1
+    assert len(selected_audit.rows) == 1
+    assert selected_audit.rows[0].preference_artifact_kind == "chart"
+
+
+def test_control_dashboard_audit_route_surfaces_memory_scope_facets_with_project_and_artifact_context(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 chart project",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/preferences?project=O2&artifact=chart",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=chart",
+        at="2026-04-09T11:08:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 chart artifact",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="show_source_note=true",
+        next_step="/control/preferences?project=O2&artifact=chart",
+        remediation="-",
+        source_command="/task T-001 | pref show_source_note apply_always artifact_kind",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=chart",
+        at="2026-04-09T11:09:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "show_source_note",
+                    "value": True,
+                    "choice": "apply_always",
+                    "scope": "artifact_kind",
+                    "scope_ref": "chart",
+                }
+            ],
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 document project",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="preserve_heading_structure=true",
+        next_step="/control/preferences?project=O2&artifact=document",
+        remediation="-",
+        source_command="/task T-001 | pref preserve_heading_structure apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=document",
+        at="2026-04-09T11:10:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "document",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "document",
+                    "key": "preserve_heading_structure",
+                    "value": True,
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?focus=preferences&project=O2&q=artifact_kind:chart&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "memory_scope_filter" in text
+    assert "project=1" in text
+    assert "artifact_kind=1" in text
+    assert "/control/audit?focus=preferences&project=O2&q=artifact_kind%3Achart%20memory_scope%3Aproject&limit=20" in text
+    assert "/control/audit?focus=preferences&project=O2&q=artifact_kind%3Achart%20memory_scope%3Aartifact_kind&limit=20" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O2",
+        query="artifact_kind:chart",
+        limit=20,
+    )
+    assert audit.project_filter == "O2"
+    assert audit.artifact_filter == "chart"
+    assert audit.memory_scope_filter == ""
+    assert audit.memory_scope_query_base == "artifact_kind:chart"
+    assert audit.memory_scope_counts == {"project": 1, "artifact_kind": 1}
+    assert audit.total_rows == 2
+
+    _snapshot, selected_audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O2",
+        query="artifact_kind:chart memory_scope:project",
+        limit=20,
+    )
+    assert selected_audit.memory_scope_filter == "project"
+    assert selected_audit.memory_scope_query_base == "artifact_kind:chart"
+    assert selected_audit.memory_scope_counts == {"project": 1, "artifact_kind": 1}
+    assert selected_audit.total_rows == 1
+    assert len(selected_audit.rows) == 1
+    assert selected_audit.rows[0].preference_memory_scope_summary == "preference_memory_scope=project:O2"
+
+
+def test_control_dashboard_audit_route_surfaces_refresh_diff_facets_with_project_and_artifact_context(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 chart applied",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/preferences?project=O2&artifact=chart",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=chart",
+        at="2026-04-09T11:08:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "chart",
+            "preference_refresh_diff_summary": "preference_refresh_diff=applied_added=legend_position=bottom | on | manual_only | session:-",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Candidate | O2 chart promoted",
+        status="executed",
+        outcome_kind="operator_preference_candidate",
+        outcome_status="executed",
+        outcome_reason_code="candidate_promoted",
+        outcome_detail="show_source_note=true",
+        next_step="/control/preferences?project=O2&artifact=chart&scope=project",
+        remediation="-",
+        source_command="/prefs candidate chart:show_source_note auto",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=chart&scope=project",
+        at="2026-04-09T11:09:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "chart",
+            "preference_refresh_diff_summary": (
+                "preference_refresh_diff=applied_added=show_source_note=true | on | auto | project:O2 ; "
+                "candidates_removed=show_source_note=true | hits=2 | issue=source note was missing"
+            ),
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | O2 document applied",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="preserve_heading_structure=true",
+        next_step="/control/preferences?project=O2&artifact=document",
+        remediation="-",
+        source_command="/task T-001 | pref preserve_heading_structure apply_always project",
+        link_label="preferences",
+        link_href="/control/preferences?project=O2&artifact=document",
+        at="2026-04-09T11:10:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "project_alias": "O2",
+            "preference_artifact_kind": "document",
+            "preference_refresh_diff_summary": "preference_refresh_diff=applied_added=preserve_heading_structure=true | on | auto | project:O2",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/audit?focus=preferences&project=O2&q=artifact_kind:chart&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "refresh_diff_filter" in text
+    assert "applied_added=2" in text
+    assert "candidates_removed=1" in text
+    assert "/control/audit?focus=preferences&project=O2&q=artifact_kind%3Achart%20refresh_diff%3Aapplied_added&limit=20" in text
+    assert "/control/audit?focus=preferences&project=O2&q=artifact_kind%3Achart%20refresh_diff%3Acandidates_removed&limit=20" in text
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O2",
+        query="artifact_kind:chart",
+        limit=20,
+    )
+    assert audit.project_filter == "O2"
+    assert audit.artifact_filter == "chart"
+    assert audit.refresh_diff_filter == ""
+    assert audit.refresh_diff_query_base == "artifact_kind:chart"
+    assert audit.refresh_diff_counts == {"applied_added": 2, "candidates_removed": 1}
+    assert audit.total_rows == 2
+
+    _snapshot, selected_audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        project_filter="O2",
+        query="artifact_kind:chart refresh_diff:candidates_removed",
+        limit=20,
+    )
+    assert selected_audit.refresh_diff_filter == "candidates_removed"
+    assert selected_audit.refresh_diff_query_base == "artifact_kind:chart"
+    assert selected_audit.refresh_diff_counts == {"applied_added": 2, "candidates_removed": 1}
+    assert selected_audit.total_rows == 1
+    assert len(selected_audit.rows) == 1
+    assert "candidates_removed" in selected_audit.rows[0].preference_refresh_diff_summary
+
+
+def test_control_dashboard_history_route_filters_preferences_by_artifact_query(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Candidate | chart",
+        status="executed",
+        outcome_kind="operator_preference_candidate",
+        outcome_status="executed",
+        outcome_reason_code="candidate_promoted",
+        outcome_detail="show_source_note=true",
+        next_step="/control/preferences?artifact=chart",
+        remediation="-",
+        source_command="/prefs candidate chart:show_source_note auto",
+        link_label="preferences",
+        link_href="/control/preferences?artifact=chart",
+        at="2026-04-09T11:08:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "applied_preferences_summary": "applied_preferences=show_source_note=true",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Candidate | document",
+        status="executed",
+        outcome_kind="operator_preference_candidate",
+        outcome_status="executed",
+        outcome_reason_code="candidate_promoted",
+        outcome_detail="explicit_open_questions_section=true",
+        next_step="/control/preferences?artifact=document",
+        remediation="-",
+        source_command="/prefs candidate document:explicit_open_questions_section confirm",
+        link_label="preferences",
+        link_href="/control/preferences?artifact=document",
+        at="2026-04-09T11:09:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "document",
+            "applied_preferences_summary": "applied_preferences=explicit_open_questions_section=true",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/history?q=artifact_kind:chart&scope=dashboard",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "History Search" in text
+    assert "artifact_kind:chart" in text
+    assert "Preference Candidate | chart" in text
+    assert "<span>rows</span><strong>1</strong>" in text
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="artifact_kind:chart",
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.total_rows == 1
+    assert len(history.rows) == 1
+    assert history.rows[0].summary == "Preference Candidate | chart | reason=candidate_promoted | applied_preferences=show_source_note=true"
+    assert "artifact_kind:chart" in history.rows[0].detail
+
+
+def test_control_dashboard_history_route_filters_preferences_by_memory_scope_query(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | project",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/actions/task/worker-apply-preview",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always project",
+        link_label="task detail",
+        link_href="/control/tasks/by-request/REQ-1",
+        at="2026-04-09T11:10:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                }
+            ],
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Preference Decision | artifact",
+        status="executed",
+        outcome_kind="operator_preference_decision",
+        outcome_status="executed",
+        outcome_reason_code="registry_updated",
+        outcome_detail="legend_position=bottom",
+        next_step="/control/actions/task/worker-apply-preview",
+        remediation="-",
+        source_command="/task T-001 | pref legend_position apply_always artifact_kind",
+        link_label="task detail",
+        link_href="/control/tasks/by-request/REQ-2",
+        at="2026-04-09T11:11:00+09:00",
+        extra={
+            "focus_badge": "preferences",
+            "preference_artifact_kind": "chart",
+            "preference_decisions": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "choice": "apply_always",
+                    "scope": "artifact_kind",
+                    "scope_ref": "chart",
+                }
+            ],
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/history?q=memory_scope:project&scope=dashboard",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "memory_scope:project" in text
+    assert "Preference Decision | project" in text
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="memory_scope:project",
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.total_rows == 1
+    assert len(history.rows) == 1
+    assert "preference_memory_scope=project:O2" in history.rows[0].summary
+    assert "memory_scope:project:O2" in history.rows[0].detail
+
+    _snapshot, combined_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="memory_scope:project artifact_kind:chart",
+        scope="dashboard",
+        limit=20,
+    )
+    assert combined_history.total_rows == 1
+    assert len(combined_history.rows) == 1
+
+
+def test_control_dashboard_history_route_surfaces_chat_event_facets(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | reply",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="direct reply ok",
+        next_step="-",
+        remediation="-",
+        source_command="/direct how is the runtime?",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:12:00+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "direct reply ok",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | dispatch",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="dispatch reply ok",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="/dispatch summarize the pending work",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:12:30+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "dispatch reply ok",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | room post",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="room post reply",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="/room post recap status",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:12:45+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_reply_summary": "room post reply",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | room use",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="room changed",
+        next_step="/control/chat?chat=123456",
+        remediation="-",
+        source_command="/room use O2/review",
+        link_label="chat console",
+        link_href="/control/chat?chat=123456",
+        at="2026-04-09T11:13:00+09:00",
+        extra={
+            "chat_id": "123456",
+            "chat_room_change_summary": "switched from O2/analysis to O2/review",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | other chat",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="other chat reply",
+        next_step="/control/chat?chat=999999",
+        remediation="-",
+        source_command="/direct other chat",
+        link_label="chat console",
+        link_href="/control/chat?chat=999999",
+        at="2026-04-09T11:14:00+09:00",
+        extra={
+            "chat_id": "999999",
+            "chat_reply_summary": "other chat reply",
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Chat Send | raw",
+        status="completed",
+        outcome_kind="chat_send",
+        outcome_status="completed",
+        outcome_reason_code="-",
+        outcome_detail="plain text reply",
+        next_step="/control/chat?chat=888888",
+        remediation="-",
+        source_command="summarize current room",
+        link_label="chat console",
+        link_href="/control/chat?chat=888888",
+        at="2026-04-09T11:15:00+09:00",
+        extra={
+            "chat_id": "888888",
+            "chat_reply_summary": "plain text reply",
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/history?scope=dashboard&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "chat_event_filter" in text
+    assert "chat_mode_filter" in text
+    assert "reply=5" in text
+    assert "room_change=1" in text
+    assert "direct=2" in text
+    assert "dispatch=1" in text
+    assert "room_post=1" in text
+    assert "room_use=1" in text
+    assert "raw=1" in text
+    assert "/control/history?q=chat_event%3Areply&scope=dashboard&limit=20" in text
+    assert "/control/history?q=chat_event%3Aroom_change&scope=dashboard&limit=20" in text
+    assert "/control/history?q=chat_mode%3Adirect&scope=dashboard&limit=20" in text
+    assert "/control/history?q=chat_mode%3Adispatch&scope=dashboard&limit=20" in text
+    assert "/control/history?q=chat_mode%3Aroom_post&scope=dashboard&limit=20" in text
+    assert "/control/history?q=chat_mode%3Aroom_use&scope=dashboard&limit=20" in text
+    assert "/control/history?q=chat_mode%3Araw&scope=dashboard&limit=20" in text
+    assert '/control/chat?chat=123456' in text
+    assert "chat-mode-direct" in text
+    assert "chat-mode-dispatch" in text
+    assert "chat-mode-room_post" in text
+    assert "chat-mode-room_use" in text
+    assert "chat-mode-raw" in text
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.chat_event_filter == ""
+    assert history.chat_event_query_base == ""
+    assert history.chat_mode_filter == ""
+    assert history.chat_mode_query_base == ""
+    assert history.chat_event_counts == {"reply": 5, "room_change": 1}
+    assert history.chat_mode_counts == {"direct": 2, "dispatch": 1, "room_post": 1, "room_use": 1, "raw": 1}
+    assert history.total_rows >= 6
+
+    _snapshot, filtered_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        chat_filter="123456",
+        scope="dashboard",
+        limit=20,
+    )
+    assert filtered_history.chat_filter == "123456"
+    assert filtered_history.chat_event_counts == {"reply": 3, "room_change": 1}
+    assert filtered_history.chat_mode_counts == {"direct": 1, "dispatch": 1, "room_post": 1, "room_use": 1}
+    assert filtered_history.total_rows == 4
+
+    _snapshot, selected_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        chat_filter="123456",
+        query="chat_event:room_change chat_mode:room_use",
+        scope="dashboard",
+        limit=20,
+    )
+    assert selected_history.chat_event_filter == "room_change"
+    assert selected_history.chat_event_query_base == "chat_mode:room_use"
+    assert selected_history.chat_mode_filter == "room_use"
+    assert selected_history.chat_mode_query_base == "chat_event:room_change"
+    assert selected_history.chat_filter == "123456"
+    assert selected_history.chat_event_counts == {"room_change": 1}
+    assert selected_history.chat_mode_counts == {"room_use": 1}
+    assert selected_history.total_rows == 1
+    assert len(selected_history.rows) == 1
+    assert selected_history.rows[0].chat_mode == "room_use"
+    assert "chat_room_change=switched from O2/analysis to O2/review" in selected_history.rows[0].detail
+
+
+def test_control_dashboard_history_route_surfaces_room_scope_rows(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    room_dir = team_dir / "logs" / "rooms" / "O2" / "analysis"
+    room_dir.mkdir(parents=True, exist_ok=True)
+    (room_dir / "2026-04-15.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-04-15T11:12:00+09:00",
+                        "actor": "operator",
+                        "kind": "note",
+                        "text": "analysis room tail line",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-04-15T11:13:00+09:00",
+                        "actor": "codex",
+                        "kind": "reply",
+                        "text": "analysis followup detail",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-04-15T11:14:00+09:00",
+                        "actor": "planner",
+                        "kind": "decision",
+                        "text": "analysis decision checkpoint",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/history?q=room%3AO2%2Fanalysis&scope=room&limit=20",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "room_kind_filter" in text
+    assert "room_actor_filter" in text
+    assert "room_text_filter" in text
+    assert "room O2/analysis" in text
+    assert '/control/history?q=room%3AO2/analysis&scope=room&limit=20' in text
+    assert "note=1" in text
+    assert "reply=1" in text
+    assert "decision=1" in text
+    assert "operator=1" in text
+    assert "codex=1" in text
+    assert "planner=1" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_kind%3Anote&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_kind%3Areply&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_kind%3Adecision&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_actor%3Aoperator&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_actor%3Acodex&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_actor%3Aplanner&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_text%3Adecision&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_text%3Acheckpoint&scope=room&limit=20" in text
+    assert "/control/history?q=room%3AO2/analysis%20room_text%3Afollowup&scope=room&limit=20" in text
+    assert "latest 11:14" in text
+    assert "recent 11:13" in text
+    assert '/control/history?q=room%3AO2/analysis%20room_kind%3Adecision&scope=room&limit=20">room_kind decision</a>' in text
+    assert '/control/history?q=room%3AO2/analysis%20room_actor%3Aplanner&scope=room&limit=20">actor planner</a>' in text
+    assert "analysis room tail line" in text
+    assert "analysis followup detail" in text
+    assert "analysis decision checkpoint" in text
+    assert '<option value="room" selected>room</option>' in text
+    assert "/room tail 20" in text
+    assert text.index("note=1") < text.index("reply=1") < text.index("decision=1")
+    assert text.index("operator=1") < text.index("codex=1") < text.index("planner=1")
+    assert text.index(">decision=1</a>") < text.index(">checkpoint=1</a>") < text.index(">followup=1</a>")
+    assert "room-kind-note" in text
+    assert "room-kind-reply" in text
+    assert "room-kind-decision" in text
+    assert "room-actor-operator" in text
+    assert "room-actor-codex" in text
+    assert "room-actor-planner" in text
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O2/analysis",
+        scope="room",
+        limit=20,
+    )
+    assert history.scope == "room"
+    assert history.room_kind_filter == ""
+    assert history.room_kind_query_base == "room:O2/analysis"
+    assert history.room_actor_filter == ""
+    assert history.room_actor_query_base == "room:O2/analysis"
+    assert history.room_text_filters == []
+    assert history.room_text_query_base == "room:O2/analysis"
+    assert history.room_kind_counts == {"note": 1, "reply": 1, "decision": 1}
+    assert history.room_kind_values == ["note", "reply", "decision"]
+    assert history.room_actor_counts == {"operator": 1, "codex": 1, "planner": 1}
+    assert history.room_actor_values == ["operator", "codex", "planner"]
+    assert history.room_text_counts == {"decision": 1, "checkpoint": 1, "followup": 1}
+    assert history.room_text_values == ["decision", "checkpoint", "followup"]
+    assert history.room_text_hints == {
+        "decision": "latest 11:14",
+        "checkpoint": "latest 11:14",
+        "followup": "recent 11:13",
+    }
+    assert history.total_rows == 3
+    assert history.rows[0].room == "O2/analysis"
+    assert history.rows[0].actor == "planner"
+    assert history.rows[0].scope == "room"
+    assert history.rows[0].followup_hint == "/room tail 20"
+
+    _snapshot, selected_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O2/analysis room_kind:reply",
+        scope="room",
+        limit=20,
+    )
+    assert selected_history.room_kind_filter == "reply"
+    assert selected_history.room_kind_query_base == "room:O2/analysis"
+    assert selected_history.room_kind_counts == {"note": 1, "reply": 1, "decision": 1}
+    assert selected_history.room_kind_values == ["note", "reply", "decision"]
+    assert selected_history.total_rows == 1
+    assert len(selected_history.rows) == 1
+    assert selected_history.rows[0].action == "room_reply"
+    assert "room_kind:reply" in selected_history.rows[0].detail
+    assert "analysis followup detail" in selected_history.rows[0].detail
+
+    selected_status, _selected_headers, selected_body = dashboard_app.build_dashboard_response(
+        "/control/history?q=room%3AO2%2Fanalysis%20room_kind%3Areply&scope=room&limit=20",
+        config,
+    )
+    selected_text = selected_body.decode("utf-8")
+    assert selected_status == 200
+    assert "room-kind-reply active-focus" in selected_text
+    assert "<mark>reply</mark>" in selected_text
+
+    _snapshot, actor_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O2/analysis room_actor:planner",
+        scope="room",
+        limit=20,
+    )
+    assert actor_history.room_actor_filter == "planner"
+    assert actor_history.room_actor_query_base == "room:O2/analysis"
+    assert actor_history.room_actor_counts == {"operator": 1, "codex": 1, "planner": 1}
+    assert actor_history.room_actor_values == ["operator", "codex", "planner"]
+    assert actor_history.total_rows == 1
+    assert len(actor_history.rows) == 1
+    assert actor_history.rows[0].actor == "planner"
+    assert "room_actor:planner" in actor_history.rows[0].detail
+    assert "analysis decision checkpoint" in actor_history.rows[0].detail
+
+    actor_status, _actor_headers, actor_body = dashboard_app.build_dashboard_response(
+        "/control/history?q=room%3AO2%2Fanalysis%20room_actor%3Aplanner%20room_text%3Adecision&scope=room&limit=20",
+        config,
+    )
+    actor_text = actor_body.decode("utf-8")
+    assert actor_status == 200
+    assert "room-actor-planner active-focus" in actor_text
+    assert ">decision=1</span>" in actor_text
+    assert "all room text" in actor_text
+    assert "<mark>decision</mark>" in actor_text
+    assert "<mark>planner</mark>" in actor_text
+
+    _snapshot, text_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O2/analysis room_text:decision",
+        scope="room",
+        limit=20,
+    )
+    assert text_history.room_text_filters == ["decision"]
+    assert text_history.room_text_query_base == "room:O2/analysis"
+    assert text_history.total_rows == 1
+    assert len(text_history.rows) == 1
+    assert text_history.rows[0].actor == "planner"
+    assert "<mark>decision</mark>" in text_history.rows[0].summary_highlight_html
+    assert "analysis decision checkpoint" in text_history.rows[0].detail
+    assert "<mark>decision</mark>" in text_history.rows[0].detail_highlight_html
+
+    _snapshot, compact_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O2/analysis room_text:decision",
+        scope="room",
+        compact_mode=True,
+        limit=20,
+    )
+    assert compact_history.compact_mode is True
+
+    compact_status, _compact_headers, compact_body = dashboard_app.build_dashboard_response(
+        "/control/history?q=room%3AO2%2Fanalysis%20room_text%3Adecision&scope=room&compact=1&limit=20",
+        config,
+    )
+    compact_text = compact_body.decode("utf-8")
+    assert compact_status == 200
+    assert "compact</span><strong>on</strong>" in compact_text
+    assert 'name="compact" value="1" checked' in compact_text
+    assert "&scope=room&compact=1&limit=20" in compact_text
+    assert "<mark>decision</mark>" in compact_text
+
+
+def test_control_dashboard_history_route_derives_dynamic_room_text_shortcuts(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    room_dir = team_dir / "logs" / "rooms" / "O3" / "review"
+    room_dir.mkdir(parents=True, exist_ok=True)
+    (room_dir / "2026-04-16.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-04-16T10:11:00+09:00",
+                        "actor": "operator",
+                        "kind": "note",
+                        "text": "bridge handoff rollback triage",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-04-16T10:12:00+09:00",
+                        "actor": "codex",
+                        "kind": "reply",
+                        "text": "bridge handoff rollback",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-04-16T10:13:00+09:00",
+                        "actor": "planner",
+                        "kind": "note",
+                        "text": "bridge triage",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O3/review",
+        scope="room",
+        compact_mode=True,
+        limit=20,
+    )
+    assert history.compact_mode is True
+    assert history.room_text_filters == []
+    assert history.room_text_query_base == "room:O3/review"
+    assert history.room_text_counts == {"bridge": 3, "handoff": 2, "rollback": 2, "triage": 2}
+    assert history.room_text_values == ["bridge", "triage", "handoff", "rollback"]
+    assert history.room_text_hints == {
+        "bridge": "latest 10:13",
+        "triage": "latest 10:13",
+        "handoff": "recent 10:12",
+        "rollback": "recent 10:12",
+    }
+
+    _snapshot, selected_history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="room:O3/review room_text:rollback",
+        scope="room",
+        limit=20,
+    )
+    assert selected_history.room_text_filters == ["rollback"]
+    assert selected_history.room_text_query_base == "room:O3/review"
+    assert selected_history.room_text_values == ["bridge", "triage", "handoff", "rollback"]
+    assert selected_history.room_text_hints["rollback"] == "recent 10:12"
+    assert selected_history.total_rows == 2
 
 
 def test_control_dashboard_history_route_renders_query_results(tmp_path: Path, monkeypatch) -> None:
@@ -2555,6 +4623,18 @@ def test_control_dashboard_recovery_route_renders_latest_nightly_summary(tmp_pat
 def test_legacy_control_dashboard_recovery_route_reads_nightly_planning_review_key(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    _mark_task_planning_gate_blocked(task)
+    task["background_run_operator_preference_preflight_summary"] = "preflight=chart | auto=1 | confirm=0 | manual=0 | disabled=0"
+    task["background_run_operator_preference_applied_summary"] = "applied_preferences=show_source_note=true | on | auto | artifact_kind:chart"
+    task["background_run_operator_preference_candidate_summary"] = (
+        "preference_candidates=legend_position=bottom | hits=2 | issue=legend keeps overlapping the plotted bars"
+    )
+    task["background_run_operator_preference_decision_summary"] = (
+        "preference_decisions=legend_position=bottom | 앞으로도 적용 | artifact_kind:chart"
+    )
+    gw.save_manager_state(manager_state_file, state)
     summary = nightly_summary.build_nightly_session_summary(
         control_root=control_root,
         team_dir=team_dir,
@@ -2582,9 +4662,11 @@ def test_legacy_control_dashboard_recovery_route_reads_nightly_planning_review_k
     assert "nightly_planning_compact" in text
     assert "draft via codex" in text
     assert "review via" in text
-    assert "dispatch waits for critic-approved plan" in text
+    assert "dispatch blocked until critic clears issues" in text
     assert "BGT-001" in text
     assert "local_background" in text
+    assert "preference_preflight" in text
+    assert "preference_candidates=legend_position=bottom" in text
     assert "run_lock" in text
     assert "open" in text
     assert "background_slots" in text
@@ -3431,6 +5513,19 @@ def test_control_dashboard_post_replan_route_terminal_block_reuses_job_contract_
     task["plan_review_count"] = 1
     task["plan_convergence_status"] = "ready"
     task["plan_gate_passed"] = True
+    task["job_contract_status"] = "blocked"
+    task["job_contract_summary"] = "status=blocked | acceptance gap still needs operator review"
+    task["debug_packet_state"] = "blocked"
+    task["debug_packet_summary"] = "state=blocked | symptom=contract_gap | next=/task T-001"
+    task["debug_packet_next_step"] = "/task T-001"
+    task["phase_checkpoint_status"] = "blocked"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=blocked | current=verify | verify=blocked|note=contract_gap"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=blocked|note=contract_gap",
+    ]
     gw.save_manager_state(manager_state_file, state)
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
@@ -3615,6 +5710,13 @@ def test_control_dashboard_post_replan_route_reuses_phase_checkpoint_feedback(tm
 def test_dashboard_surfaces_phase_review_ready_task_review_actions(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["phase_checkpoint_status"] = "blocked"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=blocked | current=verify | verify=blocked|note=verification_gap"
+    task["phase_checkpoint_rows"] = ["verify=blocked|note=verification_gap"]
+    gw.save_manager_state(manager_state_file, state)
 
     assert action_audit.append_action_audit_row(
         team_dir,
@@ -5665,6 +7767,24 @@ def test_control_dashboard_post_task_worker_apply_preview_route_returns_preview(
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
     state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=reports/summary.md"
+    task["job_contract_goal"] = "close the acceptance gap"
+    task["job_contract_scope"] = ["reports/summary.md"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["reports/summary.md"]
+    task["job_contract_rollback_hint"] = "revert summary wording if the evidence check fails"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
     task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
     task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
     task["background_run_worker_result_actions"] = ["update reports/summary.md"]
@@ -5702,6 +7822,1664 @@ def test_control_dashboard_post_task_worker_apply_preview_route_returns_preview(
     assert payload["preview"]["proposal_ids"] == ["PROP-001"]
     assert payload["preview"]["proposal_payloads"][0]["summary"] == "apply worker artifact update for T-001: reports/summary.md"
     assert payload["preview"]["target_artifacts"] == ["reports/summary.md"]
+
+
+def test_control_dashboard_worker_apply_preview_surfaces_operator_preference_preflight_actions(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "show_source_note",
+                    "value": True,
+                    "description": "Always include the source note below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                },
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                },
+            ]
+        },
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=figures/chart.png"
+    task["job_contract_goal"] = "close the chart acceptance gap"
+    task["job_contract_scope"] = ["figures/chart.png"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["keep the chart readable and support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["figures/chart.png"]
+    task["job_contract_rollback_hint"] = "revert the chart update if the verification lane rejects the evidence"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update figures/chart.png"]
+    task["background_run_worker_result_cautions"] = ["keep legend readable"]
+    task["background_run_worker_result_evidence_refs"] = ["figures/chart.png"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=figures/chart.png"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["preference_artifact_kind"] == "chart"
+    assert "preflight=chart" in payload["preference_preflight_summary"]
+    assert "applied_preferences=show_source_note=true" in payload["applied_preferences_summary"]
+    assert "confirm_preferences=legend_position=bottom" in payload["preference_confirm_summary"]
+    assert len(payload["actions"]) == 6
+    assert payload["preference_decision_prompt_summary"] == "decision_prompts=legend_position(confirm)"
+    assert len(payload["preference_decision_groups"]) == 1
+    assert payload["preference_decision_groups"][0]["key"] == "legend_position"
+    assert payload["preference_decision_groups"][0]["origin"] == "confirm"
+    assert len(payload["preference_decision_groups"][0]["actions"]) == 6
+    assert all(row["path"] == "/control/actions/task/operator-preference-decision" for row in payload["actions"])
+    assert payload["actions"][0]["label"].startswith("legend_position")
+    assert payload["actions"][0]["memory_policy"] == "apply_once"
+    assert payload["actions"][0]["memory_scope"] == "session"
+    assert any(row["memory_scope"] == "project" for row in payload["actions"])
+    assert payload["preview"]["preference_artifact_kind"] == "chart"
+    assert payload["preview"]["preference_decision_prompt_summary"] == "decision_prompts=legend_position(confirm)"
+
+
+def test_control_dashboard_worker_apply_preview_surfaces_repeated_preference_candidates(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preference_candidates(
+        project_team_dir,
+        {
+            "candidates": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "project_ref": "O2",
+                    "suggested_value": "bottom",
+                    "issue": "legend keeps overlapping the plotted bars",
+                    "occurrence_count": 2,
+                    "source_refs": ["REQ-1", "REQ-2"],
+                }
+            ]
+        },
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=figures/chart.png"
+    task["job_contract_goal"] = "close the chart acceptance gap"
+    task["job_contract_scope"] = ["figures/chart.png"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["keep the chart readable and support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["figures/chart.png"]
+    task["job_contract_rollback_hint"] = "revert the chart update if the verification lane rejects the evidence"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update figures/chart.png"]
+    task["background_run_worker_result_cautions"] = ["keep legend readable"]
+    task["background_run_worker_result_evidence_refs"] = ["figures/chart.png"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=figures/chart.png"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["preference_artifact_kind"] == "chart"
+    assert "preference_candidates=legend_position=bottom" in payload["preference_candidate_summary"]
+    assert payload["preference_confirm_summary"] == "-"
+    assert len(payload["actions"]) == 6
+    assert payload["preference_decision_prompt_summary"] == "decision_prompts=legend_position(candidate)"
+    assert len(payload["preference_decision_groups"]) == 1
+    assert payload["preference_decision_groups"][0]["origin"] == "candidate"
+    assert payload["preference_decision_groups"][0]["source_scope"] == "project"
+    assert payload["preference_decision_groups"][0]["scope_ref"] == "O2"
+    assert len(payload["preference_decision_groups"][0]["actions"]) == 6
+    assert payload["preference_candidates"][0]["expected_scope"] == "project"
+    assert payload["preference_candidates"][0]["expected_scope_ref"] == "O2"
+    assert payload["preference_candidates"][0]["expected_scope_label"] == "this project"
+    assert payload["preference_candidate_scope_summary"] == "preference_candidate_scopes=legend_position:project:O2"
+    assert payload["preference_candidates"][0]["audit_href"] == "/control/audit?focus=preferences&project=O2&q=artifact_kind%3Achart%20memory_scope%3Aproject%20legend_position&limit=50"
+    assert payload["preference_candidates"][0]["history_href"] == "/control/history?q=artifact_kind%3Achart%20memory_scope%3Aproject%20legend_position&project=O2&scope=dashboard&limit=20"
+    assert len(payload["preference_candidates"][0]["actions"]) == 4
+    assert [row["label"] for row in payload["preference_candidates"][0]["actions"]] == [
+        "promote auto",
+        "promote confirm",
+        "mute",
+        "dismiss",
+    ]
+    assert payload["preference_candidates"][0]["actions"][0]["path"] == "/control/actions/control/operator-preference-candidate"
+    assert "\"task_ref\":\"T-001\"" in payload["preference_candidates"][0]["actions"][0]["payload_json"]
+    assert "\"return_path\":\"/control/preferences?project=O2&artifact=chart&scope=project\"" in payload["preference_candidates"][0]["actions"][0]["payload_json"]
+    assert all(row["path"] == "/control/actions/task/operator-preference-decision" for row in payload["actions"])
+    assert payload["actions"][0]["label"].startswith("legend_position")
+
+
+def test_control_dashboard_worker_apply_preview_surfaces_seeded_document_preferences(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=docs/notes.md"
+    task["job_contract_goal"] = "close the acceptance gap"
+    task["job_contract_scope"] = ["docs/notes.md"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["docs/notes.md"]
+    task["job_contract_rollback_hint"] = "revert summary wording if the evidence check fails"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update docs/notes.md"]
+    task["background_run_worker_result_cautions"] = ["keep review lane open"]
+    task["background_run_worker_result_evidence_refs"] = ["docs/notes.md"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=docs/notes.md | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["docs/notes.md"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=docs/notes.md"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["preference_artifact_kind"] == "document"
+    assert "preflight=document" in payload["preference_preflight_summary"]
+    assert "confirm_preferences=preserve_heading_structure=true" in payload["preference_confirm_summary"]
+    assert "manual_preferences=explicit_open_questions_section=true" in payload["preference_manual_summary"]
+    assert len(payload["actions"]) == 6
+    assert payload["preference_decision_prompt_summary"] == "decision_prompts=preserve_heading_structure(confirm)"
+    assert len(payload["preference_decision_groups"]) == 1
+    assert len(payload["preference_decision_groups"][0]["actions"]) == 6
+    assert all(row["path"] == "/control/actions/task/operator-preference-decision" for row in payload["actions"])
+    assert payload["actions"][0]["label"].startswith("preserve_heading_structure")
+
+
+def test_control_dashboard_worker_apply_preview_surfaces_chart_bar_profile_preferences(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close bar chart readability gap | scope=figures/bar-chart.png"
+    task["job_contract_goal"] = "close the bar chart readability gap"
+    task["job_contract_scope"] = ["figures/bar-chart.png"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["keep the bar chart readable and preserve the ranking signal"]
+    task["job_contract_artifacts_to_touch"] = ["figures/bar-chart.png"]
+    task["job_contract_rollback_hint"] = "revert the bar chart update if the verification lane rejects the evidence"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update figures/bar-chart.png"]
+    task["background_run_worker_result_cautions"] = ["keep the ranking easy to scan"]
+    task["background_run_worker_result_evidence_refs"] = ["figures/bar-chart.png"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/bar-chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/bar-chart.png"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=figures/bar-chart.png"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["preference_artifact_kind"] == "chart"
+    assert payload["preference_artifact_profile"] == "chart_bar"
+    assert "profile=chart_bar" in payload["preference_preflight_summary"]
+    assert "confirm_preferences=legend_position=bottom" in payload["preference_confirm_summary"]
+    assert "category_order=descending" in payload["preference_confirm_summary"]
+    assert "show_bar_value_labels=true" in payload["preference_manual_summary"]
+    assert len(payload["actions"]) == 12
+    assert payload["preference_decision_prompt_summary"] == (
+        "decision_prompts=legend_position(confirm) || category_order(confirm)"
+    )
+    assert [row["key"] for row in payload["preference_decision_groups"]] == [
+        "legend_position",
+        "category_order",
+    ]
+    assert all(len(row["actions"]) == 6 for row in payload["preference_decision_groups"])
+
+
+def test_control_dashboard_worker_apply_preview_surfaces_confirm_and_candidate_decision_groups(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.save_operator_preference_candidates(
+        project_team_dir,
+        {
+            "candidates": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "show_source_note",
+                    "project_ref": "O2",
+                    "suggested_value": True,
+                    "issue": "source provenance keeps getting added by hand",
+                    "occurrence_count": 2,
+                    "source_refs": ["REQ-1", "REQ-2"],
+                }
+            ]
+        },
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=figures/chart.png"
+    task["job_contract_goal"] = "close the chart acceptance gap"
+    task["job_contract_scope"] = ["figures/chart.png"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["keep the chart readable and support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["figures/chart.png"]
+    task["job_contract_rollback_hint"] = "revert the chart update if the verification lane rejects the evidence"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update figures/chart.png"]
+    task["background_run_worker_result_cautions"] = ["keep legend readable"]
+    task["background_run_worker_result_evidence_refs"] = ["figures/chart.png"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=figures/chart.png"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["preference_confirm_summary"] == "confirm_preferences=legend_position=bottom | on | confirm | artifact_kind:chart"
+    assert "preference_candidates=show_source_note=true" in payload["preference_candidate_summary"]
+    assert len(payload["actions"]) == 12
+    assert payload["preference_decision_prompt_summary"] == (
+        "decision_prompts=legend_position(confirm) || show_source_note(candidate)"
+    )
+    assert [row["origin"] for row in payload["preference_decision_groups"]] == ["confirm", "candidate"]
+    assert [row["key"] for row in payload["preference_decision_groups"]] == ["legend_position", "show_source_note"]
+    assert payload["preference_decision_groups"][1]["source_scope"] == "project"
+    assert payload["preference_decision_groups"][1]["scope_ref"] == "O2"
+    assert payload["preference_candidates"][0]["expected_scope"] == "project"
+    assert payload["preference_candidate_scope_summary"] == "preference_candidate_scopes=show_source_note:project:O2"
+    assert payload["preference_candidates"][0]["audit_href"] == "/control/audit?focus=preferences&project=O2&q=artifact_kind%3Achart%20memory_scope%3Aproject%20show_source_note&limit=50"
+    assert payload["preference_candidates"][0]["history_href"] == "/control/history?q=artifact_kind%3Achart%20memory_scope%3Aproject%20show_source_note&project=O2&scope=dashboard&limit=20"
+    assert len(payload["preference_candidates"][0]["actions"]) == 4
+    assert payload["preference_candidates"][0]["actions"][1]["label"] == "promote confirm"
+    assert "\"task_ref\":\"T-001\"" in payload["preference_candidates"][0]["actions"][1]["payload_json"]
+    assert "\"return_path\":\"/control/preferences?project=O2&artifact=chart&scope=project\"" in payload["preference_candidates"][0]["actions"][1]["payload_json"]
+    assert all(len(row["actions"]) == 6 for row in payload["preference_decision_groups"])
+
+
+def test_worker_apply_preview_persists_operator_preference_summaries_to_runtime_and_task_surfaces(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "show_source_note",
+                    "value": True,
+                    "description": "Always include the source note below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.save_operator_preference_candidates(
+        project_team_dir,
+        {
+            "candidates": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "project_ref": "O2",
+                    "suggested_value": "bottom",
+                    "issue": "legend keeps overlapping the plotted bars",
+                    "occurrence_count": 2,
+                    "source_refs": ["REQ-1", "REQ-2"],
+                }
+            ]
+        },
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["job_contract_status"] = "ready"
+    task["job_contract_planning_mode"] = "deep"
+    task["job_contract_summary"] = "ready | goal=close acceptance gap | scope=figures/chart.png"
+    task["job_contract_goal"] = "close the chart acceptance gap"
+    task["job_contract_scope"] = ["figures/chart.png"]
+    task["job_contract_non_goals"] = ["publish final report"]
+    task["job_contract_acceptance_checks"] = ["keep the chart readable and support the conclusion with explicit evidence"]
+    task["job_contract_artifacts_to_touch"] = ["figures/chart.png"]
+    task["job_contract_rollback_hint"] = "revert the chart update if the verification lane rejects the evidence"
+    task["phase_checkpoint_status"] = "active"
+    task["phase_checkpoint_current_phase"] = "verify"
+    task["phase_checkpoint_summary"] = "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready"
+    task["phase_checkpoint_rows"] = [
+        "plan=done|note=approved plan",
+        "implement=done|note=execution complete",
+        "verify=active|note=review in progress",
+        "handoff=ready|note=handoff ready",
+    ]
+    task["background_run_task_contract_summary"] = "task=T-001 | pack=offdesk_execute | brief=underspecified | docs=2"
+    task["background_run_worker_result_summary"] = "status=ready | worker summary drafted | actions=1 | refs=1"
+    task["background_run_worker_result_actions"] = ["update figures/chart.png"]
+    task["background_run_worker_result_cautions"] = ["keep legend readable"]
+    task["background_run_worker_result_evidence_refs"] = ["figures/chart.png"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    task["background_run_worker_update_proposal_summary"] = "status=ready | apply_proposals=1 | ids=PROP-001 | targets=figures/chart.png"
+    task["background_run_worker_update_proposal_ids"] = ["PROP-001"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/worker-apply-preview",
+        body=json.dumps({"task_ref": "T-001"}).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert "preference_candidates=legend_position=bottom" in payload["preference_candidate_summary"]
+
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    _snapshot2, runtime_details, _state = dashboard_state.load_dashboard_runtime_details(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    task_detail = dashboard_state.load_task_detail(
+        control_root=control_root,
+        request_id="REQ-1",
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime_card = next(card for card in snapshot.runtime_cards if card.project_alias == "O2")
+    runtime_detail = next(detail for detail in runtime_details if detail.project_alias == "O2")
+
+    assert "preflight=chart" in runtime_card.active_task_background_run_operator_preference_preflight_summary
+    assert "applied_preferences=show_source_note=true" in runtime_card.active_task_background_run_operator_preference_applied_summary
+    assert "preference_candidates=legend_position=bottom" in runtime_card.active_task_background_run_operator_preference_candidate_summary
+    assert "preflight=chart" in runtime_detail.active_task_background_run_operator_preference_preflight_summary
+    assert task_detail is not None
+    assert "applied_preferences=show_source_note=true" in task_detail.background_run_operator_preference_applied_summary
+    assert "preference_candidates=legend_position=bottom" in task_detail.background_run_operator_preference_candidate_summary
+
+    detail_status, _detail_headers, detail_body = dashboard_app.build_dashboard_response(
+        "/control/tasks/by-request/REQ-1",
+        config,
+    )
+    assert detail_status == 200
+    detail_text = detail_body.decode("utf-8")
+    assert "background_preference_preflight" in detail_text
+    assert "preference_candidates=legend_position=bottom" in detail_text
+
+
+def test_control_dashboard_operator_preference_decision_route_persists_rule_and_task_override(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/operator-preference-decision",
+        body=json.dumps(
+            {
+                "task_ref": "T-001",
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "value": "bottom",
+                "description": "Keep the legend below the chart.",
+                "choice": "apply_always",
+                "return_path": "/control/actions/task/worker-apply-preview",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["outcome"]["kind"] == "operator_preference_decision"
+    assert payload["outcome"]["reason_code"] == "registry_updated"
+    assert "legend_position=bottom" in payload["applied_preferences_summary"]
+    assert "legend_position=bottom" in payload["preference_decision_summary"]
+    assert payload["preference_refresh_diff_summary"] == (
+        "preference_refresh_diff=applied_added=legend_position=bottom | on | manual_only | session:-"
+    )
+    assert payload["refresh_action"]["path"] == "/control/actions/task/worker-apply-preview"
+    assert payload["actions"][0]["path"] == "/control/actions/task/worker-apply-preview"
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="manual_only",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert len(audit.rows) == 1
+    assert "manual_only" in audit.rows[0].preference_refresh_diff_summary
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="manual_only",
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.total_rows == 1
+    assert len(history.rows) == 1
+    assert "preference_refresh_diff=" in history.rows[0].detail
+
+    updated = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    updated_task = updated["projects"]["alpha"]["tasks"]["REQ-1"]
+    assert updated_task["background_run_operator_preference_artifact_kind"] == "chart"
+    assert updated_task["background_run_operator_preference_session_rules"][0]["key"] == "legend_position"
+    assert updated_task["background_run_operator_preference_decisions"][0]["choice"] == "apply_always"
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    matching = [row for row in registry["rules"] if row["key"] == "legend_position" and row["artifact_kind"] == "chart"]
+    assert matching
+    assert matching[0]["enabled"] is True
+
+
+def test_control_dashboard_operator_preference_decision_route_records_one_off_candidate(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/operator-preference-decision",
+        body=json.dumps(
+            {
+                "task_ref": "T-001",
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "value": "bottom",
+                "description": "Keep the legend below the chart.",
+                "choice": "apply_once",
+                "return_path": "/control/actions/task/worker-apply-preview",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["outcome"]["reason_code"] == "session_override_recorded"
+    assert "legend_position=bottom" in payload["applied_preferences_summary"]
+
+    candidates = operator_preferences.load_operator_preference_candidates(project_team_dir)
+    assert len(candidates["candidates"]) == 1
+    assert candidates["candidates"][0]["key"] == "legend_position"
+    assert candidates["candidates"][0]["occurrence_count"] == 1
+    assert candidates["candidates"][0]["project_ref"] == "O2"
+
+
+def test_control_dashboard_operator_preference_decision_route_persists_project_scoped_rule(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    task = state["projects"]["alpha"]["tasks"]["REQ-1"]
+    task["background_run_worker_update_stub_status"] = "ready"
+    task["background_run_worker_update_stub_summary"] = "status=ready | targets=figures/chart.png | actions=1 | refs=1"
+    task["background_run_worker_update_stub_targets"] = ["figures/chart.png"]
+    gw.save_manager_state(manager_state_file, state)
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/task/operator-preference-decision",
+        body=json.dumps(
+            {
+                "task_ref": "T-001",
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "value": "bottom",
+                "description": "Keep the legend below the chart.",
+                "choice": "apply_always",
+                "scope": "project",
+                "scope_ref": "O2",
+                "return_path": "/control/actions/task/worker-apply-preview",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["outcome"]["reason_code"] == "registry_updated"
+    assert "project:O2" in payload["preference_decision_summary"]
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    matching = [
+        row
+        for row in registry["rules"]
+        if row["key"] == "legend_position"
+        and row["artifact_kind"] == "chart"
+        and row["scope"] == "project"
+        and row["scope_ref"] == "O2"
+    ]
+    assert matching
+    assert matching[0]["enabled"] is True
+
+
+def test_control_dashboard_preferences_page_renders_aggregate_registry_and_candidates(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    manager_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    beta_root = control_root / "Beta"
+    beta_team_dir = beta_root / ".aoe-team"
+    beta_team_dir.mkdir(parents=True, exist_ok=True)
+    (beta_team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (beta_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (beta_team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    manager_state["projects"]["beta"] = {
+        "name": "beta",
+        "display_name": "Beta",
+        "project_alias": "O3",
+        "project_root": str(beta_root),
+        "team_dir": str(beta_team_dir),
+        "overview": "runtime beta",
+        "last_request_id": "",
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+        "todos": [],
+        "todo_seq": 0,
+        "todo_proposals": [],
+        "todo_proposal_seq": 0,
+        "system_project": False,
+        "ops_hidden": False,
+        "paused": False,
+        "last_sync_at": "2026-04-22T09:40:00+09:00",
+        "last_sync_mode": "scenario",
+        "created_at": "2026-04-22T09:00:00+09:00",
+        "updated_at": "2026-04-22T09:50:00+09:00",
+    }
+    manager_state_file.write_text(json.dumps(manager_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    operator_preferences.save_operator_preferences(
+        beta_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "document",
+                    "key": "preserve_heading_structure",
+                    "value": True,
+                    "description": "Keep the heading structure stable.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        beta_team_dir,
+        artifact_kind="document",
+        key="explicit_open_questions_section",
+        suggested_value=True,
+        issue="brief revisions repeatedly missed an open questions section",
+        project_ref="O3",
+        source_ref="REQ-BETA-1",
+        now_iso="2026-04-22T10:10:00+09:00",
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/preferences", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Operator Preferences" in text
+    assert "Preferences" in text
+    assert "legend_position" in text
+    assert "preserve_heading_structure" in text
+    assert "show_source_note" in text
+    assert "explicit_open_questions_section" in text
+    assert "Project Registries" in text
+    assert "O2 Alpha" in text
+    assert "O3 Beta" in text
+    assert 'name="runtime_ref" value="O2"' in text
+    assert 'name="runtime_ref" value="O3"' in text
+    assert 'name="return_path" value="/control/preferences"' in text
+    assert "Artifact Breakdown" in text
+    assert "Memory Scope Breakdown" in text
+    assert "/control/actions/control/operator-preference-rule" in text
+    assert "/control/actions/control/operator-preference-candidate" in text
+    assert "/control/preferences?artifact=chart" in text
+    assert "/control/preferences?artifact=document" in text
+    assert "/control/preferences?scope=artifact_kind" in text
+    assert "/control/history?q=artifact_kind%3Achart&amp;scope=dashboard&amp;limit=20" in text
+    assert "/control/history?q=artifact_kind%3Adocument&amp;scope=dashboard&amp;limit=20" in text
+    assert "/control/history?q=memory_scope%3Aartifact_kind&amp;scope=dashboard&amp;limit=20" in text
+
+    _snapshot, preferences = dashboard_state.load_dashboard_preferences_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    artifact_rows = {row.artifact_kind: row for row in preferences.artifact_rows}
+    assert set(artifact_rows.keys()) == {"chart", "document"}
+    assert artifact_rows["chart"].rule_count == 1
+    assert artifact_rows["chart"].candidate_count == 1
+    assert artifact_rows["chart"].ready_candidate_count == 0
+    assert artifact_rows["chart"].prompt_mode_summary == "auto=1 | confirm=0 | manual=0 | disabled=0"
+    assert artifact_rows["chart"].project_summary == "O2"
+    assert artifact_rows["chart"].filter_href == "/control/preferences?artifact=chart"
+    assert artifact_rows["chart"].audit_href == "/control/audit?focus=preferences&q=artifact_kind%3Achart&limit=50"
+    assert artifact_rows["chart"].history_href == "/control/history?q=artifact_kind%3Achart&scope=dashboard&limit=20"
+    assert artifact_rows["document"].rule_count == 1
+    assert artifact_rows["document"].candidate_count == 1
+    assert artifact_rows["document"].ready_candidate_count == 0
+    assert artifact_rows["document"].prompt_mode_summary == "auto=0 | confirm=1 | manual=0 | disabled=0"
+    assert artifact_rows["document"].project_summary == "O3"
+    assert artifact_rows["document"].filter_href == "/control/preferences?artifact=document"
+    assert artifact_rows["document"].audit_href == "/control/audit?focus=preferences&q=artifact_kind%3Adocument&limit=50"
+    assert artifact_rows["document"].history_href == "/control/history?q=artifact_kind%3Adocument&scope=dashboard&limit=20"
+    scope_rows = {row.scope: row for row in preferences.memory_scope_rows}
+    assert scope_rows["artifact_kind"].rule_count == 2
+    assert scope_rows["artifact_kind"].filter_href == "/control/preferences?scope=artifact_kind"
+    assert scope_rows["artifact_kind"].history_href == "/control/history?q=memory_scope%3Aartifact_kind&scope=dashboard&limit=20"
+
+
+def test_control_dashboard_preferences_page_filters_to_selected_project(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note kept getting restored by hand for this project",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    manager_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    beta_root = control_root / "Beta"
+    beta_team_dir = beta_root / ".aoe-team"
+    beta_team_dir.mkdir(parents=True, exist_ok=True)
+    (beta_team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (beta_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (beta_team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    manager_state["projects"]["beta"] = {
+        "name": "beta",
+        "display_name": "Beta",
+        "project_alias": "O3",
+        "project_root": str(beta_root),
+        "team_dir": str(beta_team_dir),
+        "overview": "runtime beta",
+        "last_request_id": "",
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+        "todos": [],
+        "todo_seq": 0,
+        "todo_proposals": [],
+        "todo_proposal_seq": 0,
+        "system_project": False,
+        "ops_hidden": False,
+        "paused": False,
+        "last_sync_at": "2026-04-22T09:40:00+09:00",
+        "last_sync_mode": "scenario",
+        "created_at": "2026-04-22T09:00:00+09:00",
+        "updated_at": "2026-04-22T09:50:00+09:00",
+    }
+    manager_state_file.write_text(json.dumps(manager_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    operator_preferences.save_operator_preferences(
+        beta_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "document",
+                    "key": "preserve_heading_structure",
+                    "value": True,
+                    "description": "Keep the heading structure stable.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        beta_team_dir,
+        artifact_kind="document",
+        key="explicit_open_questions_section",
+        suggested_value=True,
+        issue="brief revisions repeatedly missed an open questions section",
+        project_ref="O3",
+        source_ref="REQ-BETA-1",
+        now_iso="2026-04-22T10:10:00+09:00",
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/preferences?project=O3", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "selected_scope" in text
+    assert "O3 Beta" in text
+    assert "preserve_heading_structure" in text
+    assert "explicit_open_questions_section" in text
+    assert "Memory Scope Breakdown" in text
+    assert "legend_position" not in text
+    assert 'name="runtime_ref" value="O3"' in text
+    assert 'name="runtime_ref" value="O2"' not in text
+    assert 'name="return_path" value="/control/preferences?project=O3"' in text
+    assert "Artifact Breakdown" in text
+
+    _snapshot, preferences = dashboard_state.load_dashboard_preferences_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        project_filter="O3",
+    )
+    assert len(preferences.artifact_rows) == 1
+    assert preferences.artifact_rows[0].artifact_kind == "document"
+    assert preferences.artifact_rows[0].rule_count == 1
+    assert preferences.artifact_rows[0].candidate_count == 1
+    assert preferences.artifact_rows[0].project_summary == "O3"
+    assert preferences.artifact_rows[0].audit_href == "/control/audit?focus=preferences&project=O3&q=artifact_kind%3Adocument&limit=50"
+    assert preferences.artifact_rows[0].history_href == "/control/history?q=artifact_kind%3Adocument&project=O3&scope=dashboard&limit=20"
+    memory_scope_rows = {row.scope: row for row in preferences.memory_scope_rows}
+    assert memory_scope_rows["artifact_kind"].rule_count == 1
+    assert memory_scope_rows["artifact_kind"].audit_href == "/control/audit?focus=preferences&project=O3&q=memory_scope%3Aartifact_kind&limit=50"
+    assert memory_scope_rows["artifact_kind"].history_href == "/control/history?q=memory_scope%3Aartifact_kind&project=O3&scope=dashboard&limit=20"
+
+
+def test_control_dashboard_preferences_page_filters_to_selected_artifact(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    manager_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    beta_root = control_root / "Beta"
+    beta_team_dir = beta_root / ".aoe-team"
+    beta_team_dir.mkdir(parents=True, exist_ok=True)
+    (beta_team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (beta_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (beta_team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    manager_state["projects"]["beta"] = {
+        "name": "beta",
+        "display_name": "Beta",
+        "project_alias": "O3",
+        "project_root": str(beta_root),
+        "team_dir": str(beta_team_dir),
+        "overview": "runtime beta",
+        "last_request_id": "",
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+        "todos": [],
+        "todo_seq": 0,
+        "todo_proposals": [],
+        "todo_proposal_seq": 0,
+        "system_project": False,
+        "ops_hidden": False,
+        "paused": False,
+        "last_sync_at": "2026-04-22T09:40:00+09:00",
+        "last_sync_mode": "scenario",
+        "created_at": "2026-04-22T09:00:00+09:00",
+        "updated_at": "2026-04-22T09:50:00+09:00",
+    }
+    manager_state_file.write_text(json.dumps(manager_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    operator_preferences.save_operator_preferences(
+        beta_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "document",
+                    "key": "preserve_heading_structure",
+                    "value": True,
+                    "description": "Keep the heading structure stable.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        beta_team_dir,
+        artifact_kind="document",
+        key="explicit_open_questions_section",
+        suggested_value=True,
+        issue="brief revisions repeatedly missed an open questions section",
+        project_ref="O3",
+        source_ref="REQ-BETA-1",
+        now_iso="2026-04-22T10:10:00+09:00",
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/preferences?artifact=document", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "selected_artifact" in text
+    assert "preserve_heading_structure" in text
+    assert "explicit_open_questions_section" in text
+    assert "legend_position" not in text
+    assert "show_source_note" not in text
+    assert 'name="return_path" value="/control/preferences?artifact=document"' in text
+    assert "/control/preferences?artifact=chart" in text
+
+    _snapshot, preferences = dashboard_state.load_dashboard_preferences_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        artifact_filter="document",
+    )
+    assert preferences.selected_artifact_summary == "document"
+    assert len(preferences.artifact_rows) == 2
+    selected_rows = [row for row in preferences.artifact_rows if row.is_selected]
+    assert len(selected_rows) == 1
+    assert selected_rows[0].artifact_kind == "document"
+    assert preferences.return_path == "/control/preferences?artifact=document"
+    assert selected_rows[0].history_href == "/control/history?q=artifact_kind%3Adocument&scope=dashboard&limit=20"
+    scope_rows = {row.scope: row for row in preferences.memory_scope_rows}
+    assert scope_rows["artifact_kind"].history_href == "/control/history?q=memory_scope%3Aartifact_kind%20artifact_kind%3Adocument&scope=dashboard&limit=20"
+    assert [row.key for row in preferences.rules] == ["preserve_heading_structure"]
+    assert [row.key for row in preferences.candidates] == ["explicit_open_questions_section"]
+
+
+def test_control_dashboard_preferences_page_surfaces_memory_scope_breakdown(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                },
+                {
+                    "artifact_kind": "chart",
+                    "key": "category_order",
+                    "value": "descending",
+                    "description": "Keep chart categories in descending order for this project.",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                },
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note kept getting restored by hand for this project",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    manager_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    beta_root = control_root / "Beta"
+    beta_team_dir = beta_root / ".aoe-team"
+    beta_team_dir.mkdir(parents=True, exist_ok=True)
+    (beta_team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (beta_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (beta_team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    manager_state["projects"]["beta"] = {
+        "name": "beta",
+        "display_name": "Beta",
+        "project_alias": "O3",
+        "project_root": str(beta_root),
+        "team_dir": str(beta_team_dir),
+        "overview": "runtime beta",
+        "last_request_id": "",
+        "tasks": {},
+        "task_alias_index": {},
+        "task_seq": 0,
+        "todos": [],
+        "todo_seq": 0,
+        "todo_proposals": [],
+        "todo_proposal_seq": 0,
+        "system_project": False,
+        "ops_hidden": False,
+        "paused": False,
+        "last_sync_at": "2026-04-22T09:40:00+09:00",
+        "last_sync_mode": "scenario",
+        "created_at": "2026-04-22T09:00:00+09:00",
+        "updated_at": "2026-04-22T09:50:00+09:00",
+    }
+    manager_state_file.write_text(json.dumps(manager_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    operator_preferences.save_operator_preferences(
+        beta_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "document",
+                    "key": "preserve_heading_structure",
+                    "value": True,
+                    "description": "Keep the heading structure stable across teams.",
+                    "scope": "user_global",
+                    "prompt_mode": "confirm",
+                    "enabled": False,
+                }
+            ]
+        },
+    )
+
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/preferences", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Memory Scope Breakdown" in text
+    assert "/control/audit?focus=preferences&amp;q=memory_scope%3Aproject&amp;limit=50" in text
+    assert "/control/history?q=memory_scope%3Auser_global&amp;scope=dashboard&amp;limit=20" in text
+
+    _snapshot, preferences = dashboard_state.load_dashboard_preferences_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    scope_rows = {row.scope: row for row in preferences.memory_scope_rows}
+    assert set(scope_rows.keys()) == {"session", "project", "artifact_kind", "user_global"}
+    assert scope_rows["session"].rule_count == 0
+    assert scope_rows["session"].enabled_count == 0
+    assert scope_rows["artifact_kind"].rule_count == 1
+    assert scope_rows["artifact_kind"].artifact_summary == "chart=1"
+    assert scope_rows["artifact_kind"].project_summary == "O2"
+    assert scope_rows["project"].rule_count == 1
+    assert scope_rows["project"].candidate_count == 1
+    assert scope_rows["project"].ready_candidate_count == 0
+    assert scope_rows["project"].enabled_count == 1
+    assert scope_rows["project"].disabled_count == 0
+    assert scope_rows["project"].prompt_mode_summary == "auto=0 | confirm=1 | manual=0 | disabled=0"
+    assert scope_rows["project"].history_href == "/control/history?q=memory_scope%3Aproject&scope=dashboard&limit=20"
+    assert scope_rows["user_global"].rule_count == 1
+    assert scope_rows["user_global"].candidate_count == 0
+    assert scope_rows["user_global"].enabled_count == 0
+    assert scope_rows["user_global"].disabled_count == 1
+    assert scope_rows["user_global"].artifact_summary == "document=1"
+    assert scope_rows["user_global"].project_summary == "O3"
+
+
+def test_control_dashboard_preferences_page_filters_to_selected_memory_scope(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                },
+                {
+                    "artifact_kind": "chart",
+                    "key": "category_order",
+                    "value": "descending",
+                    "description": "Keep chart categories in descending order for this project.",
+                    "scope": "project",
+                    "scope_ref": "O2",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                },
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="color_palette",
+        suggested_value="accessible",
+        issue="chart revisions repeatedly needed an accessible palette",
+        source_ref="REQ-2",
+        now_iso="2026-04-22T10:02:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response("/control/preferences?artifact=chart&scope=project", config)
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "selected_memory_scope" in text
+    assert "this project" in text
+    assert "category_order" in text
+    assert "legend_position" not in text
+    assert "show_source_note" in text
+    assert "color_palette" not in text
+    assert 'name="return_path" value="/control/preferences?artifact=chart&amp;scope=project"' in text
+    assert "/control/preferences?artifact=chart" in text
+    assert "/control/preferences?artifact=chart&amp;scope=artifact_kind" in text
+    assert "/control/audit?focus=preferences&amp;q=memory_scope%3Aproject%20artifact_kind%3Achart&amp;limit=50" in text
+
+    _snapshot, preferences = dashboard_state.load_dashboard_preferences_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        artifact_filter="chart",
+        scope_filter="project",
+    )
+    assert preferences.selected_memory_scope_summary == "this project"
+    assert preferences.return_path == "/control/preferences?artifact=chart&scope=project"
+    assert [row.key for row in preferences.rules] == ["category_order"]
+    assert [row.key for row in preferences.candidates] == ["show_source_note"]
+    assert preferences.candidates[0].expected_scope == "project"
+    assert preferences.candidates[0].expected_scope_ref == "O2"
+    scope_rows = {row.scope: row for row in preferences.memory_scope_rows}
+    assert scope_rows["project"].is_selected is True
+    assert scope_rows["project"].candidate_count == 1
+    assert scope_rows["project"].filter_href == "/control/preferences?artifact=chart&scope=project"
+    assert scope_rows["project"].audit_href == "/control/audit?focus=preferences&q=memory_scope%3Aproject%20artifact_kind%3Achart&limit=50"
+    assert scope_rows["project"].history_href == "/control/history?q=memory_scope%3Aproject%20artifact_kind%3Achart&scope=dashboard&limit=20"
+    artifact_rows = {row.artifact_kind: row for row in preferences.artifact_rows}
+    assert artifact_rows["chart"].filter_href == "/control/preferences?artifact=chart&scope=project"
+    assert artifact_rows["chart"].history_href == "/control/history?q=artifact_kind%3Achart%20memory_scope%3Aproject&scope=dashboard&limit=20"
+
+    _snapshot, artifact_scope_preferences = dashboard_state.load_dashboard_preferences_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        artifact_filter="chart",
+        scope_filter="artifact_kind",
+    )
+    assert [row.key for row in artifact_scope_preferences.rules] == ["legend_position"]
+    assert [row.key for row in artifact_scope_preferences.candidates] == ["color_palette"]
+    assert artifact_scope_preferences.candidates[0].expected_scope == "artifact_kind"
+    assert artifact_scope_preferences.candidates[0].expected_scope_ref == "chart"
+    artifact_scope_rows = {row.scope: row for row in artifact_scope_preferences.memory_scope_rows}
+    assert artifact_scope_rows["artifact_kind"].candidate_count == 1
+
+
+def test_control_dashboard_operator_preference_rule_action_updates_registry(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/operator-preference-rule",
+        body=json.dumps(
+            {
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "scope": "artifact_kind",
+                "scope_ref": "chart",
+                "value_json": json.dumps("bottom", ensure_ascii=False),
+                "description": "Keep the legend below the chart.",
+                "mode": "auto",
+                "return_path": "/control/preferences?project=O2&artifact=chart&scope=artifact_kind",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["focus_badge"] == "preferences"
+    assert payload["project_alias"] == "O2"
+    assert payload["next_step"] == "/control/preferences?project=O2&artifact=chart&scope=artifact_kind"
+    assert payload["outcome"]["kind"] == "operator_preference_rule"
+    assert payload["outcome"]["reason_code"] == "rule_updated"
+    assert "legend_position=bottom" in payload["applied_preferences_summary"]
+    assert payload["preview"]["detail_path"] == "/control/preferences?project=O2&artifact=chart&scope=artifact_kind"
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    matching = [row for row in registry["rules"] if row["key"] == "legend_position" and row["artifact_kind"] == "chart"]
+    assert matching
+    assert matching[0]["enabled"] is True
+    assert matching[0]["prompt_mode"] == "auto"
+
+
+def test_control_dashboard_operator_preference_rule_action_invalid_return_path_falls_back_to_preferences(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/operator-preference-rule",
+        body=json.dumps(
+            {
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "scope": "artifact_kind",
+                "scope_ref": "chart",
+                "value_json": json.dumps("bottom", ensure_ascii=False),
+                "description": "Keep the legend below the chart.",
+                "mode": "auto",
+                "return_path": "https://example.com/control/preferences?project=O2",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["next_step"] == "/control/preferences"
+    assert payload["preview"]["detail_path"] == "/control/preferences"
+
+
+def test_control_dashboard_operator_preference_candidate_action_promotes_and_clears_candidate(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-2",
+        now_iso="2026-04-22T10:05:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/operator-preference-candidate",
+        body=json.dumps(
+            {
+                "task_ref": "T-001",
+                "artifact_kind": "chart",
+                "key": "show_source_note",
+                "project_ref": "O2",
+                "value_json": json.dumps(True, ensure_ascii=False),
+                "description": "source note was missing in repeated chart revisions",
+                "mode": "auto",
+                "return_path": "/control/preferences?project=O2&artifact=chart&scope=project",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["focus_badge"] == "preferences"
+    assert payload["project_alias"] == "O2"
+    assert payload["outcome"]["kind"] == "operator_preference_candidate"
+    assert payload["outcome"]["reason_code"] == "candidate_promoted"
+    assert payload["next_step"] == "/control/preferences?project=O2&artifact=chart&scope=project"
+    assert "show_source_note=true" in payload["applied_preferences_summary"]
+    assert "show_source_note=true" in payload["preference_candidate_summary"]
+    assert payload["preference_candidate_scope_summary"] == "preference_candidate_scopes=show_source_note:project:O2"
+    assert payload["preference_memory_scope_summary"] == "preference_memory_scope=project:O2"
+    assert payload["preference_refresh_diff_summary"] == (
+        "preference_refresh_diff="
+        "applied_added=show_source_note=true | on | auto | project:O2 ; "
+        "candidates_removed=show_source_note=true | hits=2 | issue=source note was missing in repeated chart revisions"
+    )
+    assert payload["refresh_action"]["path"] == "/control/actions/task/worker-apply-preview"
+    assert payload["refresh_action"]["payload_json"] == "{\"task_ref\":\"T-001\"}"
+    assert payload["actions"][0]["label"] == "Reopen Preview"
+    assert payload["actions"][0]["path"] == "/control/actions/task/worker-apply-preview"
+    assert payload["preview"]["detail_path"] == "/control/preferences?project=O2&artifact=chart&scope=project"
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="candidates_removed",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert len(audit.rows) == 1
+    assert "candidates_removed=show_source_note=true" in audit.rows[0].preference_refresh_diff_summary
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="candidates_removed",
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.total_rows == 1
+    assert len(history.rows) == 1
+    assert "preference_refresh_diff=" in history.rows[0].detail
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    matching = [row for row in registry["rules"] if row["key"] == "show_source_note" and row["artifact_kind"] == "chart"]
+    assert matching
+    assert matching[0]["prompt_mode"] == "auto"
+    assert matching[0]["enabled"] is True
+    assert matching[0]["scope"] == "project"
+    assert matching[0]["scope_ref"] == "O2"
+
+    candidates = operator_preferences.load_operator_preference_candidates(project_team_dir)
+    assert candidates["candidates"] == []
 
 
 def test_dashboard_blocks_worker_apply_until_phase_checkpoint_reaches_verify_or_handoff(tmp_path: Path) -> None:
@@ -6049,7 +9827,8 @@ def test_control_dashboard_post_task_worker_apply_accept_route_promotes_apply_pr
 
 def test_dashboard_and_routes_gate_writing_apply_actions_when_quality_open(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
-    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    _persist_general_subagent_artifact(project_root)
     state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["background_run_task_contract_module"] = "writing"
@@ -7206,6 +10985,7 @@ def test_control_dashboard_action_audit_appends_concurrently_without_row_loss(tm
         return rows
 
     monkeypatch.setattr(dashboard_app, "_load_existing_action_audit_rows", _slow_loader)
+    monkeypatch.setenv("AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS", "0")
 
     def _append(idx: int) -> None:
         dashboard_app._append_action_audit(
@@ -7639,7 +11419,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     ]
     action_notes = [row.get("note") for row in (apply_payload.get("actions") or [])][:3]
     assert action_notes[0].startswith("start with Chat, then keep Global Direct narrow")
-    assert "dispatch waits for critic-approved plan" in action_notes[0]
+    assert "dispatch unlocked after critic approval" in action_notes[0]
     assert action_notes[1:] == [
         "inspect the full server-guard action trail",
         "inspect host pressure after switching the chat rail",
@@ -7678,7 +11458,7 @@ def test_control_dashboard_server_guard_preset_apply_updates_latest_result_and_c
     assert health_status == 200
     assert health["server_guard_latest_result_summary"].startswith("Apply Global Direct | completed")
     assert "planning_compact=draft via" in health["server_guard_latest_result_summary"]
-    assert "dispatch waits for critic-approved plan" in health["server_guard_latest_result_summary"]
+    assert "dispatch unlocked after critic approval" in health["server_guard_latest_result_summary"]
     assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in health["server_guard_latest_result_summary"]
 
     audit_status, _audit_headers, audit_body = dashboard_app.build_dashboard_response("/control/audit?focus=server-guard&chat=123456&limit=20", config)
@@ -7736,7 +11516,7 @@ def test_control_dashboard_runs_general_subagent_support_action_from_task(tmp_pa
     assert payload["subagent_evidence_summary"].startswith("general_research | confidence=")
     assert payload["subagent_artifact_path"] == "harness_authoring/subagents/req-1-general-research.json"
     assert payload["planning_compact"].startswith("draft via codex, claude | review via codex, claude")
-    assert "dispatch waits for critic-approved plan" in payload["planning_compact"]
+    assert "dispatch unlocked after critic approval" in payload["planning_compact"]
     assert payload["subagent_key_findings"]
     assert payload["subagent_artifact_refs"]
     assert artifact_path.exists()
@@ -7842,13 +11622,11 @@ def test_control_dashboard_recovery_surfaces_chat_session_on_compact_server_guar
     assert recovery_text.count("chat_session") >= 2
     assert recovery_text.count(">123456<") >= 2
     assert "/control/chat?chat=123456&amp;preset=package-rail" in recovery_text
-    assert recovery_text.count(">Chat<") >= 1
-    assert recovery_text.count(">Audit<") >= 1
-    assert recovery_text.count(">Health<") >= 1
-    assert "server-guard-mini-link chat" in recovery_text
-    assert "server-guard-mini-link audit" in recovery_text
-    assert "server-guard-mini-link health" in recovery_text
-    assert "server-guard-mini-link chat priority" in recovery_text
+    assert recovery_text.count(">Chat Console<") >= 1
+    assert recovery_text.count(">Action Audit<") >= 1
+    assert recovery_text.count(">Open Health View<") >= 1
+    assert "server-guard-thread-highlight" in recovery_text
+    assert "server-guard-thread-priority-note" in recovery_text
     assert "action_copy" in recovery_text
     assert "subagent_evidence" in recovery_text
     assert "subagent_gate" in recovery_text
@@ -8265,6 +12043,19 @@ def test_execute_retry_run_transition_prefers_recorded_outcome_contract(tmp_path
         port=8765,
     )
     paths, manager_state = dashboard_app._load_dashboard_manager_state(config)
+    task = manager_state["projects"]["alpha"]["tasks"]["REQ-1"]
+    _mark_task_planning_gate_blocked(task)
+    task["job_contract_status"] = "blocked"
+    task["job_contract_planning_mode"] = "standard"
+    task["job_contract_summary"] = "status=blocked | plan=standard | scope=0 | checks=0 | artifacts=0"
+    task["debug_packet_state"] = "blocked"
+    task["debug_packet_summary"] = "state=blocked | symptom=execution_brief_blocked | evidence=1 | next=/offdesk review"
+    task["debug_packet_symptom"] = "execution_brief_blocked"
+    task["debug_packet_failed_attempt"] = "critic=planning_gate"
+    task["debug_packet_next_step"] = "/offdesk review"
+    task["phase_checkpoint_status"] = "blocked"
+    task["phase_checkpoint_current_phase"] = "plan"
+    task["phase_checkpoint_summary"] = "status=blocked | current=plan | plan=blocked|note=contract_gap"
     assert action_audit.append_action_audit_row(
         team_dir,
         headline="Offdesk Judge",

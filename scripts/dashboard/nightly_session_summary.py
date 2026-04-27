@@ -324,6 +324,14 @@ def build_nightly_session_summary(
                 "active_task_background_run_worker_update_stub_summary": detail.active_task_background_run_worker_update_stub_summary,
                 "active_task_background_run_worker_update_stub_targets": detail.active_task_background_run_worker_update_stub_targets,
                 "active_task_background_run_worker_update_operator_summary": detail.active_task_background_run_worker_update_operator_summary,
+                "active_task_background_run_operator_preference_artifact_kind": detail.active_task_background_run_operator_preference_artifact_kind,
+                "active_task_background_run_operator_preference_preflight_summary": detail.active_task_background_run_operator_preference_preflight_summary,
+                "active_task_background_run_operator_preference_applied_summary": detail.active_task_background_run_operator_preference_applied_summary,
+                "active_task_background_run_operator_preference_candidate_summary": detail.active_task_background_run_operator_preference_candidate_summary,
+                "active_task_background_run_operator_preference_confirm_summary": detail.active_task_background_run_operator_preference_confirm_summary,
+                "active_task_background_run_operator_preference_manual_summary": detail.active_task_background_run_operator_preference_manual_summary,
+                "active_task_background_run_operator_preference_disabled_summary": detail.active_task_background_run_operator_preference_disabled_summary,
+                "active_task_background_run_operator_preference_decision_summary": detail.active_task_background_run_operator_preference_decision_summary,
                 "active_task_background_run_worker_update_proposal_summary": detail.active_task_background_run_worker_update_proposal_summary,
                 "active_task_background_run_worker_update_proposal_ids": list(
                     getattr(detail, "active_task_background_run_worker_update_proposal_ids", []) or []
@@ -629,6 +637,14 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                     f"  - backend_note: {runtime.get('active_task_backend_note', '-') or '-'}",
                     f"  - rate_limit: {runtime.get('active_task_rate_limit', '-')}",
                     f"  - worker_update: {runtime.get('active_task_background_run_worker_update_operator_summary', '-')}",
+                    f"  - preference_artifact: {runtime.get('active_task_background_run_operator_preference_artifact_kind', '-')}",
+                    f"  - preference_preflight: {runtime.get('active_task_background_run_operator_preference_preflight_summary', '-')}",
+                    f"  - preference_applied: {runtime.get('active_task_background_run_operator_preference_applied_summary', '-')}",
+                    f"  - preference_candidates: {runtime.get('active_task_background_run_operator_preference_candidate_summary', '-')}",
+                    f"  - preference_confirm: {runtime.get('active_task_background_run_operator_preference_confirm_summary', '-')}",
+                    f"  - preference_manual: {runtime.get('active_task_background_run_operator_preference_manual_summary', '-')}",
+                    f"  - preference_disabled: {runtime.get('active_task_background_run_operator_preference_disabled_summary', '-')}",
+                    f"  - preference_decisions: {runtime.get('active_task_background_run_operator_preference_decision_summary', '-')}",
                 ]
             )
             active_task_hints = runtime.get("active_task_hints") if isinstance(runtime.get("active_task_hints"), list) else []

@@ -44,6 +44,7 @@ from control_dashboard_state import (
     load_dashboard_action_audit_page,
     load_dashboard_chat_page,
     load_dashboard_history_page,
+    load_dashboard_preferences_page,
     load_dashboard_recovery_page,
     load_dashboard_runtime_page,
     load_dashboard_snapshot,
@@ -67,7 +68,7 @@ def _append_action_audit(config: DashboardAppConfig, payload: Dict[str, object])
 
 
 def _is_known_dashboard_get_route(path: str) -> bool:
-    if path in {"", "/", "/control", "/control/chat", "/control/offdesk", "/control/recovery", "/control/audit", "/control/history", "/control/tasks", "/control/health", "/control/health/view"}:
+    if path in {"", "/", "/control", "/control/chat", "/control/offdesk", "/control/recovery", "/control/preferences", "/control/audit", "/control/history", "/control/tasks", "/control/health", "/control/health/view"}:
         return True
     if path.startswith("/static/"):
         return True
@@ -212,6 +213,26 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             )
         )
 
+    if path == "/control/preferences":
+        query = parse_qs(parsed.query or "", keep_blank_values=False)
+        snapshot, preferences = load_dashboard_preferences_page(
+            control_root=config.control_root,
+            team_dir=config.team_dir,
+            manager_state_file=config.manager_state_file,
+            project_filter=str((query.get("project") or [""])[0]).strip(),
+            artifact_filter=str((query.get("artifact") or [""])[0]).strip(),
+            scope_filter=str((query.get("scope") or [""])[0]).strip(),
+        )
+        return _html(
+            render_template(
+                "dashboard/preferences.html",
+                page_title="Operator Preferences",
+                snapshot=snapshot,
+                preferences=preferences,
+                current_path=path,
+            )
+        )
+
     if path == "/control/audit":
         query = parse_qs(parsed.query or "", keep_blank_values=False)
         limit_raw = str((query.get("limit") or ["50"])[0]).strip()
@@ -224,21 +245,26 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
             focus=str((query.get("focus") or ["all"])[0]),
+            project_filter=str((query.get("project") or [""])[0]).strip(),
             chat_id=str((query.get("chat") or [""])[0]).strip(),
+            query=str((query.get("q") or [""])[0]).strip(),
             limit=limit,
         )
         return _html(render_template("dashboard/audit.html", page_title="Action Audit", snapshot=snapshot, audit=audit, current_path=path))
 
     if path == "/control/history":
         query = parse_qs(parsed.query or "", keep_blank_values=False)
+        compact_token = str((query.get("compact") or [""])[0]).strip().lower()
         snapshot, history = load_dashboard_history_page(
             control_root=config.control_root,
             team_dir=config.team_dir,
             manager_state_file=config.manager_state_file,
             query=str((query.get("q") or [""])[0]),
+            chat_filter=str((query.get("chat") or [""])[0]),
             project_filter=str((query.get("project") or [""])[0]),
             since=str((query.get("since") or [""])[0]),
             scope=str((query.get("scope") or ["all"])[0]),
+            compact_mode=compact_token in {"1", "true", "yes", "on"},
             limit=int(str((query.get("limit") or ["20"])[0] or "20")),
         )
         return _html(
