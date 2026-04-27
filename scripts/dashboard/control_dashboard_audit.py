@@ -249,6 +249,7 @@ def _append_action_audit(
         ("preference_candidate_summary", "preference_candidate_summary"),
         ("preference_candidate_scope_summary", "preference_candidate_scope_summary"),
         ("preference_decision_summary", "preference_decision_summary"),
+        ("preference_memory_scope_summary", "preference_memory_scope_summary"),
         ("preference_refresh_diff_summary", "preference_refresh_diff_summary"),
     ):
         value = str(payload.get(source_key, "")).strip()

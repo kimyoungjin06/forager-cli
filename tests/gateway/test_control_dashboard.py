@@ -9351,13 +9351,113 @@ def test_control_dashboard_operator_preference_rule_action_updates_registry(tmp_
     assert payload["outcome"]["kind"] == "operator_preference_rule"
     assert payload["outcome"]["reason_code"] == "rule_updated"
     assert "legend_position=bottom" in payload["applied_preferences_summary"]
+    assert payload["preference_memory_scope_summary"] == "preference_memory_scope=artifact_kind:chart"
+    assert payload["preference_refresh_diff_summary"] == (
+        "preference_refresh_diff=applied_added=legend_position=bottom | on | auto | artifact_kind:chart"
+    )
     assert payload["preview"]["detail_path"] == "/control/preferences?project=O2&artifact=chart&scope=artifact_kind"
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="applied_added",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert len(audit.rows) == 1
+    assert audit.rows[0].preference_memory_scope_summary == "preference_memory_scope=artifact_kind:chart"
+    assert "applied_added=legend_position=bottom" in audit.rows[0].preference_refresh_diff_summary
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="applied_added",
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.total_rows == 1
+    assert len(history.rows) == 1
+    assert "preference_refresh_diff=" in history.rows[0].detail
 
     registry = operator_preferences.load_operator_preferences(project_team_dir)
     matching = [row for row in registry["rules"] if row["key"] == "legend_position" and row["artifact_kind"] == "chart"]
     assert matching
     assert matching[0]["enabled"] is True
     assert matching[0]["prompt_mode"] == "auto"
+
+
+def test_control_dashboard_operator_preference_rule_action_delete_records_refresh_diff(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_action_response(
+        "/control/actions/control/operator-preference-rule",
+        body=json.dumps(
+            {
+                "artifact_kind": "chart",
+                "key": "legend_position",
+                "scope": "artifact_kind",
+                "scope_ref": "chart",
+                "mode": "delete",
+                "return_path": "/control/preferences?project=O2&artifact=chart&scope=artifact_kind",
+            }
+        ).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
+    payload = json.loads(body.decode("utf-8"))
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["outcome"]["reason_code"] == "rule_deleted"
+    assert payload["preference_memory_scope_summary"] == "preference_memory_scope=artifact_kind:chart"
+    assert payload["preference_refresh_diff_summary"] == (
+        "preference_refresh_diff=applied_removed=legend_position=bottom | on | auto | artifact_kind:chart"
+    )
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="applied_removed",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert len(audit.rows) == 1
+    assert audit.rows[0].preference_memory_scope_summary == "preference_memory_scope=artifact_kind:chart"
+    assert "applied_removed=legend_position=bottom" in audit.rows[0].preference_refresh_diff_summary
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    assert registry["rules"] == []
 
 
 def test_control_dashboard_operator_preference_rule_action_invalid_return_path_falls_back_to_preferences(tmp_path: Path) -> None:
