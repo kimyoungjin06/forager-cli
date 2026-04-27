@@ -1,0 +1,208 @@
+# Build B3 Manual Followup Path
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `B3`
+- preset:
+  - `build`
+- branch_target:
+  - `manual_followup`
+  - `execute_surface`
+- status:
+  - `bounded_replay_pass`
+- proof_mode:
+  - `bounded_replay`
+- promotion_gate:
+  - `FollowupBrief is now the canonical lane/reason source and gateway-full CI covers the full gateway suite`
+- live_gate:
+  - `not opened yet; next step is an isolated local_tmux followup-exec launch with run_lock=open and slot limit 1`
+- executed_at:
+  - `2026-04-27 KST`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `로그인 실패 세션 정리 패치의 테스트 증거는 보강하되, 배포 허용 여부와 릴리즈 문구는 내가 판단할 수 있게 manual follow-up으로 남겨라.`
+- normalized action:
+  - `followup_execute`
+- target runtime:
+  - `/tmp/b3_seed_probe`
+
+## 3. Expected Contract
+- expected preset:
+  - `build`
+- expected execution brief:
+  - status:
+    - `partially_executable`
+  - executable slice:
+    - `tests/session.test.js`
+    - `report.md`
+  - blocked slice or operator decision:
+    - `release acceptance decision`
+    - `release note wording`
+- expected followup brief:
+  - status:
+    - `partially_executable`
+  - execution lanes:
+    - `L2`
+  - review lanes:
+    - `R1`
+- expected lane shape:
+  - execution:
+    - `Codex-Dev` build evidence follow-up lane
+  - review:
+    - `Claude-Reviewer` manual release acceptance lane
+- expected completion branch:
+  - `manual_followup`
+- expected reentry rail:
+  - `retry=none | followup=partially_executable exec=L2 review=R1 | bg=-`
+- expected evidence:
+  - `FollowupBrief` alone declares the follow-up lane ids and reason
+  - `/task` and `/followup` agree on `L2` and `R1`
+  - `/followup-exec` is visible for the executable follow-up lane, but review lane `R1` remains manual
+  - no background ticket is created during the bounded replay
+
+## 4. Runtime Evidence
+- request_id:
+  - `REQ-B3-001`
+- task_short_id:
+  - `T-601`
+- planning:
+  - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3`
+- execution brief:
+  - `partially_executable | do=tests/session.test.js,report.md | blocked=operator-owned release acceptance`
+- followup brief:
+  - `partially_executable | execution=L2 | review=R1`
+- reentry rails:
+  - `retry=none | followup=partially_executable exec=L2 review=R1`
+- stage progression:
+  - planning:
+    - `seeded build manual-followup candidate in isolated runtime`
+  - execution:
+    - `not launched in this proof mode`
+  - verification:
+    - `bounded surface parity captured through gateway simulate commands and regression tests`
+  - integration:
+    - `not launched`
+  - close:
+    - `not launched`
+- critic/verifier verdict:
+  - `normalized exec critic stays fail/escalate with empty legacy manual lane fields; FollowupBrief still opens /followup and /followup-exec lane controls`
+- final branch:
+  - `manual_followup`
+
+## 5. Surface Evidence
+- `/task`:
+  - `shows team_phase=manual_intervention`
+  - `shows reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1`
+  - `shows followup_brief_targets: execution=L2 review=R1`
+  - keyboard includes `/followup-exec T-601` and lane buttons for `L2` and `R1`
+- `/monitor`:
+  - `not required for bounded replay`
+- `/offdesk review`:
+  - `first action stays /followup T-601 | build-manual-followup`
+  - `does not redirect the operator into retry`
+- `/orch status`:
+  - `run_lock=test_only`
+  - `background_slots local_tmux=0/1 github_runner=0/1 remote_worker=0/1`
+  - `roles are available from the seeded orchestrator config`
+- dashboard `Task Detail`:
+  - `bounded replay coverage includes followup-execute transition and local_tmux route tests`
+- dashboard `Recovery`:
+  - `not required for bounded replay`
+- background run ticket / runner:
+  - `none created in this proof`
+- launch spec / evidence bundle:
+  - `background_run_launch_spec: externalizable=no before a task-specific launch is created`
+
+## 6. Result
+- result:
+  - `pass`
+- mismatch class:
+  - `not_live_launched`
+- mismatch notes:
+  - `B3 is written and replay-proven, but no local_tmux background ticket has been launched yet`
+  - `the bounded proof intentionally keeps run_lock=test_only and avoids mutating background state`
+  - `prelaunch /orch status still reports pref=local_tmux | effective=local_background until a task-specific launch spec exists`
+- next fix:
+  - `promote B3 to live_rehearsal by launching exactly one /followup-exec T-601 lane L2 over local_tmux in an isolated runtime`
+
+## 7. Raw References
+- runtime state refs:
+  - `/tmp/b3_seed_probe/.aoe-team/orch_manager_state.json`
+  - `tests/gateway/test_live_rehearsal_seed.py::test_seed_b3_build_manual_followup_runtime_creates_canonical_followup_candidate`
+  - `tests/gateway/test_gateway_state_helpers.py::test_build_followup_brief_snapshot_prefers_existing_followup_brief_fields`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_followup_summarizes_allowed_lane_targets`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_uses_execution_slice_only`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_followup_execute_transition_rejects_review_lane_selection`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_runs_partially_executable_brief`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_followup_execute_route_uses_local_tmux_background_when_preferred`
+- log refs:
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3 --control-root /tmp/b3_seed_probe --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `bounded replay command: bash scripts/gateway_pytest.sh tests/gateway/test_live_rehearsal_seed.py -q`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_seed_probe/Alpha --workspace-root /tmp/b3_seed_probe --team-dir /tmp/b3_seed_probe/.aoe-team --manager-state-file /tmp/b3_seed_probe/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-601'`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_seed_probe/Alpha --workspace-root /tmp/b3_seed_probe --team-dir /tmp/b3_seed_probe/.aoe-team --manager-state-file /tmp/b3_seed_probe/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-601'`
+  - `surface command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/b3_seed_probe/Alpha --workspace-root /tmp/b3_seed_probe --team-dir /tmp/b3_seed_probe/.aoe-team --manager-state-file /tmp/b3_seed_probe/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O6'`
+- artifact refs:
+  - `none yet; expected after live rehearsal: background_run_logs/<ticket>.log`
+  - `none yet; expected after live rehearsal: background_run_results/<ticket>.json`
+
+## 8. Live Rehearsal Runbook
+- rehearsal scope:
+  - `single build evidence followup over local_tmux only`
+- safety posture:
+  - use an isolated runtime
+  - seed it with:
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario b3 --control-root tmp/b3_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - before launch, explicitly set:
+    - `run_lock_mode=open`
+    - `background_runner_target=local_tmux`
+    - `background_runner_slot_limits.local_tmux=1`
+  - keep:
+    - `github_runner=0/disabled for this rehearsal`
+    - `remote_worker=0/disabled for this rehearsal`
+- required target state:
+  - a build task exists with:
+    - `ExecutionBrief.status=partially_executable`
+    - `FollowupBrief.status=partially_executable`
+    - `followup_brief_execution_lane_ids=["L2"]`
+    - `followup_brief_review_lane_ids=["R1"]`
+    - `exec_critic.manual_followup_*` may be empty because `FollowupBrief` is canonical
+- preflight:
+  - verify `/orch status <orch>` shows:
+    - `run_lock=open`
+    - `background_slots` with `local_tmux=0/1`
+    - seeded build/reviewer roles available
+  - verify `/task <task>` shows:
+    - `followup_brief=partially_executable`
+    - `followup_brief_targets: execution=L2 review=R1`
+  - verify `/followup <task>` opens and reports:
+    - execution lane `L2`
+    - review lane `R1`
+    - operator-owned release acceptance reason
+- trigger:
+  - launch exactly one bounded followup execute through one operator surface:
+    - `/followup-exec <task> lane L2`
+    - or dashboard followup-execute action with `lane_ids=["L2"]`
+  - do not launch `R1`
+- capture during rehearsal:
+  - `/orch status <orch>` before launch
+  - `/task <task>` before launch
+  - `/followup <task>` before launch
+  - followup-execute trigger response
+  - `/orch status <orch>` after launch
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+- pass criteria:
+  - followup execute stays build execution-only
+  - runner target is `local_tmux`
+  - exactly one background ticket is created
+  - `reentry_rails_summary` remains `manual_followup`
+  - review/manual remainder `R1` stays visible after launch
+  - no retry branch replaces the followup branch
+- fail conditions:
+  - followup execute launches review lane `R1`
+  - runner target drifts to `github_runner` or `remote_worker`
+  - background launch exceeds one local_tmux slot
+  - `/task`, `/followup`, and dashboard disagree on lane ids or next step
