@@ -2565,7 +2565,7 @@ def sanitize_task_record(
                 if token and token not in workers:
                     workers.append(token)
         if not workers:
-            workers = dedupe_roles((task.get("plan_roles") or []) + (task.get("roles") or [])) or ["Worker"]
+            workers = dedupe_roles((task.get("plan_roles") or []) + (task.get("roles") or []))
         max_subtasks = 0
         raw_subtasks = plan.get("subtasks")
         if isinstance(raw_subtasks, list):

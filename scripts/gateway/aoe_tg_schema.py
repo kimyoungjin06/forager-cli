@@ -834,8 +834,19 @@ def normalize_task_plan_payload(
             token = str(row or "").strip()
             if token and token not in worker_roles:
                 worker_roles.append(token[:64])
+    if not worker_roles and role_map:
+        worker_roles = worker_list[:]
+    if not worker_roles:
+        for row in raw_subtasks:
+            if not isinstance(row, dict):
+                continue
+            token = str(row.get("owner_role", row.get("role", ""))).strip()
+            if token and token not in worker_roles:
+                worker_roles.append(token[:64])
     if not worker_roles:
         worker_roles = worker_list[:]
+    elif not role_map:
+        worker_list = worker_roles[:]
 
     phase1_role_preset = normalize_role_preset(
         contract_preset

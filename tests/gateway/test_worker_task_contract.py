@@ -1041,7 +1041,7 @@ def test_package_syncback_blocker_prefers_syncback_pending_reason() -> None:
         mode="syncback",
     )
     assert blocker["reason_code"] == "package_syncback_pending"
-    assert blocker["suggested_action"] == "task_review"
+    assert blocker["suggested_action"] == "package_syncback_review"
     assert blocker["remediation"] == "prepare syncback readiness before accepted syncback"
     assert blocker["summary_line"] == (
         "package_syncback_blocker | reason=package_syncback_pending | blocked=syncback_ready,package_ready | next=prepare_syncback"

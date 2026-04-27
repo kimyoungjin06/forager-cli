@@ -2175,6 +2175,9 @@ def derive_worker_task_module_record_rows(
     module_kind = _trim(contract_row.get("module_kind"), 48).lower() or "general"
     gate_state = _trim(gate_row.get("state"), 64).lower() or "-"
     checklist_state = _trim(checklist_row.get("state"), 64).lower() or "-"
+    checklist_next_hint = _trim(checklist_row.get("next_hint"), 64) or ""
+    if checklist_next_hint == "-":
+        checklist_next_hint = ""
     record_map = worker_task_module_record_map(records_row)
 
     def _row(label: str, value: str, state: str, *, note: str = "") -> str:
@@ -2198,14 +2201,14 @@ def derive_worker_task_module_record_rows(
             ),
         ]
         if gap_open:
-            rows.append(_row("gap_row", "evidence_missing", "open", note=checklist_state or "review"))
+            rows.append(_row("gap_row", "evidence_missing", "open", note=checklist_next_hint or checklist_state or "review"))
         else:
             rows.append(
                 _row(
                     "caveat_row",
                     record_map.get("caveat_record", "-"),
                     "review" if record_map.get("caveat_record", "-") not in {"", "-"} else "clear",
-                    note=checklist_state or "validate_caveats",
+                    note=checklist_next_hint or checklist_state or "validate_caveats",
                 )
             )
         return sanitize_worker_task_module_record_rows(

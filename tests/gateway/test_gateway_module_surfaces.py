@@ -636,7 +636,7 @@ def test_gateway_aux_module_matches_replay_list_path(tmp_path: Path) -> None:
         gw.STATE_FAILED_QUEUE_KEY: [
             {
                 "id": "abc",
-                "at": "2026-03-11T12:00:00+0900",
+                "at": gw.now_iso(),
                 "chat_id": "939062873",
                 "text": "/status",
                 "trace_id": "trace-1",

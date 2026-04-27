@@ -1167,7 +1167,7 @@ def test_schema_normalizes_plan_and_exec_critic_payloads() -> None:
 
     assert plan["summary"] == "demo"
     assert plan["subtasks"][0]["owner_role"] == "Codex-Analyst"
-    assert plan["subtasks"][1]["owner_role"] == "UnknownRole"
+    assert plan["subtasks"][1]["owner_role"] == "Codex-Analyst"
     assert critic["approved"] is False
     assert critic["issues"] == ["missing acceptance"]
     assert exec_critic["verdict"] == "retry"
@@ -1487,11 +1487,11 @@ def test_ensure_task_record_populates_planning_primitives_on_creation() -> None:
 
     assert task["request_contract_status"] == "complete"
     assert task["execution_brief_status"] == "executable"
-    assert task["job_contract_status"] == "blocked"
-    assert task["job_contract_scope"] == []
-    assert task["job_contract_acceptance_checks"] == []
-    assert task["job_contract_artifacts_to_touch"] == []
-    assert task["phase_checkpoint_status"] == "blocked"
+    assert task["job_contract_status"] == "ready"
+    assert task["job_contract_scope"] == ["work_result"]
+    assert "implementation_delta" in task["job_contract_acceptance_checks"]
+    assert task["job_contract_artifacts_to_touch"] == ["work_result"]
+    assert task["phase_checkpoint_status"] == "ready"
     assert task["phase_checkpoint_current_phase"] == "plan"
 
 
@@ -3455,11 +3455,11 @@ def test_tf_worker_specs_use_request_scoped_session_and_logs(tmp_path: Path) -> 
 
     assert len(specs) == 1
     spec = specs[0]
-    assert spec["session"].startswith("tfw_req-123_reviewer")
+    assert spec["session"].startswith("tfw_req-123_codex-reviewer")
     assert "aoe-tf-worker-session.py" in spec["shell"]
     assert "scripts/team/runtime/worker_codex_handler.sh" in spec["shell"]
     assert str(team_dir / "telegram.env") not in spec["shell"] or ". " in spec["shell"]
-    assert str(team_dir / "tf_runs" / "REQ-123" / "logs" / "worker_reviewer.console.log") in spec["log_file"]
+    assert str(team_dir / "tf_runs" / "REQ-123" / "logs" / "worker_codex-reviewer.console.log") in spec["log_file"]
 
 
 def test_resolve_dispatch_roles_from_preview_reads_dispatch_plan(monkeypatch) -> None:
@@ -3536,7 +3536,7 @@ def test_choose_auto_dispatch_roles_adds_claude_companion_for_multi_review_reque
         team_dir=team_dir,
     )
 
-    assert roles == ["Codex-Reviewer"]
+    assert roles == ["Codex-Reviewer", "Claude-Reviewer"]
 
 
 def test_choose_auto_dispatch_roles_adds_claude_companion_for_explicit_review_role(tmp_path: Path) -> None:

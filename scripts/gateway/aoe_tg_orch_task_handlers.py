@@ -295,7 +295,7 @@ def _orch_status_reply_markup(manager_state: Dict[str, Any], key: str, entry: Di
             [{"text": f"/sync preview {alias} 1h"}],
             [{"text": f"/sync {alias} 1h"}, {"text": f"/use {alias}"}, {"text": focus_button}],
             [{"text": hide_button}],
-            [{"text": f"/orch status {alias}"}, {"text": "/queue"}, {"text": "/map"}],
+            [{"text": f"/orch status {alias}"}, {"text": "/queue"}, {"text": "/next"}, {"text": "/map"}],
         ]
         keyboard = [row for row in keyboard if row]
     return {

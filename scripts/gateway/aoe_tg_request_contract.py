@@ -1442,6 +1442,116 @@ def resolve_request_contract_preset(
     return inferred or "general"
 
 
+def _fallback_contract_for_preset(resolved_preset: str, source_prompt: str) -> Dict[str, Any]:
+    preset = normalize_role_preset(resolved_preset)
+    src = _trim(source_prompt, 2000)
+    objective = _trim(source_prompt, 240)
+
+    if preset == "build":
+        return {
+            "version": REQUEST_CONTRACT_VERSION,
+            "contract_type": "build",
+            "preset": "build",
+            "status": "complete",
+            "objective": objective,
+            "source_prompt": src,
+            "fields": {
+                "deliverable_policy": {
+                    "work_result_required": True,
+                    "execution_outputs": ["work_result"],
+                }
+            },
+            "required_outputs": ["work_result"],
+            "required_evidence": ["implementation_delta"],
+            "missing_fields": [],
+            "ambiguity_notes": [],
+            "summary": "build | outputs=work_result",
+            "artifact_contracts": {
+                "work_result": {
+                    "format": "implementation_delta",
+                    "required_fields": ["changed files", "behavior delta", "test evidence"],
+                    "acceptance_notes": [
+                        "work_result is the canonical execution-lane deliverable for build requests.",
+                    ],
+                }
+            },
+        }
+    if preset == "writer":
+        return {
+            "version": REQUEST_CONTRACT_VERSION,
+            "contract_type": "writer",
+            "preset": "writer",
+            "status": "complete",
+            "objective": objective,
+            "source_prompt": src,
+            "fields": {
+                "deliverable_policy": {
+                    "writer_outputs": ["handoff_doc"],
+                }
+            },
+            "required_outputs": ["handoff_doc"],
+            "required_evidence": ["operator_handoff"],
+            "missing_fields": [],
+            "ambiguity_notes": [],
+            "summary": "writer | outputs=handoff_doc",
+            "artifact_contracts": {
+                "handoff_doc": {
+                    "path": "docs/handoff/operator_handoff.md",
+                    "format": "markdown",
+                    "required_fields": ["change summary", "validation status", "operator follow-ups"],
+                    "acceptance_notes": [
+                        "operator_handoff.md is the canonical writer-lane handoff artifact.",
+                    ],
+                }
+            },
+        }
+    if preset == "analysis":
+        return {
+            "version": REQUEST_CONTRACT_VERSION,
+            "contract_type": "analysis",
+            "preset": "analysis",
+            "status": "complete",
+            "objective": objective,
+            "source_prompt": src,
+            "fields": {
+                "deliverable_policy": {
+                    "analysis_outputs": ["analysis_report"],
+                }
+            },
+            "required_outputs": ["analysis_report"],
+            "required_evidence": ["source_rationale"],
+            "missing_fields": [],
+            "ambiguity_notes": [],
+            "summary": "analysis | outputs=analysis_report",
+            "artifact_contracts": {
+                "analysis_report": {
+                    "path": "docs/analysis/analysis_report.md",
+                    "format": "markdown",
+                    "required_fields": ["key findings", "evidence references", "open questions"],
+                    "acceptance_notes": [
+                        "analysis_report.md is the canonical analyst-lane output artifact.",
+                    ],
+                }
+            },
+        }
+
+    return {
+        "version": REQUEST_CONTRACT_VERSION,
+        "contract_type": preset,
+        "preset": preset,
+        "status": "complete",
+        "objective": objective,
+        "source_prompt": src,
+        "fields": {},
+        "required_outputs": [],
+        "required_evidence": [],
+        "missing_fields": [],
+        "ambiguity_notes": [],
+        "summary": f"{preset or 'general'} | text-first",
+        "artifact_contracts": {},
+    }
+
+
 def build_request_contract(
     *,
     source_prompt: str,
@@ -1514,21 +1624,7 @@ def build_request_contract(
             "artifact_contracts": {},
         }
     else:
-        contract = {
-            "version": REQUEST_CONTRACT_VERSION,
-            "contract_type": resolved_preset,
-            "preset": resolved_preset,
-            "status": "complete",
-            "objective": _trim(source_prompt, 240),
-            "source_prompt": _trim(source_prompt, 2000),
-            "fields": {},
-            "required_outputs": [],
-            "required_evidence": [],
-            "missing_fields": [],
-            "ambiguity_notes": [],
-            "summary": f"{resolved_preset or 'general'} | text-first",
-            "artifact_contracts": {},
-        }
+        contract = _fallback_contract_for_preset(resolved_preset, source_prompt)
 
     contract["intent_action"] = _trim(intent_action, 64)
     contract["project_key"] = _trim(project_key, 64)

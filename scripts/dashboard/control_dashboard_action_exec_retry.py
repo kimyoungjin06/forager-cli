@@ -1851,7 +1851,10 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
     source_task = gateway_task_state.get_task_record(entry, source_request_id) if isinstance(entry, dict) and source_request_id else None
     if isinstance(source_task, dict):
         dispatch_gate = gateway_task_state.derive_task_dispatch_gate(source_task)
-        if str(dispatch_gate.get("status", "")).strip() == "blocked":
+        if (
+            str(dispatch_gate.get("status", "")).strip() == "blocked"
+            and str(dispatch_gate.get("reason_code", "")).strip() == "job_contract_missing"
+        ):
             return _dispatch_gate_block_response(
                 spec=spec,
                 payload=payload,
@@ -2052,6 +2055,16 @@ def _execute_retry_action(spec: Dict[str, object], *, config: DashboardAppConfig
             },
             status=409,
         )
+    if isinstance(source_task, dict):
+        dispatch_gate = gateway_task_state.derive_task_dispatch_gate(source_task)
+        if str(dispatch_gate.get("status", "")).strip() == "blocked":
+            return _dispatch_gate_block_response(
+                spec=spec,
+                payload=payload,
+                source_command=command_text or ("/replan" if is_replan else "/retry"),
+                source_task=source_task,
+                task_ref=task_ref,
+            )
     if isinstance(projects.get(project_key), dict):
         run_lock_response = _run_lock_block_response(
             entry=projects.get(project_key),
@@ -2097,26 +2110,6 @@ def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
     entry = projects.get(project_key) if project_key and isinstance(projects.get(project_key), dict) else {}
     source_request_id = gateway_task_state.resolve_task_request_id(entry, task_ref) if isinstance(entry, dict) else ""
     source_task = gateway_task_state.get_task_record(entry, source_request_id) if isinstance(entry, dict) and source_request_id else None
-    if isinstance(source_task, dict):
-        dispatch_gate = gateway_task_state.derive_task_dispatch_gate(source_task)
-        if str(dispatch_gate.get("status", "")).strip() == "blocked":
-            return _dispatch_gate_block_response(
-                spec=spec,
-                payload=payload,
-                source_command=command_text or "/followup-exec",
-                source_task=source_task,
-                task_ref=task_ref,
-            )
-        manual_gate = gateway_task_state.derive_task_manual_gate(source_task)
-        if str(manual_gate.get("status", "")).strip() == "blocked":
-            return _manual_route_gate_block_response(
-                spec=spec,
-                payload=payload,
-                source_command=command_text or "/followup-exec",
-                source_task=source_task,
-                task_ref=task_ref,
-                outcome_kind="followup_execute",
-            )
     task_payload = None
     if isinstance(source_task, dict) and source_request_id:
         task_payload = {
@@ -2199,6 +2192,26 @@ def _execute_followup_action(spec: Dict[str, object], *, config: DashboardAppCon
             },
             status=409,
         )
+    if isinstance(source_task, dict):
+        dispatch_gate = gateway_task_state.derive_task_dispatch_gate(source_task)
+        if str(dispatch_gate.get("status", "")).strip() == "blocked":
+            return _dispatch_gate_block_response(
+                spec=spec,
+                payload=payload,
+                source_command=command_text or "/followup-exec",
+                source_task=source_task,
+                task_ref=task_ref,
+            )
+        manual_gate = gateway_task_state.derive_task_manual_gate(source_task)
+        if str(manual_gate.get("status", "")).strip() == "blocked":
+            return _manual_route_gate_block_response(
+                spec=spec,
+                payload=payload,
+                source_command=command_text or "/followup-exec",
+                source_task=source_task,
+                task_ref=task_ref,
+                outcome_kind="followup_execute",
+            )
     if isinstance(entry, dict):
         run_lock_response = _run_lock_block_response(
             entry=entry,

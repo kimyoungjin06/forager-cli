@@ -7902,7 +7902,11 @@ def test_background_run_summary_and_stale_marking(tmp_path: Path) -> None:
         (
             "O3",
             "DataProject",
-            "CSV 적재 흐름의 null/스키마 문제를 점검하고 정리해줘.",
+            (
+                "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+                "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+                "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
+            ),
             ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
             ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
             "data",
