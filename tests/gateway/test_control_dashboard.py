@@ -5,11 +5,19 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
+import base64
+import os
 import json
+import shutil
+import socket
+import struct
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from urllib.parse import quote, urlparse
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 GW_DIR = ROOT / "scripts" / "gateway"
@@ -18,6 +26,7 @@ for path in (GW_DIR, DASH_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import pytest  # noqa: E402
 from _gateway_test_support import gw  # noqa: E402
 import aoe_tg_action_audit as action_audit  # noqa: E402
 import aoe_tg_background_runs as background_runs  # noqa: E402
@@ -116,6 +125,205 @@ def _submit_dashboard_action_form(
         content_type="application/json",
         config=config,
     )
+
+
+class _CdpWebSocket:
+    def __init__(self, url: str) -> None:
+        parsed = urlparse(url)
+        host = parsed.hostname or "127.0.0.1"
+        port = int(parsed.port or 80)
+        path = parsed.path or "/"
+        if parsed.query:
+            path += f"?{parsed.query}"
+        self._socket = socket.create_connection((host, port), timeout=5)
+        self._socket.settimeout(5)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+        self._socket.sendall(request.encode("ascii"))
+        response = b""
+        while b"\r\n\r\n" not in response:
+            chunk = self._socket.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+        if b" 101 " not in response.split(b"\r\n", 1)[0]:
+            raise RuntimeError(f"DevTools websocket upgrade failed: {response[:160]!r}")
+        self._next_id = 0
+
+    def close(self) -> None:
+        try:
+            self._send_frame(b"", opcode=8)
+        except Exception:
+            pass
+        try:
+            self._socket.close()
+        except Exception:
+            pass
+
+    def command(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
+        self._next_id += 1
+        message_id = self._next_id
+        self._send_text(json.dumps({"id": message_id, "method": method, "params": params or {}}))
+        while True:
+            message = json.loads(self._recv_text())
+            if message.get("id") == message_id:
+                if "error" in message:
+                    raise RuntimeError(f"DevTools command failed: {message['error']}")
+                return message
+
+    def _send_text(self, text: str) -> None:
+        self._send_frame(text.encode("utf-8"), opcode=1)
+
+    def _send_frame(self, payload: bytes, *, opcode: int) -> None:
+        length = len(payload)
+        header = bytearray([0x80 | opcode])
+        if length < 126:
+            header.append(0x80 | length)
+        elif length < 65536:
+            header.extend([0x80 | 126])
+            header.extend(struct.pack("!H", length))
+        else:
+            header.extend([0x80 | 127])
+            header.extend(struct.pack("!Q", length))
+        mask = os.urandom(4)
+        masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        self._socket.sendall(bytes(header) + mask + masked)
+
+    def _recv_exact(self, length: int) -> bytes:
+        chunks = []
+        remaining = length
+        while remaining:
+            chunk = self._socket.recv(remaining)
+            if not chunk:
+                raise RuntimeError("DevTools websocket closed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    def _recv_text(self) -> str:
+        while True:
+            first, second = self._recv_exact(2)
+            opcode = first & 0x0F
+            masked = bool(second & 0x80)
+            length = second & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self._recv_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self._recv_exact(8))[0]
+            mask = self._recv_exact(4) if masked else b""
+            payload = self._recv_exact(length) if length else b""
+            if masked:
+                payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+            if opcode == 1:
+                return payload.decode("utf-8")
+            if opcode == 8:
+                raise RuntimeError("DevTools websocket closed")
+            if opcode == 9:
+                self._send_frame(payload, opcode=10)
+
+
+def _find_chrome_for_dashboard_smoke() -> str:
+    env_path = os.environ.get("AOE_DASHBOARD_CHROME", "").strip()
+    candidates = [env_path] if env_path else []
+    candidates.extend(["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"])
+    for candidate in candidates:
+        if not candidate:
+            continue
+        found = shutil.which(candidate) if "/" not in candidate else candidate
+        if found and Path(found).exists():
+            return found
+    pytest.skip("Chrome/Chromium is not available for dashboard browser smoke")
+
+
+def _free_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _open_chrome_cdp_page(chrome_path: str, target_url: str, tmp_path: Path) -> tuple[subprocess.Popen[str], _CdpWebSocket]:
+    profile_dir = tmp_path / "chrome-profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    debugging_port = _free_tcp_port()
+    command = [
+        chrome_path,
+        "--headless=new",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-sandbox",
+        f"--remote-debugging-port={debugging_port}",
+        f"--user-data-dir={profile_dir}",
+        "about:blank",
+    ]
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    http_base = f"http://127.0.0.1:{debugging_port}"
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"Chrome exited early with code {process.returncode}")
+        try:
+            with urlopen(f"{http_base}/json/version", timeout=0.5):
+                break
+        except Exception:
+            time.sleep(0.05)
+    else:
+        process.terminate()
+        raise RuntimeError("Chrome did not expose a DevTools endpoint")
+    new_target = f"{http_base}/json/new?{quote(target_url, safe='')}"
+    for method in ("PUT", "GET"):
+        try:
+            request = Request(new_target, method=method) if method == "PUT" else new_target
+            with urlopen(request, timeout=5) as response:
+                target = json.loads(response.read().decode("utf-8"))
+            break
+        except Exception:
+            if method == "GET":
+                process.terminate()
+                raise
+    cdp = _CdpWebSocket(str(target["webSocketDebuggerUrl"]))
+    cdp.command("Page.navigate", {"url": target_url})
+    return process, cdp
+
+
+def _cdp_eval(cdp: _CdpWebSocket, expression: str) -> object:
+    response = cdp.command(
+        "Runtime.evaluate",
+        {
+            "expression": expression,
+            "returnByValue": True,
+            "awaitPromise": True,
+        },
+    )
+    result = response.get("result") if isinstance(response.get("result"), dict) else {}
+    if isinstance(result, dict) and result.get("exceptionDetails"):
+        raise AssertionError(result["exceptionDetails"])
+    remote = result.get("result") if isinstance(result.get("result"), dict) else {}
+    return remote.get("value")
+
+
+def _wait_for_cdp_eval(cdp: _CdpWebSocket, expression: str, *, timeout: float = 5.0) -> object:
+    deadline = time.time() + timeout
+    last_value: object = None
+    while time.time() < deadline:
+        last_value = _cdp_eval(cdp, expression)
+        if last_value:
+            return last_value
+        time.sleep(0.05)
+    raise AssertionError(f"condition did not become truthy: {expression!r}; last={last_value!r}")
 
 
 def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
@@ -9399,6 +9607,16 @@ def test_control_dashboard_preferences_page_destructive_forms_require_confirmati
         source_ref="REQ-1",
         now_iso="2026-04-22T10:00:00+09:00",
     )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-2",
+        now_iso="2026-04-22T10:05:00+09:00",
+    )
     config = dashboard_app.DashboardAppConfig(
         control_root=control_root,
         team_dir=team_dir,
@@ -9441,6 +9659,184 @@ def test_control_dashboard_preferences_page_destructive_forms_require_confirmati
     assert candidate_disable["data-action-confirm-message"] == "Mute preference candidate show_source_note for chart?"
     assert candidate_dismiss["data-action-confirm"] == "true"
     assert candidate_dismiss["data-action-confirm-message"] == "Dismiss preference candidate show_source_note for chart?"
+
+
+def test_control_dashboard_preferences_browser_submit_updates_action_result(tmp_path: Path) -> None:
+    chrome_path = _find_chrome_for_dashboard_smoke()
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-2",
+        now_iso="2026-04-22T10:05:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=0,
+    )
+    server = dashboard_app.ThreadingHTTPServer(("127.0.0.1", 0), dashboard_app.DashboardRequestHandler)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=int(server.server_address[1]),
+    )
+    server.dashboard_config = config  # type: ignore[attr-defined]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    process: subprocess.Popen[str] | None = None
+    cdp: _CdpWebSocket | None = None
+    try:
+        target_url = f"http://127.0.0.1:{config.port}/control/preferences?project=O2&artifact=chart"
+        process, cdp = _open_chrome_cdp_page(chrome_path, target_url, tmp_path)
+        _wait_for_cdp_eval(cdp, "document.readyState === 'complete' || document.readyState === 'interactive'")
+        submit_result = _cdp_eval(
+            cdp,
+            """
+            (() => {
+              window.__dashboardFetches = [];
+              const nativeFetch = window.fetch.bind(window);
+              window.fetch = async (path, options = {}) => {
+                window.__dashboardFetches.push({
+                  path: String(path),
+                  method: String(options.method || ""),
+                  contentType: String((options.headers || {})["Content-Type"] || ""),
+                  body: String(options.body || "")
+                });
+                return nativeFetch(path, options);
+              };
+              const form = document.querySelector('form[data-action-command="pref-candidate:show_source_note:auto"]');
+              if (!form) {
+                return { ok: false, reason: "candidate_form_missing" };
+              }
+              form.requestSubmit();
+              return { ok: true, action: form.action };
+            })()
+            """,
+        )
+        assert isinstance(submit_result, dict)
+        assert submit_result["ok"] is True
+        result = _wait_for_cdp_eval(
+            cdp,
+            """
+            (() => {
+              const panel = document.querySelector("#action-result");
+              const summary = document.querySelector("#action-result-summary")?.textContent || "";
+              const rows = document.querySelector("#action-result-rows")?.textContent || "";
+              const body = document.querySelector("#action-result-body")?.textContent || "";
+              if (!body.includes('"status": "executed"') || !body.includes("show_source_note")) {
+                return false;
+              }
+              return {
+                hidden: panel ? panel.classList.contains("hidden") : true,
+                summary,
+                rows,
+                body,
+                fetches: window.__dashboardFetches || []
+              };
+            })()
+            """,
+            timeout=8,
+        )
+        assert isinstance(result, dict)
+        assert result["hidden"] is False
+        assert "Candidate show_source_note -> promote auto" in str(result["summary"])
+        assert "status=executed" in str(result["summary"])
+        assert "preference_memory_scope" in str(result["rows"])
+        assert "preference_refresh_diff" in str(result["rows"])
+        fetches = result.get("fetches")
+        assert isinstance(fetches, list)
+        assert len(fetches) == 1
+        fetch_payload = json.loads(str(fetches[0]["body"]))
+        assert fetches[0]["method"] == "POST"
+        assert fetches[0]["contentType"] == "application/json"
+        assert fetch_payload["runtime_ref"] == "O2"
+        assert fetch_payload["artifact_kind"] == "chart"
+        assert fetch_payload["key"] == "show_source_note"
+        assert fetch_payload["mode"] == "auto"
+
+        cancel_result = _cdp_eval(
+            cdp,
+            """
+            (() => {
+              window.__dashboardFetches = [];
+              window.__confirmMessage = "";
+              window.confirm = (message) => {
+                window.__confirmMessage = String(message);
+                return false;
+              };
+              const form = document.querySelector('form[data-action-command="pref-rule:legend_position:delete"]');
+              if (!form) {
+                return { ok: false, reason: "delete_form_missing" };
+              }
+              form.requestSubmit();
+              return {
+                ok: true,
+                confirmMessage: window.__confirmMessage,
+                fetchCount: window.__dashboardFetches.length
+              };
+            })()
+            """,
+        )
+        assert isinstance(cancel_result, dict)
+        assert cancel_result["ok"] is True
+        assert cancel_result["confirmMessage"] == "Delete preference rule legend_position for chart?"
+        assert cancel_result["fetchCount"] == 0
+    finally:
+        if cdp is not None:
+            cdp.close()
+        if process is not None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        server.shutdown()
+        server.server_close()
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    assert [row["key"] for row in registry["rules"]] == ["legend_position", "show_source_note"]
+    assert registry["rules"][0]["key"] == "legend_position"
+    assert registry["rules"][1]["scope"] == "project"
+    candidates = operator_preferences.load_operator_preference_candidates(project_team_dir)
+    assert candidates["candidates"] == []
 
 
 def test_control_dashboard_preferences_page_rule_form_submit_updates_registry(tmp_path: Path) -> None:
