@@ -488,9 +488,10 @@ def test_runtime_read_matches_gateway_wrapper_state(tmp_path: Path) -> None:
     assert via_runtime_read["projects"]["alpha"]["tasks"]["REQ-1"]["phase1_role_preset"] == "analysis"
 
 
-def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp_path: Path) -> None:
+def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     state = gw.load_manager_state(manager_state_file, control_root, team_dir)
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     task["phase1_current_planner"] = "codex"

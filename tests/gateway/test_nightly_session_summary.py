@@ -16,13 +16,15 @@ for path in (GW_DIR, DASH_DIR, TEST_DIR):
         sys.path.insert(0, str(path))
 
 import aoe_tg_action_audit as action_audit  # noqa: E402
+import control_dashboard_server_guard as server_guard  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
 from test_control_dashboard import _build_runtime, _mark_task_planning_gate_blocked, _persist_general_subagent_artifact  # noqa: E402
 
 
-def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path) -> None:
+def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     _mark_task_planning_gate_blocked(task)
@@ -287,9 +289,10 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert runtimes[0]["task_teams"][0]["completion_contract"]["done_when"] == "conclusion is supported by inspectable evidence and explicit caveats"
 
 
-def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_path: Path) -> None:
+def test_write_nightly_session_summary_creates_latest_and_timestamped_files(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
     _mark_task_planning_gate_blocked(task)
