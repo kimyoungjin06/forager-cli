@@ -139,7 +139,7 @@ Rule:
 - treat `.aoe-team/` as mutable environment-local state
 
 ## Testing
-- Full gateway pytest wrapper:
+- Gateway pytest wrapper (defaults to CLI regressions; accepts explicit test paths):
 ```bash
 scripts/gateway_pytest.sh
 ```
@@ -152,6 +152,11 @@ bash scripts/gateway_smoke_test.sh
 - Error subset:
 ```bash
 bash scripts/gateway_error_test.sh
+```
+
+- Dashboard/operator subset:
+```bash
+bash scripts/gateway_dashboard_test.sh
 ```
 
 - CI workflow:

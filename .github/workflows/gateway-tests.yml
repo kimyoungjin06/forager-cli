@@ -30,6 +30,7 @@ jobs:
         suite:
           - smoke
           - error
+          - dashboard
 
     steps:
       - name: Checkout
