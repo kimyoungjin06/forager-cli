@@ -11,6 +11,7 @@
   - common capture template
 - `phase2/build/`
   - `build/B2_rerun_path.md`
+  - `build/B3_manual_followup_path.md`
 - `phase2/data/`
 - `phase2/review/`
 - `phase2/mixed/`
@@ -39,6 +40,13 @@
       - isolated `local_tmux` live rehearsal launched exactly one lane-scoped build retry and closed the background ticket with `exit_code=0`
       - `/task`, `/offdesk review`, and dashboard task/runtime detail all kept the branch on `rerun`
       - the prelaunch `pref=local_tmux | effective=local_background` status nuance is now documented as a task-specific launch-spec limitation, not a build rerun blocker
+  - `build/B3_manual_followup_path.md`
+    - `bounded_replay_pass`
+    - finding:
+      - first build manual-followup artifact is now written as a launch-bearing candidate
+      - seeded B3 proves `FollowupBrief` can be the canonical lane/reason source even when legacy `exec_critic.manual_followup_*` lane fields are empty
+      - `/task`, `/followup`, `/offdesk review`, and bounded dashboard transition tests agree on `followup=partially_executable exec=L2 review=R1`
+      - live local_tmux launch is intentionally deferred to the next promotion step
   - `data/D1_happy_path.md`
     - `executed_done`
     - finding:
@@ -126,11 +134,11 @@
 - still bounded replay only:
   - `none in the review rail first wave`
 - next live candidate:
-  - `build/B3_manual_followup_path.md` (not yet written)
+  - `build/B3_manual_followup_path.md`
 - candidate reason:
-  - `review rail first wave is complete and build rerun has now crossed into executed live rehearsal`
+  - `B3 is now written and replay-proven as a launch-bearing build manual-followup candidate`
 - remaining gate:
-  - `write the first build manual-followup artifact and choose whether it should start as preview-only or launch-bearing`
+  - `run the isolated local_tmux followup-exec launch for B3 and record the background ticket/result artifacts`
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
 
@@ -139,9 +147,10 @@
   - preview proof
     - `FollowupBrief.status=preview_only`
     - `/followup` and dashboard preview surfaces must agree
-    - preview-open seed currently also requires aligned `exec_critic.manual_followup_*` lane ids and reason
+    - preview-open seeds should use `followup_brief_*` as the canonical lane/reason source
+    - `exec_critic.manual_followup_*` is legacy fallback only and is no longer required for preview surface loading
   - execute proof
-    - only valid after an explicit executable `FollowupBrief` exists
+    - only valid after an explicit `executable` or `partially_executable` `FollowupBrief` exists
     - `/followup-exec` must not be treated as equivalent to preview
 
 ## Reentry Rail Rule

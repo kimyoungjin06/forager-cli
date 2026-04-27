@@ -29,6 +29,11 @@ B2_REQUEST_TEXT = (
     "세션 정리나 테스트 증적이 부족하면 done으로 닫지 말고 rerun으로 남겨라."
 )
 
+B3_REQUEST_TEXT = (
+    "로그인 실패 세션 정리 패치의 테스트 증거는 보강하되, 배포 허용 여부와 릴리즈 문구는 "
+    "내가 판단할 수 있게 manual follow-up으로 남겨라."
+)
+
 R3_EXECUTE_REQUEST_TEXT = (
     "로그인 패치의 회귀 리스크 후보를 정리하고, 내가 지정한 lane만 후속 증거 수집으로 다시 실행해줘."
 )
@@ -63,6 +68,21 @@ def _prepare_project_layout(control_root: Path, *, overview: str) -> tuple[Path,
             "project_root": str(project_root),
             "team_dir": str(project_team_dir),
             "overview": overview,
+            "provider_commands": {
+                "codex": "codex",
+                "claude": "claude",
+            },
+            "coordinator": {
+                "role": "Orchestrator",
+                "provider": "codex",
+                "launch": "codex",
+                "session": "",
+            },
+            "agents": [
+                {"role": "Codex-Dev", "provider": "codex", "launch": "codex", "session": ""},
+                {"role": "Codex-Reviewer", "provider": "codex", "launch": "codex", "session": ""},
+                {"role": "Claude-Reviewer", "provider": "claude", "launch": "claude", "session": ""},
+            ],
         },
     )
     return team_dir, project_root, project_team_dir
@@ -295,6 +315,148 @@ def _b2_task(now: str) -> Dict[str, Any]:
             "project_key": "alpha",
             "project_alias": "O5",
             "task_short_id": "T-501",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _b3_task(now: str) -> Dict[str, Any]:
+    return {
+        "request_id": "REQ-B3-001",
+        "short_id": "T-601",
+        "alias": "build-manual-followup",
+        "prompt": B3_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "failed",
+        "stage": "verification",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "done",
+            "verification": "failed",
+            "integration": "failed",
+            "close": "failed",
+        },
+        "roles": ["Codex-Dev", "Claude-Reviewer"],
+        "verifier_roles": ["Claude-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "verification",
+        "phase1_current_round": 3,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "build",
+        "phase2_team_preset": "build",
+        "execution_brief_status": "partially_executable",
+        "execution_brief_summary": (
+            "partially_executable | do=tests/session.test.js,report.md | "
+            "blocked=operator-owned release acceptance"
+        ),
+        "execution_brief_executable_slice": [
+            "tests/session.test.js",
+            "report.md",
+        ],
+        "execution_brief_blocked_slice": [
+            "release acceptance decision",
+            "release note wording",
+        ],
+        "execution_brief_operator_decision": "operator owns final release acceptance and wording",
+        "followup_brief_status": "partially_executable",
+        "followup_brief_summary": "partially_executable | execution=L2 | review=R1",
+        "followup_brief_execution_lane_ids": ["L2"],
+        "followup_brief_review_lane_ids": ["R1"],
+        "followup_brief_reason": (
+            "operator owns release acceptance; build follow-up may rerun the evidence lane only"
+        ),
+        "reentry_rails_summary": "retry=none | followup=partially_executable exec=L2 review=R1",
+        "plan": {
+            "summary": (
+                "build | session regression evidence lane L2 may run while release acceptance "
+                "and wording remain manual in R1"
+            ),
+            "meta": {
+                "phase1_role_preset": "build",
+                "phase2_team_preset": "build",
+                "phase2_team_spec": {
+                    "execution_groups": [
+                        {"group_id": "L2", "role": "Codex-Dev", "kind": "implementation_followup"},
+                    ],
+                    "review_groups": [
+                        {"group_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L2"]},
+                    ],
+                    "critic_role": "Claude-Reviewer",
+                    "integration_role": "Codex-Dev",
+                },
+                "phase2_execution_plan": {
+                    "execution_lanes": [
+                        {
+                            "lane_id": "L2",
+                            "role": "Codex-Dev",
+                            "kind": "implementation_followup",
+                            "outputs": ["session_regression_evidence", "handoff_report"],
+                        },
+                    ],
+                    "review_lanes": [
+                        {
+                            "lane_id": "R1",
+                            "role": "Claude-Reviewer",
+                            "kind": "verifier",
+                            "depends_on": ["L2"],
+                            "outputs": ["release_acceptance_note"],
+                        },
+                    ],
+                },
+            },
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L2",
+                    "role": "Codex-Dev",
+                    "status": "blocked",
+                    "subtask_ids": ["S2"],
+                    "touched_files": ["tests/session.test.js", "report.md"],
+                }
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Claude-Reviewer",
+                    "kind": "verifier",
+                    "status": "blocked",
+                    "depends_on": ["L2"],
+                    "reason": "operator keeps release acceptance and wording; execute only the evidence lane",
+                    "verdict": "manual_followup",
+                    "action": "manual_followup",
+                    "touched_files": ["report.md"],
+                }
+            ],
+            "summary": {
+                "execution": {"blocked": 1},
+                "review": {"blocked": 1},
+                "review_verdicts": {"manual_followup": 1},
+            },
+        },
+        "exec_critic": {
+            "verdict": "intervention",
+            "action": "manual_followup",
+            "reason": "legacy critic reason only; FollowupBrief owns the follow-up lane ids",
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "manual_followup",
+            "backend_contract": "build_manual_followup",
+            "backend_contract_note": (
+                "followup execute is limited to build evidence lane L2 while release review lane R1 stays manual"
+            ),
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O6",
+            "task_short_id": "T-601",
         },
         "created_at": now,
         "updated_at": now,
@@ -645,6 +807,72 @@ def seed_b2_build_rerun_runtime(
     }
 
 
+def seed_b3_build_manual_followup_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "local_tmux",
+    local_tmux_slot_limit: int = 1,
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated build manual followup live rehearsal",
+    )
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_b3_task(now), "REQ-B3-001")
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O6",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated build manual followup live rehearsal",
+        "last_request_id": "REQ-B3-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": local_tmux_slot_limit,
+        "background_runner_slot_limits": {
+            "local_tmux": local_tmux_slot_limit,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-B3-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "B3",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O6",
+        "request_id": "REQ-B3-001",
+        "task_ref": "T-601",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "preflight_commands": [
+            "/orch status O6",
+            "/task T-601",
+            "/followup T-601",
+            "/offdesk review O6",
+        ],
+        "trigger_command": "/followup-exec T-601 lane L2",
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-B3-001",
+            "runtime_detail": "/control/runtimes/O6",
+        },
+    }
+
+
 def seed_r3_manual_followup_execute_runtime(
     control_root: Path,
     *,
@@ -832,7 +1060,7 @@ def seed_r4_external_background_runtime(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["b2", "r2", "r3-execute", "r4"], default="r2")
+    parser.add_argument("--scenario", choices=["b2", "b3", "r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
     parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
@@ -841,6 +1069,13 @@ def main() -> int:
 
     if args.scenario == "b2":
         payload = seed_b2_build_rerun_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target,
+            local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "b3":
+        payload = seed_b3_build_manual_followup_runtime(
             Path(args.control_root),
             run_lock_mode=args.run_lock_mode,
             runner_target=args.runner_target,
