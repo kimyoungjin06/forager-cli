@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""TF execution backend interface.
+"""Task Team execution backend interface.
 
-This module defines a narrow adapter seam for TF execution engines.
+This module defines a narrow adapter seam for Task Team execution engines.
 
 The current repository owns the higher-level orchestration model:
 
@@ -11,7 +11,7 @@ The current repository owns the higher-level orchestration model:
 - sync / salvage / syncback
 - offdesk / auto scheduling
 
-Backends are responsible only for executing one TF request and returning a
+Backends are responsible only for executing one Task Team request and returning a
 normalized result payload.
 """
 
@@ -43,7 +43,7 @@ def normalize_tf_backend_name(raw: Optional[str], *, default: str = DEFAULT_TF_B
 
 @dataclass(frozen=True)
 class TFBackendRequest:
-    """Normalized request passed into a TF execution backend."""
+    """Normalized request passed into a Task Team execution backend."""
 
     args: Any
     prompt: str

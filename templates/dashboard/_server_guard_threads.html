@@ -1,0 +1,59 @@
+{% if threads %}
+<div class="server-guard-thread-list{% if compact %} compact{% endif %}">
+  {% for row in threads %}
+  <article class="server-guard-thread-card{% if compact %} compact{% endif %}">
+    <p><strong>preview</strong> {{ row.preview_headline }}</p>
+    <p><strong>apply</strong> {{ row.apply_headline }}</p>
+    {% if row.pressure_kind_label %}
+    <p><strong>pressure</strong> <span class="action-history-badge">{{ row.pressure_kind_label }}</span></p>
+    {% endif %}
+    {% if row.chat_id %}
+    <p><strong>chat_session</strong> {% if row.chat_href %}<a class="mono" href="{{ row.chat_href }}">{{ row.chat_id }}</a>{% else %}<span class="mono">{{ row.chat_id }}</span>{% endif %}</p>
+    {% endif %}
+    {% if row.next_step and row.next_step != '-' %}
+    <p><strong>next</strong> <span class="action-history-badge">{{ row.next_step }}</span></p>
+    {% endif %}
+    {% if row.action_sentence %}
+    <p class="muted"><strong>action_copy</strong> {{ row.action_sentence }}</p>
+    {% endif %}
+    {% if row.subagent_evidence_summary and row.subagent_evidence_summary != '-' %}
+    <p class="muted"><strong>subagent_evidence</strong> {{ row.subagent_evidence_summary }}</p>
+    {% endif %}
+    {% if row.subagent_gate_summary and row.subagent_gate_summary != '-' %}
+    <p class="muted"><strong>subagent_gate</strong> {{ row.subagent_gate_summary }}</p>
+    {% endif %}
+    <p><strong>preset_diff</strong></p>
+    <div class="diff-badge-list">
+      {% for token in row.preset_diff_summary.split(' | ') if token %}
+      <span class="diff-badge {% if token == 'no change' %}unchanged{% else %}changed{% endif %}">{{ token }}</span>
+      {% endfor %}
+    </div>
+    {% if not compact %}
+    <p><strong>command</strong> <code>{{ row.command }}</code></p>
+    {% endif %}
+    <p><strong>at</strong> <span class="mono">{{ row.at }}</span></p>
+    {% if row.detail_href %}
+    <p><a href="{{ row.detail_href }}">{{ row.detail_label or 'detail' }}</a></p>
+    {% endif %}
+    {% if compact %}
+    <div class="chat-hints server-guard-mini-links">
+      {% if row.chat_href %}
+        <a class="action-history-badge server-guard-mini-link chat{% if row.priority_link_label == 'Chat' %} priority{% endif %}" href="{{ row.chat_href }}">Chat</a>
+        {% if row.priority_link_label == 'Chat' and row.action_sentence %}<span class="muted server-guard-mini-note">{{ row.action_sentence }}</span>{% endif %}
+      {% endif %}
+      {% if row.audit_href %}
+        <a class="action-history-badge server-guard-mini-link audit{% if row.priority_link_label == 'Audit' %} priority{% endif %}" href="{{ row.audit_href }}">Audit</a>
+        {% if row.priority_link_label == 'Audit' and row.action_sentence %}<span class="muted server-guard-mini-note">{{ row.action_sentence }}</span>{% endif %}
+      {% endif %}
+      {% if row.health_href %}
+        <a class="action-history-badge server-guard-mini-link health{% if row.priority_link_label == 'Health' %} priority{% endif %}" href="{{ row.health_href }}">Health</a>
+        {% if row.priority_link_label == 'Health' and row.action_sentence %}<span class="muted server-guard-mini-note">{{ row.action_sentence }}</span>{% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% elif show_empty is not defined or show_empty %}
+<p class="muted">server guard preset thread history가 없습니다.</p>
+{% endif %}

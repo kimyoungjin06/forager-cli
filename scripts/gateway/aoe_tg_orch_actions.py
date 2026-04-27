@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Mother-Orch Action API contract helpers.
+"""Control Action API contract helpers.
 
-This module defines the stable action surface Mother-Orch may use when it
+This module defines the stable action surface Control Plane may use when it
 decides whether a plaintext request should become:
 
 - a status lookup
@@ -119,7 +119,7 @@ ACTION_CATALOG: Dict[str, Dict[str, Any]] = {
         "requires_project": True,
         "operator_surface": ["/monitor", "/orch monitor O#"],
         "required_args": [],
-        "notes": ["Return active task and TF lifecycle detail for operator monitoring."],
+        "notes": ["Return active task and Task Team lifecycle detail for operator monitoring."],
     },
     "get_queue": {
         "family": "backlog",
@@ -300,12 +300,58 @@ def infer_mother_orch_action_call(
     text = _trim_text(prompt, 2000)
     low = text.lower()
     if not text:
-        raise RuntimeError("missing plaintext prompt for Mother-Orch action inference")
+        raise RuntimeError("missing plaintext prompt for Control Plane action inference")
 
     offdesk_prepare_markers = ("offdesk prepare", "오프데스크 준비", "퇴근 준비", "야간 준비")
     offdesk_review_markers = ("offdesk review", "오프데스크 검토", "퇴근 검토", "야간 검토")
     offdesk_start_markers = ("offdesk on", "퇴근모드 시작", "오프데스크 시작", "야간 실행 시작")
     offdesk_status_markers = ("offdesk status", "auto status", "오프데스크 상태", "자동 상태")
+    offdesk_scope_markers = (
+        "offdesk",
+        "오프데스크",
+        "퇴근모드",
+        "퇴근 모드",
+        "야간",
+        "night run",
+        "nightly",
+    )
+    offdesk_timing_markers = (
+        "퇴근 전",
+        "퇴근전에",
+        "오늘 밤",
+        "오늘밤",
+        "복귀 후",
+        "복귀후",
+        "내일 아침",
+        "morning",
+    )
+    offdesk_prepare_scope_markers = (
+        "준비",
+        "세팅",
+        "setup",
+        "prepare",
+        "preflight",
+        "점검",
+    )
+    offdesk_review_scope_markers = (
+        "검토",
+        "리뷰",
+        "review",
+        "확인",
+        "정리",
+        "후보",
+        "candidate",
+        "할일",
+        "todo",
+        "후속",
+        "followup",
+        "follow-up",
+        "리스크",
+        "경고",
+        "경고 프로젝트",
+        "막힌 프로젝트",
+        "문제",
+    )
     map_markers = ("프로젝트 목록", "프로젝트들", "workspace", "워크스페이스", "map", "프로젝트 맵")
     queue_markers = ("queue", "대기열", "todo", "할일", "백로그")
     followup_markers = ("followup", "follow-up", "후속", "수동개입", "manual followup")
@@ -365,64 +411,165 @@ def infer_mother_orch_action_call(
         "deploy",
     )
 
-    if _contains_any(low, offdesk_prepare_markers):
-        return normalize_mother_orch_action_call({"action": "offdesk_prepare"})
-    if _contains_any(low, offdesk_review_markers):
-        return normalize_mother_orch_action_call({"action": "offdesk_review"})
-    if _contains_any(low, offdesk_start_markers):
-        return normalize_mother_orch_action_call({"action": "offdesk_start"})
-    if _contains_any(low, offdesk_status_markers):
-        return normalize_mother_orch_action_call({"action": "offdesk_status"})
+    explicit_prepare_hits = _matching_markers(low, offdesk_prepare_markers)
+    explicit_review_hits = _matching_markers(low, offdesk_review_markers)
+    explicit_start_hits = _matching_markers(low, offdesk_start_markers)
+    explicit_status_hits = _matching_markers(low, offdesk_status_markers)
+    offdesk_scope_hits = _matching_markers(low, offdesk_scope_markers)
+    offdesk_timing_hits = _matching_markers(low, offdesk_timing_markers)
+    offdesk_prepare_hits = _matching_markers(low, offdesk_prepare_scope_markers)
+    offdesk_review_hits = _matching_markers(low, offdesk_review_scope_markers)
+    map_hits = _matching_markers(low, map_markers)
+    queue_hits = _matching_markers(low, queue_markers)
+    followup_hits = _matching_markers(low, followup_markers)
+    sync_hits = _matching_markers(low, sync_markers)
+    sync_bootstrap_hits = _matching_markers(low, sync_bootstrap_markers)
+    preview_hits = _matching_markers(low, preview_markers)
+    status_hits = _matching_markers(low, status_markers)
+    reporting_hits = _matching_markers(low, reporting_markers)
+    inspect_hits = _matching_markers(low, inspect_markers)
+    work_hits = _matching_markers(low, work_markers)
 
-    if _contains_any(low, followup_markers):
-        return normalize_mother_orch_action_call({"action": "list_followups", "project_key": default_project_key})
-    if _contains_any(low, queue_markers):
-        return normalize_mother_orch_action_call({"action": "get_queue", "project_key": default_project_key})
-    if _contains_any(low, map_markers):
-        return normalize_mother_orch_action_call({"action": "list_projects"})
-
-    if _contains_any(low, sync_markers) or _contains_any(low, sync_bootstrap_markers):
-        if _contains_any(low, sync_bootstrap_markers):
-            action = "sync_bootstrap"
-        else:
-            action = "sync_preview" if _contains_any(low, preview_markers) else "sync_apply"
-        return normalize_mother_orch_action_call(
-            {"action": action, "project_key": default_project_key, "window": "24h"}
+    def _return(
+        action_row: Dict[str, Any],
+        *,
+        matched: Dict[str, List[str]],
+        safe_mode: str = "",
+        why_not_dispatch: str = "",
+    ) -> Dict[str, Any]:
+        payload = dict(action_row)
+        payload["intent_trace"] = _build_intent_trace(
+            str(action_row.get("action", "")),
+            matched=matched,
+            safe_mode=safe_mode,
+            why_not_dispatch=why_not_dispatch,
         )
+        return normalize_mother_orch_action_call(payload, default_project_key=default_project_key)
 
-    if _contains_any(low, work_markers):
-        return normalize_mother_orch_action_call(
+    if explicit_prepare_hits:
+        return _return({"action": "offdesk_prepare"}, matched={"offdesk_prepare": explicit_prepare_hits})
+    if explicit_review_hits:
+        return _return({"action": "offdesk_review"}, matched={"offdesk_review": explicit_review_hits})
+    if explicit_start_hits:
+        return _return({"action": "offdesk_start"}, matched={"offdesk_start": explicit_start_hits})
+    if explicit_status_hits:
+        return _return({"action": "offdesk_status"}, matched={"offdesk_status": explicit_status_hits})
+    if offdesk_scope_hits:
+        safe_mode = "prefer_control_over_dispatch" if work_hits else ""
+        why_not_dispatch = "offdesk scope markers outrank work markers" if safe_mode else ""
+        if offdesk_review_hits:
+            return _return(
+                {"action": "offdesk_review"},
+                matched={"offdesk_scope": offdesk_scope_hits, "review": offdesk_review_hits, "work": work_hits},
+                safe_mode=safe_mode,
+                why_not_dispatch=why_not_dispatch,
+            )
+        if offdesk_prepare_hits:
+            return _return(
+                {"action": "offdesk_prepare"},
+                matched={"offdesk_scope": offdesk_scope_hits, "prepare": offdesk_prepare_hits, "work": work_hits},
+                safe_mode=safe_mode,
+                why_not_dispatch=why_not_dispatch,
+            )
+        return _return(
+            {"action": "offdesk_status"},
+            matched={"offdesk_scope": offdesk_scope_hits, "work": work_hits},
+            safe_mode=safe_mode,
+            why_not_dispatch=why_not_dispatch,
+        )
+    if offdesk_timing_hits and reporting_hits and work_hits:
+        return _return(
             {
                 "action": "dispatch_task",
                 "project_key": default_project_key,
                 "objective": text,
                 "readonly": False,
-            }
+            },
+            matched={"timing": offdesk_timing_hits, "reporting": reporting_hits, "work": work_hits},
+            safe_mode="prefer_dispatch_for_reporting_work",
+        )
+    if offdesk_timing_hits and (offdesk_review_hits or offdesk_prepare_hits):
+        safe_mode = "prefer_control_review_over_dispatch" if work_hits else "prefer_control_review"
+        why_not_dispatch = "recovery/offdesk timing markers outrank work markers" if work_hits else ""
+        if offdesk_review_hits:
+            return _return(
+                {"action": "offdesk_review"},
+                matched={"timing": offdesk_timing_hits, "review": offdesk_review_hits, "work": work_hits},
+                safe_mode=safe_mode,
+                why_not_dispatch=why_not_dispatch,
+            )
+        return _return(
+            {"action": "offdesk_prepare"},
+            matched={"timing": offdesk_timing_hits, "prepare": offdesk_prepare_hits, "work": work_hits},
+            safe_mode=safe_mode,
+            why_not_dispatch=why_not_dispatch,
+        )
+    if offdesk_timing_hits and status_hits and not work_hits:
+        return _return(
+            {"action": "offdesk_review"},
+            matched={"timing": offdesk_timing_hits, "status": status_hits},
+            safe_mode="prefer_control_review",
+        )
+    if ("경고 프로젝트" in low or "막힌 프로젝트" in low) and (offdesk_review_hits or inspect_hits):
+        return _return(
+            {"action": "offdesk_review"},
+            matched={"review": offdesk_review_hits or inspect_hits, "warning_scope": ["경고 프로젝트" if "경고 프로젝트" in low else "막힌 프로젝트"]},
+            safe_mode="prefer_control_review",
         )
 
-    if _contains_any(low, inspect_markers) or _contains_any(low, reporting_markers):
-        return normalize_mother_orch_action_call(
+    if followup_hits:
+        return _return({"action": "list_followups", "project_key": default_project_key}, matched={"followup": followup_hits})
+    if queue_hits:
+        return _return({"action": "get_queue", "project_key": default_project_key}, matched={"queue": queue_hits})
+    if map_hits:
+        return _return({"action": "list_projects"}, matched={"map": map_hits})
+
+    if sync_hits or sync_bootstrap_hits:
+        if sync_bootstrap_hits:
+            action = "sync_bootstrap"
+        else:
+            action = "sync_preview" if preview_hits else "sync_apply"
+        return _return(
+            {"action": action, "project_key": default_project_key, "window": "24h"},
+            matched={"sync": sync_bootstrap_hits or sync_hits, "preview": preview_hits},
+        )
+
+    if work_hits:
+        return _return(
+            {
+                "action": "dispatch_task",
+                "project_key": default_project_key,
+                "objective": text,
+                "readonly": False,
+            },
+            matched={"work": work_hits},
+        )
+
+    if inspect_hits or reporting_hits:
+        return _return(
             {
                 "action": "dispatch_task",
                 "project_key": default_project_key,
                 "objective": text,
                 "readonly": True,
-            }
+            },
+            matched={"inspect": inspect_hits, "reporting": reporting_hits},
         )
 
-    if has_active_task and _contains_any(low, status_markers):
-        return normalize_mother_orch_action_call({"action": "monitor_project", "project_key": default_project_key})
+    if has_active_task and status_hits:
+        return _return({"action": "monitor_project", "project_key": default_project_key}, matched={"status": status_hits})
 
-    if _contains_any(low, status_markers) and not _contains_any(low, work_markers):
-        return normalize_mother_orch_action_call({"action": "monitor_project", "project_key": default_project_key})
+    if status_hits and not work_hits:
+        return _return({"action": "monitor_project", "project_key": default_project_key}, matched={"status": status_hits})
 
-    return normalize_mother_orch_action_call(
+    return _return(
         {
             "action": "dispatch_task",
             "project_key": default_project_key,
             "objective": text,
             "readonly": True,
-        }
+        },
+        matched={"fallback": ["readonly-dispatch"]},
     )
 
 
@@ -511,7 +658,7 @@ def action_call_to_resolved_command(call: Any) -> Dict[str, Any]:
         return {"cmd": "offdesk", "rest": "on"}
     if action == "offdesk_status":
         return {"cmd": "offdesk", "rest": "status"}
-    raise RuntimeError(f"unsupported Mother-Orch action mapping: {action}")
+    raise RuntimeError(f"unsupported Control Plane action mapping: {action}")
 
 
 def _trim_text(raw: Any, limit: int) -> str:
@@ -532,16 +679,52 @@ def _normalize_bool(raw: Any, default: bool) -> bool:
 def _canonical_action_name(raw: Any) -> str:
     token = _trim_text(raw, 64).lower().replace(" ", "_")
     if not token:
-        raise RuntimeError("missing Mother-Orch action name")
+        raise RuntimeError("missing Control Plane action name")
     canonical = ACTION_ALIASES.get(token, token)
     if canonical not in ACTION_CATALOG:
-        raise RuntimeError(f"unknown Mother-Orch action: {raw}")
+        raise RuntimeError(f"unknown Control Plane action: {raw}")
     return canonical
 
 
 def _normalize_project_key(raw: Any, default_project_key: str = "") -> str:
     token = _trim_text(raw, 64) or _trim_text(default_project_key, 64)
     return token
+
+
+def _matching_markers(text: str, markers: Any) -> List[str]:
+    if not isinstance(markers, (list, tuple)):
+        return []
+    hits: List[str] = []
+    for item in markers:
+        token = _trim_text(item, 64).lower()
+        if token and token in text and token not in hits:
+            hits.append(token)
+    return hits
+
+
+def _build_intent_trace(
+    selected_action: str,
+    *,
+    matched: Dict[str, List[str]] | None = None,
+    safe_mode: str = "",
+    why_not_dispatch: str = "",
+) -> str:
+    parts: List[str] = [f"selected={_trim_text(selected_action, 64)}"]
+    if isinstance(matched, dict):
+        matched_rows: List[str] = []
+        for key, values in matched.items():
+            if not isinstance(values, list) or not values:
+                continue
+            shown = "|".join(_trim_text(item, 32) for item in values[:2] if _trim_text(item, 32))
+            if shown:
+                matched_rows.append(f"{_trim_text(key, 32)}:{shown}")
+        if matched_rows:
+            parts.append(f"matched={','.join(matched_rows[:4])}")
+    if safe_mode:
+        parts.append(f"safe_mode={_trim_text(safe_mode, 64)}")
+    if why_not_dispatch:
+        parts.append(f"why_not_dispatch={_trim_text(why_not_dispatch, 160)}")
+    return _trim_text("; ".join(part for part in parts if part), 400)
 
 
 def mother_orch_action_api_schema() -> Dict[str, Any]:
@@ -562,7 +745,7 @@ def mother_orch_action_api_schema() -> Dict[str, Any]:
         "risk_levels": list(RISK_LEVELS),
         "actions": actions,
         "notes": [
-            "This is the stable control-plane seam Mother-Orch should use before any MCP adapter is added.",
+            "This is the stable control-plane seam Control Plane should use before any MCP adapter is added.",
             "Adapters may convert Telegram/CLI/MCP requests into this call envelope, but must not bypass it.",
             "Action API owns intent and mutation boundaries; execution backends stay downstream.",
         ],
@@ -646,7 +829,7 @@ def normalize_mother_orch_action_call(
         if key not in normalized_args:
             raise RuntimeError(f"{action} requires {key}")
 
-    return {
+    row = {
         "action": action,
         "family": definition["family"],
         "intent_class": definition["intent_class"],
@@ -660,3 +843,7 @@ def normalize_mother_orch_action_call(
         "operator_surface": list(definition["operator_surface"]),
         "args": normalized_args,
     }
+    intent_trace = _trim_text(data.get("intent_trace", ""), 400)
+    if intent_trace:
+        row["intent_trace"] = intent_trace
+    return row

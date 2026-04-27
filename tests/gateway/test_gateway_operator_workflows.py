@@ -1,7 +1,76 @@
 #!/usr/bin/env python3
 """Gateway operator workflow regression tests."""
 
+import json
+import subprocess
+import time
+
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_action_audit as action_audit
+import aoe_tg_run_command_flow as run_command_flow
+import aoe_tg_run_detached_flow as run_detached_flow
+import aoe_tg_document_registry as document_registry
+import aoe_tg_workspace_brief as workspace_brief
+
+from aoe_tg_background_runs import (
+    advance_background_run_ticket,
+    background_worker_state_path,
+    background_runs_state_path,
+    claim_background_run_ticket,
+    claim_next_background_run_ticket,
+    list_background_run_tickets,
+    load_background_worker_state,
+    load_background_runs_state,
+    mark_stale_background_run_tickets,
+    sort_background_run_claim_candidates,
+    summarize_background_worker_state,
+    summarize_background_runs_state,
+    update_background_worker_state,
+    upsert_background_run_ticket,
+)
+from aoe_tg_local_background_worker import (
+    drain_local_background_queue,
+    drain_local_background_queue_once,
+    ensure_local_background_daemon,
+    register_local_background_run,
+    run_local_background_ticket,
+    stop_local_background_daemon,
+)
+from aoe_tg_external_background_worker import (
+    external_background_ack_path,
+    emit_external_background_ack,
+    emit_external_background_handoff,
+    emit_external_background_result,
+    external_background_handoff_path,
+    external_background_result_path,
+    poll_external_background_tickets,
+)
+from aoe_tg_tmux_background_worker import (
+    build_local_tmux_session_name,
+    launch_local_tmux_background_ticket,
+    local_tmux_log_path,
+    local_tmux_result_path,
+    poll_local_tmux_background_tickets,
+)
+from aoe_tg_request_contract import (
+    background_run_evidence_artifacts_from_task,
+    background_run_evidence_bundle_from_task,
+    build_background_launch_spec,
+    build_external_runner_gateway_command_launch_spec,
+    build_github_runner_background_launch_spec,
+    build_gateway_run_command_text,
+    build_gateway_simulation_command_argv,
+    build_local_background_provider_invoke_launch_spec,
+    build_local_tmux_background_launch_spec,
+    build_local_tmux_gateway_command_launch_spec,
+    build_local_tmux_gateway_run_launch_spec,
+    build_remote_worker_background_launch_spec,
+    build_runner_background_launch_spec,
+    build_background_run_ticket,
+    gateway_cli_entrypoint_path,
+    select_background_runner_target,
+)
+
 def test_orch_map_reply_markup_contains_use_focus_status_todo_and_active_sync_actions() -> None:
     state = _empty_state()
     state["projects"]["twinpaper"] = {
@@ -31,6 +100,552 @@ def test_orch_map_reply_markup_contains_use_focus_status_todo_and_active_sync_ac
     assert "/sync O2 1h" in buttons
     assert "/queue" in buttons
     assert "/next" in buttons
+
+
+def test_orch_bgw_ping_executes_test_only_provider_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://172.16.0.37:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "hybrid_local_exec",
+                "routes": {
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda team_dir, ticket: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 status=ok",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_provider_adapter.invoke_background_ticket_worker",
+        lambda team_dir, *, ticket: {
+            "ok": True,
+            "executed": True,
+            "route_id": "background_worker_primary",
+            "endpoint_id": "ollama-qwen3",
+            "model": "qwen3-coder:30b",
+            "response_text": "BGW_PING_OK",
+        },
+    )
+
+    def _send(msg: str, **kwargs):
+        sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup")))
+        return True
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-09T13:00:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-ping", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgw-ping"
+    assert "background worker ping" in text
+    assert "- status: completed" in text
+    assert "provider_invoke_completed" in text
+    assert "provider_invoke_ok" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-ping O2" in buttons
+    queue_file = team_dir / "background_runs.json"
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    assert len(rows) == 1
+    assert rows[0]["status"] == "completed"
+    assert rows[0]["launch_spec"]["kind"] == "provider_invoke"
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert audit_rows[-1]["source_command"] == "/orch bgw-ping O2"
+    assert audit_rows[-1]["outcome_reason_code"] == "completed"
+
+
+def test_orch_model_ping_executes_research_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    monkeypatch.setattr(
+        orch_task_handlers.model_provider_adapter,
+        "invoke_task_research_stub",
+        lambda team_dir, **kwargs: {
+            "kind": "research",
+            "ok": True,
+            "executed": True,
+            "summary": "route=research_synthesis endpoint=ollama-gemma4 model=gemma4:26b",
+            "response_text": "RESEARCH_PING_OK",
+            "reason_code": "ok",
+        },
+    )
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="research",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-09T15:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-model-ping", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-model-ping"
+    assert "model ping" in text
+    assert "- kind: research" in text
+    assert "- executed: yes" in text
+    assert "- ok: yes" in text
+    assert "- response: RESEARCH_PING_OK" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch model-ping O2 research" in buttons
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert audit_rows[-1]["source_command"] == "/orch model-ping O2 research"
+    assert audit_rows[-1]["outcome_reason_code"] == "ok"
+
+
+def test_orch_bgw_task_executes_test_only_task_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "alias": "analysis-check",
+                "prompt": "check the analysis summary",
+                "status": "blocked",
+                "tf_phase": "needs_retry",
+                "execution_brief_status": "executable",
+                "execution_brief_summary": "do=summary",
+                "followup_brief_status": "preview_only",
+                "followup_brief_summary": "followup preview only",
+                "reentry_rails_summary": "retry=ready exec=L1 review=R1 | followup=preview_only",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    def _send(body: str, **kwargs):
+        sent.append((body, kwargs.get("context"), kwargs.get("reply_markup")))
+        return True
+
+    monkeypatch.setattr(
+        orch_task_handlers.model_provider_adapter,
+        "invoke_background_ticket_worker",
+        lambda team_dir, *, ticket: {
+            "ok": True,
+            "executed": True,
+            "route_id": "background_worker_primary",
+            "endpoint_id": "ollama-qwen3",
+            "model": "qwen3-coder:30b",
+            "response_text": "TASK_WORKER_OK",
+            "task_contract_summary": "task=T-001 | pack=offdesk_execute | brief=executable | docs=1",
+            "task_result_status": "ready",
+            "task_result_summary": "status=ready | worker summary drafted | actions=1 | refs=1",
+            "task_result_actions": ["update reports/summary.md"],
+            "task_result_cautions": ["keep review lane open"],
+            "task_result_evidence_refs": ["reports/summary.md"],
+            "task_update_stub_status": "ready",
+            "task_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+            "task_update_stub_targets": ["reports/summary.md"],
+        },
+    )
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda team_dir, ticket: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 status=ok",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-10T10:00:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-task", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgw-task"
+    assert "background worker task invoke" in text
+    assert "- task: T-001" in text
+    assert "task=T-001 | pack=offdesk_execute | brief=executable | docs=1" in text
+    assert "status=ready | worker summary drafted | actions=1 | refs=1" in text
+    assert "status=ready | targets=reports/summary.md | actions=1 | refs=1" in text
+    assert "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
+    assert "TASK_WORKER_OK" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-task O2" in buttons
+    queue_file = team_dir / "background_runs.json"
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    assert len(rows) == 1
+    assert rows[0]["status"] == "completed"
+    assert rows[0]["launch_spec"]["provider_task_contract_profile"] == "offdesk_execute"
+    assert rows[0]["launch_spec"]["provider_task_contract_summary"].startswith("module=")
+    assert rows[0]["worker_result_status"] == "ready"
+    assert rows[0]["worker_result_summary"] == "status=ready | worker summary drafted | actions=1 | refs=1"
+    assert rows[0]["worker_result_evidence_refs"] == ["reports/summary.md"]
+    assert rows[0]["worker_update_stub_status"] == "ready"
+    assert rows[0]["worker_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert rows[0]["worker_update_stub_targets"] == ["reports/summary.md"]
+    proposals = state["projects"]["twinpaper"].get("todo_proposals") or []
+    assert len(proposals) == 1
+    assert proposals[0]["summary"] == "review worker artifact update for T-001: reports/summary.md"
+    assert proposals[0]["kind"] == "handoff"
+    assert proposals[0]["created_by"] == "worker"
+    assert (
+        state["projects"]["twinpaper"]["tasks"]["REQ-1"]["background_run_worker_update_proposal_summary"]
+        == "status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md"
+    )
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert audit_rows[-1]["source_command"] == "/orch bgw-task O2"
+    assert audit_rows[-1]["outcome_reason_code"] == "completed"
+
+
+def test_orch_judge_executes_bound_review_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "status": "running",
+                "tf_phase": "running",
+                "execution_brief_status": "executable",
+                "execution_brief_summary": "executable | do=reports/summary.md",
+                "followup_brief_status": "preview_only",
+                "followup_brief_summary": "preview_only | exec=L2 review=R1",
+                "background_run_task_contract_module": "analysis",
+                "background_run_task_contract_module_summary": "module=analysis | findings_evidence_gate",
+                "background_run_worker_record_set_summary": "analysis_record_set | finding=1 | evidence=1 | gap=1",
+                "background_run_worker_record_set": [
+                    {"kind": "finding", "label": "summary", "state": "stable", "note": "action"},
+                    {"kind": "evidence", "label": "missing", "state": "missing", "note": "attach_evidence"},
+                    {"kind": "gap", "label": "evidence_missing", "state": "open", "note": "attach_evidence"},
+                ],
+            }
+        },
+        "last_request_id": "REQ-1",
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    monkeypatch.setattr(
+        orch_task_handlers.model_endpoint_adapter,
+        "resolve_task_judge_binding",
+        lambda *args, **kwargs: {
+            "bound": True,
+            "summary": "judge=claude_code_cli-opus:opus",
+            "endpoint": {"endpoint_id": "claude_code_cli-opus", "provider_kind": "claude_code_cli"},
+        },
+    )
+    monkeypatch.setattr(
+        orch_task_handlers.model_provider_adapter,
+        "invoke_task_judge_stub",
+        lambda team_dir, **kwargs: {
+            "kind": "judge",
+            "ok": True,
+            "executed": True,
+            "summary": "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+            "response_text": "{\"verdict\":\"continue\",\"confidence\":\"medium\",\"reasoning\":\"brief executable\",\"next_step\":\"/retry T-001\",\"caution\":\"review lane remains\"}",
+            "reason_code": "ok",
+        },
+    )
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-09T16:00:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-judge", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-judge"
+    assert "offdesk judge" in text
+    assert "- task: T-001" in text
+    assert "- binding: judge=claude_code_cli-opus:opus" in text
+    assert "- executed: yes" in text
+    assert "- ok: yes" in text
+    assert "continue" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch judge O2" in buttons
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    audit_rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert audit_rows[-1]["source_command"] == "/orch judge O2"
+    assert audit_rows[-1]["outcome_kind"] == "offdesk_judge"
+    assert audit_rows[-1]["decision_snapshot"]["verdict"] == "continue"
+    assert audit_rows[-1]["decision_snapshot"]["recommended_action"] == "retry"
+    assert audit_rows[-1]["decision_snapshot"]["analysis_record_set"] == "analysis_record_set | finding=1 | evidence=1 | gap=1"
+    assert audit_rows[-1]["decision_snapshot"]["analysis_record_set_records"][1]["kind"] == "evidence"
+    assert audit_rows[-1]["outcome_reason_code"] == "ok"
 
 
 def test_orch_map_reply_markup_narrows_to_locked_project() -> None:
@@ -97,11 +712,254 @@ def test_resolve_message_command_parses_slash_orch_repair() -> None:
     assert resolved.orch_target == "O2"
 
 
+def test_resolve_message_command_parses_slash_orch_bgq_clean() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgq-clean O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgq-clean"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgw_start() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgw-start O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgw-start"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgw_ping() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgw-ping O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgw-ping"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_model_ping() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch model-ping O2 research",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-model-ping"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "research"
+
+
+def test_resolve_message_command_parses_slash_orch_judge() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch judge O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-judge"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgx_status() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgx-status O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgx-status"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgx_result() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgx-result O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgx-result"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgx_emit_ack() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgx-emit-ack O2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgx-emit-ack"
+    assert resolved.orch_target == "O2"
+
+
+def test_resolve_message_command_parses_slash_orch_bgx_emit_result() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bgx-emit-result O2 failed",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bgx-emit-result"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "failed"
+
+
+def test_resolve_message_command_parses_slash_orch_bg_runner() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bg-runner O2 local_tmux",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bg-runner"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "local_tmux"
+
+
+def test_resolve_message_command_parses_slash_orch_run_lock() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch run-lock O2 test_only",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-run-lock"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "test_only"
+
+
+def test_resolve_message_command_parses_slash_orch_bg_slots() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bg-slots O2 2",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bg-slots"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "2"
+
+
+def test_resolve_message_command_parses_slash_orch_bg_slots_with_runner() -> None:
+    resolved = resolver.resolve_message_command(
+        text="/orch bg-slots O2 github_runner 3",
+        slash_only=False,
+        manager_state=_empty_state(),
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-bg-slots"
+    assert resolved.orch_target == "O2"
+    assert resolved.rest == "github_runner 3"
+
+
 def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     state = _empty_state()
     project_root = tmp_path / "TwinPaper"
     team_dir = project_root / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
     state["projects"]["twinpaper"] = {
         "name": "twinpaper",
         "display_name": "TwinPaper",
@@ -182,6 +1040,2439 @@ def test_orch_repair_rebuilds_missing_runtime(tmp_path: Path) -> None:
     assert messages
     assert "orch repair finished" in messages[-1]
     assert "- after: ready" in messages[-1]
+
+
+def test_orch_bgq_clean_marks_stale_background_queue_tickets(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    queue_path = background_runs_state_path(team_dir)
+    upsert_background_run_ticket(
+        queue_path,
+        {
+            "ticket_id": "BGT-STALE-1",
+            "request_id": "REQ-STALE-1",
+            "project_key": "twinpaper",
+            "execution_brief_status": "executable",
+            "runner_target": "local_background",
+            "launch_mode": "detached_no_wait",
+            "created_by": "test",
+            "source_surface": "offdesk",
+            "status": "running",
+            "created_at": "2026-03-16T07:00:00+09:00",
+        },
+        now_iso=lambda: "2026-03-16T07:00:00+09:00",
+    )
+
+    sent = []
+
+    def _send(msg: str, **kwargs):
+        sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup")))
+        return True
+
+    handled = orch_task_handlers.handle_orch_task_command(
+        cmd="orch-bgq-clean",
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-03-16T10:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    snapshot = summarize_background_runs_state(queue_path)
+
+    assert handled is True
+    assert sent
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgq-clean"
+    assert "background queue cleanup" in text
+    assert "- marked_stale: 1" in text
+    assert snapshot["stale_count"] >= 1
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch status O2" in buttons
+
+
+def test_orch_bgw_start_and_status_and_stop_manage_local_background_daemon(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    def _send(msg: str, **kwargs):
+        sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup")))
+        return True
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-06T12:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-start", **common_kwargs) is True
+    start_text, start_context, start_markup = sent[-1]
+    assert start_context == "orch-bgw-start"
+    assert "background worker start" in start_text
+    assert "- started: yes" in start_text
+    start_buttons = [btn["text"] for row in (start_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-stop O2" in start_buttons
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-status", **common_kwargs) is True
+    status_text, status_context, _status_markup = sent[-1]
+    assert status_context == "orch-bgw-status"
+    assert "background worker status" in status_text
+    assert "status=running" in status_text or "status=idle" in status_text
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgw-stop", **common_kwargs) is True
+    stop_text, stop_context, stop_markup = sent[-1]
+    assert stop_context == "orch-bgw-stop"
+    assert "background worker stop" in stop_text
+    assert "- stopped: yes" in stop_text
+    stop_buttons = [btn["text"] for row in (stop_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgw-start O2" in stop_buttons
+
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [row["source_command"] for row in rows[-3:]] == [
+        "/orch bgw-start O2",
+        "/orch bgw-status O2",
+        "/orch bgw-stop O2",
+    ]
+    assert rows[-3]["headline"] == "Background Worker Start | executed"
+    assert rows[-3]["next_step"] == "/orch status O2"
+    assert "background_worker.json" in rows[-3]["remediation"]
+    assert rows[-2]["headline"] == "Background Worker Status | accepted"
+    assert rows[-2]["link_href"] == "/control/runtimes/O2"
+    assert rows[-1]["headline"] == "Background Worker Stop | executed"
+    assert "queued tickets" in rows[-1]["remediation"]
+
+
+def test_orch_status_surfaces_external_background_phase(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {
+            "REQ-EXT-001": {
+                "request_id": "REQ-EXT-001",
+                "short_id": "T-401",
+                "status": "running",
+                "updated_at": "2026-04-07T22:10:00+09:00",
+                "background_run_runner_target": "github_runner",
+                "background_run_external_phase": "pickup_acknowledged",
+                "background_run_external_note": "background_run_acks/github-runner-bgt-ext-001.json",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-07T22:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "status"
+    assert "background_external: T-401 | github_runner | pickup_acknowledged | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "background_external_next: /orch bgx-status O2 | background_run_acks/github-runner-bgt-ext-001.json" in text
+
+
+def test_orch_status_surfaces_model_routing_summary(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (team_dir / "model_endpoints.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "endpoint_id": "claude-sonnet-shell",
+                        "provider_kind": "anthropic",
+                        "model": "claude-sonnet-4",
+                        "enabled": True,
+                        "supports_tools": True,
+                    },
+                    {
+                        "endpoint_id": "ollama-qwen3",
+                        "provider_kind": "ollama",
+                        "base_url": "http://127.0.0.1:11434",
+                        "model": "qwen3-coder:30b",
+                        "enabled": True,
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (team_dir / "model_routing.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "profile": "default",
+                "routes": {
+                    "on_desk_primary": {"endpoint_id": "claude-sonnet-shell"},
+                    "background_worker_primary": {"endpoint_id": "ollama-qwen3"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (project_root / "docs").mkdir(parents=True, exist_ok=True)
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "project_root": str(project_root),
+            "project_alias": "O2",
+            "onboarding_status": "active",
+            "doc_roots": [str((project_root / "docs").resolve())],
+            "canonical_todo_path": str((team_dir / "AOE_TODO.md").resolve()),
+        },
+        project_root=project_root,
+        entry={"background_runner_target": "local_background"},
+    )
+    document_registry.write_document_registry(
+        team_dir,
+        {
+            "records": [
+                {
+                    "doc_id": "tp-spec",
+                    "path": str((project_root / "docs" / "REQUEST_CONTRACT_SPEC.md").resolve()),
+                    "doc_type": "spec",
+                    "source_kind": "markdown",
+                    "title": "Request Contract Spec",
+                    "canonical": True,
+                    "freshness_class": "fresh",
+                    "ingest_status": "indexed",
+                }
+            ]
+        },
+        project_root=project_root,
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "last_request_id": "REQ-1",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "status": "running",
+                "updated_at": "2026-04-08T23:10:00+09:00",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-08T23:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "status"
+    assert "workspace: status=active" in text
+    assert "document_registry: indexed=1 canonical=1" in text
+    assert "model_routing: profile=default" in text
+    assert "ondesk=claude-sonnet-shell:claude-sonnet-4" in text
+    assert "bg=ollama-qwen3:qwen3-coder:30b" in text
+    assert "model_registry: enabled=2 bound=2/5 local=1 kinds=anthropic=1, ollama=1" in text
+    assert "judge_binding: T-001 | judge=unbound:claude-opus-4.1" in text
+    assert "judge_probe: T-001 | judge=unbound:claude-opus-4.1" in text
+    assert "escalation_binding: T-001 | bgx=unbound:gpt-oss-or-gemma4" in text
+    assert "escalation_probe: T-001 | bgx=unbound:gpt-oss-or-gemma4" in text
+
+
+def test_orch_status_surfaces_judge_bridge_and_replan_auto_routing_policy(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "project_root": str(project_root),
+            "project_alias": "O2",
+            "onboarding_status": "active",
+            "doc_roots": [str(docs_dir.resolve())],
+        },
+        project_root=project_root,
+        entry={"background_runner_target": "local_background"},
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Retry | blocked",
+        status="blocked",
+        outcome_kind="retry_run",
+        outcome_status="blocked",
+        outcome_reason_code="planning_gate",
+        outcome_detail="planning critic blocked retry",
+        next_step="/retry T-001",
+        remediation="judge decision reuse: action=retry next=/retry T-001",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:15:00+09:00",
+        extra={
+            "latest_judge_decision_bridge": {
+                "source": "latest_offdesk_judge",
+                "verdict": "continue",
+                "confidence": "medium",
+                "recommended_action": "retry",
+                "candidate_next_step": "/retry T-001",
+                "applied": True,
+                "applied_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+            },
+            "replan_auto_routing_policy": {
+                "source": "latest_offdesk_judge",
+                "status": "ready",
+                "current_action": "replan",
+                "suggested_action": "retry",
+                "suggested_next_step": "/retry T-001",
+                "decision_mode": "promoted_next_step",
+                "supports_auto_decision": True,
+                "can_auto_apply": True,
+                "requires_operator_confirmation": True,
+                "confidence": "medium",
+            },
+        },
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Replan Auto Route | applied",
+        status="executed",
+        outcome_kind="replan_auto_route",
+        outcome_status="executed",
+        outcome_reason_code="judge_policy_ready",
+        outcome_detail="retry_command=/retry T-001",
+        next_step="/retry T-001",
+        remediation="-",
+        source_command="/replan T-001 lane L1",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:18:00+09:00",
+    )
+    assert action_audit.append_action_audit_row(
+        team_dir,
+        headline="Syncback Apply | executed",
+        status="executed",
+        outcome_kind="runtime_syncback_apply",
+        outcome_status="executed",
+        outcome_reason_code="completed",
+        outcome_detail="path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0",
+        next_step="/sync preview O2 24h",
+        remediation="-",
+        source_command="/todo O2 syncback apply",
+        link_label="Runtime O2",
+        link_href="/control/runtimes/O2",
+        at="2026-04-10T09:19:00+09:00",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "last_request_id": "REQ-1",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "status": "blocked",
+                "updated_at": "2026-04-10T09:10:00+09:00",
+                "background_run_task_contract_module": "package",
+                "background_run_task_contract_module_summary": "package | artifact/package signals",
+                "background_run_task_contract_policy_summary": (
+                    "package | policy=artifact_integrity_gate | result=artifact+verification | "
+                    "apply=strict_syncback | loop=build_verify"
+                ),
+                "background_run_worker_gate_summary": "state=integrity_ready | artifacts=1 | refs=1 | stop=syncback_clean",
+                "background_run_worker_profile_summary": (
+                    "package_verification_profile | state=integrity_ready | artifacts=1 | verification=1 | integrity=ready | targets=1 | cautions=0"
+                ),
+                "background_run_worker_checklist_summary": (
+                    "package_checklist | state=integrity_ready | artifacts=1,verification=1,integrity=ready | next=syncback_clean"
+                ),
+                "background_run_worker_items_summary": (
+                    "package_items | artifact:TODO.md,verification:1,integrity:ready"
+                ),
+                "background_run_worker_items": [
+                    "artifact:TODO.md",
+                    "verification:1",
+                    "integrity:ready",
+                ],
+                "background_run_worker_item_classes_summary": (
+                    "package_item_classes | artifact=1 | verification=1 | integrity=ready"
+                ),
+                "background_run_worker_item_classes": [
+                    "artifact=1",
+                    "verification=1",
+                    "integrity=ready",
+                ],
+                "background_run_worker_records_summary": (
+                    "package_records | artifact_record=TODO.md | verification_record=1 | apply_record=pending | syncback_record=ready"
+                ),
+                "background_run_worker_records": [
+                    "artifact_record=TODO.md",
+                    "verification_record=1",
+                    "apply_record=pending",
+                    "syncback_record=ready",
+                ],
+                "background_run_worker_record_rows_summary": (
+                    "package_record_rows | artifact_row=TODO.md|state=present | "
+                    "verification_row=1|state=ready | apply_row=pending|state=pending | "
+                    "syncback_row=ready|state=ready|note=syncback_clean"
+                ),
+                "background_run_worker_record_rows": [
+                    "artifact_row=TODO.md|state=present",
+                    "verification_row=1|state=ready",
+                    "apply_row=pending|state=pending",
+                    "syncback_row=ready|state=ready|note=syncback_clean",
+                ],
+                "background_run_worker_record_set_summary": (
+                    "package_record_set | artifact=1 | verification=1 | apply=1 | syncback=1"
+                ),
+                "background_run_worker_record_set": [
+                    {"kind": "artifact", "label": "TODO.md", "state": "present", "note": "artifact"},
+                    {"kind": "verification", "label": "1", "state": "ready", "note": "verification"},
+                    {"kind": "apply", "label": "pending", "state": "pending", "note": "apply_gate"},
+                    {"kind": "syncback", "label": "ready", "state": "ready", "note": "syncback_clean"},
+                ],
+                "background_run_worker_preflight_summary": (
+                    "package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
+                ),
+                "background_run_worker_preflight_rows_summary": (
+                    "package_preflight_rows | verification_ready=ready|state=ready|note=verification | "
+                    "apply_ready=pending|state=blocked|note=apply_gate | syncback_ready=ready|state=ready|note=artifact_check_open | "
+                    "package_ready=artifact_open|state=blocked|note=artifact_check_open"
+                ),
+                "background_run_worker_preflight_rows": [
+                    "verification_ready=ready|state=ready|note=verification",
+                    "apply_ready=pending|state=blocked|note=apply_gate",
+                    "syncback_ready=ready|state=ready|note=artifact_check_open",
+                    "package_ready=artifact_open|state=blocked|note=artifact_check_open",
+                ],
+                "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-10T09:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "status"
+    assert (
+        "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-001 | auto=yes"
+        in text
+    )
+    assert (
+        "replan_auto_routing_policy: status=ready | from=replan | to=retry | confidence=medium | next=/retry T-001 | mode=promoted_next_step | confirm=yes"
+        in text
+    )
+    assert (
+        "auto_route_status: ready+applied=/retry T-001 | at=2026-04-10T09:18:00+09:00"
+        in text
+    )
+    assert (
+        "worker_module: package | artifact/package signals"
+        in text
+    )
+    assert (
+        "worker_policy: package | policy=artifact_integrity_gate | result=artifact+verification"
+        in text
+    )
+    assert (
+        "worker_gate: state=integrity_ready | artifacts=1 | refs=1 | stop=syncback_clean"
+        in text
+    )
+    assert (
+        "worker_profile: package_verification_profile | state=integrity_ready | artifacts=1 | verification=1 | integrity=ready | targets=1 | cautions=0"
+        in text
+    )
+    assert (
+        "worker_checklist: package_checklist | state=integrity_ready | artifacts=1,verification=1,integrity=ready | next=syncback_clean"
+        in text
+    )
+    assert "worker_items: package_items | artifact:TODO.md,verification:1,integrity:ready" in text
+    assert "worker_item_tokens: artifact:TODO.md, verification:1, integrity:ready" in text
+    assert "worker_item_classes: package_item_classes | artifact=1 | verification=1 | integrity=ready" in text
+    assert "worker_item_class_tokens: artifact=1, verification=1, integrity=ready" in text
+    assert "worker_records: package_records | artifact_record=TODO.md | verification_record=1 | apply_record=pending | syncback_record=ready" in text
+    assert "worker_record_tokens: artifact_record=TODO.md, verification_record=1, apply_record=pending, syncback_record=ready" in text
+    assert (
+        "worker_record_rows: package_record_rows | artifact_row=TODO.md|state=present | verification_row=1|state=ready | apply_row=pending|state=pending | syncback_row=ready|state=ready|note=syncback_clean"
+        in text
+    )
+    assert (
+        "worker_record_row_tokens: artifact_row=TODO.md|state=present, verification_row=1|state=ready, apply_row=pending|state=pending, syncback_row=ready|state=ready|note=syncback_clean"
+        in text
+    )
+    assert "worker_record_set: package_record_set | artifact=1 | verification=1 | apply=1 | syncback=1" in text
+    assert (
+        "worker_record_set_tokens: artifact:TODO.md|state=present|note=artifact, verification:1|state=ready|note=verification, apply:pending|state=pending|note=apply_gate, syncback:ready|state=ready|note=syncback_clean"
+        in text
+    )
+    assert (
+        "worker_preflight: package_preflight | state=artifact_open | verification=ready | apply=pending | syncback=ready | next=artifact_check_open"
+        in text
+    )
+    assert "worker_preflight_rows: package_preflight_rows | verification_ready=ready|state=ready|note=verification" in text
+    assert "apply_ready=pending|state=blocked|note=apply_gate" in text
+    assert "syncback_ready=ready|state=ready|note=artifact_check_open" in text
+    assert (
+        "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-10T09:19:00+09:00"
+        in text
+    )
+    assert (
+        "canonical_writeback: Syncback Apply | executed | state=executed | next=/sync preview O2 24h | at=2026-04-10T09:19:00+09:00 | path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0"
+        in text
+    )
+
+
+def test_orch_status_prefers_recent_successful_judge_model_ping_over_probe_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    docs_dir = project_root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    workspace_brief.write_workspace_brief(
+        team_dir,
+        {
+            "project_root": str(project_root),
+            "project_alias": "O2",
+            "onboarding_status": "active",
+            "doc_roots": [str(docs_dir.resolve())],
+            "canonical_todo_path": str((team_dir / "AOE_TODO.md").resolve()),
+        },
+        project_root=project_root,
+        entry={"background_runner_target": "local_background"},
+    )
+    document_registry.write_document_registry(
+        team_dir,
+        {
+            "records": [
+                {
+                    "doc_id": "tp-spec",
+                    "path": str((docs_dir / "REQUEST_CONTRACT_SPEC.md").resolve()),
+                    "doc_type": "spec",
+                    "source_kind": "markdown",
+                    "title": "Request Contract Spec",
+                    "canonical": True,
+                    "freshness_class": "fresh",
+                    "ingest_status": "indexed",
+                }
+            ]
+        },
+        project_root=project_root,
+    )
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T10:01:00+09:00",
+                "headline": "Model Ping Judge | executed",
+                "status": "executed",
+                "outcome_kind": "model_ping",
+                "outcome_status": "executed",
+                "outcome_reason_code": "ok",
+                "outcome_detail": "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+                "next_step": "/orch status O2",
+                "remediation": "inspect binding summary and route probe status if the bounded invoke did not execute",
+                "source_command": "/orch model-ping O2 judge",
+                "link_href": "/control/runtimes/O2",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "last_request_id": "REQ-1",
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "status": "running",
+                "updated_at": "2026-04-09T10:00:00+09:00",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    monkeypatch.setattr(
+        orch_task_handlers.model_endpoint_adapter,
+        "resolve_task_judge_binding",
+        lambda *args, **kwargs: {
+            "bound": True,
+            "summary": "judge=claude_code_cli-opus:opus",
+            "endpoint": {
+                "endpoint_id": "claude_code_cli-opus",
+                "provider_kind": "claude_code_cli",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orch_task_handlers.model_endpoint_adapter,
+        "probe_task_judge_binding",
+        lambda *args, **kwargs: {
+            "probe_status": "probe_timeout",
+            "summary": "endpoint=claude_code_cli-opus provider=claude_code_cli status=probe_timeout",
+        },
+    )
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-09T10:02:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "status"
+    assert "judge_binding: T-001 | judge=claude_code_cli-opus:opus" in text
+    assert (
+        "judge_probe: T-001 | status=last_invoke_ok | "
+        "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed"
+    ) in text
+
+
+def test_orch_bgx_status_surfaces_external_artifacts_and_audit(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {
+            "REQ-EXT-001": {
+                "request_id": "REQ-EXT-001",
+                "short_id": "T-401",
+                "status": "running",
+                "updated_at": "2026-04-07T22:10:00+09:00",
+                "background_run_ticket_id": "BGT-EXT-001",
+                "background_run_runner_target": "github_runner",
+                "background_run_external_phase": "pickup_acknowledged",
+                "background_run_external_note": "background_run_acks/github-runner-bgt-ext-001.json",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    handoff_path = external_background_handoff_path(team_dir, "BGT-EXT-001", "github_runner")
+    ack_path = external_background_ack_path(team_dir, "BGT-EXT-001", "github_runner")
+    result_path = external_background_result_path(team_dir, "BGT-EXT-001", "github_runner")
+    handoff_path.parent.mkdir(parents=True, exist_ok=True)
+    ack_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    handoff_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-EXT-001",
+                "runner_target": "github_runner",
+                "request_id": "REQ-EXT-001",
+                "launch_mode": "dashboard_retry",
+                "source_surface": "dashboard",
+                "created_by": "dashboard:control",
+                "emitted_at": "2026-04-07T22:11:00+09:00",
+                "launch_spec": {"summary": "github runner retry payload", "mode": "github_action_json"},
+                "task_runtime": {"execution_brief_status": "executable"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    ack_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-EXT-001",
+                "status": "acknowledged",
+                "worker_id": "gh-runner-17",
+                "summary": "picked up by github runner",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-EXT-001",
+                "status": "completed",
+                "reason": "done",
+                "summary": "review retry finished",
+                "evidence_bundle": "status=completed | outcome=retry_done",
+                "evidence_artifacts": ["reports/review_report.md"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-07T22:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgx-status", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgx-status"
+    assert "external background status" in text
+    assert "- task: T-401" in text
+    assert "- runner: github_runner" in text
+    assert "- phase: pickup_acknowledged" in text
+    assert "background_run_handoffs/github-runner-bgt-ext-001.json | exists=yes" in text
+    assert "background_run_acks/github-runner-bgt-ext-001.json | exists=yes" in text
+    assert "background_run_results/github-runner-bgt-ext-001.json | exists=yes" in text
+    assert "- /orch bgx-result O2" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgx-status O2" in buttons
+    assert "/orch bgx-handoff O2" in buttons
+    assert "/orch bgx-ack O2" in buttons
+    assert "/orch bgx-result O2" in buttons
+
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["headline"] == "External Background Status | accepted"
+    assert rows[-1]["outcome_kind"] == "background_external"
+    assert rows[-1]["source_command"] == "/orch bgx-status O2"
+    assert rows[-1]["next_step"] == "/orch bgx-result O2"
+
+
+def test_orch_bgx_result_surfaces_result_payload_and_audit(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {
+            "REQ-EXT-001": {
+                "request_id": "REQ-EXT-001",
+                "short_id": "T-401",
+                "status": "running",
+                "updated_at": "2026-04-07T22:10:00+09:00",
+                "background_run_ticket_id": "BGT-EXT-001",
+                "background_run_runner_target": "github_runner",
+                "background_run_external_phase": "result_received",
+                "background_run_external_note": "background_run_results/github-runner-bgt-ext-001.json",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    result_path = external_background_result_path(team_dir, "BGT-EXT-001", "github_runner")
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-EXT-001",
+                "status": "completed",
+                "reason": "done",
+                "summary": "review retry finished",
+                "evidence_bundle": "status=completed | outcome=retry_done",
+                "evidence_artifacts": ["reports/review_report.md", "logs/retry.log"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-07T22:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgx-result", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "orch-bgx-result"
+    assert "external background result" in text
+    assert "- artifact: background_run_results/github-runner-bgt-ext-001.json | exists=yes | parsed=yes" in text
+    assert "- result_status: completed" in text
+    assert "- reason: done" in text
+    assert "- summary: review retry finished" in text
+    assert "- evidence_bundle: status=completed | outcome=retry_done" in text
+    assert "- evidence_artifacts: reports/review_report.md, logs/retry.log" in text
+    assert "- /orch bgx-status O2" in text
+
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["headline"] == "External Background Result | accepted"
+    assert rows[-1]["outcome_reason_code"] == "result_present"
+    assert rows[-1]["source_command"] == "/orch bgx-result O2"
+
+
+def test_orch_bgx_emit_ack_writes_test_only_ack_and_syncs_snapshot(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    queue_file = team_dir / "background_runs.json"
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-EXT-ACK-001",
+        request_id="REQ-EXT-ACK-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-08T10:00:00+09:00",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+            launch_spec=build_external_runner_gateway_command_launch_spec(
+                runner_target="github_runner",
+                request_id="REQ-EXT-ACK-001",
+                project_key="twinpaper",
+                project_root=str(project_root),
+                team_dir=str(team_dir),
+                manager_state_file=str(team_dir / "orch_manager_state.json"),
+                command_text="/retry T-401 lane L1",
+                simulate_chat_id="939062873",
+                source_surface="dashboard_retry",
+                created_by="dashboard:control",
+            ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-08T10:00:00+09:00")
+    handoff = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-EXT-ACK-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-08T10:00:01+09:00",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {
+            "REQ-EXT-ACK-001": {
+                "request_id": "REQ-EXT-ACK-001",
+                "short_id": "T-401",
+                "status": "running",
+                "updated_at": "2026-04-08T10:00:01+09:00",
+                "background_run_status": "running",
+                "background_run_ticket_id": "BGT-EXT-ACK-001",
+                "background_run_runner_target": "github_runner",
+                "background_run_runtime_handle": handoff.get("runtime_handle", ""),
+                "background_run_external_phase": "handoff_emitted",
+                "background_run_external_note": handoff.get("runtime_handle", ""),
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    manager_state_file = tmp_path / "manager_state.json"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=manager_state_file,
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, updated: Path(path).write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"),
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-08T10:00:02+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgx-emit-ack", **common_kwargs) is True
+    text, context, reply_markup = sent[-1]
+    assert context == "orch-bgx-emit-ack"
+    assert "external background pickup ack emitted" in text
+    assert "- /orch bgx-emit-result O2 completed" in text
+    buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bgx-emit-result O2 completed" in buttons
+    ack_path = external_background_ack_path(team_dir, "BGT-EXT-ACK-001", "github_runner")
+    ack_payload = json.loads(ack_path.read_text(encoding="utf-8"))
+    assert ack_payload["worker_id"] == "test-harness:github_runner"
+    assert ack_payload["status"] == "acknowledged"
+    updated_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = updated_state["projects"]["twinpaper"]["tasks"]["REQ-EXT-ACK-001"]
+    assert task["background_run_external_phase"] == "pickup_acknowledged"
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["outcome_reason_code"] == "external_pickup_acknowledged"
+    assert rows[-1]["source_command"] == "/orch bgx-emit-ack O2"
+
+
+def test_orch_bgx_emit_result_writes_test_only_result_and_syncs_snapshot(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    queue_file = team_dir / "background_runs.json"
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-EXT-RESULT-001",
+        request_id="REQ-EXT-RESULT-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-08T10:10:00+09:00",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+            launch_spec=build_external_runner_gateway_command_launch_spec(
+                runner_target="github_runner",
+                request_id="REQ-EXT-RESULT-001",
+                project_key="twinpaper",
+                project_root=str(project_root),
+                team_dir=str(team_dir),
+                manager_state_file=str(team_dir / "orch_manager_state.json"),
+                command_text="/retry T-402 lane L1",
+                simulate_chat_id="939062873",
+                source_surface="dashboard_retry",
+                created_by="dashboard:control",
+            ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-08T10:10:00+09:00")
+    handoff = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-EXT-RESULT-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-08T10:10:01+09:00",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+    emit_external_background_ack(
+        queue_path=queue_file,
+        ticket_id="BGT-EXT-RESULT-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-08T10:10:02+09:00",
+    )
+    poll_external_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-08T10:10:03+09:00",
+    )
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "run_lock_mode": "test_only",
+        "tasks": {
+            "REQ-EXT-RESULT-001": {
+                "request_id": "REQ-EXT-RESULT-001",
+                "short_id": "T-402",
+                "status": "running",
+                "updated_at": "2026-04-08T10:10:03+09:00",
+                "background_run_status": "running",
+                "background_run_ticket_id": "BGT-EXT-RESULT-001",
+                "background_run_runner_target": "github_runner",
+                "background_run_runtime_handle": handoff.get("runtime_handle", ""),
+                "background_run_external_phase": "pickup_acknowledged",
+                "background_run_external_note": "background_run_acks/github-runner-bgt-ext-result-001.json",
+            }
+        },
+    }
+    state["active"] = "twinpaper"
+    manager_state_file = tmp_path / "manager_state.json"
+    manager_state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=manager_state_file,
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="completed",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, updated: Path(path).write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"),
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-08T10:10:04+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bgx-emit-result", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "orch-bgx-emit-result"
+    assert "external background result emitted" in text
+    assert "- /offdesk review O2" in text
+    result_path = external_background_result_path(team_dir, "BGT-EXT-RESULT-001", "github_runner")
+    result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result_payload["status"] == "completed"
+    updated_state = json.loads(manager_state_file.read_text(encoding="utf-8"))
+    task = updated_state["projects"]["twinpaper"]["tasks"]["REQ-EXT-RESULT-001"]
+    assert task["background_run_status"] == "completed"
+    assert task["background_run_external_phase"] == "result_received"
+    audit_file = team_dir / "dashboard" / "action-history.jsonl"
+    rows = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["outcome_reason_code"] == "external_result_completed"
+    assert rows[-1]["source_command"] == "/orch bgx-emit-result O2 completed"
+
+
+def test_orch_status_surfaces_background_scheduler_head(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    queue_file = team_dir / "background_runs.json"
+    for ticket_id, runner_target, launch_mode, created_at in [
+        ("BGT-LB-001", "local_background", "detached_no_wait", "2026-04-07T20:00:00+09:00"),
+        ("BGT-LB-002", "local_background", "dashboard_followup_execute", "2026-04-07T20:01:00+09:00"),
+        ("BGT-EXT-001", "github_runner", "dashboard_retry", "2026-04-07T20:02:00+09:00"),
+    ]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target=runner_target,
+                launch_mode=launch_mode,
+                created_at=created_at,
+                created_by="dashboard:control",
+                source_surface="dashboard_retry",
+                status="queued",
+            ),
+            now_iso=lambda: "2026-04-07T20:02:30+09:00",
+        )
+
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "tasks": {},
+        "todos": [],
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=lambda msg, **kwargs: sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-07T22:20:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    text, context, _reply_markup = sent[-1]
+    assert context == "status"
+    assert "background_scheduler: local_background:head=BGT-LB-001/detached_no_wait queued=2 starved=yes" in text
+    assert "github_runner:head=BGT-EXT-001/dashboard_retry queued=1 starved=yes" in text
+
+
+def test_orch_bg_runner_sets_preference_and_status_surfaces_effective_runner(tmp_path: Path) -> None:
+    state = _empty_state()
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "overview": "Twin project orchestration",
+        "tasks": {},
+    }
+    state["active"] = "twinpaper"
+    sent = []
+
+    def _send(msg: str, **kwargs):
+        sent.append((msg, kwargs.get("context", ""), kwargs.get("reply_markup")))
+        return True
+
+    common_kwargs = dict(
+        args=argparse.Namespace(
+            project_root=ROOT,
+            manager_state_file=tmp_path / "manager_state.json",
+            dry_run=False,
+            require_verifier=False,
+            verifier_roles="",
+        ),
+        manager_state=state,
+        chat_id="939062873",
+        orch_target="O2",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="local_tmux",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        send=_send,
+        log_event=lambda **kwargs: None,
+        get_context=lambda target: ("twinpaper", state["projects"]["twinpaper"], argparse.Namespace(team_dir=team_dir)),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda path, state: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-06T12:30:00+09:00",
+        run_aoe_status=lambda p_args: "",
+        resolve_chat_task_ref=lambda *args, **kwargs: "",
+        resolve_task_request_id=lambda entry, ref: "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda *args, **kwargs: None,
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda *args, **kwargs: "",
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bg-runner", **common_kwargs) is True
+    pref_text, pref_context, pref_markup = sent[-1]
+    assert pref_context == "orch-bg-runner"
+    assert "background runner preference" in pref_text
+    assert "- preferred: local_tmux" in pref_text
+    assert "- effective: local_background" in pref_text
+    assert "externalizable launch spec" in pref_text
+    assert state["projects"]["twinpaper"]["background_runner_target"] == "local_tmux"
+    buttons = [btn["text"] for row in (pref_markup or {}).get("keyboard", []) for btn in row]
+    assert "/orch bg-runner O2 local_background" in buttons
+
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    status_text, status_context, _ = sent[-1]
+    assert status_context == "status"
+    assert "background_runner: pref=local_tmux | effective=local_background" in status_text
+    assert "background_runner_note: preferred local_tmux is pending until an externalizable launch spec exists" in status_text
+
+    common_kwargs["rest"] = "test_only"
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-run-lock", **common_kwargs) is True
+    lock_text, lock_context, _ = sent[-1]
+    assert lock_context == "orch-run-lock"
+    assert "- mode: test_only" in lock_text
+    assert state["projects"]["twinpaper"]["run_lock_mode"] == "test_only"
+
+    common_kwargs["rest"] = ""
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    status_text, status_context, _ = sent[-1]
+    assert status_context == "status"
+    assert "run_lock: test_only" in status_text
+    assert "run_lock_note: test_only lock is active; only small test launches are allowed" in status_text
+
+    common_kwargs["rest"] = "2"
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bg-slots", **common_kwargs) is True
+    slots_text, slots_context, _ = sent[-1]
+    assert slots_context == "orch-bg-slots"
+    assert "- limit: 2" in slots_text
+    assert state["projects"]["twinpaper"]["background_runner_slot_limit"] == 2
+
+    common_kwargs["rest"] = "github_runner 3"
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-bg-slots", **common_kwargs) is True
+    slots_text, slots_context, _ = sent[-1]
+    assert slots_context == "orch-bg-slots"
+    assert "- runner: github_runner" in slots_text
+    assert "- limit: 3" in slots_text
+    assert state["projects"]["twinpaper"]["background_runner_slot_limits"]["github_runner"] == 3
+
+    common_kwargs["rest"] = ""
+    assert orch_task_handlers.handle_orch_task_command(cmd="orch-status", **common_kwargs) is True
+    status_text, status_context, _ = sent[-1]
+    assert status_context == "status"
+    assert "background_slots: runner=local_tmux limit=2 active=0" in status_text
+    assert "github_runner=0/3" in status_text
+
+
+def test_no_wait_detach_uses_local_tmux_when_serializable_launch_spec_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    upsert_background_run_ticket(
+        team_dir / "background_runs.json",
+        build_background_run_ticket(
+            ticket_id="BGT-EXTERNAL-BUSY-001",
+            request_id="REQ-EXTERNAL-BUSY-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="dashboard_retry",
+            created_at="2026-03-13T18:54:00+0900",
+            created_by="dashboard:control",
+            source_surface="dashboard_retry",
+            status="running",
+        ),
+        now_iso=lambda: "2026-03-13T18:54:01+0900",
+    )
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "background_runner_target": "local_tmux",
+                "todos": [],
+            }
+        }
+    }
+    sent = []
+    logged = []
+    saves = []
+    daemon = {}
+    launched = {}
+
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: daemon.update(kwargs) or {"started": True, "thread_name": "aoe-local-bg-test", "runner_target": kwargs.get("runner_target", "")},
+    )
+    monkeypatch.setattr(
+        run_detached_flow,
+        "launch_background_ticket_via_adapter",
+        lambda **kwargs: launched.update(kwargs)
+        or advance_background_run_ticket(
+            kwargs["queue_path"],
+            kwargs["ticket_id"],
+            now_iso=kwargs["now_iso"],
+            status="running",
+            runner_target="local_tmux",
+            launch_mode="detached_no_wait",
+            created_by=kwargs.get("claimed_by", ""),
+            source_surface=kwargs.get("source_surface", ""),
+            runtime_handle="aoe_bg_req_detached_tmux",
+            runtime_summary="tmux_session=aoe_bg_req_detached_tmux",
+            evidence_bundle="status=running | outcome=tmux_session_started | session=aoe_bg_req_detached_tmux",
+            evidence_artifacts=["background_run_logs/req-detached-tmux.log"],
+        ),
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda path, manager_state: saves.append(path),
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: "REQ-DETACHED-TMUX",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-13T18:55:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert daemon["runner_target"] == "local_background"
+    assert launched["launch_mode"] == "detached_no_wait"
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-TMUX"]
+    assert task["background_run_runner_target"] == "local_tmux"
+    assert task["background_run_status"] == "running"
+    assert task["background_run_runtime_handle"] == "aoe_bg_req_detached_tmux"
+    assert task["background_run_launch_spec_summary"].startswith("background_dispatch | mode=tmux_session_json")
+    assert task["background_run_launch_spec_summary"].endswith("externalizable=yes")
+    assert task["background_run_model_pack_profile"] == "offdesk_execute"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
+    assert task["background_run_model_judge_binding_summary"] == "judge=unbound:claude-opus-4.1"
+    assert task["background_run_model_judge_probe_status"] == "unbound"
+    assert task["background_run_model_escalation_binding_summary"] == "bgx=unbound:gpt-oss-or-gemma4"
+    assert task["background_run_model_escalation_probe_status"] == "unbound"
+    queue_file = team_dir / "background_runs.json"
+    rows = json.loads(queue_file.read_text(encoding="utf-8")).get("runs") or []
+    row = next(row for row in rows if str(row.get("ticket_id", "")).startswith("BGT-REQ-DETACHED-TMUX-"))
+    assert row["runner_target"] == "local_tmux"
+    assert row["status"] == "running"
+    assert row["launch_spec"]["externalizable"] is True
+    assert row["launch_spec"]["mode"] == "tmux_session_json"
+    assert row["launch_spec"]["model_pack_profile"] == "offdesk_execute"
+    assert row["launch_spec"]["model_plan_summary"] == (
+        "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
+    assert row["launch_spec"]["model_judge_binding_summary"] == "judge=unbound:claude-opus-4.1"
+    assert row["launch_spec"]["model_judge_probe_status"] == "unbound"
+    assert row["launch_spec"]["model_escalation_binding_summary"] == "bgx=unbound:gpt-oss-or-gemma4"
+    assert row["launch_spec"]["model_escalation_probe_status"] == "unbound"
+    assert row["launch_spec"]["command_argv"][1] == gateway_cli_entrypoint_path()
+    assert "--simulate-text" in row["launch_spec"]["command_argv"]
+    assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in row["launch_spec"]["command_argv"]
+
+
+def test_no_wait_detach_falls_back_to_local_background_without_manager_state_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "background_runner_target": "local_tmux",
+                "todos": [],
+            }
+        }
+    }
+    daemon = {}
+
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: daemon.update(kwargs) or {"started": True, "thread_name": "aoe-local-bg-test", "runner_target": kwargs.get("runner_target", "")},
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file="",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda *args, **kwargs: True,
+            log_event=lambda **kwargs: None,
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda *args, **kwargs: None,
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: "REQ-DETACHED-FALLBACK",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-13T18:55:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert daemon["runner_target"] == "local_background"
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-FALLBACK"]
+    assert task["background_run_runner_target"] == "local_background"
+    assert task["background_run_launch_spec_summary"].startswith("gateway_dispatch | mode=in_process_callback")
+    assert task["background_run_model_pack_profile"] == "offdesk_execute"
+    assert task["background_run_model_plan_summary"] == (
+        "pack=offdesk_execute | worker=bg=unbound:qwen3-coder | judge=judge=unbound:claude-opus-4.1 | escalation=bgx=unbound:gpt-oss-or-gemma4"
+    )
+
+
+def test_no_wait_detach_blocks_when_run_lock_is_test_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "background_runner_target": "local_tmux",
+                "run_lock_mode": "test_only",
+                "todos": [],
+            }
+        }
+    }
+    sent = []
+    logged = []
+
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("daemon should not start under test-only run lock")),
+    )
+    monkeypatch.setattr(
+        run_detached_flow,
+        "launch_background_ticket_via_adapter",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("tmux launch should not start under test-only run lock")),
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda *args, **kwargs: None,
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: "REQ-DETACHED-LOCKED",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-13T18:55:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert sent
+    assert sent[-1][0] == "dispatch-detach blocked"
+    assert "/orch run-lock O2 open" in sent[-1][1]
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-LOCKED"]
+    assert task["background_run_status"] == "failed"
+    assert task["background_run_evidence_bundle"] == "status=failed | reason=run_lock_test_only"
+    assert any(row.get("event") == "dispatch_detach_blocked" for row in logged)
+
+
+def test_no_wait_detach_blocks_when_background_slots_are_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    queue_path = team_dir / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_path,
+        build_background_run_ticket(
+            ticket_id="BGT-BUSY-001",
+            request_id="REQ-BUSY-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="dashboard_retry",
+            created_at="2026-04-07T11:00:00+09:00",
+            created_by="dashboard:control",
+            source_surface="dashboard_retry",
+            status="running",
+        ),
+        now_iso=lambda: "2026-04-07T11:00:01+09:00",
+    )
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "background_runner_target": "local_tmux",
+                "background_runner_slot_limit": 1,
+                "todos": [],
+            }
+        }
+    }
+    sent = []
+    logged = []
+
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("daemon should not start when slots are exhausted")),
+    )
+    monkeypatch.setattr(
+        run_detached_flow,
+        "launch_background_ticket_via_adapter",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("tmux launch should not start when slots are exhausted")),
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=True,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda *args, **kwargs: None,
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("planning should be detached when --no-wait is set")),
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run inline")),
+            create_request_id=lambda: "REQ-DETACHED-SLOTS",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-13T18:55:00+0900",
+            sync_task_lifecycle=gw.sync_task_lifecycle,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert sent
+    assert sent[-1][0] == "dispatch-detach blocked"
+    assert "/orch bg-slots O2 local_tmux 2" in sent[-1][1]
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED-SLOTS"]
+    assert task["background_run_status"] == "failed"
+    assert task["background_run_evidence_bundle"] == "status=failed | reason=background_runner_slots_exhausted"
+    assert any(row.get("event") == "dispatch_detach_blocked" for row in logged)
 
 
 def test_orch_repair_all_repairs_multiple_projects(tmp_path: Path) -> None:
@@ -537,7 +3828,7 @@ def test_todo_syncback_preview_reports_done_append_and_blocked_notes(tmp_path: P
     assert sent
     text = sent[-1]
     assert "todo syncback preview" in text
-    assert "- orch: twinpaper (O2)" in text
+    assert "- runtime: twinpaper (O2)" in text
     assert "- mark_done: 1" in text
     assert "- append_new: 1" in text
     assert "- blocked_notes: 1" in text
@@ -2156,6 +5447,40 @@ def test_handle_run_or_unknown_command_materializes_provisional_task_before_plan
                 "plan_error": "",
                 "plan_gate_blocked": True,
                 "plan_gate_reason": "missing acceptance",
+                "plan_review_count": 3,
+                "plan_issue_codes": ["acceptance_gap"],
+                "plan_issue_history": [
+                    {
+                        "round": 1,
+                        "review_pass": "contract",
+                        "status": "issues",
+                        "primary_issue": "missing acceptance",
+                        "issue_codes": ["acceptance_gap"],
+                        "issue_count": 1,
+                        "provider": "codex",
+                    },
+                    {
+                        "round": 2,
+                        "review_pass": "execution",
+                        "status": "issues",
+                        "primary_issue": "missing acceptance",
+                        "issue_codes": ["acceptance_gap"],
+                        "issue_count": 1,
+                        "provider": "claude",
+                    },
+                    {
+                        "round": 3,
+                        "review_pass": "verification",
+                        "status": "issues",
+                        "primary_issue": "missing acceptance",
+                        "issue_codes": ["acceptance_gap"],
+                        "issue_count": 1,
+                        "provider": "codex",
+                    },
+                ],
+                "plan_convergence_status": "stalled",
+                "plan_stalled_reason": "missing acceptance",
+                "plan_last_round": 3,
                 "phase1_mode": "ensemble",
                 "phase1_rounds": 3,
                 "phase1_providers": ["codex", "claude"],
@@ -2218,6 +5543,12 @@ def test_handle_run_or_unknown_command_materializes_provisional_task_before_plan
     assert task["phase1_current_provider"] == "codex"
     assert task["phase1_candidate_roles"] == ["Codex-Dev"]
     assert task["plan_gate_reason"] == "missing acceptance"
+    assert task["plan_review_count"] == 3
+    assert task["plan_issue_codes"] == ["acceptance_gap"]
+    assert task["plan_issue_history"][-1]["review_pass"] == "verification"
+    assert task["plan_convergence_status"] == "stalled"
+    assert task["plan_stalled_reason"] == "missing acceptance"
+    assert task["plan_last_round"] == 3
     assert task["stages"]["planning"] == "failed"
     assert task["stages"]["close"] == "failed"
     assert manager_state["projects"]["twinpaper"]["last_request_id"] == "REQ-PLAN"
@@ -2226,6 +5557,540 @@ def test_handle_run_or_unknown_command_materializes_provisional_task_before_plan
     assert planning_evt["project"] == "twinpaper"
     assert planning_evt["request_id"] == "REQ-PLAN"
     assert planning_evt["task_short_id"] == task["short_id"]
+    assert saved
+
+
+def test_handle_run_or_unknown_command_preserves_plan_on_dispatch_failure(tmp_path: Path) -> None:
+    project_root = tmp_path / "TwinPaper"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "twinpaper": {
+                "name": "twinpaper",
+                "display_name": "TwinPaper",
+                "project_alias": "O2",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "todos": [],
+            }
+        }
+    }
+    sent: list[tuple[str, str, dict | None]] = []
+    logged: list[dict] = []
+    saved: list[Path] = []
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="run it",
+        rest="run it",
+        orch_target="O2",
+        run_prompt="run it",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=None,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda path, manager_state: saved.append(path),
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Dev"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Dev", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: ["Codex-Dev"],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=lambda *args, **kwargs: (
+                kwargs.get("report_progress") and kwargs["report_progress"](phase="planner", detail="phase1 round 1/3 provider=codex")
+            ) or {
+                "plan_data": {
+                    "summary": "ready",
+                    "subtasks": [
+                        {
+                            "id": "S1",
+                            "title": "Do work",
+                            "goal": "execute the task",
+                            "owner_role": "Codex-Dev",
+                            "acceptance": ["deliver the requested artifact"],
+                        }
+                    ],
+                },
+                "plan_critic": {"approved": True, "issues": [], "recommendations": []},
+                "plan_roles": ["Codex-Dev"],
+                "plan_replans": [{"attempt": 1}, {"attempt": 2}, {"attempt": 3}],
+                "plan_error": "",
+                "plan_gate_blocked": False,
+                "plan_gate_reason": "",
+                "plan_review_count": 3,
+                "plan_issue_codes": [],
+                "plan_issue_history": [
+                    {
+                        "round": 1,
+                        "review_pass": "contract",
+                        "status": "approved",
+                        "primary_issue": "",
+                        "issue_codes": [],
+                        "issue_count": 0,
+                        "provider": "codex",
+                    },
+                    {
+                        "round": 2,
+                        "review_pass": "execution",
+                        "status": "approved",
+                        "primary_issue": "",
+                        "issue_codes": [],
+                        "issue_count": 0,
+                        "provider": "claude",
+                    },
+                    {
+                        "round": 3,
+                        "review_pass": "verification",
+                        "status": "approved",
+                        "primary_issue": "",
+                        "issue_codes": [],
+                        "issue_count": 0,
+                        "provider": "codex",
+                    },
+                ],
+                "plan_convergence_status": "ready",
+                "plan_stalled_reason": "",
+                "plan_last_round": 3,
+                "phase1_mode": "ensemble",
+                "phase1_rounds": 3,
+                "phase1_providers": ["codex", "claude"],
+            },
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "twinpaper",
+                manager_state["projects"]["twinpaper"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Dev",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("aoe-orch run dry-run failed: [ERROR] no target roles found for orchestration")
+            ),
+            create_request_id=lambda: "REQ-DISPATCH-FAIL",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-31T00:10:00+0900",
+            sync_task_lifecycle=lambda **kwargs: None,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DISPATCH-FAIL"]
+    assert task["status"] == "failed"
+    assert task["phase1_mode"] == "ensemble"
+    assert task["phase1_rounds"] == 3
+    assert task["plan_review_count"] == 3
+    assert task["plan_convergence_status"] == "ready"
+    assert task["plan_last_round"] == 3
+    assert task["plan_issue_history"][-1]["review_pass"] == "verification"
+    assert task["plan"]["subtasks"][0]["owner_role"] == "Codex-Dev"
+    assert any(evt.get("event") == "dispatch_failed" and evt.get("error_code") == "E_DISPATCH" for evt in logged)
+    assert sent[-1][0] == "dispatch-exception"
+    assert saved
+
+
+def test_handle_run_or_unknown_command_blocks_incomplete_data_contract_before_planning(tmp_path: Path) -> None:
+    project_root = tmp_path / "DataDemo"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "default": {
+                "name": "default",
+                "display_name": "default",
+                "project_alias": "O1",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "todos": [],
+            }
+        }
+    }
+    sent: list[tuple[str, str, dict | None]] = []
+    logged: list[dict] = []
+    saved: list[Path] = []
+
+    def _phase1_ensemble_planning(*args, **kwargs):
+        raise AssertionError("planner must not run when the request contract is incomplete")
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.",
+        rest="월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.",
+        orch_target="O1",
+        run_prompt="월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=None,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda path, manager_state: saved.append(path),
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["DataEngineer"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["DataEngineer", "Codex-Reviewer"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=_phase1_ensemble_planning,
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "default",
+                manager_state["projects"]["default"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="DataEngineer,Codex-Reviewer",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run")),
+            create_request_id=lambda: "REQ-DATA-BLOCK",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-30T15:00:00+0900",
+            sync_task_lifecycle=lambda **kwargs: None,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert sent[-1][0] == "contract-incomplete"
+    assert "source_path" in sent[-1][1]
+    assert "target_column" in sent[-1][1]
+    task = manager_state["projects"]["default"]["tasks"]["REQ-DATA-BLOCK"]
+    assert task["request_contract_type"] == "data"
+    assert task["request_contract_status"] == "incomplete"
+    assert task["request_contract_missing_fields"] == [
+        "source_path",
+        "target_column",
+        "accepted_input_formats",
+        "normalize_to",
+    ]
+    assert task["execution_brief_status"] == "underspecified"
+    assert task["execution_brief_blocked_slice"] == [
+        "source_path",
+        "target_column",
+        "accepted_input_formats",
+        "normalize_to",
+    ]
+    assert task["tf_phase"] == "blocked"
+    assert task["stages"]["planning"] == "failed"
+    assert task["stages"]["close"] == "failed"
+    assert any(evt.get("event") == "contract_incomplete" for evt in logged)
+    assert saved
+
+
+def test_handle_run_or_unknown_command_blocks_empty_job_contract_before_planning(tmp_path: Path, monkeypatch) -> None:
+    project_root = tmp_path / "PlanDemo"
+    team_dir = project_root / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    manager_state = {
+        "projects": {
+            "default": {
+                "name": "default",
+                "display_name": "default",
+                "project_alias": "O1",
+                "project_root": str(project_root),
+                "team_dir": str(team_dir),
+                "todos": [],
+            }
+        }
+    }
+    sent: list[tuple[str, str, dict | None]] = []
+    logged: list[dict] = []
+    saved: list[Path] = []
+
+    def _phase1_ensemble_planning(*args, **kwargs):
+        raise AssertionError("planner must not run when the job contract body is missing")
+
+    monkeypatch.setattr(
+        run_command_flow,
+        "build_request_contract",
+        lambda **_kwargs: {
+            "version": "2026-03-30.v1",
+            "contract_type": "general",
+            "preset": "analysis",
+            "status": "complete",
+            "summary": "complete request contract without declared write scope",
+            "objective": "Summarize findings for the operator",
+            "fields": {},
+            "required_outputs": [],
+            "required_evidence": [],
+        },
+    )
+    monkeypatch.setattr(
+        run_command_flow,
+        "build_execution_brief",
+        lambda _contract: {
+            "version": "2026-04-04.v1",
+            "status": "executable",
+            "summary": "executable | review summary",
+            "executable_slice": ["review_summary"],
+            "offdesk_allowed": True,
+        },
+    )
+
+    ctx = run_handlers.build_run_context(
+        cmd="run",
+        args=argparse.Namespace(
+            dry_run=False,
+            manager_state_file=team_dir / "orch_manager_state.json",
+            auto_dispatch=False,
+            require_verifier=False,
+            verifier_roles="",
+            task_planning=True,
+            plan_phase1_ensemble=True,
+            plan_max_subtasks=6,
+            plan_auto_replan=False,
+            plan_replan_attempts=0,
+            plan_block_on_critic=True,
+            exec_critic=False,
+            exec_critic_retry_max=3,
+            chat_max_running=3,
+            chat_daily_cap=20,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        text="요약만 정리해줘.",
+        rest="요약만 정리해줘.",
+        orch_target="O1",
+        run_prompt="요약만 정리해줘.",
+        run_roles_override=None,
+        run_priority_override=None,
+        run_timeout_override=None,
+        run_no_wait_override=None,
+        run_force_mode="dispatch",
+        run_auto_source="default",
+        run_control_mode="normal",
+        run_source_request_id="",
+        run_source_task=None,
+    )
+
+    deps = run_handlers.RunDeps(
+        core=run_handlers.RunCoreDeps(
+            send=lambda body, **kwargs: sent.append((kwargs.get("context", ""), body, kwargs.get("reply_markup"))) or True,
+            log_event=lambda **kwargs: logged.append(kwargs),
+            help_text=lambda: "help",
+        ),
+        guard=run_handlers.RunGuardDeps(
+            summarize_chat_usage=lambda manager_state, chat_id: (0, 0),
+            detect_high_risk_prompt=lambda prompt: "",
+            set_confirm_action=lambda *args, **kwargs: None,
+            save_manager_state=lambda path, manager_state: saved.append(path),
+        ),
+        planning=run_handlers.RunPlanningDeps(
+            choose_auto_dispatch_roles=lambda *args, **kwargs: ["Codex-Analyst"],
+            resolve_verifier_candidates=lambda text: [],
+            load_orchestrator_roles=lambda team_dir: ["Codex-Analyst"],
+            parse_roles_csv=lambda csv: [token for token in str(csv or "").split(",") if token],
+            ensure_verifier_roles=lambda **kwargs: (kwargs.get("selected_roles", []), [], False, []),
+            available_worker_roles=lambda roles: roles,
+            normalize_task_plan_payload=lambda payload, **kwargs: payload or {},
+            build_task_execution_plan=lambda **kwargs: {},
+            critique_task_execution_plan=lambda **kwargs: {"approved": True, "issues": [], "recommendations": []},
+            critic_has_blockers=lambda critic: False,
+            repair_task_execution_plan=lambda **kwargs: {},
+            plan_roles_from_subtasks=lambda payload: [],
+            build_planned_dispatch_prompt=lambda prompt, plan_data, plan_critic: prompt,
+            phase1_ensemble_planning=_phase1_ensemble_planning,
+        ),
+        routing=run_handlers.RunRoutingDeps(
+            get_context=lambda raw: (
+                "default",
+                manager_state["projects"]["default"],
+                argparse.Namespace(
+                    project_root=project_root,
+                    team_dir=team_dir,
+                    roles="Codex-Analyst",
+                    priority="P2",
+                    orch_timeout_sec=120,
+                    no_wait=False,
+                ),
+            ),
+            run_orchestrator_direct=lambda p_args, prompt: "direct",
+            run_aoe_orch=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dispatch should not run")),
+            create_request_id=lambda: "REQ-JOB-BLOCK",
+            ensure_task_record=lambda **kwargs: gw.ensure_task_record(
+                kwargs["entry"],
+                kwargs["request_id"],
+                kwargs["prompt"],
+                kwargs["mode"],
+                kwargs["roles"],
+                kwargs["verifier_roles"],
+                kwargs["require_verifier"],
+            ),
+            finalize_request_reply_messages=lambda *args, **kwargs: {},
+            touch_chat_recent_task_ref=gw.touch_chat_recent_task_ref,
+            set_chat_selected_task_ref=gw.set_chat_selected_task_ref,
+            now_iso=lambda: "2026-03-30T15:10:00+0900",
+            sync_task_lifecycle=lambda **kwargs: None,
+            lifecycle_set_stage=gw.lifecycle_set_stage,
+            summarize_task_lifecycle=lambda key, task: "",
+            synthesize_orchestrator_response=lambda p_args, prompt, state: "",
+            critique_task_result=lambda **kwargs: {"verdict": "success", "reason": ""},
+            extract_todo_proposals=lambda *args, **kwargs: [],
+            merge_todo_proposals=lambda **kwargs: {"created_count": 0, "created_ids": [], "duplicate_count": 0, "skipped_count": 0},
+            render_run_response=lambda state, task=None: "result",
+        ),
+    )
+
+    handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
+
+    assert handled is True
+    assert sent[-1][0] == "contract-incomplete"
+    assert "job contract incomplete" in sent[-1][1]
+    assert "scope, acceptance checks, artifact targets" in sent[-1][1]
+    task = manager_state["projects"]["default"]["tasks"]["REQ-JOB-BLOCK"]
+    assert task["request_contract_status"] == "complete"
+    assert task["execution_brief_status"] == "executable"
+    assert task["job_contract_status"] == "blocked"
+    assert task["job_contract_scope"] == []
+    assert task["job_contract_acceptance_checks"] == []
+    assert task["job_contract_artifacts_to_touch"] == []
+    assert task["tf_phase"] == "blocked"
+    assert task["stages"]["planning"] == "failed"
+    assert task["stages"]["close"] == "failed"
+    assert any(evt.get("event") == "contract_incomplete" for evt in logged)
     assert saved
 
 
@@ -2419,6 +6284,7 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     logged: list[dict] = []
     saves: list[Path] = []
     detached: dict[str, Any] = {}
+    daemon: dict[str, Any] = {}
 
     def _fake_start_background_dispatch_flow(*, name: str, target):
         detached["name"] = name
@@ -2427,6 +6293,11 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
         return object()
 
     monkeypatch.setattr(run_handlers, "_start_background_dispatch_flow", _fake_start_background_dispatch_flow)
+    monkeypatch.setattr(
+        run_detached_flow,
+        "ensure_local_background_daemon",
+        lambda **kwargs: daemon.update(kwargs) or {"started": True, "thread_name": "aoe-local-bg-test", "runner_target": "local_background"},
+    )
 
     ctx = run_handlers.build_run_context(
         cmd="run",
@@ -2537,8 +6408,9 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     handled = run_handlers.handle_run_or_unknown_command(ctx=ctx, deps=deps)
 
     assert handled is True
-    assert detached.get("started") is True
-    assert detached.get("name") == "aoe-run-REQ-DETACHED"
+    assert detached == {}
+    assert daemon["runner_target"] == "local_background"
+    assert daemon["launch_mode"] == "detached_no_wait"
     task = manager_state["projects"]["twinpaper"]["tasks"]["REQ-DETACHED"]
     assert task["request_id"] == "REQ-DETACHED"
     assert task["status"] == "running"
@@ -2549,6 +6421,30 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     assert task["phase1_current_phase"] == "planner"
     assert task["phase1_current_round"] == 1
     assert task["phase1_current_total_rounds"] == 3
+    assert task["background_run_status"] == "queued"
+    assert task["background_run_runner_target"] == "local_background"
+    assert task["background_run_launch_mode"] == "detached_no_wait"
+    assert task["background_run_source_surface"] == "run_no_wait"
+    assert task["background_run_request_id"] == "REQ-DETACHED"
+    assert task["background_run_project_key"] == "twinpaper"
+    assert task["background_run_execution_brief_status"] == "executable"
+    assert task["background_run_ticket_id"].startswith("BGT-REQ-DETACHED-")
+    assert task["result"]["background_run_status"] == "queued"
+    assert task["result"]["background_run_runner_target"] == "local_background"
+    assert task["result"]["background_run_ticket_id"].startswith("BGT-REQ-DETACHED-")
+    queue_file = team_dir / "background_runs.json"
+    assert queue_file.exists()
+    queue_state = json.loads(queue_file.read_text(encoding="utf-8"))
+    rows = queue_state.get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket_id"].startswith("BGT-REQ-DETACHED-")
+    assert row["status"] == "queued"
+    assert row["runner_target"] == "local_background"
+    assert row["launch_mode"] == "detached_no_wait"
+    assert row["source_surface"] == "run_no_wait"
+    assert row["request_id"] == "REQ-DETACHED"
+    assert row["project_key"] == "twinpaper"
     assert manager_state["projects"]["twinpaper"]["last_request_id"] == "REQ-DETACHED"
     assert saves
     assert sent
@@ -2562,6 +6458,1434 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
     assert "/monitor" in buttons
     assert "/offdesk review O2" in buttons
     assert any(evt.get("event") == "dispatch_detached" for evt in logged)
+
+
+def test_background_run_ticket_helpers_advance_queue_state(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    launch_spec = build_background_launch_spec(
+        request_id="REQ-DETACHED",
+        project_key="twinpaper",
+        project_root=str(tmp_path / "project"),
+        team_dir=str(tmp_path),
+        manager_state_file=str(tmp_path / "orch_manager_state.json"),
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        source_surface="run_no_wait",
+        created_by="telegram:939062873",
+        argv=["run", "--no-wait"],
+        env_keys=["AOE_TEAM_DIR", "AOE_STATE_DIR"],
+        externalizable=False,
+    )
+    seeded = upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REQ-DETACHED-001",
+            request_id="REQ-DETACHED",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec=launch_spec,
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    assert seeded["status"] == "queued"
+
+    claimed = claim_background_run_ticket(
+        queue_file,
+        "BGT-REQ-DETACHED-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="thread:REQ-DETACHED",
+        source_surface="run_no_wait",
+    )
+    assert claimed["status"] == "dispatching"
+    assert claimed["evidence_bundle"] == "status=dispatching | outcome=worker_claimed"
+
+    running = advance_background_run_ticket(
+        queue_file,
+        "BGT-REQ-DETACHED-001",
+        now_iso=lambda: "2026-03-13T18:55:03+0900",
+        status="running",
+        evidence_bundle="status=running | outcome=dispatch_flow_started",
+    )
+    assert running["status"] == "running"
+
+    completed = advance_background_run_ticket(
+        queue_file,
+        "BGT-REQ-DETACHED-001",
+        now_iso=lambda: "2026-03-13T18:55:04+0900",
+        status="completed",
+        evidence_bundle="status=completed | outcome=dispatch_flow_returned",
+        evidence_artifacts=["review_report.md"],
+    )
+    assert completed["status"] == "completed"
+    assert completed["evidence_artifacts"] == ["review_report.md"]
+
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket_id"] == "BGT-REQ-DETACHED-001"
+    assert row["status"] == "completed"
+    assert row["evidence_bundle"] == "status=completed | outcome=dispatch_flow_returned"
+    assert row["evidence_artifacts"] == ["review_report.md"]
+    assert row["launch_spec"]["spec_id"] == "BLS-REQ-DETACHED"
+    assert row["launch_spec"]["externalizable"] is False
+
+
+def test_local_background_worker_claims_and_completes_ticket(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REQ-WORKER-001",
+            request_id="REQ-WORKER",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    updates: list[dict[str, Any]] = []
+    queue_errors: list[str] = []
+
+    result = run_local_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-REQ-WORKER-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        run_target=lambda: "ok",
+        on_ticket_update=lambda ticket: updates.append(dict(ticket)),
+        on_queue_error=lambda event_name, exc: queue_errors.append(f"{event_name}:{exc}"),
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="thread:REQ-WORKER",
+        source_surface="run_no_wait",
+        completed_evidence_artifacts=lambda: ["review_report.md"],
+    )
+
+    assert result == "ok"
+    assert queue_errors == []
+    assert [row["status"] for row in updates] == ["dispatching", "running", "completed"]
+    state = load_background_runs_state(queue_file)
+    rows = state.get("runs") or []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ticket_id"] == "BGT-REQ-WORKER-001"
+    assert row["status"] == "completed"
+    assert row["evidence_bundle"] == "status=completed | outcome=dispatch_flow_returned"
+    assert row["evidence_artifacts"] == ["review_report.md"]
+
+
+def test_local_background_worker_fails_when_bound_model_route_probe_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REQ-WORKER-FAIL-001",
+            request_id="REQ-WORKER-FAIL",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec={"model_worker_route_id": "background_worker_primary"},
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+    called = {"count": 0}
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "probe_status": "request_failed",
+            "summary": "endpoint=ollama-qwen3 provider=ollama status=request_failed",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="model_route_probe_failed"):
+        run_local_background_ticket(
+            queue_path=queue_file,
+            ticket_id="BGT-REQ-WORKER-FAIL-001",
+            now_iso=lambda: "2026-03-13T18:55:02+0900",
+            run_target=lambda: called.__setitem__("count", called["count"] + 1),
+            on_ticket_update=lambda ticket: None,
+            on_queue_error=lambda event_name, exc: None,
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            claimed_by="thread:REQ-WORKER",
+            source_surface="run_no_wait",
+        )
+
+    assert called["count"] == 0
+    state = load_background_runs_state(queue_file)
+    row = state["runs"][0]
+    assert row["status"] == "failed"
+    assert "model_route_probe_failed" in row["evidence_bundle"]
+
+
+def test_background_run_evidence_artifacts_from_task_uses_request_contract_paths() -> None:
+    task = {
+        "request_contract_required_outputs": ["review_report", "severity_rationale"],
+        "request_contract_artifact_contracts": {
+            "review_report": {"path": "review_report.md"},
+            "severity_rationale": {"path": "review_evidence/severity_rationale.md"},
+        },
+    }
+
+    artifacts = background_run_evidence_artifacts_from_task(task)
+
+    assert artifacts == ["review_report.md", "review_evidence/severity_rationale.md"]
+
+
+def test_background_run_evidence_bundle_from_task_uses_task_outcome_fields() -> None:
+    task = {
+        "status": "completed",
+        "tf_phase": "completed",
+        "result": {
+            "complete": True,
+            "verdict": "success",
+        },
+    }
+
+    bundle = background_run_evidence_bundle_from_task(task)
+
+    assert bundle == "status=completed | outcome=dispatch_completed | phase=completed | complete=true | verdict=success"
+
+
+def test_background_run_queue_claims_next_matching_ticket(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    for ticket_id, runner_target, status, launch_mode, created_at in [
+        ("BGT-001", "github_runner", "queued", "dashboard_retry", "2026-03-13T18:55:00+0900"),
+        ("BGT-002", "local_background", "running", "detached_no_wait", "2026-03-13T18:55:00+0900"),
+        ("BGT-003", "local_background", "queued", "detached_no_wait", "2026-03-13T18:55:02+0900"),
+        ("BGT-004", "local_background", "queued", "dashboard_followup_execute", "2026-03-13T18:55:03+0900"),
+        ("BGT-005", "local_background", "queued", "dashboard_retry", "2026-03-13T18:55:01+0900"),
+    ]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target=runner_target,
+                launch_mode=launch_mode,
+                created_at=created_at,
+                created_by="telegram:939062873",
+                source_surface="run_no_wait",
+                status=status,
+            ),
+            now_iso=lambda: "2026-03-13T18:55:01+0900",
+        )
+
+    queued = list_background_run_tickets(queue_file, statuses=["queued"], runner_target="local_background")
+    assert {row["ticket_id"] for row in queued} == {"BGT-003", "BGT-004", "BGT-005"}
+
+    claimed = claim_next_background_run_ticket(
+        queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-004"
+    assert claimed["status"] == "dispatching"
+    state = load_background_runs_state(queue_file)
+    rows = {row["ticket_id"]: row for row in (state.get("runs") or [])}
+    assert rows["BGT-004"]["status"] == "dispatching"
+    assert rows["BGT-005"]["status"] == "queued"
+    assert rows["BGT-003"]["status"] == "queued"
+    assert rows["BGT-001"]["status"] == "queued"
+
+
+def test_background_run_queue_claims_starved_ticket_before_newer_high_priority_work(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    for ticket_id, launch_mode, created_at in [
+        ("BGT-OLD-001", "detached_no_wait", "2026-04-07T08:00:00+0900"),
+        ("BGT-NEW-001", "dashboard_followup_execute", "2026-04-07T09:55:00+0900"),
+    ]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target="local_background",
+                launch_mode=launch_mode,
+                created_at=created_at,
+                created_by="telegram:939062873",
+                source_surface="run_no_wait",
+                status="queued",
+            ),
+            now_iso=lambda: "2026-04-07T10:00:00+0900",
+        )
+
+    queued = list_background_run_tickets(queue_file, statuses=["queued"], runner_target="local_background")
+    ordered = sort_background_run_claim_candidates(queued, now_iso=lambda: "2026-04-07T10:00:00+0900")
+    assert [row["ticket_id"] for row in ordered[:2]] == ["BGT-OLD-001", "BGT-NEW-001"]
+
+    claimed = claim_next_background_run_ticket(
+        queue_file,
+        now_iso=lambda: "2026-04-07T10:00:00+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-OLD-001"
+
+
+def test_background_run_external_runner_requires_externalizable_launch_spec(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-EXT-001",
+            request_id="REQ-EXT-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="offdesk_manual",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec=build_background_launch_spec(
+                request_id="REQ-EXT-001",
+                project_key="twinpaper",
+                runner_target="github_runner",
+                launch_mode="offdesk_manual",
+                source_surface="run_no_wait",
+                created_by="telegram:939062873",
+                mode="in_process_callback",
+                externalizable=False,
+            ),
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    claimed = claim_background_run_ticket(
+        queue_file,
+        "BGT-EXT-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="github_runner",
+        launch_mode="offdesk_manual",
+        claimed_by="worker:github_runner",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-EXT-001"
+    assert claimed["status"] == "failed"
+    assert claimed["evidence_bundle"] == "status=failed | reason=launch_spec_not_externalizable"
+
+
+def test_background_run_external_runner_claims_when_launch_spec_is_externalizable(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-EXT-OK-001",
+            request_id="REQ-EXT-OK-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="github_runner",
+            launch_mode="offdesk_manual",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+            launch_spec=build_background_launch_spec(
+                request_id="REQ-EXT-OK-001",
+                project_key="twinpaper",
+                runner_target="github_runner",
+                launch_mode="offdesk_manual",
+                source_surface="run_no_wait",
+                created_by="telegram:939062873",
+                mode="subprocess_json",
+                entrypoint="aoe-background-worker",
+                externalizable=True,
+                blocked_reason="",
+            ),
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    claimed = claim_background_run_ticket(
+        queue_file,
+        "BGT-EXT-OK-001",
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="github_runner",
+        launch_mode="offdesk_manual",
+        claimed_by="worker:github_runner",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-EXT-OK-001"
+    assert claimed["status"] == "dispatching"
+    assert claimed["evidence_bundle"] == "status=dispatching | outcome=worker_claimed"
+
+
+def test_select_background_runner_target_defaults_to_local_background() -> None:
+    assert select_background_runner_target() == "local_background"
+    assert select_background_runner_target(preferred_runner_target="github_runner") == "local_background"
+    assert select_background_runner_target(
+        launch_spec=build_background_launch_spec(
+            request_id="REQ-SEL-001",
+            project_key="twinpaper",
+            runner_target="local_background",
+            externalizable=False,
+        )
+    ) == "local_background"
+
+
+def test_select_background_runner_target_allows_externalizable_local_tmux_only() -> None:
+    tmux_spec = build_local_tmux_background_launch_spec(
+        request_id="REQ-SEL-002",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+    github_spec = build_github_runner_background_launch_spec(
+        request_id="REQ-SEL-003",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+
+    assert select_background_runner_target(
+        preferred_runner_target="local_tmux",
+        launch_spec=tmux_spec,
+    ) == "local_tmux"
+    assert select_background_runner_target(
+        preferred_runner_target="github_runner",
+        launch_spec=github_spec,
+    ) == "local_background"
+    assert select_background_runner_target(
+        preferred_runner_target="github_runner",
+        launch_spec=github_spec,
+        allow_external_targets=True,
+    ) == "github_runner"
+
+
+def test_local_tmux_launch_spec_can_embed_command_payload() -> None:
+    spec = build_local_tmux_background_launch_spec(
+        request_id="REQ-TMUX-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+        command_argv=["python3", "-c", "print('ok')"],
+        command_cwd="/tmp/twinpaper",
+    )
+
+    assert spec["command_argv"] == ["python3", "-c", "print('ok')"]
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+
+
+def test_build_gateway_simulation_command_argv_uses_gateway_entrypoint() -> None:
+    argv = build_gateway_simulation_command_argv(
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        simulate_text="/retry T-101",
+        simulate_chat_id="local-bg",
+    )
+
+    assert argv[0]
+    assert argv[1] == gateway_cli_entrypoint_path()
+    assert "--project-root" in argv
+    assert "/tmp/twinpaper" in argv
+    assert "--team-dir" in argv
+    assert "/tmp/twinpaper/.aoe-team" in argv
+    assert "--manager-state-file" in argv
+    assert "/tmp/twinpaper/.aoe-team/orch_manager_state.json" in argv
+    assert "--simulate-live" in argv
+    assert "--simulate-chat-id" in argv
+    assert "local-bg" in argv
+    assert "--simulate-text" in argv
+    assert "/retry T-101" in argv
+
+
+def test_build_local_tmux_gateway_command_launch_spec_embeds_gateway_payload() -> None:
+    spec = build_local_tmux_gateway_command_launch_spec(
+        request_id="REQ-TMUX-CLI-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        command_text="/retry T-101 lane L1",
+        simulate_chat_id="local-bg",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+
+    assert spec["runner_target"] == "local_tmux"
+    assert spec["externalizable"] is True
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+    assert spec["command_argv"][1] == gateway_cli_entrypoint_path()
+    assert "--simulate-text" in spec["command_argv"]
+    assert "/retry T-101 lane L1" in spec["command_argv"]
+
+
+def test_build_gateway_run_command_text_preserves_dispatch_options() -> None:
+    command_text = build_gateway_run_command_text(
+        prompt="run it",
+        orch_target="O2",
+        roles=["Codex-Dev", "Codex-Reviewer"],
+        priority="P1",
+        timeout_sec=300,
+        force_mode="dispatch",
+    )
+
+    assert command_text == "aoe orch run --orch O2 --dispatch --roles Codex-Dev,Codex-Reviewer --priority P1 --timeout-sec 300 'run it'"
+
+
+def test_build_local_tmux_gateway_run_launch_spec_embeds_run_cli_payload() -> None:
+    spec = build_local_tmux_gateway_run_launch_spec(
+        request_id="REQ-TMUX-RUN-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        orch_target="O2",
+        prompt="run it",
+        roles=["Codex-Dev"],
+        priority="P2",
+        timeout_sec=120,
+        force_mode="dispatch",
+        simulate_chat_id="local-bg",
+        launch_mode="detached_no_wait",
+        source_surface="run_no_wait",
+        created_by="telegram:939062873",
+    )
+
+    assert spec["runner_target"] == "local_tmux"
+    assert spec["externalizable"] is True
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+    assert "--simulate-text" in spec["command_argv"]
+    assert "aoe orch run --orch O2 --dispatch --roles Codex-Dev --priority P2 --timeout-sec 120 'run it'" in spec["command_argv"]
+
+
+def test_build_external_runner_gateway_command_launch_spec_embeds_gateway_payload() -> None:
+    spec = build_external_runner_gateway_command_launch_spec(
+        runner_target="github_runner",
+        request_id="REQ-GHA-001",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        command_text="/retry T-101 lane L1",
+        simulate_chat_id="gha-bg",
+        launch_mode="dashboard_retry",
+        source_surface="dashboard_retry",
+        created_by="dashboard:control",
+    )
+
+    assert spec["runner_target"] == "github_runner"
+    assert spec["mode"] == "github_action_json"
+    assert spec["externalizable"] is True
+    assert spec["command_cwd"] == "/tmp/twinpaper"
+    assert spec["command_argv"][1] == gateway_cli_entrypoint_path()
+    assert "/retry T-101 lane L1" in spec["command_argv"]
+
+
+def test_emit_external_background_handoff_writes_manifest(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-GHA-001",
+        request_id="REQ-GHA-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:00:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+        launch_spec=build_external_runner_gateway_command_launch_spec(
+            runner_target="github_runner",
+            request_id="REQ-GHA-001",
+            project_key="twinpaper",
+            project_root=str(tmp_path),
+            team_dir=str(team_dir),
+            manager_state_file=str(team_dir / "orch_manager_state.json"),
+            command_text="/retry T-101",
+            simulate_chat_id="gha-bg",
+            launch_mode="dashboard_retry",
+            source_surface="dashboard_retry",
+            created_by="dashboard:control",
+        ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:00:01+0900")
+
+    launched = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-GHA-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-07T10:00:02+0900",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+
+    assert launched["status"] == "running"
+    assert launched["runner_target"] == "github_runner"
+    handoff_rel = launched["runtime_handle"]
+    assert handoff_rel.endswith("github-runner-bgt-gha-001.json")
+    assert launched["runtime_summary"] == f"github_runner_handoff={handoff_rel}"
+    handoff_path = external_background_handoff_path(team_dir, "BGT-GHA-001", "github_runner")
+    assert handoff_path.exists()
+    payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    assert payload["runner_target"] == "github_runner"
+    assert payload["ticket_id"] == "BGT-GHA-001"
+    assert payload["launch_spec"]["externalizable"] is True
+    assert handoff_rel in (launched.get("evidence_artifacts") or [])
+
+
+def test_emit_external_background_handoff_fails_when_bound_model_route_probe_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-GHA-FAIL-001",
+        request_id="REQ-GHA-FAIL-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:00:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="queued",
+        launch_spec=build_external_runner_gateway_command_launch_spec(
+            runner_target="github_runner",
+            request_id="REQ-GHA-FAIL-001",
+            project_key="twinpaper",
+            project_root=str(tmp_path),
+            team_dir=str(team_dir),
+            manager_state_file=str(team_dir / "orch_manager_state.json"),
+            command_text="/retry T-101",
+            simulate_chat_id="gha-bg",
+            launch_mode="dashboard_retry",
+            source_surface="dashboard_retry",
+            created_by="dashboard:control",
+        ),
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:00:01+0900")
+    monkeypatch.setattr(
+        "aoe_tg_external_background_worker.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "probe_status": "model_missing",
+            "summary": "endpoint=ollama-qwen3 provider=ollama model=qwen3-coder:30b present=no available=0",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    launched = emit_external_background_handoff(
+        queue_path=queue_file,
+        ticket_id="BGT-GHA-FAIL-001",
+        runner_target="github_runner",
+        now_iso=lambda: "2026-04-07T10:00:02+0900",
+        claimed_by="dashboard:control",
+        source_surface="dashboard_retry",
+        launch_mode="dashboard_retry",
+    )
+
+    assert launched["status"] == "failed"
+    assert "model_route_probe_failed" in launched["evidence_bundle"]
+    assert not external_background_handoff_path(team_dir, "BGT-GHA-FAIL-001", "github_runner").exists()
+
+
+def test_poll_external_background_tickets_marks_completed_from_result_file(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-REMOTE-001",
+        request_id="REQ-REMOTE-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="remote_worker",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:10:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="running",
+        runtime_handle="background_run_handoffs/remote-worker-bgt-remote-001.json",
+        runtime_summary="remote_worker_handoff=background_run_handoffs/remote-worker-bgt-remote-001.json",
+        evidence_artifacts=["background_run_handoffs/remote-worker-bgt-remote-001.json"],
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:10:01+0900")
+    result_path = external_background_result_path(team_dir, "BGT-REMOTE-001", "remote_worker")
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-REMOTE-001",
+                "status": "completed",
+                "summary": "remote worker completed retry",
+                "evidence_artifacts": ["reports/external-summary.md"],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = poll_external_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-07T10:10:02+0900",
+    )
+
+    assert result["changed"] is True
+    assert result["completed_count"] == 1
+    updated = load_background_runs_state(queue_file)["runs"][0]
+    assert updated["status"] == "completed"
+    assert updated["runner_target"] == "remote_worker"
+    assert updated["runtime_handle"] == "background_run_handoffs/remote-worker-bgt-remote-001.json"
+    assert "external_result" in updated["evidence_bundle"]
+    assert "background_run_results/remote-worker-bgt-remote-001.json" in (updated.get("evidence_artifacts") or [])
+    assert "reports/external-summary.md" in (updated.get("evidence_artifacts") or [])
+    audit_rows = [
+        json.loads(line)
+        for line in (tmp_path / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert audit_rows[-1]["outcome_reason_code"] == "external_result_completed"
+    assert audit_rows[-1]["source_command"] == "/external result remote_worker BGT-REMOTE-001"
+    assert audit_rows[-1]["link_href"] == "/control/tasks/by-request/REQ-REMOTE-001"
+
+
+def test_poll_external_background_tickets_records_pickup_acknowledgement(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    team_dir = tmp_path
+    ticket = build_background_run_ticket(
+        ticket_id="BGT-GHA-ACK-001",
+        request_id="REQ-GHA-ACK-001",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-07T10:20:00+0900",
+        created_by="dashboard:control",
+        source_surface="dashboard_retry",
+        status="running",
+        runtime_handle="background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+        runtime_summary="github_runner_handoff=background_run_handoffs/github-runner-bgt-gha-ack-001.json",
+        evidence_artifacts=["background_run_handoffs/github-runner-bgt-gha-ack-001.json"],
+    )
+    upsert_background_run_ticket(queue_file, ticket, now_iso=lambda: "2026-04-07T10:20:01+0900")
+    ack_path = external_background_ack_path(team_dir, "BGT-GHA-ACK-001", "github_runner")
+    ack_path.parent.mkdir(parents=True, exist_ok=True)
+    ack_path.write_text(
+        json.dumps(
+            {
+                "ticket_id": "BGT-GHA-ACK-001",
+                "status": "running",
+                "worker_id": "gha-runner-01",
+                "summary": "workflow accepted handoff",
+                "evidence_artifacts": ["logs/github-runner-start.txt"],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = poll_external_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-07T10:20:02+0900",
+    )
+
+    assert result["changed"] is True
+    assert result["acknowledged_count"] == 1
+    updated = load_background_runs_state(queue_file)["runs"][0]
+    assert updated["status"] == "running"
+    assert "external_pickup_acknowledged" in updated["evidence_bundle"]
+    assert "worker=gha-runner-01" in updated["evidence_bundle"]
+    assert "ack=background_run_acks/github-runner-bgt-gha-ack-001.json" in updated["evidence_bundle"]
+    assert updated["runtime_summary"].endswith("| ack=background_run_acks/github-runner-bgt-gha-ack-001.json")
+    assert "background_run_acks/github-runner-bgt-gha-ack-001.json" in (updated.get("evidence_artifacts") or [])
+    assert "logs/github-runner-start.txt" in (updated.get("evidence_artifacts") or [])
+    audit_rows = [
+        json.loads(line)
+        for line in (tmp_path / "dashboard" / "action-history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert audit_rows[-1]["outcome_reason_code"] == "external_pickup_acknowledged"
+    assert audit_rows[-1]["source_command"] == "/external ack github_runner BGT-GHA-ACK-001"
+    assert audit_rows[-1]["link_href"] == "/control/tasks/by-request/REQ-GHA-ACK-001"
+
+
+def test_launch_local_tmux_background_ticket_starts_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-001",
+            request_id="REQ-TMUX-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="queued",
+            launch_spec=build_local_tmux_background_launch_spec(
+                request_id="REQ-TMUX-001",
+                project_key="twinpaper",
+                project_root=str(tmp_path),
+                team_dir=str(tmp_path / ".aoe-team"),
+                manager_state_file=str(tmp_path / ".aoe-team" / "orch_manager_state.json"),
+                launch_mode="offdesk_manual",
+                source_surface="offdesk_review",
+                created_by="telegram:939062873",
+                command_argv=["python3", "-c", "print('tmux')"],
+                command_cwd=str(tmp_path),
+            ),
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    launched = {}
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: launched.update({"cmd": cmd}) or subprocess.CompletedProcess(cmd, 0, "", ""))
+
+    result = launch_local_tmux_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-TMUX-001",
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+        claimed_by="worker:local_tmux",
+        source_surface="background_queue",
+        launch_mode="offdesk_manual",
+    )
+
+    assert result["status"] == "running"
+    assert result["runtime_handle"] == build_local_tmux_session_name("BGT-TMUX-001")
+    assert result["runtime_summary"] == f"tmux_session={build_local_tmux_session_name('BGT-TMUX-001')}"
+    assert "tmux_session_started" in result["evidence_bundle"]
+    assert build_local_tmux_session_name("BGT-TMUX-001") in result["evidence_bundle"]
+    assert "background_run_logs/bgt-tmux-001.log" in result["evidence_bundle"]
+    assert "background_run_logs/bgt-tmux-001.log" in (result.get("evidence_artifacts") or [])
+    assert "background_run_results/bgt-tmux-001.json" in (result.get("evidence_artifacts") or [])
+    assert launched["cmd"][:4] == ["tmux", "new-session", "-d", "-s"]
+    assert "background_run_results" in launched["cmd"][-1]
+    assert "background_run_logs" in launched["cmd"][-1]
+
+
+def test_launch_local_tmux_background_ticket_records_worker_probe_when_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-PROBE-001",
+            request_id="REQ-TMUX-PROBE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="queued",
+            launch_spec=build_local_tmux_background_launch_spec(
+                request_id="REQ-TMUX-PROBE-001",
+                project_key="twinpaper",
+                project_root=str(tmp_path),
+                team_dir=str(tmp_path / ".aoe-team"),
+                manager_state_file=str(tmp_path / ".aoe-team" / "orch_manager_state.json"),
+                launch_mode="offdesk_manual",
+                source_surface="offdesk_review",
+                created_by="telegram:939062873",
+                command_argv=["python3", "-c", "print('tmux')"],
+                command_cwd=str(tmp_path),
+            ),
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        "aoe_tg_tmux_background_worker.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 provider=ollama model=qwen3-coder:30b present=yes available=4",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+
+    result = launch_local_tmux_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-TMUX-PROBE-001",
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+        claimed_by="worker:local_tmux",
+        source_surface="background_queue",
+        launch_mode="offdesk_manual",
+    )
+
+    assert result["status"] == "running"
+    assert "worker=bg=ollama-qwen3:qwen3-coder:30b" in result["runtime_summary"]
+    assert "probe=ok" in result["runtime_summary"]
+    assert "worker_probe=ok" in result["evidence_bundle"]
+
+
+def test_launch_local_tmux_background_ticket_fails_without_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-002",
+            request_id="REQ-TMUX-002",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="queued",
+            launch_spec=build_local_tmux_background_launch_spec(
+                request_id="REQ-TMUX-002",
+                project_key="twinpaper",
+                project_root=str(tmp_path),
+                team_dir=str(tmp_path / ".aoe-team"),
+                manager_state_file=str(tmp_path / ".aoe-team" / "orch_manager_state.json"),
+                launch_mode="offdesk_manual",
+                source_surface="offdesk_review",
+                created_by="telegram:939062873",
+            ),
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+
+    result = launch_local_tmux_background_ticket(
+        queue_path=queue_file,
+        ticket_id="BGT-TMUX-002",
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+        claimed_by="worker:local_tmux",
+        source_surface="background_queue",
+        launch_mode="offdesk_manual",
+    )
+
+    assert result["status"] == "failed"
+    assert result["evidence_bundle"] == "status=failed | reason=launch_spec_missing_command"
+
+
+def test_poll_local_tmux_background_tickets_marks_completed_from_result_file(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    ticket_id = "BGT-TMUX-POLL-001"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id=ticket_id,
+            request_id="REQ-TMUX-POLL-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="running",
+            runtime_handle="aoe_bg_tmux_poll_001",
+            runtime_summary="tmux_session=aoe_bg_tmux_poll_001",
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    result_path = local_tmux_result_path(tmp_path, ticket_id)
+    log_path = local_tmux_log_path(tmp_path, ticket_id)
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps({"ticket_id": ticket_id, "exit_code": 0}) + "\n", encoding="utf-8")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("tmux run ok\n", encoding="utf-8")
+
+    result = poll_local_tmux_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+    )
+
+    assert result["changed"] is True
+    assert result["completed_count"] == 1
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    row = rows[0]
+    assert row["status"] == "completed"
+    assert row["evidence_bundle"] == "status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-tmux-poll-001.log"
+    assert "background_run_results/bgt-tmux-poll-001.json" in row["evidence_artifacts"]
+    assert "background_run_logs/bgt-tmux-poll-001.log" in row["evidence_artifacts"]
+
+
+def test_poll_local_tmux_background_tickets_marks_failed_when_session_disappears(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    ticket_id = "BGT-TMUX-POLL-002"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id=ticket_id,
+            request_id="REQ-TMUX-POLL-002",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="offdesk_manual",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="telegram:939062873",
+            source_surface="offdesk_review",
+            status="running",
+            runtime_handle="aoe_bg_tmux_poll_002",
+            runtime_summary="tmux_session=aoe_bg_tmux_poll_002",
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, "", ""))
+
+    result = poll_local_tmux_background_tickets(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-04-06T10:00:02+0900",
+    )
+
+    assert result["changed"] is True
+    assert result["failed_count"] == 1
+    rows = load_background_runs_state(queue_file).get("runs") or []
+    row = rows[0]
+    assert row["status"] == "failed"
+    assert row["evidence_bundle"] == "status=failed | reason=tmux_session_missing_result"
+    assert "background_run_results/bgt-tmux-poll-002.json" in row["evidence_artifacts"]
+    assert "background_run_logs/bgt-tmux-poll-002.log" in row["evidence_artifacts"]
+
+
+def test_sync_background_run_snapshots_from_queue_updates_task_record(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    entry = {
+        "tasks": {
+            "REQ-TMUX-SYNC-001": {
+                "request_id": "REQ-TMUX-SYNC-001",
+                "background_run_status": "running",
+                "background_run_ticket_id": "BGT-OLD",
+                "result": {},
+            }
+        }
+    }
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-TMUX-SYNC-001",
+            request_id="REQ-TMUX-SYNC-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_tmux",
+            launch_mode="dashboard_retry",
+            created_at="2026-04-06T10:00:00+0900",
+            created_by="dashboard:dashboard-http",
+            source_surface="dashboard_retry",
+            status="completed",
+            runtime_handle="aoe_bg_tmux_sync_001",
+            runtime_summary="tmux_session=aoe_bg_tmux_sync_001",
+            evidence_bundle="status=completed | outcome=tmux_exit_code | exit_code=0",
+            evidence_artifacts=["background_run_results/bgt-tmux-sync-001.json"],
+        ),
+        now_iso=lambda: "2026-04-06T10:00:01+0900",
+    )
+
+    changed = orch_task_handlers._sync_background_run_snapshots_from_queue(entry, queue_file)
+
+    assert changed is True
+    task = entry["tasks"]["REQ-TMUX-SYNC-001"]
+    assert task["background_run_ticket_id"] == "BGT-TMUX-SYNC-001"
+    assert task["background_run_status"] == "completed"
+    assert task["background_run_runtime_handle"] == "aoe_bg_tmux_sync_001"
+    assert task["result"]["background_run_status"] == "completed"
+    assert task["result"]["background_run_ticket_id"] == "BGT-TMUX-SYNC-001"
+
+
+def test_external_runner_launch_spec_builders_are_externalizable() -> None:
+    common = dict(
+        request_id="REQ-EXT-BUILD",
+        project_key="twinpaper",
+        project_root="/tmp/twinpaper",
+        team_dir="/tmp/twinpaper/.aoe-team",
+        manager_state_file="/tmp/twinpaper/.aoe-team/orch_manager_state.json",
+        launch_mode="offdesk_manual",
+        source_surface="offdesk_review",
+        created_by="telegram:939062873",
+    )
+
+    local_tmux = build_local_tmux_background_launch_spec(**common)
+    github_runner = build_github_runner_background_launch_spec(**common)
+    remote_worker = build_remote_worker_background_launch_spec(**common)
+    generic_local_tmux = build_runner_background_launch_spec(runner_target="local_tmux", **common)
+
+    assert local_tmux["runner_target"] == "local_tmux"
+    assert local_tmux["mode"] == "tmux_session_json"
+    assert local_tmux["entrypoint"] == "aoe-background-worker"
+    assert local_tmux["argv"] == ["worker-run", "--runner", "local_tmux"]
+    assert local_tmux["env_keys"] == ["AOE_TEAM_DIR", "AOE_STATE_DIR", "AOE_ORCH_ALIAS"]
+    assert local_tmux["externalizable"] is True
+    assert "blocked_reason" not in local_tmux
+
+    assert github_runner["runner_target"] == "github_runner"
+    assert github_runner["mode"] == "github_action_json"
+    assert github_runner["argv"] == ["worker-run", "--runner", "github_runner"]
+    assert github_runner["env_keys"] == ["AOE_TEAM_DIR", "AOE_STATE_DIR", "GITHUB_TOKEN", "GITHUB_REPOSITORY"]
+    assert github_runner["externalizable"] is True
+
+    assert remote_worker["runner_target"] == "remote_worker"
+    assert remote_worker["mode"] == "remote_worker_json"
+    assert remote_worker["argv"] == ["worker-run", "--runner", "remote_worker"]
+    assert remote_worker["env_keys"] == ["AOE_TEAM_DIR", "AOE_STATE_DIR", "AOE_REMOTE_ENDPOINT"]
+    assert remote_worker["externalizable"] is True
+
+    assert generic_local_tmux == local_tmux
+
+
+def test_background_run_queue_drain_uses_registered_handler(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-REG-001",
+            request_id="REQ-REG-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    updates: list[str] = []
+    ran: list[str] = []
+    queue_errors: list[str] = []
+    assert register_local_background_run(
+        ticket_id="BGT-REG-001",
+        run_target=lambda: ran.append("ran") or "ok",
+        on_ticket_update=lambda ticket: updates.append(str(ticket.get("status", "")).strip()),
+        on_queue_error=lambda event_name, exc: queue_errors.append(f"{event_name}:{exc}"),
+        completed_evidence_artifacts=lambda: ["review_report.md"],
+    ) is True
+
+    claimed = drain_local_background_queue_once(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-REG-001"
+    assert ran == ["ran"]
+    assert queue_errors == []
+    assert updates == ["dispatching", "running", "completed"]
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-REG-001"]["status"] == "completed"
+    assert rows["BGT-REG-001"]["evidence_artifacts"] == ["review_report.md"]
+
+
+def test_background_run_queue_drain_consumes_multiple_registered_tickets(tmp_path: Path) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    for ticket_id in ["BGT-REG-101", "BGT-REG-102"]:
+        upsert_background_run_ticket(
+            queue_file,
+            build_background_run_ticket(
+                ticket_id=ticket_id,
+                request_id=ticket_id.replace("BGT", "REQ"),
+                project_key="twinpaper",
+                execution_brief_status="executable",
+                runner_target="local_background",
+                launch_mode="detached_no_wait",
+                created_at="2026-03-13T18:55:00+0900",
+                created_by="telegram:939062873",
+                source_surface="run_no_wait",
+                status="queued",
+            ),
+            now_iso=lambda: "2026-03-13T18:55:01+0900",
+        )
+
+    ran: list[str] = []
+    for ticket_id in ["BGT-REG-101", "BGT-REG-102"]:
+        assert register_local_background_run(
+            ticket_id=ticket_id,
+            run_target=lambda token=ticket_id: ran.append(token) or "ok",
+            on_ticket_update=lambda ticket: None,
+            on_queue_error=lambda event_name, exc: None,
+            completed_evidence_artifacts=lambda: ["review_report.md"],
+        ) is True
+
+    result = drain_local_background_queue(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+        max_items=8,
+    )
+
+    assert result["claimed_count"] == 2
+    assert result["claimed_ticket_ids"] == ["BGT-REG-101", "BGT-REG-102"]
+    assert ran == ["BGT-REG-101", "BGT-REG-102"]
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-REG-101"]["status"] == "completed"
+    assert rows["BGT-REG-102"]["status"] == "completed"
+
+
+def test_background_run_queue_drain_executes_provider_invoke_without_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_file = tmp_path / "background_runs.json"
+    launch_spec = build_local_background_provider_invoke_launch_spec(
+        request_id="REQ-PROVIDER-QUEUE-001",
+        project_key="twinpaper",
+        project_root=str(tmp_path),
+        team_dir=str(tmp_path),
+        launch_mode="detached_no_wait",
+        source_surface="background_queue",
+        created_by="telegram:939062873",
+        prompt="Reply with QUEUE_OK only.",
+        system="Return the exact token.",
+        timeout_sec=11,
+    )
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-PROVIDER-QUEUE-001",
+            request_id="REQ-PROVIDER-QUEUE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="background_queue",
+            status="queued",
+            launch_spec=launch_spec,
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_endpoint_adapter.probe_background_ticket_worker_binding",
+        lambda team_dir, ticket: {
+            "ok": True,
+            "probe_status": "ok",
+            "summary": "endpoint=ollama-qwen3 status=ok",
+            "binding": {"bound": True, "summary": "bg=ollama-qwen3:qwen3-coder:30b"},
+        },
+    )
+    monkeypatch.setattr(
+        "aoe_tg_executor_runtime.model_provider_adapter.invoke_background_ticket_worker",
+        lambda team_dir, *, ticket: {
+            "ok": True,
+            "executed": True,
+            "route_id": "background_worker_primary",
+            "endpoint_id": "ollama-qwen3",
+            "model": "qwen3-coder:30b",
+            "response_text": "QUEUE_OK",
+            "task_result_status": "ready",
+            "task_result_summary": "status=ready | queue summary drafted | actions=1 | refs=1",
+            "task_result_actions": ["update reports/summary.md"],
+            "task_result_cautions": ["keep review lane open"],
+            "task_result_evidence_refs": ["reports/summary.md"],
+            "task_update_stub_status": "ready",
+            "task_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+            "task_update_stub_targets": ["reports/summary.md"],
+        },
+    )
+
+    claimed = drain_local_background_queue_once(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        launch_mode="detached_no_wait",
+        claimed_by="worker:local_background",
+        source_surface="background_queue",
+    )
+
+    assert claimed["ticket_id"] == "BGT-PROVIDER-QUEUE-001"
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-PROVIDER-QUEUE-001"]["status"] == "completed"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["runtime_summary"].startswith("provider_invoke_completed")
+    assert "provider_invoke_ok" in rows["BGT-PROVIDER-QUEUE-001"]["evidence_bundle"]
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_result_status"] == "ready"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_result_summary"] == "status=ready | queue summary drafted | actions=1 | refs=1"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_result_evidence_refs"] == ["reports/summary.md"]
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_update_stub_status"] == "ready"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_update_stub_summary"] == "status=ready | targets=reports/summary.md | actions=1 | refs=1"
+    assert rows["BGT-PROVIDER-QUEUE-001"]["worker_update_stub_targets"] == ["reports/summary.md"]
+    assert rows["BGT-PROVIDER-QUEUE-001"]["evidence_artifacts"] == ["reports/summary.md"]
+
+
+def test_local_background_daemon_drains_queue_and_writes_worker_state(tmp_path: Path) -> None:
+    queue_file = background_runs_state_path(tmp_path)
+    worker_state_file = background_worker_state_path(tmp_path)
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-DAEMON-001",
+            request_id="REQ-DAEMON-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:01+0900",
+    )
+
+    ran: list[str] = []
+    assert register_local_background_run(
+        ticket_id="BGT-DAEMON-001",
+        run_target=lambda: ran.append("ok") or "ok",
+        on_ticket_update=lambda ticket: None,
+        on_queue_error=lambda event_name, exc: None,
+        completed_evidence_artifacts=lambda: ["review_report.md"],
+        completed_evidence_bundle=lambda: "status=completed | outcome=daemon_drain",
+    ) is True
+
+    started = ensure_local_background_daemon(
+        queue_path=queue_file,
+        now_iso=lambda: "2026-03-13T18:55:02+0900",
+        runner_target="local_background",
+        claimed_by="daemon:test",
+        source_surface="test",
+        interval_sec=0.05,
+        idle_sec=0.05,
+        max_items=4,
+    )
+    assert started["runner_target"] == "local_background"
+
+    deadline = time.time() + 2.0
+    rows = {}
+    while time.time() < deadline:
+        rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+        if rows.get("BGT-DAEMON-001", {}).get("status") == "completed":
+            break
+        time.sleep(0.05)
+
+    stopped = stop_local_background_daemon(queue_path=queue_file, wait_sec=1.0)
+    assert stopped["stopped"] is True
+    assert ran == ["ok"]
+    assert rows["BGT-DAEMON-001"]["status"] == "completed"
+    worker_state = load_background_worker_state(worker_state_file)
+    worker_summary = summarize_background_worker_state(
+        worker_state_file,
+        now_iso=lambda: "2026-03-13T18:55:05+0900",
+    )
+    assert worker_state["thread_name"]
+    assert int(worker_state.get("claimed_count", 0) or 0) >= 1
+    assert worker_summary["status"] in {"stopped", "running", "idle"}
+    assert "queue=" in worker_summary["summary"]
+
+
+def test_background_run_summary_and_stale_marking(tmp_path: Path) -> None:
+    queue_file = background_runs_state_path(tmp_path)
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-STALE-001",
+            request_id="REQ-STALE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:55:00+0900",
+            touched_at="2026-03-13T18:55:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="running",
+        ),
+        now_iso=lambda: "2026-03-13T18:55:00+0900",
+    )
+    upsert_background_run_ticket(
+        queue_file,
+        build_background_run_ticket(
+            ticket_id="BGT-QUEUE-001",
+            request_id="REQ-QUEUE-001",
+            project_key="twinpaper",
+            execution_brief_status="executable",
+            runner_target="local_background",
+            launch_mode="detached_no_wait",
+            created_at="2026-03-13T18:56:00+0900",
+            touched_at="2026-03-13T18:56:00+0900",
+            created_by="telegram:939062873",
+            source_surface="run_no_wait",
+            status="queued",
+        ),
+        now_iso=lambda: "2026-03-13T18:56:00+0900",
+    )
+
+    before = summarize_background_runs_state(queue_file)
+    assert before["depth"] == 2
+    assert before["stale_count"] == 0
+
+    marked = mark_stale_background_run_tickets(
+        queue_file,
+        now_iso=lambda: "2026-03-13T20:00:00+0900",
+        stale_after_sec=1800,
+    )
+    assert marked == {"stale_count": 1, "changed": True}
+
+    after = summarize_background_runs_state(queue_file)
+    assert after["depth"] == 1
+    assert after["stale_count"] == 1
+    rows = {row["ticket_id"]: row for row in (load_background_runs_state(queue_file).get("runs") or [])}
+    assert rows["BGT-STALE-001"]["status"] == "stale"
+    assert rows["BGT-QUEUE-001"]["status"] == "queued"
 
 
 @pytest.mark.parametrize(
@@ -2578,7 +7902,11 @@ def test_handle_run_or_unknown_command_no_wait_detaches_after_provisional_task(
         (
             "O3",
             "DataProject",
-            "CSV 적재 흐름의 null/스키마 문제를 점검하고 정리해줘.",
+            (
+                "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+                "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+                "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
+            ),
             ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
             ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
             "data",
@@ -2875,6 +8203,66 @@ def test_filter_phase2_retry_scope_honors_operator_selected_lane_subset() -> Non
     assert [row["lane_id"] for row in exec_plan["review_lanes"]] == ["R1"]
     assert scope["rerun_execution_lane_ids"] == ["L1"]
     assert scope["rerun_review_lane_ids"] == ["R1"]
+
+
+def test_filter_phase2_retry_scope_uses_execution_only_slice_for_followup() -> None:
+    plan_data = {
+        "summary": "ready",
+        "subtasks": [
+            {"id": "S1", "owner_role": "Codex-Dev", "title": "Implement", "goal": "do impl"},
+            {"id": "S2", "owner_role": "Codex-Writer", "title": "Document", "goal": "write handoff"},
+        ],
+        "meta": {
+            "phase2_team_spec": {
+                "execution_mode": "parallel",
+                "execution_groups": [
+                    {"group_id": "L1", "role": "Codex-Dev", "subtask_ids": ["S1"], "parallel": True},
+                    {"group_id": "L2", "role": "Codex-Writer", "subtask_ids": ["S2"], "parallel": True},
+                ],
+                "review_mode": "parallel",
+                "review_groups": [
+                    {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L1"], "parallel": True},
+                    {"group_id": "R2", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L2"], "parallel": True},
+                ],
+                "team_roles": ["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+                "critic_role": "Codex-Reviewer",
+                "integration_role": "Codex-Reviewer",
+            },
+            "phase2_execution_plan": {
+                "execution_mode": "parallel",
+                "execution_lanes": [
+                    {"lane_id": "L1", "role": "Codex-Dev", "subtask_ids": ["S1"], "parallel": True},
+                    {"lane_id": "L2", "role": "Codex-Writer", "subtask_ids": ["S2"], "parallel": True},
+                ],
+                "review_mode": "parallel",
+                "review_lanes": [
+                    {"lane_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L1"], "parallel": True},
+                    {"lane_id": "R2", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L2"], "parallel": True},
+                ],
+                "parallel_workers": True,
+                "parallel_reviews": True,
+                "readonly": True,
+            },
+        },
+    }
+
+    filtered, scope = run_handlers._filter_phase2_retry_scope(
+        plan_data=plan_data,
+        run_control_mode="followup",
+        run_source_task={
+            "exec_critic": {
+                "manual_followup_execution_lane_ids": ["L2"],
+                "manual_followup_review_lane_ids": ["R2"],
+            }
+        },
+    )
+
+    assert filtered is not None
+    exec_plan = filtered["meta"]["phase2_execution_plan"]
+    assert [row["lane_id"] for row in exec_plan["execution_lanes"]] == ["L2"]
+    assert exec_plan["review_lanes"] == []
+    assert scope["rerun_execution_lane_ids"] == ["L2"]
+    assert scope["rerun_review_lane_ids"] == []
 
 
 def test_handle_run_or_unknown_command_retry_filters_phase2_dispatch_to_target_lanes(tmp_path: Path) -> None:
@@ -4015,6 +9403,47 @@ def test_resolve_message_command_parses_followup_lane_selector() -> None:
     assert resolved.orch_followup_lane_ids == ["L2", "R1"]
 
 
+def test_resolve_message_command_parses_followup_execute_lane_selector() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/followup-exec T-123 lane L2,R1",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "orch-followup-exec"
+    assert resolved.orch_followup_execute_request_id == "T-123"
+    assert resolved.orch_followup_execute_lane_ids == ["L2", "R1"]
+
+
+def test_resolve_message_command_parses_history_search() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/history search planning_gate --project O3",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "history"
+    assert resolved.rest == "search planning_gate --project O3"
+
+
 def test_resolve_retry_replan_transition_rejects_invalid_lane_selector() -> None:
     manager_state = _empty_state()
     manager_state["projects"]["twinpaper"] = {
@@ -4046,8 +9475,10 @@ def test_resolve_retry_replan_transition_rejects_invalid_lane_selector() -> None
         orch_target="twinpaper",
         orch_retry_request_id="REQ-123",
         orch_replan_request_id=None,
+        orch_followup_execute_request_id=None,
         orch_retry_lane_ids=["L1"],
         orch_replan_lane_ids=None,
+        orch_followup_execute_lane_ids=None,
         send=lambda text, **kwargs: sent.append((text, kwargs.get("context", ""))) or True,
         get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(ROOT / ".aoe-team"))),
         get_chat_selected_task_ref=lambda *_args, **_kwargs: "",
@@ -4097,8 +9528,10 @@ def test_resolve_retry_replan_transition_preserves_selected_lane_targets() -> No
         orch_target="twinpaper",
         orch_retry_request_id="REQ-123",
         orch_replan_request_id=None,
+        orch_followup_execute_request_id=None,
         orch_retry_lane_ids=["L2", "R2"],
         orch_replan_lane_ids=None,
+        orch_followup_execute_lane_ids=None,
         send=lambda *_args, **_kwargs: True,
         get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(ROOT / ".aoe-team"))),
         get_chat_selected_task_ref=lambda *_args, **_kwargs: "",
@@ -4117,6 +9550,118 @@ def test_resolve_retry_replan_transition_preserves_selected_lane_targets() -> No
     assert result["terminal"] is False
     assert result["run_selected_execution_lane_ids"] == ["L2"]
     assert result["run_selected_review_lane_ids"] == ["R2"]
+
+
+def test_resolve_followup_execute_transition_uses_execution_slice_only() -> None:
+    manager_state = _empty_state()
+    manager_state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(ROOT),
+        "team_dir": str(ROOT / ".aoe-team"),
+        "tasks": {
+            "REQ-123": {
+                "request_id": "REQ-123",
+                "prompt": "followup target",
+                "roles": ["Codex-Dev", "Codex-Reviewer"],
+                "followup_brief_status": "partially_executable",
+                "followup_brief_execution_lane_ids": ["L2"],
+                "followup_brief_review_lane_ids": ["R2"],
+                "exec_critic": {
+                    "manual_followup_execution_lane_ids": ["L2"],
+                    "manual_followup_review_lane_ids": ["R2"],
+                },
+            }
+        },
+    }
+
+    result = retry_handlers.resolve_retry_replan_transition(
+        cmd="orch-followup-exec",
+        args=argparse.Namespace(require_verifier=False, verifier_roles=""),
+        manager_state=manager_state,
+        chat_id="939062873",
+        orch_target="twinpaper",
+        orch_retry_request_id=None,
+        orch_replan_request_id=None,
+        orch_followup_execute_request_id="REQ-123",
+        orch_retry_lane_ids=None,
+        orch_replan_lane_ids=None,
+        orch_followup_execute_lane_ids=["L2"],
+        send=lambda *_args, **_kwargs: True,
+        get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(ROOT / ".aoe-team"))),
+        get_chat_selected_task_ref=lambda *_args, **_kwargs: "",
+        resolve_chat_task_ref=lambda *_args, **_kwargs: "REQ-123",
+        resolve_task_request_id=lambda entry, ref: ref if ref in entry.get("tasks", {}) else "",
+        get_task_record=lambda entry, req_id: entry.get("tasks", {}).get(req_id),
+        run_request_query=lambda *_args, **_kwargs: {},
+        sync_task_lifecycle=lambda **_kwargs: None,
+        resolve_verifier_candidates=lambda _raw: [],
+        dedupe_roles=lambda rows: [str(item).strip() for item in rows if str(item).strip()],
+        touch_chat_recent_task_ref=lambda *_args, **_kwargs: None,
+        set_chat_selected_task_ref=lambda *_args, **_kwargs: None,
+    )
+
+    assert isinstance(result, dict)
+    assert result["terminal"] is False
+    assert result["run_control_mode"] == "followup"
+    assert result["run_selected_execution_lane_ids"] == ["L2"]
+    assert result["run_selected_review_lane_ids"] == []
+
+
+def test_resolve_followup_execute_transition_rejects_review_lane_selection() -> None:
+    manager_state = _empty_state()
+    manager_state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(ROOT),
+        "team_dir": str(ROOT / ".aoe-team"),
+        "tasks": {
+            "REQ-123": {
+                "request_id": "REQ-123",
+                "prompt": "followup target",
+                "roles": ["Codex-Dev", "Codex-Reviewer"],
+                "followup_brief_status": "partially_executable",
+                "followup_brief_execution_lane_ids": ["L2"],
+                "followup_brief_review_lane_ids": ["R2"],
+                "exec_critic": {
+                    "manual_followup_execution_lane_ids": ["L2"],
+                    "manual_followup_review_lane_ids": ["R2"],
+                },
+            }
+        },
+    }
+    sent: list[tuple[str, str]] = []
+    result = retry_handlers.resolve_retry_replan_transition(
+        cmd="orch-followup-exec",
+        args=argparse.Namespace(require_verifier=False, verifier_roles=""),
+        manager_state=manager_state,
+        chat_id="939062873",
+        orch_target="twinpaper",
+        orch_retry_request_id=None,
+        orch_replan_request_id=None,
+        orch_followup_execute_request_id="REQ-123",
+        orch_retry_lane_ids=None,
+        orch_replan_lane_ids=None,
+        orch_followup_execute_lane_ids=["R2"],
+        send=lambda text, **kwargs: sent.append((text, kwargs.get("context", ""))) or True,
+        get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(ROOT / ".aoe-team"))),
+        get_chat_selected_task_ref=lambda *_args, **_kwargs: "",
+        resolve_chat_task_ref=lambda *_args, **_kwargs: "REQ-123",
+        resolve_task_request_id=lambda entry, ref: ref if ref in entry.get("tasks", {}) else "",
+        get_task_record=lambda entry, req_id: entry.get("tasks", {}).get(req_id),
+        run_request_query=lambda *_args, **_kwargs: {},
+        sync_task_lifecycle=lambda **_kwargs: None,
+        resolve_verifier_candidates=lambda _raw: [],
+        dedupe_roles=lambda rows: [str(item).strip() for item in rows if str(item).strip()],
+        touch_chat_recent_task_ref=lambda *_args, **_kwargs: None,
+        set_chat_selected_task_ref=lambda *_args, **_kwargs: None,
+    )
+
+    assert result == {"terminal": True}
+    assert sent
+    assert "only supports execution lanes" in sent[-1][0]
 
 
 def test_orch_followup_rejects_invalid_lane_selector() -> None:
@@ -4299,6 +9844,106 @@ def test_orch_followup_summarizes_allowed_lane_targets() -> None:
     assert "/followup T-123" in buttons
     assert "/followup T-123 lane L2" in buttons
     assert "/followup T-123 lane R2" in buttons
+
+
+def test_orch_followup_execute_blocks_preview_only_followup_brief(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    manager_state_file = team_dir / "orch_manager_state.json"
+    manager_state = _empty_state()
+    manager_state["projects"]["twinpaper"] = {
+        "name": "twinpaper",
+        "display_name": "TwinPaper",
+        "project_alias": "O2",
+        "project_root": str(ROOT),
+        "team_dir": str(team_dir),
+        "last_request_id": "REQ-123",
+        "tasks": {
+            "REQ-123": {
+                "request_id": "REQ-123",
+                "status": "failed",
+                "prompt": "followup target",
+                "context": {"task_short_id": "T-123"},
+                "followup_brief_status": "preview_only",
+                "followup_brief_summary": "preview_only | execution=L2 | review=R2",
+                "followup_brief_execution_lane_ids": ["L2"],
+                "followup_brief_review_lane_ids": ["R2"],
+                "followup_brief_reason": "operator decision required",
+                "exec_critic": {
+                    "verdict": "intervention",
+                    "action": "manual_followup",
+                    "reason": "Need operator review",
+                    "manual_followup_execution_lane_ids": ["L2"],
+                    "manual_followup_review_lane_ids": ["R2"],
+                },
+            }
+        },
+    }
+    sent: list[tuple[str, str, object]] = []
+    handled = orch_task_handlers.handle_orch_task_command(
+        cmd="orch-followup-exec",
+        args=argparse.Namespace(
+            require_verifier=False,
+            verifier_roles="",
+            manager_state_file=manager_state_file,
+            dry_run=True,
+        ),
+        manager_state=manager_state,
+        chat_id="939062873",
+        orch_target="twinpaper",
+        orch_add_name=None,
+        orch_add_path=None,
+        orch_add_overview=None,
+        orch_add_init=True,
+        orch_add_spawn=True,
+        orch_add_set_active=True,
+        rest="",
+        orch_check_request_id=None,
+        orch_task_request_id=None,
+        orch_pick_request_id=None,
+        orch_cancel_request_id=None,
+        orch_followup_request_id=None,
+        orch_followup_lane_ids=None,
+        orch_followup_execute_request_id="REQ-123",
+        orch_followup_execute_lane_ids=["L2"],
+        send=lambda text, **kwargs: sent.append((text, kwargs.get("context", ""), kwargs.get("reply_markup"))) or True,
+        log_event=lambda **kwargs: None,
+        get_context=lambda orch: (str(orch or "twinpaper"), manager_state["projects"]["twinpaper"], argparse.Namespace(team_dir=str(team_dir))),
+        latest_task_request_refs=lambda *args, **kwargs: [],
+        set_chat_recent_task_refs=lambda *args, **kwargs: None,
+        save_manager_state=lambda *args, **kwargs: None,
+        resolve_project_root=lambda raw: Path(raw).expanduser().resolve(),
+        is_path_within=lambda path, root: True,
+        register_orch_project=lambda *args, **kwargs: ("", {}),
+        run_aoe_init=lambda *args, **kwargs: "",
+        run_aoe_spawn=lambda *args, **kwargs: "",
+        now_iso=lambda: "2026-04-06T20:20:00+0900",
+        run_aoe_status=lambda *args, **kwargs: "",
+        resolve_chat_task_ref=lambda *_args, **_kwargs: "REQ-123",
+        resolve_task_request_id=lambda entry, ref: ref if ref in entry.get("tasks", {}) else "",
+        run_request_query=lambda *args, **kwargs: {},
+        sync_task_lifecycle=lambda *args, **kwargs: None,
+        resolve_verifier_candidates=lambda text: [],
+        touch_chat_recent_task_ref=lambda *args, **kwargs: None,
+        set_chat_selected_task_ref=lambda *args, **kwargs: None,
+        get_chat_selected_task_ref=lambda *args, **kwargs: "",
+        get_task_record=lambda entry, req_id: entry.get("tasks", {}).get(req_id),
+        summarize_request_state=lambda *args, **kwargs: "",
+        summarize_three_stage_request=lambda *args, **kwargs: "",
+        summarize_task_lifecycle=lambda *args, **kwargs: "",
+        task_display_label=lambda task, fallback_request_id="": str((task or {}).get("context", {}).get("task_short_id") or fallback_request_id),
+        cancel_request_assignments=lambda *args, **kwargs: {},
+        lifecycle_set_stage=lambda *args, **kwargs: None,
+        summarize_cancel_result=lambda *args, **kwargs: "",
+    )
+
+    assert handled is True
+    assert sent
+    text, context, _reply_markup = sent[-1]
+    assert context == "orch-followup-exec blocked"
+    assert "follow-up execute blocked" in text
+    assert "followup_brief: preview_only" in text
+    assert "- /followup T-123" in text
 
 
 def test_resolve_message_command_auto_routes_plain_text_from_direct_bias() -> None:

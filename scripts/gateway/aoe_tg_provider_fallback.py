@@ -6,8 +6,10 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Iterable, Optional
+
+from aoe_tg_artifact_backend import artifact_backend
+from aoe_tg_runtime_core import provider_capacity_state_path
 
 
 _RATE_LIMIT_PATTERNS = (
@@ -45,16 +47,13 @@ def load_provider_capacity_state(team_dir: Any) -> dict:
     if not token:
         return {}
     try:
-        path = Path(token).expanduser().resolve() / "provider_capacity.json"
+        path = provider_capacity_state_path(token)
     except Exception:
         return {}
-    if not path.exists():
+    payload = artifact_backend(path.parent).load_provider_capacity_state(filename=path.name)
+    if not payload and not path.exists():
         return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def extract_retry_after_sec(raw: object, *, default: int = 300) -> int:

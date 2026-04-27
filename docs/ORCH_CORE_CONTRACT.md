@@ -29,7 +29,111 @@ Mother-Orch control-plane actions are defined separately in:
 - `scripts/gateway/aoe_tg_orch_actions.py`
 - `docs/MOTHER_ORCH_ACTION_API.md`
 
+## 1.5 Workspace And Knowledge Inputs
+
+The control-plane contract also assumes three upstream knowledge objects:
+
+- `WorkspaceBrief`
+  - project/runtime workspace truth
+  - root paths, doc roots, todo owner, routing defaults
+- `DocumentRegistry`
+  - canonical document metadata truth
+  - document type, freshness, canonical status
+- `ContextPack`
+  - task-scoped compiled context truth
+  - what a given on-desk/off-desk operation is actually allowed to carry
+
+Important policy:
+
+- these are upstream control-plane objects, not planner-owned objects
+- TF planners and executor adapters must not silently replace them with runner-local filesystem guesses
+- references:
+  - `docs/WORKSPACE_ONBOARDING_SPEC.md`
+  - `docs/DOCUMENT_REGISTRY_SPEC.md`
+  - `docs/CONTEXT_PACK_COMPILER_SPEC.md`
+
 ## 2. Contract Objects
+
+### 2.0 RequestContract
+
+This is the canonical normalized input between plain-language intake and TF planning.
+
+Required fields:
+
+- `version`
+- `contract_type`
+- `status`
+- `objective`
+- `intent_action`
+- `source_prompt`
+- `preset`
+- `fields`
+- `required_outputs`
+- `required_evidence`
+- `missing_fields`
+- `summary`
+
+Operational meaning:
+
+- plain text remains the operator-facing UI
+- `WorkspaceBrief` should already have established the project/runtime workspace boundary
+- `RequestContract` becomes the intake-normalization truth once extracted
+- planner/critic logic should depend on structured fields before it depends on prompt wording
+
+Important policy:
+
+- routing may still use lightweight text heuristics at the intake boundary
+- planning must not rely on raw prompt wording when the same requirement is already expressible as a structured field
+- incomplete request contracts should fail closed with explicit `contract_*` reasons instead of hidden planner guesses
+- runtime/operator surfaces should preserve contract summary and missing-field evidence so blocker explanations stay stable across phrasing drift
+- `RequestContract` must be resolved before `ExecutionBrief` and `OrchTaskSpec` are assembled
+- `OrchTaskSpec` remains the single planner-facing task object, but it should be assembled from `ExecutionBrief`
+- implementation should treat `RequestContract -> ExecutionBrief -> OrchTaskSpec` as a mandatory assembly step, not an optional enrichment path
+
+### 2.0A ExecutionBrief
+
+This is the on-desk execution handoff that decides what off-desk may execute.
+
+Required fields:
+
+- `brief_status`
+- `objective`
+- `scope`
+- `non_goals`
+- `required_inputs`
+- `deliverables`
+- `done_criteria`
+- `rerun_criteria`
+- `operator_decisions`
+- `blocked_reasons`
+
+States:
+
+- `executable`
+- `underspecified`
+- `infeasible`
+- `partially_executable`
+- `operator_decision_required`
+
+Operational meaning:
+
+- `ExecutionBrief` is the final on-desk artifact
+- `ExecutionBrief` is the first off-desk artifact
+- it states:
+  - what can be executed now
+  - what is explicitly out of scope
+  - what still needs operator clarification
+  - what only has a partial executable slice
+
+Important policy:
+
+- off-desk must not exceed the executable scope named by the brief
+- `partially_executable` must enumerate:
+  - executable slice
+  - blocked slice
+- `operator_decision_required` must name the exact unresolved decision instead of translating it into planner guesswork
+- `underspecified` and `infeasible` requests must not silently fall through into normal planning
+- runner-specific execution must consume the brief through an executor adapter seam rather than re-deriving scope from runner-local inputs
 
 ### 2.1 OrchTaskSpec
 
@@ -61,6 +165,13 @@ Important policy:
 - TF may read `source_ref`
 - TF must not rewrite queue state directly
 - TF should emit proposals instead of creating backlog rows
+- `OrchTaskSpec` should inherit normalized request truth from `RequestContract` and executable boundaries from `ExecutionBrief` rather than re-deriving either from raw prompt text
+- only `ExecutionBrief.status in {executable, partially_executable}` may produce a normal `OrchTaskSpec`
+- when the brief is `partially_executable`, `OrchTaskSpec.objective` and `acceptance_criteria` must describe only the permitted slice
+- `approval_mode` semantics:
+  - `policy`: operator approval/recovery is outside the Task Team; missing human approver/DRI is not a planning gate blocker
+  - `confirm`: explicit operator confirmation is part of closure; approval-related critic issues may remain planning blockers
+  - `none`: no approval step is required; approval-related critic issues should not block planning
 
 ### 2.2 TFPlan
 
@@ -76,17 +187,24 @@ Required fields:
 - `critic`
 - `evidence_required`
 - `blocking_issues`
+- `plan_review_count`
+- `plan_issue_history`
+- `plan_convergence_status`
 
 States:
 
 - `draft`
+- `reviewing`
 - `ready`
 - `blocked`
+- `stalled`
 
 Important policy:
 
 - `blocked` must always explain why it cannot proceed
+- `stalled` must explain why repeated critical reviews failed to converge
 - `ready` must name a critic role and minimum evidence requirements
+- `ready` requires at least `3` critical review passes
 - role assignments are role-scoped, not backend-scoped
 - `meta.phase2_team_spec` must make Phase2 execution lanes and critic lanes explicit
 
@@ -267,10 +385,13 @@ Default policy:
 
 - TF is the default execution path for real work
 - planning is mandatory before execution
-- Phase1 runs an ensemble planner loop
-- target loop count is at least `3`
+- Phase1 runs a bounded planning convergence loop
+- target critical review count is at least `3`
 - Codex and Claude receive the same planning mission each round
 - each round shares criticism and improved plan candidates back into the next round
+- `planning_ready` is only valid after the minimum critical review count is met
+- `contract_incomplete`, unsafe mutation, or invalid dependency graph may short-circuit directly to `blocked`
+- repeated unresolved blockers may terminate as `stalled`
 
 The output of Phase1 is:
 
@@ -278,6 +399,10 @@ The output of Phase1 is:
 - critic issues reduced to a dispatchable level
 - explicit execution team shape for Phase2
 - explicit `phase1_role_preset` and `phase2_team_preset` values for downstream observability
+- explicit convergence metadata:
+  - `plan_review_count`
+  - `plan_issue_history`
+  - `plan_convergence_status`
 
 ### 3.2 Phase2: execution
 
@@ -313,6 +438,7 @@ Current runtime field:
 Current mapping rule:
 
 - `plan_gate blocked` -> `blocked`
+- `planning stalled` -> `manual_intervention`
 - `planning in progress` -> `planning`
 - `execution/staffing active` -> `running`
 - `verification/integration active` -> `critic_review`

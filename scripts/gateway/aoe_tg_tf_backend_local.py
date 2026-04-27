@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local TF backend wrapper.
+"""Local Task Team backend wrapper.
 
 This adapter preserves the current behavior by delegating to `run_aoe_orch`.
 It exists so future backends can share the same call boundary.

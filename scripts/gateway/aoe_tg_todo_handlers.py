@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Todo queue handlers for Telegram gateway.
 
-Todo is project-level backlog (not TF lifecycle). Keep it simple:
+Todo is project-level backlog (not Task Team lifecycle). Keep it simple:
 - /todo                : list open items
 - /todo add <summary>  : add new item (optional priority prefix P1/P2/P3)
 - /todo done <id|num>  : mark item done
-- /todo next           : pick next open item and run it as a TF (dispatch)
+- /todo next           : pick next open item and run it as a Task Team dispatch
 
 Optional orch override:
 - /todo O2
@@ -267,7 +267,7 @@ def _todo_usage() -> str:
     return (
         "todo queue\n"
         "- /todo\n"
-        "- /todo proposals  (show TF follow-up proposals inbox)\n"
+        "- /todo proposals  (show Task Team follow-up proposals inbox)\n"
         "- /todo followup  (manual follow-up backlog only)\n"
         "- /todo syncback [preview]  (write runtime done/notes/proposals back to canonical TODO.md)\n"
         "- /todo add [P1|P2|P3] <summary>\n"
@@ -392,7 +392,7 @@ def handle_todo_command(
                 canceled_cnt += 1
 
         lines = [
-            f"orch: {key}",
+            f"runtime: {key}",
             (
                 f"todo followup: count={len(manual_followup_ids)} active={len(active_rows)} done={done_cnt} canceled={canceled_cnt}"
                 if followup_only
@@ -470,12 +470,12 @@ def handle_todo_command(
         accepted_cnt = sum(1 for row in proposals if isinstance(row, dict) and _normalize_proposal_status(row.get("status")) == _PROPOSAL_STATUS_ACCEPTED)
         rejected_cnt = sum(1 for row in proposals if isinstance(row, dict) and _normalize_proposal_status(row.get("status")) == _PROPOSAL_STATUS_REJECTED)
         lines = [
-            f"orch: {key}",
+            f"runtime: {key}",
             f"todo proposals: open={len(open_rows)} accepted={accepted_cnt} rejected={rejected_cnt}",
         ]
         if not open_rows:
             lines.append("")
-            lines.append("(empty) no pending TF follow-up proposals")
+            lines.append("(empty) no pending Task Team follow-up proposals")
             send("\n".join(lines), context="todo-proposals empty", with_menu=False, reply_markup=_todo_empty_reply_markup(key, entry))
             return {"terminal": True}
 
@@ -532,7 +532,7 @@ def handle_todo_command(
         alias = _project_alias(entry, key)
         lines = [
             f"todo syncback{' preview' if preview else ''}",
-            f"- orch: {key} ({alias})",
+            f"- runtime: {key} ({alias})",
             f"- target: {plan['path']}",
             f"- mark_done: {int(plan.get('done_count', 0) or 0)}",
             f"- reopen_open: {int(plan.get('reopen_count', 0) or 0)}",
@@ -584,7 +584,7 @@ def handle_todo_command(
             alias = _project_alias(entry, key)
             send(
                 "todo next blocked: project runtime is not ready\n"
-                f"- orch: {key} ({alias})\n"
+                f"- runtime: {key} ({alias})\n"
                 f"- reason: {project_runtime_label(entry)}\n"
                 "next:\n"
                 f"- /orch status {alias}\n"
@@ -604,7 +604,7 @@ def handle_todo_command(
             alias = _project_alias(entry, key)
             send(
                 "todo next blocked: pending todo exists (awaiting dispatch/approval)\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- pending: {todo_id}\n"
                 "next:\n"
                 "- /todo (list)\n"
@@ -627,7 +627,7 @@ def handle_todo_command(
                 summary = summary[:197] + "..."
             send(
                 "todo next blocked: active todo exists\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- current: {todo_id} | {pr} | {summary or '-'}\n"
                 "next:\n"
                 "- /todo (list)\n"
@@ -643,7 +643,7 @@ def handle_todo_command(
         candidate_rows = [row for row in resume_rows if isinstance(row, dict)] or open_rows
         if not candidate_rows:
             send(
-                f"orch: {key}\n"
+                f"runtime: {key}\n"
                 "no open todo.\n"
                 "add: /todo add <summary>",
                 context="todo-next empty",
@@ -668,7 +668,7 @@ def handle_todo_command(
         headline = "todo next resumed" if item in resume_rows else "todo next selected"
         send(
             f"{headline}\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- id: {queued['todo_id']}\n"
             f"- priority: {queued['priority']}\n"
             f"- summary: {queued['summary_preview'] or '-'}\n"
@@ -722,7 +722,7 @@ def handle_todo_command(
 
         send(
             "todo added\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- id: {todo_id}\n"
             f"- priority: {_normalize_priority(pr)}\n"
             f"- summary: {summary[:200]}",
@@ -746,7 +746,7 @@ def handle_todo_command(
             todo_id = str(item.get("id", "")).strip() or ref
             send(
                 "todo ack blocked: target is not blocked\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- id: {todo_id}\n"
                 "next:\n"
                 "- /todo\n"
@@ -770,7 +770,7 @@ def handle_todo_command(
             summary = summary[:197] + "..."
         send(
             "todo acknowledged\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- id: {todo_id or '-'}\n"
             f"- reopened: yes\n"
             f"- cleared_followup: {'yes' if had_followup else 'no'}\n"
@@ -799,7 +799,7 @@ def handle_todo_command(
         if status != _STATUS_BLOCKED:
             send(
                 "todo ackrun blocked: target is not blocked\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- id: {todo_id}\n"
                 "next:\n"
                 "- /todo\n"
@@ -814,7 +814,7 @@ def handle_todo_command(
             alias = _project_alias(entry, key)
             send(
                 "todo ackrun blocked: project runtime is not ready\n"
-                f"- orch: {key} ({alias})\n"
+                f"- runtime: {key} ({alias})\n"
                 f"- id: {todo_id}\n"
                 f"- reason: {project_runtime_label(entry)}\n"
                 "next:\n"
@@ -836,7 +836,7 @@ def handle_todo_command(
             alias = _project_alias(entry, key)
             send(
                 "todo ackrun blocked: pending todo exists (awaiting dispatch/approval)\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- pending: {pending_id}\n"
                 "next:\n"
                 "- /todo (list)\n"
@@ -864,7 +864,7 @@ def handle_todo_command(
                 summary = summary[:197] + "..."
             send(
                 "todo ackrun blocked: active running todo exists\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- current: {head_id} | {pr} | {summary or '-'}\n"
                 "next:\n"
                 "- /todo (list)\n"
@@ -891,7 +891,7 @@ def handle_todo_command(
         )
         send(
             "todo ackrun selected\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- id: {queued['todo_id']}\n"
             f"- reopened: yes\n"
             f"- cleared_followup: {'yes' if had_followup else 'no'}\n"
@@ -945,7 +945,7 @@ def handle_todo_command(
             summary = summary[:197] + "..."
         send(
             "todo done\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- id: {todo_id}\n"
             f"- summary: {summary or '-'}\n"
             "next: /todo",
@@ -966,7 +966,7 @@ def handle_todo_command(
         if _normalize_proposal_status(proposal.get("status")) != _PROPOSAL_STATUS_OPEN:
             send(
                 "todo accept blocked: proposal is not open\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- id: {str(proposal.get('id', '')).strip() or ref}",
                 context="todo-accept not-open",
                 with_menu=True,
@@ -983,7 +983,7 @@ def handle_todo_command(
             save_manager_state(args.manager_state_file, manager_state)
         send(
             "todo proposal accepted\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- proposal: {accepted['proposal_id'] or ref}\n"
             f"- todo: {accepted['todo_id'] or '-'}\n"
             f"- created_new: {'yes' if accepted['created_new'] else 'no'}\n"
@@ -1005,7 +1005,7 @@ def handle_todo_command(
         if _normalize_proposal_status(proposal.get("status")) != _PROPOSAL_STATUS_OPEN:
             send(
                 "todo reject blocked: proposal is not open\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- id: {str(proposal.get('id', '')).strip() or ref}",
                 context="todo-reject not-open",
                 with_menu=True,
@@ -1023,7 +1023,7 @@ def handle_todo_command(
             save_manager_state(args.manager_state_file, manager_state)
         send(
             "todo proposal rejected\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- proposal: {rejected['proposal_id'] or ref}\n"
             + (f"- reason: {str(rejected['reason'])[:200]}\n" if rejected["reason"] else "")
             + f"- summary: {str(rejected['summary'])[:200] or '-'}",

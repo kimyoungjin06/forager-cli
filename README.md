@@ -8,7 +8,7 @@ Telegram-controlled orchestration workspace for multi-project AOE operations.
 - This repository adds a Telegram control plane, runtime queue/proposal handling, offdesk automation, and tmux-oriented operator workflow.
 
 ## What This Repository Is
-- A `Python + shell/tmux` control plane for orchestrating project-level Orch sessions.
+- A `Python + shell/tmux` control plane for orchestrating project runtimes.
 - A runtime queue/task system with `todo`, `proposal`, `sync`, `salvage`, and `syncback` flows.
 - An operator-first workflow for:
   - `on-desk`: tmux/session switching and local orchestration
@@ -27,6 +27,7 @@ Telegram-controlled orchestration workspace for multi-project AOE operations.
 Project charter:
 - `docs/PROJECT_CHARTER.md`
 - `docs/CONSTITUTION.md`
+- `docs/OPERATING_MODEL.md`
 
 ## Architecture At A Glance
 - Control plane:
@@ -34,13 +35,19 @@ Project charter:
   - `aoe-team-stack`
   - tmux operator surface
 - Execution plane:
-  - request-scoped TF workdirs
+  - request-scoped Task Team workdirs
   - role worker sessions
   - runtime queue/task state
 
 Primary docs:
 - Architecture: `docs/ARCHITECTURE.md`
-- Mother-Orch Action API: `docs/MOTHER_ORCH_ACTION_API.md`
+- Operating model: `docs/OPERATING_MODEL.md`
+- Control dashboard MVP: `docs/CONTROL_DASHBOARD_MVP.md`
+- Control dashboard read-only design: `docs/CONTROL_DASHBOARD_READONLY_DESIGN.md`
+- Preset completion matrix: `docs/PRESET_COMPLETION_MATRIX.md`
+- Nightly session summary: `docs/NIGHTLY_SESSION_SUMMARY.md`
+- Storage retention policy: `docs/STORAGE_RETENTION_POLICY.md`
+- Control Action API: `docs/MOTHER_ORCH_ACTION_API.md`
 - Command reference: `docs/COMMANDS.md`
 - Deployment: `docs/DEPLOYMENT.md`
 - Runbook: `docs/RUNBOOK.md`
@@ -49,6 +56,7 @@ Primary docs:
 - Core decomposition plan: `docs/CORE_DECOMPOSITION_PLAN.md`
 - AutoGen Core adoption note: `docs/AUTOGEN_CORE_ADOPTION.md`
 - AutoGen Core sandbox pilot criteria: `docs/AUTOGEN_CORE_PILOT.md`
+- LangChain deepagents benchmark note: `docs/LANGCHAIN_DEEPAGENTS_BENCHMARK_20260421.md`
 
 ## Repository Layout
 - `scripts/gateway/`
@@ -131,7 +139,7 @@ Rule:
 - treat `.aoe-team/` as mutable environment-local state
 
 ## Testing
-- Full gateway pytest wrapper:
+- Gateway pytest wrapper (defaults to CLI regressions; accepts explicit test paths):
 ```bash
 scripts/gateway_pytest.sh
 ```
@@ -146,12 +154,17 @@ bash scripts/gateway_smoke_test.sh
 bash scripts/gateway_error_test.sh
 ```
 
+- Dashboard/operator subset:
+```bash
+bash scripts/gateway_dashboard_test.sh
+```
+
 - CI workflow:
   - `.github/workflows/gateway-tests.yml`
 
-## Experimental TF Backends
+## Experimental Task Team Backends
 Current production path:
-- local TF backend based on `aoe-orch` + tmux/request-scoped workers
+- local Task Team backend based on `aoe-orch` + tmux/request-scoped workers
 
 Planned experimental seam:
 - `scripts/gateway/aoe_tg_tf_backend.py`
@@ -160,7 +173,7 @@ Planned experimental seam:
 - `scripts/experiments/autogen_core_tf_spike.py`
 
 Important rule:
-- external frameworks may be used inside one TF execution backend
+- external frameworks may be used inside one Task Team execution backend
 - backlog ownership, syncback, Telegram control, and offdesk scheduling remain in this repository
 
 ## Current Status

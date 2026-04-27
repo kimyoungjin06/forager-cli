@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from aoe_tg_acl import parse_acl_command_args, parse_acl_revoke_args
+from aoe_tg_deprecation import match_deprecated_cli_surface, match_deprecated_slash_surface
 from aoe_tg_parse import (
     infer_natural_run_mode,
     normalize_lang_token,
@@ -49,6 +50,7 @@ _ABBREV_COMMANDS = [
     "lang",
     "report",
     "replay",
+    "history",
     "ok",
     "whoami",
     "lockme",
@@ -63,6 +65,7 @@ _ABBREV_COMMANDS = [
     "retry",
     "replan",
     "followup",
+    "followup-exec",
     "request",
     "run",
     "clear",
@@ -118,9 +121,11 @@ class ResolvedCommand:
     orch_retry_request_id: Optional[str] = None
     orch_replan_request_id: Optional[str] = None
     orch_followup_request_id: Optional[str] = None
+    orch_followup_execute_request_id: Optional[str] = None
     orch_retry_lane_ids: Optional[list[str]] = None
     orch_replan_lane_ids: Optional[list[str]] = None
     orch_followup_lane_ids: Optional[list[str]] = None
+    orch_followup_execute_lane_ids: Optional[list[str]] = None
     orch_monitor_limit: Optional[int] = None
     orch_kpi_hours: Optional[int] = None
 
@@ -133,6 +138,14 @@ class ResolvedCommand:
     acl_revoke_chat_id: Optional[str] = None
 
     run_auto_source: str = ""
+    intent_action: str = ""
+    intent_class: str = ""
+    intent_trace: str = ""
+    deprecated_code: str = ""
+    deprecated_surface: str = ""
+    deprecated_replacement: str = ""
+    deprecated_note: str = ""
+    deprecated_next_step: str = ""
 
 
 def _default_project_key_for_plaintext(manager_state: Dict[str, Any]) -> str:
@@ -177,6 +190,15 @@ def resolve_message_command(
     out.came_from_slash = bool(out.cmd)
 
     if out.cmd:
+        deprecated = match_deprecated_slash_surface(out.cmd, out.rest)
+        if deprecated is not None:
+            out.cmd = "deprecated"
+            out.deprecated_code = deprecated.code
+            out.deprecated_surface = deprecated.surface
+            out.deprecated_replacement = deprecated.replacement
+            out.deprecated_note = deprecated.note
+            out.deprecated_next_step = deprecated.next_step
+            return out
         slash_rest = str(out.rest or "").strip()
         if out.cmd in {"menu"}:
             out.cmd = "help"
@@ -195,6 +217,9 @@ def resolve_message_command(
                 out.cmd = "cancel-pending"
         elif out.cmd in {"replay"}:
             out.cmd = "replay"
+            out.rest = slash_rest
+        elif out.cmd in {"history"}:
+            out.cmd = "history"
             out.rest = slash_rest
         elif out.cmd in {"id", "whoami"}:
             out.cmd = "whoami"
@@ -291,11 +316,78 @@ def resolve_message_command(
                 elif sub in {"repair", "init", "fix"}:
                     out.cmd = "orch-repair"
                     out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgq-clean", "queue-clean", "cleanup-queue"}:
+                    out.cmd = "orch-bgq-clean"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgw-status", "worker-status"}:
+                    out.cmd = "orch-bgw-status"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgw-ping", "worker-ping"}:
+                    out.cmd = "orch-bgw-ping"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgw-task", "worker-task"}:
+                    out.cmd = "orch-bgw-task"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"model-ping", "model-invoke"}:
+                    out.cmd = "orch-model-ping"
+                    out.orch_target = tail[0].strip() if tail else None
+                    out.rest = tail[1].strip() if len(tail) > 1 else ""
+                    if not out.orch_target or not out.rest:
+                        raise RuntimeError("usage: /orch model-ping <O#|name> <research|judge|escalation>")
+                elif sub in {"judge", "review-judge"}:
+                    out.cmd = "orch-judge"
+                    out.orch_target = tail[0].strip() if tail else None
+                    if not out.orch_target:
+                        raise RuntimeError("usage: /orch judge <O#|name>")
+                elif sub in {"bgx-status", "external-status", "background-external-status"}:
+                    out.cmd = "orch-bgx-status"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-handoff", "external-handoff", "background-external-handoff"}:
+                    out.cmd = "orch-bgx-handoff"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-ack", "external-ack", "background-external-ack"}:
+                    out.cmd = "orch-bgx-ack"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-result", "external-result", "background-external-result"}:
+                    out.cmd = "orch-bgx-result"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-emit-ack", "external-emit-ack", "background-external-emit-ack"}:
+                    out.cmd = "orch-bgx-emit-ack"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgx-emit-result", "external-emit-result", "background-external-emit-result"}:
+                    out.cmd = "orch-bgx-emit-result"
+                    out.orch_target = tail[0].strip() if tail else None
+                    if len(tail) > 1:
+                        out.rest = tail[1].strip()
+                elif sub in {"bgw-start", "worker-start"}:
+                    out.cmd = "orch-bgw-start"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bgw-stop", "worker-stop"}:
+                    out.cmd = "orch-bgw-stop"
+                    out.orch_target = tail[0].strip() if tail else None
+                elif sub in {"bg-runner", "background-runner", "runner-target"}:
+                    out.cmd = "orch-bg-runner"
+                    out.orch_target = tail[0].strip() if tail else None
+                    out.rest = tail[1].strip() if len(tail) > 1 else ""
+                    if not out.orch_target or not out.rest:
+                        raise RuntimeError("usage: /orch bg-runner <O#|name> <local_background|local_tmux|github_runner|remote_worker>")
+                elif sub in {"run-lock", "execution-lock"}:
+                    out.cmd = "orch-run-lock"
+                    out.orch_target = tail[0].strip() if tail else None
+                    out.rest = tail[1].strip() if len(tail) > 1 else ""
+                    if not out.orch_target or not out.rest:
+                        raise RuntimeError("usage: /orch run-lock <O#|name> <open|test_only>")
+                elif sub in {"bg-slots", "background-slots"}:
+                    out.cmd = "orch-bg-slots"
+                    out.orch_target = tail[0].strip() if tail else None
+                    out.rest = " ".join(part.strip() for part in tail[1:] if part.strip())
+                    if not out.orch_target or not out.rest:
+                        raise RuntimeError("usage: /orch bg-slots <O#|name> [<local_tmux|github_runner|remote_worker>] <limit>")
                 elif sub in {"status", "stat"}:
                     out.cmd = "orch-status"
                     out.orch_target = tail[0].strip() if tail else None
                 else:
-                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|status]")
+                    raise RuntimeError("usage: /orch [list|use|pause|resume|repair|bgq-clean|bgw-status|bgw-ping|bgw-task|model-ping|judge|bgx-status|bgx-handoff|bgx-ack|bgx-result|bgx-emit-ack|bgx-emit-result|bgw-start|bgw-stop|bg-runner|bg-slots|run-lock|status]")
         elif out.cmd in {"todo", "todos"}:
             out.cmd = "todo"
             out.rest = slash_rest
@@ -353,6 +445,15 @@ def resolve_message_command(
                 )
                 out.orch_followup_request_id = parsed["request_id"]
                 out.orch_followup_lane_ids = parsed["lane_ids"]
+        elif out.cmd in {"followup-exec", "followup-run"}:
+            out.cmd = "orch-followup-exec"
+            if slash_rest:
+                parsed = parse_request_lane_args(
+                    slash_rest,
+                    usage="usage: /followup-exec <request_or_alias> [lane <L#|R#,...>]",
+                )
+                out.orch_followup_execute_request_id = parsed["request_id"]
+                out.orch_followup_execute_lane_ids = parsed["lane_ids"]
         elif out.cmd in {"monitor", "tasks", "board"}:
             out.cmd = "orch-monitor"
             if slash_rest:
@@ -394,6 +495,16 @@ def resolve_message_command(
                 out.cmd = "quick-direct"
 
     if (not out.cmd) and (not bool(slash_only)):
+        deprecated_cli = match_deprecated_cli_surface(text)
+        if deprecated_cli is not None:
+            out.cmd = "deprecated"
+            out.deprecated_code = deprecated_cli.code
+            out.deprecated_surface = deprecated_cli.surface
+            out.deprecated_replacement = deprecated_cli.replacement
+            out.deprecated_note = deprecated_cli.note
+            out.deprecated_next_step = deprecated_cli.next_step
+            return out
+
         quick = parse_quick_message(text)
         if quick:
             out.cmd = str(quick.get("cmd", "")).strip().lower()
@@ -407,8 +518,14 @@ def resolve_message_command(
                 out.run_no_wait_override = bool(quick.get("no_wait", False))
                 out.run_force_mode = quick.get("force_mode")
                 out.orch_target = quick.get("orch")
-            elif out.cmd in {"orch-use", "orch-status", "orch-repair"}:
+            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-ping", "orch-bgw-task", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = quick.get("orch")
+            elif out.cmd == "orch-model-ping":
+                out.orch_target = quick.get("orch")
+                out.rest = str(quick.get("rest", "")).strip()
+            elif out.cmd == "orch-bg-runner":
+                out.orch_target = quick.get("orch")
+                out.rest = str(quick.get("runner_target", "")).strip()
             elif out.cmd == "orch-check":
                 out.orch_target = quick.get("orch")
                 out.orch_check_request_id = quick.get("request_id")
@@ -433,6 +550,10 @@ def resolve_message_command(
                 out.orch_target = quick.get("orch")
                 out.orch_followup_request_id = quick.get("request_id")
                 out.orch_followup_lane_ids = quick.get("lane_ids")
+            elif out.cmd == "orch-followup-exec":
+                out.orch_target = quick.get("orch")
+                out.orch_followup_execute_request_id = quick.get("request_id")
+                out.orch_followup_execute_lane_ids = quick.get("lane_ids")
             elif out.cmd == "orch-monitor":
                 out.orch_target = quick.get("orch")
                 out.orch_monitor_limit = quick.get("limit")
@@ -469,8 +590,14 @@ def resolve_message_command(
                 out.orch_target = cli.get("orch")
             elif out.cmd == "add-role":
                 _apply_add_role_cli(cli)
-            elif out.cmd in {"orch-use", "orch-status", "orch-repair"}:
+            elif out.cmd in {"orch-use", "orch-status", "orch-repair", "orch-bgq-clean", "orch-bgw-status", "orch-bgw-ping", "orch-bgw-task", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgw-start", "orch-bgw-stop"}:
                 out.orch_target = cli.get("orch")
+            elif out.cmd == "orch-model-ping":
+                out.orch_target = cli.get("orch")
+                out.rest = str(cli.get("rest", "")).strip()
+            elif out.cmd == "orch-bg-runner":
+                out.orch_target = cli.get("orch")
+                out.rest = str(cli.get("runner_target", "")).strip()
             elif out.cmd == "orch-add":
                 out.orch_add_name = str(cli.get("orch", "")).strip()
                 out.orch_add_path = str(cli.get("path", "")).strip()
@@ -505,6 +632,10 @@ def resolve_message_command(
                 out.orch_target = cli.get("orch")
                 out.orch_followup_request_id = cli.get("request_id")
                 out.orch_followup_lane_ids = cli.get("lane_ids")
+            elif out.cmd == "orch-followup-exec":
+                out.orch_target = cli.get("orch")
+                out.orch_followup_execute_request_id = cli.get("request_id")
+                out.orch_followup_execute_lane_ids = cli.get("lane_ids")
             elif out.cmd == "orch-monitor":
                 out.orch_target = cli.get("orch")
                 out.orch_monitor_limit = cli.get("limit")
@@ -522,6 +653,8 @@ def resolve_message_command(
                 out.report_setting = token if token in {"status", "short", "normal", "long", "off"} else ""
             elif out.cmd == "replay":
                 out.rest = str(cli.get("target", "")).strip()
+            elif out.cmd == "history":
+                out.rest = str(cli.get("rest", "")).strip()
             elif out.cmd == "todo":
                 out.rest = str(cli.get("rest", "")).strip()
             elif out.cmd == "next":
@@ -570,6 +703,9 @@ def resolve_message_command(
                 str(mapped.get("run_auto_source", "")).strip()
                 or f"orch-action:{str(action_call.get('action', '')).strip()}"
             )
+            out.intent_action = str(action_call.get("action", "")).strip()
+            out.intent_class = str(action_call.get("intent_class", "")).strip()
+            out.intent_trace = str(action_call.get("intent_trace", "")).strip()
             out.orch_target = mapped.get("orch_target") or out.orch_target
             out.orch_task_request_id = mapped.get("orch_task_request_id") or out.orch_task_request_id
             out.orch_retry_request_id = mapped.get("orch_retry_request_id") or out.orch_retry_request_id
@@ -602,6 +738,21 @@ def resolve_message_command(
                 "status",
                 "orch-kpi",
                 "orch-monitor",
+                "orch-bgq-clean",
+                "orch-bgw-status",
+                "orch-bgw-ping",
+                "orch-bgw-task",
+                "orch-model-ping",
+                "orch-judge",
+                "orch-bgx-status",
+                "orch-bgx-handoff",
+                "orch-bgx-ack",
+                "orch-bgx-result",
+                "orch-bgx-emit-ack",
+                "orch-bgx-emit-result",
+                "orch-bgw-start",
+                "orch-bgw-stop",
+                "orch-bg-runner",
                 "orch-check",
                 "orch-task",
                 "orch-pick",
@@ -609,6 +760,7 @@ def resolve_message_command(
                 "orch-retry",
                 "orch-replan",
                 "orch-followup",
+                "orch-followup-exec",
                 "cancel-pending",
                 "replay",
             }
@@ -631,10 +783,25 @@ def resolve_message_command(
                 elif ncmd == "orch-followup":
                     out.orch_followup_request_id = natural.get("request_id")
                     out.orch_followup_lane_ids = natural.get("lane_ids")
+                elif ncmd == "orch-followup-exec":
+                    out.orch_followup_execute_request_id = natural.get("request_id")
+                    out.orch_followup_execute_lane_ids = natural.get("lane_ids")
                 elif ncmd == "orch-monitor":
                     out.orch_monitor_limit = natural.get("limit")
                 elif ncmd == "orch-kpi":
                     out.orch_kpi_hours = natural.get("hours")
+                elif ncmd == "orch-bgq-clean":
+                    out.orch_target = natural.get("orch")
+                elif ncmd in {"orch-bgw-status", "orch-bgw-ping", "orch-bgw-task", "orch-bgx-status", "orch-bgx-handoff", "orch-bgx-ack", "orch-bgx-result", "orch-bgx-emit-ack", "orch-bgx-emit-result", "orch-bgw-start", "orch-bgw-stop"}:
+                    out.orch_target = natural.get("orch")
+                    if ncmd == "orch-bgx-emit-result":
+                        out.rest = str(natural.get("rest", "")).strip()
+                elif ncmd == "orch-model-ping":
+                    out.orch_target = natural.get("orch")
+                    out.rest = str(natural.get("rest", "")).strip()
+                elif ncmd == "orch-bg-runner":
+                    out.orch_target = natural.get("orch")
+                    out.rest = str(natural.get("runner_target", "")).strip()
                 elif ncmd == "mode":
                     token = str(natural.get("mode", "status")).strip().lower()
                     out.mode_setting = token if token in {"status", "dispatch", "direct", "off"} else "invalid"

@@ -15,7 +15,7 @@ def run_orchestrator_direct(
     reply_lang: str,
     default_reply_lang: str,
     normalize_chat_lang_token: Callable[[str, str], str],
-    run_codex_exec: Callable[..., str],
+    run_control_exec: Callable[..., str],
 ) -> str:
     lang = normalize_chat_lang_token(reply_lang, default_reply_lang) or default_reply_lang
     if lang == "en":
@@ -38,7 +38,7 @@ def run_orchestrator_direct(
             "- 실무적으로 간결하게 답하고, 필요할 때만 다음 행동을 제안한다\n\n"
             f"사용자 요청:\n{user_prompt.strip()}\n"
         )
-    return run_codex_exec(args, prompt, timeout_sec=min(900, max(90, int(args.orch_command_timeout_sec))))
+    return run_control_exec(args, prompt, timeout_sec=min(900, max(90, int(args.orch_command_timeout_sec))), stage="orchestrator_direct")
 
 
 def synthesize_orchestrator_response(
@@ -49,7 +49,7 @@ def synthesize_orchestrator_response(
     reply_lang: str,
     default_reply_lang: str,
     normalize_chat_lang_token: Callable[[str, str], str],
-    run_codex_exec: Callable[..., str],
+    run_control_exec: Callable[..., str],
 ) -> str:
     replies = state.get("replies") or []
     chunks: List[str] = []
@@ -85,7 +85,7 @@ def synthesize_orchestrator_response(
             f"사용자 요청:\n{user_prompt.strip()}\n\n"
             f"서브에이전트 답변:\n{joined}\n"
         )
-    return run_codex_exec(args, prompt, timeout_sec=min(900, max(90, int(args.orch_command_timeout_sec))))
+    return run_control_exec(args, prompt, timeout_sec=min(900, max(90, int(args.orch_command_timeout_sec))), stage="orchestrator_synth")
 
 
 def critique_task_execution_result(
@@ -100,7 +100,7 @@ def critique_task_execution_result(
     default_reply_lang: str,
     normalize_chat_lang_token: Callable[[str, str], str],
     mask_sensitive_text: Callable[[str], str],
-    run_codex_exec: Callable[..., str],
+    run_control_exec: Callable[..., str],
     parse_json_object_from_text: Callable[[str], Optional[Dict[str, Any]]],
     normalize_exec_critic_payload: Callable[..., Dict[str, Any]],
     now_iso: Callable[[], str],
@@ -251,7 +251,12 @@ def critique_task_execution_result(
             + f"서브에이전트 답변:\n{joined}\n"
         )
 
-    raw = run_codex_exec(args, critic_prompt, timeout_sec=min(600, max(60, int(args.orch_command_timeout_sec))))
+    raw = run_control_exec(
+        args,
+        critic_prompt,
+        timeout_sec=min(600, max(60, int(args.orch_command_timeout_sec))),
+        stage="exec_critic",
+    )
     parsed = parse_json_object_from_text(raw)
 
     return normalize_exec_critic_payload(
@@ -273,7 +278,7 @@ def extract_followup_todo_proposals(
     default_orch_command_timeout_sec: int,
     normalize_chat_lang_token: Callable[[str, str], str],
     mask_sensitive_text: Callable[[str], str],
-    run_codex_exec: Callable[..., str],
+    run_control_exec: Callable[..., str],
     parse_json_object_from_text: Callable[[str], Optional[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
     replies = state.get("replies") or []
@@ -351,7 +356,7 @@ def extract_followup_todo_proposals(
         )
 
     try:
-        raw = run_codex_exec(
+        raw = run_control_exec(
             args,
             prompt,
             timeout_sec=min(
@@ -361,6 +366,7 @@ def extract_followup_todo_proposals(
                     int(getattr(args, "orch_command_timeout_sec", default_orch_command_timeout_sec) or default_orch_command_timeout_sec) // 4,
                 ),
             ),
+            stage="followup_proposals",
         )
     except Exception:
         return []

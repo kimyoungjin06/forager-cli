@@ -5,12 +5,46 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
+from aoe_tg_action_audit import load_latest_action_audit_for_runtime
+from aoe_tg_operator_summary import runtime_latest_intent_summary
+from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_priority_actions import task_lane_target_snapshot, task_priority_action_snapshot
+from aoe_tg_request_contract import (
+    apply_background_run_ticket_snapshot,
+    apply_execution_brief_snapshot,
+    apply_job_contract_snapshot,
+    apply_request_contract_snapshot,
+    build_request_contract,
+    build_execution_brief,
+    build_job_contract,
+    job_contract_has_body,
+    normalize_background_run_ticket_snapshot,
+    normalize_execution_brief_snapshot,
+    normalize_job_contract_snapshot,
+    normalize_request_contract_snapshot,
+)
+from aoe_tg_team_observatory import observatory_monitor_line, task_team_observatory_snapshot
+import aoe_tg_worker_task_contract as worker_task_contract
 
 
 LANE_STATES = ("pending", "running", "done", "failed", "waiting_on_dependencies")
 LANE_VERDICTS = ("success", "retry", "fail", "intervention")
+PLAN_CONVERGENCE_STATUSES = ("ready", "blocked", "stalled", "failed", "pending")
+FOLLOWUP_BRIEF_VERSION = "2026-04-06.v1"
+FOLLOWUP_BRIEF_STATUSES = ("preview_only", "executable", "partially_executable")
+DEBUG_PACKET_VERSION = "2026-04-16.v1"
+DEBUG_PACKET_STATES = ("clean", "watch", "blocked", "active")
+PHASE_CHECKPOINT_VERSION = "2026-04-16.v1"
+PHASE_CHECKPOINT_STATUSES = ("ready", "active", "blocked", "done")
+PLANNING_LANE_VERSION = "2026-04-17.v1"
+PLANNING_LANE_STATUSES = ("pending", "active", "ready", "blocked", "done")
+CRITIC_REVIEW_VERSION = "2026-04-17.v1"
+CRITIC_REVIEW_STATUSES = ("pending", "active", "blocked", "approved")
+APPROVED_PLAN_VERSION = "2026-04-17.v1"
+APPROVED_PLAN_STATUSES = ("missing", "pending", "blocked", "approved")
+_BRIEF_BLOCKED_STATUSES = {"underspecified", "operator_decision_required", "infeasible"}
+_EXTERNAL_BACKGROUND_RUNNERS = {"github_runner", "remote_worker"}
 
 
 def _normalize_lane_status(raw: Any, default: str = "pending") -> str:
@@ -45,6 +79,1476 @@ def _normalize_lane_verdict(raw: Any, default: str = "") -> str:
     if token in {"escalate"}:
         return "intervention"
     return default
+
+
+def _normalize_plan_convergence_status(raw: Any, default: str = "") -> str:
+    token = str(raw or "").strip().lower()
+    if token in PLAN_CONVERGENCE_STATUSES:
+        return token
+    return default
+
+
+def _normalize_followup_brief_status(raw: Any, default: str = "") -> str:
+    token = str(raw or "").strip().lower()
+    if token in FOLLOWUP_BRIEF_STATUSES:
+        return token
+    return default
+
+
+def _normalize_followup_lane_ids(raw: Any, *, limit: int = 8) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    out: List[str] = []
+    for row in rows:
+        token = str(row or "").strip()[:32]
+        if token and token not in out:
+            out.append(token)
+    return out[: max(1, int(limit or 1))]
+
+
+def _normalize_small_rows(raw: Any, *, limit: int = 8, text_limit: int = 160) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    out: List[str] = []
+    for row in rows:
+        token = str(row or "").strip()[: max(1, int(text_limit or 1))]
+        if token and token not in out:
+            out.append(token)
+    return out[: max(1, int(limit or 1))]
+
+
+def normalize_followup_brief_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = _normalize_followup_brief_status(raw.get("status"))
+    if not status:
+        return {}
+    execution_lane_ids = _normalize_followup_lane_ids(raw.get("execution_lane_ids"))
+    review_lane_ids = _normalize_followup_lane_ids(raw.get("review_lane_ids"))
+    summary = str(raw.get("summary", "")).strip()
+    reason = str(raw.get("reason", "")).strip()[:240]
+    if not summary:
+        parts = [status]
+        if execution_lane_ids:
+            parts.append("execution=" + ",".join(execution_lane_ids))
+        if review_lane_ids:
+            parts.append("review=" + ",".join(review_lane_ids))
+        summary = " | ".join(parts)[:320]
+    return {
+        "version": str(raw.get("version", FOLLOWUP_BRIEF_VERSION)).strip() or FOLLOWUP_BRIEF_VERSION,
+        "status": status,
+        "summary": summary[:320],
+        "execution_lane_ids": execution_lane_ids,
+        "review_lane_ids": review_lane_ids,
+        "reason": reason,
+    }
+
+
+def build_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
+    execution_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_execution_lane_ids"))
+    review_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_review_lane_ids"))
+    if not execution_lane_ids and not review_lane_ids:
+        return {}
+    status = "preview_only"
+    if execution_lane_ids and review_lane_ids:
+        status = "partially_executable"
+    elif execution_lane_ids:
+        status = "executable"
+    return normalize_followup_brief_snapshot(
+        {
+            "version": FOLLOWUP_BRIEF_VERSION,
+            "status": status,
+            "execution_lane_ids": execution_lane_ids,
+            "review_lane_ids": review_lane_ids,
+            "reason": str(exec_critic.get("reason", exec_critic.get("note", "")) or "").strip(),
+        }
+    )
+
+
+def apply_followup_brief_snapshot(target: Dict[str, Any], brief: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_followup_brief_snapshot(brief)
+    if not snapshot or not isinstance(target, dict):
+        return target
+    target["followup_brief_version"] = snapshot.get("version", FOLLOWUP_BRIEF_VERSION)
+    target["followup_brief_status"] = snapshot.get("status", "")
+    target["followup_brief_summary"] = snapshot.get("summary", "")
+    target["followup_brief_execution_lane_ids"] = list(snapshot.get("execution_lane_ids") or [])
+    target["followup_brief_review_lane_ids"] = list(snapshot.get("review_lane_ids") or [])
+    target["followup_brief_reason"] = snapshot.get("reason", "")
+    return target
+
+
+def normalize_debug_packet_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    state = str(raw.get("state", "")).strip().lower()
+    if state not in DEBUG_PACKET_STATES:
+        return {}
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", DEBUG_PACKET_VERSION)).strip() or DEBUG_PACKET_VERSION,
+        "state": state,
+    }
+    for key in ("summary", "symptom", "root_cause", "failed_attempt", "next_step"):
+        token = str(raw.get(key, "")).strip()
+        if token:
+            snapshot[key] = token[:320 if key == "summary" else 240]
+    evidence = _normalize_small_rows(raw.get("evidence"), limit=10, text_limit=160)
+    if evidence:
+        snapshot["evidence"] = evidence
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [
+                f"state={state}",
+                f"symptom={snapshot.get('symptom', '-')}",
+                f"evidence={len(snapshot.get('evidence') or [])}",
+                f"next={snapshot.get('next_step', '-')}",
+            ]
+        )[:320]
+    return snapshot
+
+
+def apply_debug_packet_snapshot(target: Dict[str, Any], packet: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_debug_packet_snapshot(packet)
+    if not snapshot or not isinstance(target, dict):
+        return target
+    target["debug_packet_version"] = snapshot.get("version", DEBUG_PACKET_VERSION)
+    target["debug_packet_state"] = snapshot.get("state", "")
+    target["debug_packet_summary"] = snapshot.get("summary", "")
+    target["debug_packet_symptom"] = snapshot.get("symptom", "")
+    target["debug_packet_root_cause"] = snapshot.get("root_cause", "")
+    target["debug_packet_evidence"] = list(snapshot.get("evidence") or [])
+    target["debug_packet_failed_attempt"] = snapshot.get("failed_attempt", "")
+    target["debug_packet_next_step"] = snapshot.get("next_step", "")
+    return target
+
+
+def _task_ref_label(task: Dict[str, Any]) -> str:
+    for key in ("short_id", "alias", "request_id"):
+        token = str(task.get(key, "")).strip()
+        if token:
+            return token
+    return "task"
+
+
+def build_debug_packet_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    task_ref = _task_ref_label(task)
+    execution_brief_status = str(task.get("execution_brief_status", "")).strip().lower()
+    blocked_slice = _normalize_small_rows(task.get("execution_brief_blocked_slice"), limit=8, text_limit=120)
+    missing_fields = _normalize_small_rows(task.get("request_contract_missing_fields"), limit=8, text_limit=120)
+    worker_preflight_rows = _normalize_small_rows(task.get("background_run_worker_preflight_rows"), limit=8, text_limit=160)
+    worker_result_cautions = _normalize_small_rows(task.get("background_run_worker_result_cautions"), limit=6, text_limit=160)
+    evidence: List[str] = []
+    evidence.extend(blocked_slice)
+    evidence.extend(missing_fields)
+    evidence.extend(worker_preflight_rows)
+    evidence.extend(worker_result_cautions)
+    evidence.extend(_normalize_small_rows(task.get("background_run_evidence_artifacts"), limit=6, text_limit=160))
+    if isinstance(task.get("result"), dict):
+        evidence.extend(_normalize_small_rows((task.get("result") or {}).get("degraded_by"), limit=6, text_limit=120))
+    evidence = _normalize_small_rows(evidence, limit=10, text_limit=160)
+
+    worker_blocker: Dict[str, Any] = {}
+    module_kind = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if module_kind and module_kind != "general":
+        worker_blocker = worker_task_contract.derive_worker_task_module_action_blocker(
+            {
+                "module_kind": module_kind,
+                "rows_kind": str(task.get("background_run_worker_preflight_rows_summary", "")).strip().split(" | ", 1)[0] or "",
+                "rows": worker_preflight_rows,
+                "summary_line": str(task.get("background_run_worker_preflight_rows_summary", "")).strip() or "-",
+                "followup_brief_status": str(task.get("followup_brief_status", "")).strip() or "-",
+            },
+            mode="apply",
+        )
+
+    status = str(task.get("status", "")).strip().lower()
+    followup_status = str(task.get("followup_brief_status", "")).strip().lower()
+    rate_limit = task.get("rate_limit") if isinstance(task.get("rate_limit"), dict) else {}
+    state = "clean"
+    symptom = ""
+    root_cause = ""
+    next_step = "-"
+
+    if execution_brief_status in _BRIEF_BLOCKED_STATUSES:
+        state = "blocked"
+        symptom = "execution_brief_blocked"
+        root_cause = (
+            str(task.get("execution_brief_operator_decision", "")).strip()
+            or ", ".join(blocked_slice[:4])
+            or str(task.get("plan_gate_reason", "")).strip()
+            or str(task.get("execution_brief_summary", "")).strip()
+        )
+        next_step = "/offdesk review"
+    elif str(worker_blocker.get("summary_line", "")).strip():
+        state = "blocked"
+        symptom = "worker_gate_blocked"
+        root_cause = (
+            str(worker_blocker.get("remediation", "")).strip()
+            or str(worker_blocker.get("summary_line", "")).strip()
+        )
+        next_step = str(worker_blocker.get("next_step", "")).strip() or f"/task {task_ref}"
+        evidence = _normalize_small_rows(
+            list(worker_blocker.get("blocked_rows") or []) + evidence,
+            limit=10,
+            text_limit=160,
+        )
+    elif status == "failed" or any(
+        str(((task.get("stages") or {}).get(name, ""))).strip().lower() == "failed"
+        for name in ("execution", "verification", "integration", "close")
+    ):
+        state = "blocked"
+        symptom = "task_failed"
+        root_cause = (
+            str(task.get("backend_contract_note", "")).strip()
+            or str(((task.get("exec_critic") or {}).get("reason", ""))).strip()
+            or "task entered failed state"
+        )
+        next_step = f"/retry {task_ref}"
+    elif followup_status == "preview_only":
+        state = "watch"
+        symptom = "followup_preview_only"
+        root_cause = str(task.get("followup_brief_reason", "")).strip() or "operator-owned follow-up remains"
+        next_step = f"/followup {task_ref}"
+    elif rate_limit:
+        state = "watch"
+        symptom = "rate_limited"
+        providers = ",".join(str(item).strip() for item in (rate_limit.get("limited_providers") or []) if str(item).strip()) or "-"
+        root_cause = f"providers={providers} retry_at={str(rate_limit.get('retry_at', '')).strip() or '-'}"
+        next_step = f"/check {task_ref}"
+    elif str(task.get("background_run_status", "")).strip().lower() in {"queued", "dispatching", "running"}:
+        state = "active"
+        symptom = "background_run_inflight"
+        root_cause = str(task.get("background_run_runtime_summary", "")).strip() or str(task.get("background_run_status", "")).strip()
+        next_step = f"/task {task_ref}"
+
+    failed_attempt_parts: List[str] = []
+    exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
+    critic_verdict = str(exec_critic.get("verdict", "")).strip()
+    critic_action = str(exec_critic.get("action", "")).strip()
+    if critic_verdict:
+        try:
+            attempt = int(exec_critic.get("attempt", 0) or 0)
+            max_attempts = int(exec_critic.get("max_attempts", 0) or 0)
+        except Exception:
+            attempt = 0
+            max_attempts = 0
+        critic_text = critic_verdict
+        if critic_action:
+            critic_text += f"/{critic_action}"
+        if attempt and max_attempts:
+            critic_text += f" {attempt}/{max_attempts}"
+        failed_attempt_parts.append("critic=" + critic_text)
+    backend = str(task.get("backend", "")).strip()
+    backend_verdict = str(task.get("backend_verdict", "")).strip()
+    if backend or backend_verdict:
+        failed_attempt_parts.append("backend=" + "/".join(part for part in (backend, backend_verdict) if part))
+    background_status = str(task.get("background_run_status", "")).strip()
+    if background_status:
+        failed_attempt_parts.append("background=" + background_status)
+
+    return normalize_debug_packet_snapshot(
+        {
+            "version": DEBUG_PACKET_VERSION,
+            "state": state,
+            "symptom": symptom or "none",
+            "root_cause": root_cause or ("no immediate debug focus" if state == "clean" else "-"),
+            "failed_attempt": " | ".join(part for part in failed_attempt_parts if part)[:240],
+            "next_step": next_step,
+            "evidence": evidence,
+        }
+    )
+
+
+def normalize_phase_checkpoint_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = str(raw.get("status", "")).strip().lower()
+    if status not in PHASE_CHECKPOINT_STATUSES:
+        return {}
+    current_phase = str(raw.get("current_phase", "")).strip().lower() or "plan"
+    snapshot: Dict[str, Any] = {
+        "version": str(raw.get("version", PHASE_CHECKPOINT_VERSION)).strip() or PHASE_CHECKPOINT_VERSION,
+        "status": status,
+        "current_phase": current_phase,
+    }
+    summary = str(raw.get("summary", "")).strip()
+    if summary:
+        snapshot["summary"] = summary[:320]
+    rows = _normalize_small_rows(raw.get("rows"), limit=8, text_limit=200)
+    if rows:
+        snapshot["rows"] = rows
+    if not snapshot.get("summary"):
+        snapshot["summary"] = " | ".join(
+            [f"status={status}", f"current={current_phase}", *list(snapshot.get("rows") or [])[:4]]
+        )[:320]
+    return snapshot
+
+
+def apply_phase_checkpoint_snapshot(target: Dict[str, Any], checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = normalize_phase_checkpoint_snapshot(checkpoint)
+    if not snapshot or not isinstance(target, dict):
+        return target
+    target["phase_checkpoint_version"] = snapshot.get("version", PHASE_CHECKPOINT_VERSION)
+    target["phase_checkpoint_status"] = snapshot.get("status", "")
+    target["phase_checkpoint_current_phase"] = snapshot.get("current_phase", "")
+    target["phase_checkpoint_summary"] = snapshot.get("summary", "")
+    target["phase_checkpoint_rows"] = list(snapshot.get("rows") or [])
+    return target
+
+
+def build_phase_checkpoint_snapshot(task: Dict[str, Any], debug_packet: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    debug_snapshot = normalize_debug_packet_snapshot(debug_packet or build_debug_packet_snapshot(task))
+    job_status = str(task.get("job_contract_status", "")).strip().lower() or "ready"
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    stages = task.get("stages") if isinstance(task.get("stages"), dict) else {}
+    planning_stage = str(stages.get("planning", "")).strip().lower()
+    staffing_stage = str(stages.get("staffing", "")).strip().lower()
+    execution_stage = str(stages.get("execution", "")).strip().lower()
+    verification_stage = str(stages.get("verification", "")).strip().lower()
+    integration_stage = str(stages.get("integration", "")).strip().lower()
+    close_stage = str(stages.get("close", "")).strip().lower()
+    background_status = str(task.get("background_run_status", "")).strip().lower()
+    followup_status = str(task.get("followup_brief_status", "")).strip().lower()
+
+    rows: List[str] = []
+    row_states: Dict[str, str] = {}
+
+    def _append_row(kind: str, state: str, note: str) -> None:
+        row_states[kind] = state
+        token = f"{kind}={state}"
+        if note:
+            token += f"|note={note[:120]}"
+        rows.append(token[:200])
+
+    plan_note = (
+        str(task.get("plan_gate_reason", "")).strip()
+        or str(task.get("execution_brief_summary", "")).strip()
+        or str(task.get("job_contract_summary", "")).strip()
+    )
+    if execution_stage in {"running", "done"} or staffing_stage == "done":
+        _append_row("plan", "done", plan_note or "execution started")
+    elif job_status == "blocked" or str(task.get("execution_brief_status", "")).strip().lower() in _BRIEF_BLOCKED_STATUSES or task.get("plan_gate_passed") is False:
+        _append_row("plan", "blocked", plan_note or "plan contract blocked")
+    elif planning_stage == "running" or tf_phase == "planning":
+        _append_row("plan", "active", plan_note or "plan review in progress")
+    else:
+        _append_row("plan", "ready", plan_note or "plan contract ready")
+
+    implement_note = (
+        str(task.get("lane_summary", "")).strip()
+        or str(task.get("background_run_runtime_summary", "")).strip()
+        or str(task.get("backend_contract_note", "")).strip()
+    )
+    if execution_stage == "failed" or str(task.get("status", "")).strip().lower() == "failed":
+        _append_row("implement", "blocked", implement_note or "execution failed")
+    elif execution_stage == "done":
+        _append_row("implement", "done", implement_note or "execution complete")
+    elif execution_stage == "running" or background_status in {"queued", "dispatching", "running"} or staffing_stage in {"running", "done"}:
+        _append_row("implement", "active", implement_note or "execution in progress")
+    else:
+        _append_row("implement", "ready", implement_note or "implementation lane ready")
+
+    verify_note = (
+        str(task.get("followup_brief_reason", "")).strip()
+        or str(task.get("background_run_worker_preflight_summary", "")).strip()
+        or str(debug_snapshot.get("root_cause", "")).strip()
+    )
+    if verification_stage == "failed" or str(debug_snapshot.get("symptom", "")).strip() in {"worker_gate_blocked", "followup_preview_only"}:
+        _append_row("verify", "blocked", verify_note or "verification blocked")
+    elif verification_stage == "done":
+        _append_row("verify", "done", verify_note or "verification complete")
+    elif verification_stage == "running" or followup_status in {"executable", "partially_executable"} or integration_stage == "running":
+        _append_row("verify", "active", verify_note or "verification in progress")
+    else:
+        _append_row("verify", "ready", verify_note or "verification lane ready")
+
+    handoff_note = (
+        str(task.get("background_run_canonical_writeback_summary", "")).strip()
+        or str(task.get("background_run_canonical_mutation_summary", "")).strip()
+        or str(task.get("background_run_worker_syncback_summary", "")).strip()
+        or str(task.get("background_run_status", "")).strip()
+    )
+    if close_stage == "failed":
+        _append_row("handoff", "blocked", handoff_note or "handoff failed")
+    elif close_stage == "done" or str(task.get("status", "")).strip().lower() == "completed":
+        _append_row("handoff", "done", handoff_note or "handoff complete")
+    elif close_stage == "running" or integration_stage == "running" or background_status in {"queued", "dispatching", "running"}:
+        _append_row("handoff", "active", handoff_note or "handoff in progress")
+    else:
+        _append_row("handoff", "ready", handoff_note or "handoff ready")
+
+    overall = "ready"
+    if all(row_states.get(kind) == "done" for kind in ("plan", "implement", "verify", "handoff")):
+        overall = "done"
+    elif any(state == "blocked" for state in row_states.values()):
+        overall = "blocked"
+    elif any(state == "active" for state in row_states.values()):
+        overall = "active"
+    current_phase = "done"
+    for kind in ("plan", "implement", "verify", "handoff"):
+        if row_states.get(kind) != "done":
+            current_phase = kind
+            break
+    return normalize_phase_checkpoint_snapshot(
+        {
+            "version": PHASE_CHECKPOINT_VERSION,
+            "status": overall,
+            "current_phase": current_phase,
+            "summary": " | ".join(
+                [
+                    f"status={overall}",
+                    f"current={current_phase}",
+                    *[f"{kind}={row_states.get(kind, '-')}" for kind in ("plan", "implement", "verify", "handoff")],
+                ]
+            )[:320],
+            "rows": rows,
+        }
+    )
+
+
+def _task_has_planning_context(task: Dict[str, Any]) -> bool:
+    if not isinstance(task, dict):
+        return False
+    return bool(
+        isinstance(task.get("plan"), dict)
+        or isinstance(task.get("plan_critic"), dict)
+        or isinstance(task.get("plan_replans"), list)
+        or bool(task.get("plan_issue_history"))
+        or bool(task.get("plan_issue_codes"))
+        or isinstance(task.get("plan_gate_passed"), bool)
+        or str(task.get("phase1_mode", "")).strip()
+        or int(task.get("phase1_rounds", 0) or 0) > 0
+        or str(task.get("phase1_current_phase", "")).strip()
+    )
+
+
+def _plan_critic_has_blockers(critic: Any) -> bool:
+    if not isinstance(critic, dict):
+        return False
+    issues = critic.get("issues")
+    if not isinstance(issues, list):
+        return False
+    return any(str(item or "").strip() for item in issues)
+
+
+def _latest_plan_issue(task: Dict[str, Any]) -> str:
+    history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
+    for row in reversed(history):
+        if not isinstance(row, dict):
+            continue
+        token = str(row.get("primary_issue", "")).strip()
+        if token:
+            return token[:240]
+    return str(task.get("plan_gate_reason", "")).strip()[:240]
+
+
+def _approved_plan_artifact_rows(plan_data: Dict[str, Any], *, limit: int = 8) -> List[str]:
+    subtasks = plan_data.get("subtasks") if isinstance(plan_data.get("subtasks"), list) else []
+    rows: List[str] = []
+    for row in subtasks:
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id", "")).strip() or "S"
+        role = str(row.get("owner_role", "")).strip() or "Worker"
+        title = (
+            str(row.get("title", "")).strip()
+            or str(row.get("goal", "")).strip()
+            or str(row.get("summary", "")).strip()
+            or "subtask"
+        )
+        token = f"{sid} [{role}] {title[:120]}".strip()
+        if token and token not in rows:
+            rows.append(token[:200])
+    return rows[: max(1, int(limit or 1))]
+
+
+def _clear_planner_lane_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "planner_lane_version",
+        "planner_lane_status",
+        "planner_lane_summary",
+        "planner_lane_actor",
+        "planner_lane_mode",
+        "planner_lane_preset",
+    ):
+        target.pop(key, None)
+
+
+def _clear_critic_lane_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "critic_lane_version",
+        "critic_lane_status",
+        "critic_lane_summary",
+        "critic_lane_actor",
+        "critic_lane_convergence",
+        "critic_lane_primary_issue",
+    ):
+        target.pop(key, None)
+
+
+def _clear_approved_plan_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "approved_plan_version",
+        "approved_plan_status",
+        "approved_plan_summary",
+        "approved_plan_artifact_rows",
+        "approved_plan_subtask_count",
+        "approved_plan_review_count",
+    ):
+        target.pop(key, None)
+
+
+def _clear_critic_review_snapshot(target: Dict[str, Any]) -> None:
+    for key in (
+        "critic_review_version",
+        "critic_review_status",
+        "critic_review_summary",
+        "critic_review_mode",
+        "critic_review_provider",
+        "critic_review_planner_provider",
+        "critic_review_primary_issue",
+        "critic_review_blocking_issues",
+        "critic_review_required_fixes",
+    ):
+        target.pop(key, None)
+
+
+def normalize_critic_review_snapshot(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    status = str(raw.get("status", "")).strip().lower()
+    if status not in CRITIC_REVIEW_STATUSES:
+        return {}
+    blocking_issues = _normalize_small_rows(raw.get("blocking_issues"), limit=8, text_limit=240)
+    required_fixes = _normalize_small_rows(raw.get("required_fixes"), limit=8, text_limit=240)
+    provider = str(raw.get("provider", "")).strip()[:64]
+    planner_provider = str(raw.get("planner_provider", "")).strip()[:64]
+    review_mode = str(raw.get("review_mode", "")).strip()[:64] or "native_review"
+    primary_issue = str(raw.get("primary_issue", "")).strip()[:240]
+    summary = str(raw.get("summary", "")).strip()
+    if not summary:
+        summary_parts = [f"critic_review={status}", f"mode={review_mode}"]
+        if provider:
+            summary_parts.append(f"provider={provider}")
+        if planner_provider:
+            summary_parts.append(f"planner={planner_provider}")
+        if primary_issue:
+            summary_parts.append(f"issue={primary_issue[:120]}")
+        summary = " | ".join(summary_parts)[:320]
+    return {
+        "version": str(raw.get("version", CRITIC_REVIEW_VERSION)).strip() or CRITIC_REVIEW_VERSION,
+        "status": status,
+        "summary": summary[:320],
+        "review_mode": review_mode,
+        "provider": provider,
+        "planner_provider": planner_provider,
+        "primary_issue": primary_issue,
+        "blocking_issues": blocking_issues,
+        "required_fixes": required_fixes,
+    }
+
+
+def apply_critic_review_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = normalize_critic_review_snapshot(snapshot)
+    if not isinstance(target, dict):
+        return target
+    if not normalized:
+        _clear_critic_review_snapshot(target)
+        return target
+    target["critic_review_version"] = normalized.get("version", CRITIC_REVIEW_VERSION)
+    target["critic_review_status"] = normalized.get("status", "")
+    target["critic_review_summary"] = normalized.get("summary", "")
+    target["critic_review_mode"] = normalized.get("review_mode", "")
+    target["critic_review_provider"] = normalized.get("provider", "")
+    target["critic_review_planner_provider"] = normalized.get("planner_provider", "")
+    target["critic_review_primary_issue"] = normalized.get("primary_issue", "")
+    target["critic_review_blocking_issues"] = list(normalized.get("blocking_issues") or [])
+    target["critic_review_required_fixes"] = list(normalized.get("required_fixes") or [])
+    return target
+
+
+def build_planner_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    current_phase = str(task.get("phase1_current_phase", "")).strip().lower()
+    current_round = max(0, int(task.get("phase1_current_round", 0) or 0))
+    total_rounds = max(
+        0,
+        int(task.get("phase1_current_total_rounds", 0) or task.get("phase1_rounds", 0) or task.get("plan_last_round", 0) or 0),
+    )
+    mode = str(task.get("phase1_mode", "")).strip() or "single"
+    preset = str(task.get("phase1_role_preset", "")).strip() or "-"
+    providers = [str(item).strip() for item in (task.get("phase1_planner_providers") or task.get("phase1_providers") or []) if str(item).strip()]
+    actor = (
+        str(task.get("phase1_current_planner", "")).strip()
+        or str(task.get("phase1_current_provider", "")).strip()
+        or (providers[0] if providers else "")
+    )
+    has_plan = isinstance(task.get("plan"), dict)
+    status = "pending"
+    if has_plan:
+        status = "done"
+    elif tf_phase == "planning" or current_phase in {"planner", "planning", "reuse", "repair"}:
+        status = "active"
+    elif isinstance(task.get("plan_gate_passed"), bool):
+        status = "ready"
+    summary_parts = [f"planner={status}", f"mode={mode}"]
+    if actor:
+        summary_parts.append(f"actor={actor}")
+    if current_phase:
+        summary_parts.append(f"step={current_phase}")
+    if current_round and total_rounds:
+        summary_parts.append(f"round={current_round}/{total_rounds}")
+    elif total_rounds:
+        summary_parts.append(f"rounds={total_rounds}")
+    if preset and preset != "-":
+        summary_parts.append(f"preset={preset}")
+    if providers:
+        summary_parts.append("providers=" + ",".join(providers[:4]))
+    return {
+        "version": PLANNING_LANE_VERSION,
+        "status": status,
+        "summary": " | ".join(summary_parts)[:320],
+        "actor": actor[:64],
+        "mode": mode[:32],
+        "preset": preset[:64],
+    }
+
+
+def build_critic_lane_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    current_phase = str(task.get("phase1_current_phase", "")).strip().lower()
+    critic = task.get("plan_critic") if isinstance(task.get("plan_critic"), dict) else {}
+    convergence = str(task.get("plan_convergence_status", "")).strip().lower() or "-"
+    review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    blockers = _plan_critic_has_blockers(critic) or task.get("plan_gate_passed") is False
+    primary_issue = _latest_plan_issue(task)
+    actor = str(task.get("phase1_current_critic", "")).strip()
+    providers = [str(item).strip() for item in (task.get("phase1_critic_providers") or task.get("phase1_providers") or []) if str(item).strip()]
+    if not actor:
+        history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
+        for row in reversed(history):
+            if not isinstance(row, dict):
+                continue
+            actor = (
+                str(row.get("critic_provider", "")).strip()
+                or str(row.get("provider", "")).strip()
+                or str(row.get("planner_provider", "")).strip()
+            )
+            if actor:
+                break
+    if not actor and providers:
+        actor = providers[0]
+    status = "pending"
+    if blockers:
+        status = "blocked"
+    elif isinstance(critic, dict) and critic:
+        status = "done"
+    elif tf_phase == "planning" or current_phase in {"critic", "verification", "repair"}:
+        status = "active"
+    elif isinstance(task.get("plan_gate_passed"), bool):
+        status = "ready"
+    summary_parts = [f"critic={status}", f"reviews={review_count}"]
+    if actor:
+        summary_parts.append(f"actor={actor}")
+    if convergence and convergence != "-":
+        summary_parts.append(f"convergence={convergence}")
+    if primary_issue:
+        summary_parts.append(f"issue={primary_issue[:120]}")
+    if providers:
+        summary_parts.append("providers=" + ",".join(providers[:4]))
+    return {
+        "version": PLANNING_LANE_VERSION,
+        "status": status,
+        "summary": " | ".join(summary_parts)[:320],
+        "actor": actor[:64],
+        "convergence": convergence[:32],
+        "primary_issue": primary_issue[:240],
+    }
+
+
+def build_critic_review_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    critic = task.get("plan_critic") if isinstance(task.get("plan_critic"), dict) else {}
+    tf_phase = str(task.get("tf_phase", "")).strip().lower() or normalize_tf_phase(derive_tf_phase(task), "queued")
+    current_phase = str(task.get("phase1_current_phase", "")).strip().lower()
+    provider = str(task.get("phase1_current_critic", "")).strip()
+    planner_provider = (
+        str(task.get("phase1_current_planner", "")).strip()
+        or str(task.get("phase1_current_provider", "")).strip()
+    )
+    if not provider:
+        critic_providers = [str(item).strip() for item in (task.get("phase1_critic_providers") or task.get("phase1_providers") or []) if str(item).strip()]
+        provider = critic_providers[0] if critic_providers else ""
+    if not planner_provider:
+        planner_providers = [str(item).strip() for item in (task.get("phase1_planner_providers") or task.get("phase1_providers") or []) if str(item).strip()]
+        planner_provider = planner_providers[0] if planner_providers else ""
+    review_mode = "native_review" if str(task.get("phase1_mode", "")).strip() == "ensemble" else "plan_review"
+    blocking_issues = _normalize_small_rows((critic or {}).get("issues"), limit=8, text_limit=240)
+    required_fixes = _normalize_small_rows((critic or {}).get("recommendations"), limit=8, text_limit=240)
+    primary_issue = _latest_plan_issue(task)
+    status = "pending"
+    if blocking_issues or task.get("plan_gate_passed") is False:
+        status = "blocked"
+    elif isinstance(critic, dict) and critic:
+        status = "approved"
+    elif tf_phase == "planning" or current_phase in {"critic", "verification", "repair"}:
+        status = "active"
+    summary_parts = [f"critic_review={status}", f"mode={review_mode}"]
+    if provider:
+        summary_parts.append(f"provider={provider}")
+    if planner_provider:
+        summary_parts.append(f"planner={planner_provider}")
+    if blocking_issues:
+        summary_parts.append(f"issue={blocking_issues[0][:120]}")
+    elif required_fixes:
+        summary_parts.append(f"fix={required_fixes[0][:120]}")
+    return normalize_critic_review_snapshot(
+        {
+            "version": CRITIC_REVIEW_VERSION,
+            "status": status,
+            "summary": " | ".join(summary_parts)[:320],
+            "review_mode": review_mode,
+            "provider": provider,
+            "planner_provider": planner_provider,
+            "primary_issue": primary_issue,
+            "blocking_issues": blocking_issues,
+            "required_fixes": required_fixes,
+        }
+    )
+
+
+def build_approved_plan_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not _task_has_planning_context(task):
+        return {}
+    plan_data = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    critic_review = normalize_critic_review_snapshot(
+        {
+            "version": task.get("critic_review_version"),
+            "status": task.get("critic_review_status"),
+            "summary": task.get("critic_review_summary"),
+            "review_mode": task.get("critic_review_mode"),
+            "provider": task.get("critic_review_provider"),
+            "planner_provider": task.get("critic_review_planner_provider"),
+            "primary_issue": task.get("critic_review_primary_issue"),
+            "blocking_issues": task.get("critic_review_blocking_issues"),
+            "required_fixes": task.get("critic_review_required_fixes"),
+        }
+    ) or build_critic_review_snapshot(task)
+    review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    convergence = str(task.get("plan_convergence_status", "")).strip().lower()
+    critic_status = str(critic_review.get("status", "")).strip().lower()
+    blockers = critic_status == "blocked"
+    status = "missing"
+    if not plan_data:
+        if str(task.get("tf_phase", "")).strip().lower() == "planning":
+            status = "pending"
+    elif critic_status in {"pending", "active"}:
+        status = "pending"
+    elif blockers:
+        status = "blocked"
+    else:
+        status = "approved"
+    subtasks = plan_data.get("subtasks") if isinstance(plan_data.get("subtasks"), list) else []
+    summary_parts = [
+        f"approved_plan={status}",
+        f"subtasks={len(subtasks)}",
+        f"reviews={review_count}",
+    ]
+    if convergence:
+        summary_parts.append(f"convergence={convergence}")
+    if blockers:
+        primary_issue = str(critic_review.get("primary_issue", "")).strip() or _latest_plan_issue(task)
+        if primary_issue:
+            summary_parts.append(f"issue={primary_issue[:120]}")
+    elif isinstance(plan_data, dict):
+        plan_summary = str(plan_data.get("summary", "")).strip()
+        if plan_summary:
+            summary_parts.append(f"summary={plan_summary[:120]}")
+    return {
+        "version": APPROVED_PLAN_VERSION,
+        "status": status,
+        "summary": " | ".join(summary_parts)[:320],
+        "artifact_rows": _approved_plan_artifact_rows(plan_data, limit=8) if plan_data else [],
+        "subtask_count": len(subtasks),
+        "review_count": review_count,
+    }
+
+
+def apply_planner_lane_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict) or not isinstance(snapshot, dict):
+        return target
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status not in PLANNING_LANE_STATUSES:
+        _clear_planner_lane_snapshot(target)
+        return target
+    target["planner_lane_version"] = str(snapshot.get("version", PLANNING_LANE_VERSION)).strip() or PLANNING_LANE_VERSION
+    target["planner_lane_status"] = status
+    target["planner_lane_summary"] = str(snapshot.get("summary", "")).strip()[:320]
+    target["planner_lane_actor"] = str(snapshot.get("actor", "")).strip()[:64]
+    target["planner_lane_mode"] = str(snapshot.get("mode", "")).strip()[:32]
+    target["planner_lane_preset"] = str(snapshot.get("preset", "")).strip()[:64]
+    return target
+
+
+def apply_critic_lane_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict) or not isinstance(snapshot, dict):
+        return target
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status not in PLANNING_LANE_STATUSES:
+        _clear_critic_lane_snapshot(target)
+        return target
+    target["critic_lane_version"] = str(snapshot.get("version", PLANNING_LANE_VERSION)).strip() or PLANNING_LANE_VERSION
+    target["critic_lane_status"] = status
+    target["critic_lane_summary"] = str(snapshot.get("summary", "")).strip()[:320]
+    target["critic_lane_actor"] = str(snapshot.get("actor", "")).strip()[:64]
+    target["critic_lane_convergence"] = str(snapshot.get("convergence", "")).strip()[:32]
+    target["critic_lane_primary_issue"] = str(snapshot.get("primary_issue", "")).strip()[:240]
+    return target
+
+
+def apply_approved_plan_snapshot(target: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(target, dict) or not isinstance(snapshot, dict):
+        return target
+    status = str(snapshot.get("status", "")).strip().lower()
+    if status not in APPROVED_PLAN_STATUSES:
+        _clear_approved_plan_snapshot(target)
+        return target
+    target["approved_plan_version"] = str(snapshot.get("version", APPROVED_PLAN_VERSION)).strip() or APPROVED_PLAN_VERSION
+    target["approved_plan_status"] = status
+    target["approved_plan_summary"] = str(snapshot.get("summary", "")).strip()[:320]
+    target["approved_plan_artifact_rows"] = _normalize_small_rows(snapshot.get("artifact_rows"), limit=8, text_limit=200)
+    target["approved_plan_subtask_count"] = max(0, int(snapshot.get("subtask_count", 0) or 0))
+    target["approved_plan_review_count"] = max(0, int(snapshot.get("review_count", 0) or 0))
+    return target
+
+
+def refresh_task_planning_primitives(
+    task: Dict[str, Any],
+    *,
+    request_contract: Optional[Dict[str, Any]] = None,
+    execution_brief: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+
+    explicit_request_contract_snapshot = (
+        normalize_request_contract_snapshot(request_contract)
+        if isinstance(request_contract, dict)
+        else {}
+    )
+    explicit_execution_brief_snapshot = (
+        normalize_execution_brief_snapshot(execution_brief)
+        if isinstance(execution_brief, dict)
+        else {}
+    )
+    explicit_request_contract = bool(explicit_request_contract_snapshot)
+    explicit_execution_brief = bool(explicit_execution_brief_snapshot)
+
+    request_contract_snapshot = (
+        explicit_request_contract_snapshot
+        if explicit_request_contract
+        else normalize_request_contract_snapshot(
+            {
+            "version": task.get("request_contract_version"),
+            "contract_type": task.get("request_contract_type"),
+            "preset": task.get("request_contract_preset"),
+            "status": task.get("request_contract_status"),
+            "summary": task.get("request_contract_summary"),
+            "missing_fields": task.get("request_contract_missing_fields"),
+            "required_outputs": task.get("request_contract_required_outputs"),
+            "fields": task.get("request_contract_fields"),
+            "artifact_contracts": task.get("request_contract_artifact_contracts"),
+        }
+        )
+    )
+    if request_contract_snapshot:
+        apply_request_contract_snapshot(task, request_contract_snapshot)
+
+    execution_brief_snapshot: Dict[str, Any] = {}
+    if explicit_execution_brief:
+        execution_brief_snapshot = explicit_execution_brief_snapshot
+    elif explicit_request_contract and request_contract_snapshot:
+        execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
+    else:
+        execution_brief_snapshot = normalize_execution_brief_snapshot(
+            {
+                "version": task.get("execution_brief_version"),
+                "status": task.get("execution_brief_status"),
+                "summary": task.get("execution_brief_summary"),
+                "executable_slice": task.get("execution_brief_executable_slice"),
+                "blocked_slice": task.get("execution_brief_blocked_slice"),
+                "operator_decision": task.get("execution_brief_operator_decision"),
+                "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
+            }
+        )
+    if not execution_brief_snapshot and request_contract_snapshot:
+        execution_brief_snapshot = build_execution_brief(request_contract_snapshot)
+    if execution_brief_snapshot:
+        apply_execution_brief_snapshot(task, execution_brief_snapshot)
+    else:
+        for key in (
+            "execution_brief_version",
+            "execution_brief_status",
+            "execution_brief_summary",
+            "execution_brief_executable_slice",
+            "execution_brief_blocked_slice",
+            "execution_brief_operator_decision",
+            "execution_brief_offdesk_allowed",
+        ):
+            task.pop(key, None)
+
+    job_contract_snapshot: Dict[str, Any] = {}
+    if request_contract_snapshot and (explicit_request_contract or explicit_execution_brief):
+        job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
+    else:
+        job_contract_snapshot = normalize_job_contract_snapshot(
+            {
+                "version": task.get("job_contract_version"),
+                "status": task.get("job_contract_status"),
+                "planning_mode": task.get("job_contract_planning_mode"),
+                "summary": task.get("job_contract_summary"),
+                "goal": task.get("job_contract_goal"),
+                "scope": task.get("job_contract_scope"),
+                "non_goals": task.get("job_contract_non_goals"),
+                "risks": task.get("job_contract_risks"),
+                "acceptance_checks": task.get("job_contract_acceptance_checks"),
+                "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+                "rollback_hint": task.get("job_contract_rollback_hint"),
+            }
+        )
+    if not job_contract_snapshot and request_contract_snapshot:
+        job_contract_snapshot = build_job_contract(request_contract_snapshot, execution_brief_snapshot)
+    if not job_contract_snapshot and execution_brief_snapshot:
+        fallback_outputs = [
+            str(item).strip()
+            for item in (
+                list(execution_brief_snapshot.get("executable_slice") or [])
+                + list(task.get("background_run_worker_update_stub_targets") or [])
+            )
+            if str(item).strip()
+        ]
+        fallback_evidence = [
+            str(item).strip()
+            for item in (
+                list(task.get("background_run_worker_result_evidence_refs") or [])
+                + list(task.get("background_run_evidence_artifacts") or [])
+            )
+            if str(item).strip()
+        ]
+        fallback_artifact_contracts: Dict[str, Dict[str, Any]] = {}
+        for token in fallback_outputs[:8]:
+            fallback_artifact_contracts[token] = {"path": token}
+        readonly = False
+        plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+        meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+        phase2_execution_plan = (
+            meta.get("phase2_execution_plan")
+            if isinstance(meta.get("phase2_execution_plan"), dict)
+            else {}
+        )
+        if isinstance(phase2_execution_plan, dict):
+            readonly = bool(phase2_execution_plan.get("readonly", False))
+        job_contract_snapshot = build_job_contract(
+            {
+                "version": task.get("request_contract_version"),
+                "contract_type": str(task.get("phase2_team_preset", "")).strip()
+                or str(task.get("phase1_role_preset", "")).strip()
+                or "general",
+                "preset": str(task.get("phase2_team_preset", "")).strip()
+                or str(task.get("phase1_role_preset", "")).strip()
+                or "general",
+                "status": "complete"
+                if str(execution_brief_snapshot.get("status", "")).strip().lower() not in _BRIEF_BLOCKED_STATUSES
+                else "incomplete",
+                "objective": str(task.get("prompt", "")).strip(),
+                "summary": str(task.get("execution_brief_summary", "")).strip()
+                or str(task.get("prompt", "")).strip(),
+                "required_outputs": fallback_outputs,
+                "required_evidence": fallback_evidence,
+                "missing_fields": list(execution_brief_snapshot.get("blocked_slice") or []),
+                "artifact_contracts": fallback_artifact_contracts,
+                "readonly": readonly,
+            },
+            execution_brief_snapshot,
+        )
+    if job_contract_snapshot:
+        apply_job_contract_snapshot(task, job_contract_snapshot)
+    else:
+        for key in (
+            "job_contract_version",
+            "job_contract_status",
+            "job_contract_planning_mode",
+            "job_contract_summary",
+            "job_contract_goal",
+            "job_contract_scope",
+            "job_contract_non_goals",
+            "job_contract_risks",
+            "job_contract_acceptance_checks",
+            "job_contract_artifacts_to_touch",
+            "job_contract_rollback_hint",
+        ):
+            task.pop(key, None)
+
+    debug_packet_snapshot: Dict[str, Any] = {}
+    if not (explicit_request_contract or explicit_execution_brief):
+        debug_packet_snapshot = normalize_debug_packet_snapshot(
+            {
+                "version": task.get("debug_packet_version"),
+                "state": task.get("debug_packet_state"),
+                "summary": task.get("debug_packet_summary"),
+                "symptom": task.get("debug_packet_symptom"),
+                "root_cause": task.get("debug_packet_root_cause"),
+                "evidence": task.get("debug_packet_evidence"),
+                "failed_attempt": task.get("debug_packet_failed_attempt"),
+                "next_step": task.get("debug_packet_next_step"),
+            }
+        )
+    if not debug_packet_snapshot:
+        debug_packet_snapshot = build_debug_packet_snapshot(task)
+    if debug_packet_snapshot:
+        apply_debug_packet_snapshot(task, debug_packet_snapshot)
+    else:
+        for key in (
+            "debug_packet_version",
+            "debug_packet_state",
+            "debug_packet_summary",
+            "debug_packet_symptom",
+            "debug_packet_root_cause",
+            "debug_packet_evidence",
+            "debug_packet_failed_attempt",
+            "debug_packet_next_step",
+        ):
+            task.pop(key, None)
+
+    phase_checkpoint_snapshot: Dict[str, Any] = {}
+    if not (explicit_request_contract or explicit_execution_brief):
+        phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
+            {
+                "version": task.get("phase_checkpoint_version"),
+                "status": task.get("phase_checkpoint_status"),
+                "current_phase": task.get("phase_checkpoint_current_phase"),
+                "summary": task.get("phase_checkpoint_summary"),
+                "rows": task.get("phase_checkpoint_rows"),
+            }
+        )
+    if not phase_checkpoint_snapshot:
+        phase_checkpoint_snapshot = build_phase_checkpoint_snapshot(task, debug_packet_snapshot)
+    if phase_checkpoint_snapshot:
+        apply_phase_checkpoint_snapshot(task, phase_checkpoint_snapshot)
+    else:
+        for key in (
+            "phase_checkpoint_version",
+            "phase_checkpoint_status",
+            "phase_checkpoint_current_phase",
+            "phase_checkpoint_summary",
+            "phase_checkpoint_rows",
+        ):
+            task.pop(key, None)
+
+    planner_lane_snapshot = build_planner_lane_snapshot(task)
+    if planner_lane_snapshot:
+        apply_planner_lane_snapshot(task, planner_lane_snapshot)
+    else:
+        _clear_planner_lane_snapshot(task)
+
+    critic_lane_snapshot = build_critic_lane_snapshot(task)
+    if critic_lane_snapshot:
+        apply_critic_lane_snapshot(task, critic_lane_snapshot)
+    else:
+        _clear_critic_lane_snapshot(task)
+
+    critic_review_snapshot = build_critic_review_snapshot(task)
+    if critic_review_snapshot:
+        apply_critic_review_snapshot(task, critic_review_snapshot)
+    else:
+        _clear_critic_review_snapshot(task)
+
+    approved_plan_snapshot = build_approved_plan_snapshot(task)
+    if approved_plan_snapshot:
+        apply_approved_plan_snapshot(task, approved_plan_snapshot)
+    else:
+        _clear_approved_plan_snapshot(task)
+    return task
+
+
+def derive_task_dispatch_gate(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    refresh_task_planning_primitives(task)
+    task_ref = _task_ref_label(task)
+    contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
+    contract_status = str(task.get("job_contract_status", "")).strip().lower()
+    contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
+    has_contract_body = job_contract_has_body(contract_snapshot)
+    debug_state = str(task.get("debug_packet_state", "")).strip().lower()
+    debug_summary = str(task.get("debug_packet_summary", "")).strip() or "-"
+    phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
+    phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
+    phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    approved_plan_status = str(task.get("approved_plan_status", "")).strip().lower()
+    approved_plan_summary = str(task.get("approved_plan_summary", "")).strip() or "-"
+    planning_context = _task_has_planning_context(task)
+    status = "ready"
+    reason_code = "ready"
+    remediation = "dispatch contract is ready"
+    next_step = f"/task {task_ref}"
+    detail = contract_summary
+    if contract_status in {"", "-"} or not has_contract_body:
+        status = "blocked"
+        reason_code = "job_contract_missing"
+        remediation = "capture the job contract goal, scope, acceptance checks, and rollback hint before dispatching a new run"
+        detail = "job contract missing"
+    elif planning_context and approved_plan_status in {"missing", "pending"}:
+        status = "blocked"
+        reason_code = "approved_plan_missing"
+        remediation = "materialize and approve the planning artifact before dispatching execution lanes"
+        detail = approved_plan_summary
+    elif planning_context and approved_plan_status == "blocked":
+        status = "blocked"
+        reason_code = "approved_plan_blocked"
+        remediation = "clear critic issues and approve the planning artifact before dispatching execution lanes"
+        detail = approved_plan_summary
+    elif debug_state in {"", "-"} or debug_summary in {"", "-"}:
+        status = "blocked"
+        reason_code = "debug_packet_missing"
+        remediation = "derive and review the debug packet before retrying, replanning, or dispatching another execution step"
+        detail = "debug packet missing"
+    elif debug_state == "clean":
+        status = "blocked"
+        reason_code = "debug_packet_not_ready"
+        remediation = "capture the current symptom, failed attempt, and next debug step before retrying, replanning, or dispatching another execution step"
+        detail = debug_summary
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "detail": detail,
+        "summary": "dispatch_gate | contract={contract} | debug={debug} | phase={phase}/{current}".format(
+            contract=contract_status or "-",
+            debug=debug_state or "-",
+            phase=phase_status or "-",
+            current=phase_current or "-",
+        )[:320],
+        "remediation": remediation,
+        "next_step": next_step,
+        "job_contract_status": contract_status or "-",
+        "job_contract_summary": contract_summary,
+        "approved_plan_status": approved_plan_status or "-",
+        "approved_plan_summary": approved_plan_summary,
+        "debug_packet_state": debug_state or "-",
+        "debug_packet_summary": debug_summary,
+        "debug_packet_next_step": str(task.get("debug_packet_next_step", "")).strip() or "-",
+        "phase_checkpoint_status": phase_status or "-",
+        "phase_checkpoint_current_phase": phase_current or "-",
+        "phase_checkpoint_summary": phase_summary,
+    }
+
+
+def derive_task_apply_gate(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    refresh_task_planning_primitives(task)
+    task_ref = _task_ref_label(task)
+    contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
+    contract_status = str(task.get("job_contract_status", "")).strip().lower()
+    contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
+    has_contract_body = job_contract_has_body(contract_snapshot)
+    phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
+    phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
+    phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    status = "ready"
+    reason_code = "ready"
+    remediation = "apply contract is ready"
+    next_step = f"/task {task_ref}"
+    detail = phase_summary
+    if contract_status in {"", "-"} or not has_contract_body:
+        status = "blocked"
+        reason_code = "job_contract_missing"
+        remediation = "capture the job contract goal, scope, acceptance checks, and rollback hint before applying worker artifacts"
+        detail = "job contract missing"
+    elif contract_status == "blocked":
+        status = "blocked"
+        reason_code = "job_contract_blocked"
+        remediation = "resolve the blocked job contract scope or acceptance gaps before applying worker artifacts"
+        detail = contract_summary
+    elif phase_status == "blocked":
+        status = "blocked"
+        reason_code = "phase_checkpoint_blocked"
+        remediation = "clear the current checkpoint blocker before applying worker artifacts"
+        detail = phase_summary
+    elif phase_current in {"", "-", "plan", "implement"}:
+        status = "blocked"
+        reason_code = "phase_checkpoint_not_apply_ready"
+        remediation = "wait until the task reaches verify or handoff before applying worker artifacts"
+        detail = phase_summary
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "detail": detail,
+        "summary": "apply_gate | contract={contract} | phase={phase}/{current}".format(
+            contract=contract_status or "-",
+            phase=phase_status or "-",
+            current=phase_current or "-",
+        )[:320],
+        "remediation": remediation,
+        "next_step": next_step,
+        "job_contract_status": contract_status or "-",
+        "job_contract_summary": contract_summary,
+        "phase_checkpoint_status": phase_status or "-",
+        "phase_checkpoint_current_phase": phase_current or "-",
+        "phase_checkpoint_summary": phase_summary,
+    }
+
+
+def derive_task_manual_gate(task: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(task, dict):
+        return {}
+    refresh_task_planning_primitives(task)
+    task_ref = _task_ref_label(task)
+    contract_snapshot = normalize_job_contract_snapshot(
+        {
+            "version": task.get("job_contract_version"),
+            "status": task.get("job_contract_status"),
+            "planning_mode": task.get("job_contract_planning_mode"),
+            "summary": task.get("job_contract_summary"),
+            "goal": task.get("job_contract_goal"),
+            "scope": task.get("job_contract_scope"),
+            "non_goals": task.get("job_contract_non_goals"),
+            "risks": task.get("job_contract_risks"),
+            "acceptance_checks": task.get("job_contract_acceptance_checks"),
+            "artifacts_to_touch": task.get("job_contract_artifacts_to_touch"),
+            "rollback_hint": task.get("job_contract_rollback_hint"),
+        }
+    )
+    contract_status = str(task.get("job_contract_status", "")).strip().lower()
+    contract_summary = str(task.get("job_contract_summary", "")).strip() or "-"
+    debug_state = str(task.get("debug_packet_state", "")).strip().lower()
+    debug_summary = str(task.get("debug_packet_summary", "")).strip() or "-"
+    phase_status = str(task.get("phase_checkpoint_status", "")).strip().lower()
+    phase_current = str(task.get("phase_checkpoint_current_phase", "")).strip().lower()
+    phase_summary = str(task.get("phase_checkpoint_summary", "")).strip() or "-"
+    phase_rows = [str(item).strip().lower() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()]
+    manual_phase_ready = phase_current in {"verify", "handoff"}
+    if not manual_phase_ready:
+        for item in phase_rows:
+            phase_name, _, rest = item.partition("=")
+            row_state = rest.split("|", 1)[0].strip().lower() if rest else ""
+            if phase_name in {"verify", "handoff"} and row_state in {"ready", "active", "done", "running"}:
+                manual_phase_ready = True
+                break
+    status = "ready"
+    reason_code = "ready"
+    remediation = "manual route is ready"
+    next_step = f"/task {task_ref}"
+    detail = phase_summary
+    if phase_status == "blocked" and not manual_phase_ready:
+        status = "blocked"
+        reason_code = "phase_checkpoint_blocked"
+        remediation = "clear the current checkpoint blocker before applying judge-backed manual steps"
+        detail = phase_summary
+    elif not manual_phase_ready:
+        status = "blocked"
+        reason_code = "phase_checkpoint_not_manual_ready"
+        remediation = "wait until the task reaches verify or handoff before applying judge-backed manual steps"
+        detail = phase_summary
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "detail": detail,
+        "summary": "manual_gate | contract={contract} | debug={debug} | phase={phase}/{current}".format(
+            contract=contract_status or "-",
+            debug=debug_state or "-",
+            phase=phase_status or "-",
+            current=phase_current or "-",
+        )[:320],
+        "remediation": remediation,
+        "next_step": next_step,
+        "job_contract_status": contract_status or "-",
+        "job_contract_summary": contract_summary,
+        "debug_packet_state": debug_state or "-",
+        "debug_packet_summary": debug_summary,
+        "phase_checkpoint_status": phase_status or "-",
+        "phase_checkpoint_current_phase": phase_current or "-",
+        "phase_checkpoint_summary": phase_summary,
+    }
+
+
+def build_reentry_rails_summary(task: Dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return ""
+    targets = task_lane_target_snapshot(task)
+    rerun_exec = [str(x).strip() for x in (targets.get("rerun_execution_lane_ids") or []) if str(x).strip()]
+    rerun_review = [str(x).strip() for x in (targets.get("rerun_review_lane_ids") or []) if str(x).strip()]
+    rerun_status = "none"
+    brief_status = str(task.get("execution_brief_status", "")).strip().lower()
+    if rerun_exec or rerun_review:
+        if brief_status in _BRIEF_BLOCKED_STATUSES:
+            rerun_status = f"blocked:{brief_status}"
+        elif brief_status == "partially_executable":
+            rerun_status = "partial"
+        else:
+            rerun_status = "ready"
+    followup_status = str(task.get("followup_brief_status", "")).strip().lower()
+    followup_exec = [str(x).strip() for x in (task.get("followup_brief_execution_lane_ids") or []) if str(x).strip()]
+    followup_review = [str(x).strip() for x in (task.get("followup_brief_review_lane_ids") or []) if str(x).strip()]
+    if not followup_status:
+        followup_status = "none"
+    background_status = str(task.get("background_run_status", "")).strip().lower()
+    background_runner = str(task.get("background_run_runner_target", "")).strip().lower()
+    background_part = ""
+    if background_status or background_runner:
+        background_part = "bg={status}{runner}".format(
+            status=background_status or "-",
+            runner=(f"/{background_runner}" if background_runner else ""),
+        )
+    summary_parts = [
+        "retry={status}{exec_part}{review_part}".format(
+            status=rerun_status,
+            exec_part=(f" exec={','.join(rerun_exec)}" if rerun_exec else ""),
+            review_part=(f" review={','.join(rerun_review)}" if rerun_review else ""),
+        ),
+        "followup={status}{exec_part}{review_part}".format(
+            status=followup_status,
+            exec_part=(f" exec={','.join(followup_exec)}" if followup_exec else ""),
+            review_part=(f" review={','.join(followup_review)}" if followup_review else ""),
+        ),
+    ]
+    if background_part:
+        summary_parts.append(background_part)
+    return " | ".join(summary_parts)[:320]
+
+
+def _background_run_artifact_paths(task: Dict[str, Any]) -> List[str]:
+    return [
+        str(item).strip()
+        for item in (task.get("background_run_evidence_artifacts") or [])
+        if str(item).strip()
+    ]
+
+
+def _find_background_artifact(task: Dict[str, Any], prefix: str) -> str:
+    for item in _background_run_artifact_paths(task):
+        if item.startswith(prefix):
+            return item[:240]
+    return ""
+
+
+def derive_background_run_external_snapshot(task: Dict[str, Any]) -> Dict[str, str]:
+    if not isinstance(task, dict):
+        return {}
+    runner_target = str(task.get("background_run_runner_target", "")).strip().lower()
+    if runner_target not in _EXTERNAL_BACKGROUND_RUNNERS:
+        return {}
+    status = str(task.get("background_run_status", "")).strip().lower()
+    runtime_summary = str(task.get("background_run_runtime_summary", "")).strip()
+    evidence_bundle = str(task.get("background_run_evidence_bundle", "")).strip()
+    handoff_path = _find_background_artifact(task, "background_run_handoffs/")
+    ack_path = _find_background_artifact(task, "background_run_acks/")
+    result_path = _find_background_artifact(task, "background_run_results/")
+
+    phase = ""
+    note = ""
+    if result_path or status in {"completed", "failed"}:
+        phase = "result_received"
+        note = result_path or evidence_bundle or status
+    elif ack_path or "external_pickup_acknowledged" in evidence_bundle or "ack=" in runtime_summary:
+        phase = "pickup_acknowledged"
+        note = ack_path or runtime_summary or evidence_bundle
+    elif handoff_path or "external_handoff_emitted" in evidence_bundle or "_handoff=" in runtime_summary:
+        phase = "handoff_emitted"
+        note = handoff_path or runtime_summary or evidence_bundle
+    elif status in {"queued", "dispatching", "running"}:
+        phase = "awaiting_external_pickup"
+        note = f"{runner_target} awaiting pickup"
+
+    if not phase:
+        return {}
+    return {
+        "phase": phase[:64],
+        "note": note[:240],
+    }
+
+
+def _normalize_plan_issue_codes(raw: Any, *, limit: int = 12) -> List[str]:
+    rows = raw if isinstance(raw, list) else []
+    normalized: List[str] = []
+    for row in rows:
+        token = str(row or "").strip().lower()
+        if not token or token in normalized:
+            continue
+        normalized.append(token[:64])
+    return normalized[: max(1, int(limit or 1))]
+
+
+def _normalize_plan_issue_history(raw: Any, *, keep: int = 20) -> List[Dict[str, Any]]:
+    rows = raw if isinstance(raw, list) else []
+    normalized: List[Dict[str, Any]] = []
+    for item in rows[-max(1, int(keep or 1)) :]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            round_no = max(1, int(item.get("round", 0) or 0))
+        except Exception:
+            round_no = 1
+        row: Dict[str, Any] = {"round": round_no}
+        review_pass = str(item.get("review_pass", "")).strip().lower()
+        if review_pass in {"contract", "execution", "verification"}:
+            row["review_pass"] = review_pass
+        status = str(item.get("status", "")).strip().lower()
+        if status in {"approved", "issues"}:
+            row["status"] = status
+        primary_issue = str(item.get("primary_issue", "")).strip()
+        if primary_issue:
+            row["primary_issue"] = primary_issue[:240]
+        issue_codes = _normalize_plan_issue_codes(item.get("issue_codes"), limit=8)
+        if issue_codes:
+            row["issue_codes"] = issue_codes
+        try:
+            issue_count = max(0, int(item.get("issue_count", 0) or 0))
+        except Exception:
+            issue_count = 0
+        row["issue_count"] = issue_count
+        for key in ("provider", "planner_provider", "critic_provider"):
+            token = str(item.get(key, "")).strip()
+            if token:
+                row[key] = token[:64]
+        normalized.append(row)
+    return normalized
 
 
 def _normalize_lane_state_rows(raw_rows: Any, *, kind: str) -> List[Dict[str, Any]]:
@@ -82,6 +1586,26 @@ def _normalize_lane_state_rows(raw_rows: Any, *, kind: str) -> List[Dict[str, An
         reason = str(row.get("reason", "")).strip()
         if reason:
             item["reason"] = reason[:240]
+        for key in (
+            "request_id",
+            "started_at",
+            "last_event_at",
+            "last_event_kind",
+            "backend",
+            "outcome_reason_code",
+        ):
+            token = str(row.get(key, "")).strip()
+            if token:
+                item[key] = token[:240]
+        try:
+            tool_count = int(row.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            item["tool_count"] = tool_count
+        touched_files = [str(x).strip()[:240] for x in (row.get("touched_files") or []) if str(x).strip()]
+        if touched_files:
+            item["touched_files"] = touched_files[:8]
         normalized.append(item)
     return normalized
 
@@ -137,6 +1661,14 @@ def _phase2_shape_roles(task: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     exec_roles = _dedupe_phase2_roles(exec_plan.get("execution_lanes"))
     review_roles = _dedupe_phase2_roles(exec_plan.get("review_lanes"))
     return exec_roles, review_roles
+
+
+def task_phase2_shape_snapshot(task: Dict[str, Any]) -> Dict[str, List[str]]:
+    exec_roles, review_roles = _phase2_shape_roles(task)
+    return {
+        "execution_roles": list(exec_roles),
+        "review_roles": list(review_roles),
+    }
 
 
 def derive_role_execution_snapshot(
@@ -250,6 +1782,66 @@ def derive_backend_snapshot(request_data: Dict[str, Any]) -> Dict[str, Any]:
         "backend_verdict": verdict,
         "backend_contract": contract,
         "backend_contract_note": note[:240],
+    }
+
+
+def task_lane_summary_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    lane_states = task.get("lane_states") if isinstance(task.get("lane_states"), dict) else {}
+    lane_summary = lane_states.get("summary") if isinstance(lane_states.get("summary"), dict) else {}
+    execution = lane_summary.get("execution") if isinstance(lane_summary.get("execution"), dict) else {}
+    review = lane_summary.get("review") if isinstance(lane_summary.get("review"), dict) else {}
+    review_verdicts = lane_summary.get("review_verdicts") if isinstance(lane_summary.get("review_verdicts"), dict) else {}
+
+    plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    exec_plan = meta.get("phase2_execution_plan") if isinstance(meta.get("phase2_execution_plan"), dict) else {}
+    execution_lanes = exec_plan.get("execution_lanes") if isinstance(exec_plan.get("execution_lanes"), list) else []
+    review_lanes = exec_plan.get("review_lanes") if isinstance(exec_plan.get("review_lanes"), list) else []
+
+    return {
+        "execution_lane_count": len(execution_lanes),
+        "review_lane_count": len(review_lanes),
+        "execution": dict(execution),
+        "review": dict(review),
+        "review_verdicts": dict(review_verdicts),
+    }
+
+
+def task_monitor_row_snapshot(
+    task: Dict[str, Any],
+    request_id: str,
+    *,
+    normalize_task_status: Callable[[Any], str],
+    task_display_label: Callable[[Dict[str, Any], str], str],
+) -> Dict[str, Any]:
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    shape = task_phase2_shape_snapshot(task)
+    lane = task_lane_summary_snapshot(task)
+    observatory = task_team_observatory_snapshot(task)
+    return {
+        "request_id": str(request_id or "").strip(),
+        "label": task_display_label(task, str(request_id or "").strip()),
+        "status": normalize_task_status(task.get("status", "pending")),
+        "stage": str(task.get("stage", "pending")).strip().lower() or "pending",
+        "tf_phase": normalize_tf_phase(derive_tf_phase(task), "queued"),
+        "updated_at": str(task.get("updated_at", "")).strip() or str(task.get("created_at", "")).strip(),
+        "phase1_role_preset": str(task.get("phase1_role_preset", "")).strip(),
+        "phase2_team_preset": str(task.get("phase2_team_preset", "")).strip(),
+        "phase2_execution_roles": shape["execution_roles"],
+        "phase2_review_roles": shape["review_roles"],
+        "execution_lane_count": int(lane.get("execution_lane_count", 0) or 0),
+        "review_lane_count": int(lane.get("review_lane_count", 0) or 0),
+        "execution_summary": dict(lane.get("execution") or {}),
+        "review_summary": dict(lane.get("review") or {}),
+        "review_verdicts": dict(lane.get("review_verdicts") or {}),
+        "backend": str(task.get("backend", "") or result.get("backend", "")).strip(),
+        "backend_profile": str(task.get("backend_profile", "") or result.get("backend_profile", "")).strip(),
+        "backend_verdict": str(task.get("backend_verdict", "") or result.get("backend_verdict", "")).strip(),
+        "backend_contract": str(task.get("backend_contract", "") or result.get("backend_contract", "")).strip(),
+        "backend_contract_note": str(task.get("backend_contract_note", "") or result.get("backend_contract_note", "")).strip(),
+        "task_team_observatory": observatory,
+        "task_team_observatory_headline": str(observatory.get("headline", "")).strip(),
+        "task_team_observatory_first_focus": str(observatory.get("first_focus", "")).strip(),
     }
 
 
@@ -384,6 +1976,8 @@ def derive_lane_states(
 
     role_status: Dict[str, str] = {}
     lane_role_status: Dict[Tuple[str, str], str] = {}
+    lane_role_rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    status_rank = {"failed": 4, "running": 3, "done": 2, "pending": 1, "waiting_on_dependencies": 1}
     for row in snapshot.get("rows") or []:
         if not isinstance(row, dict):
             continue
@@ -398,6 +1992,10 @@ def derive_lane_states(
                 lane_role_status.get((lane_id, role), "pending"),
                 status,
             )
+            key = (lane_id, role)
+            prev = lane_role_rows.get(key)
+            if prev is None or status_rank.get(status, 0) >= status_rank.get(str(prev.get("status", "")).strip().lower(), 0):
+                lane_role_rows[key] = dict(row)
 
     complete = bool(snapshot.get("complete", False))
     pending_roles = {str(x).strip() for x in (snapshot.get("pending_roles") or []) if str(x).strip()}
@@ -440,6 +2038,20 @@ def derive_lane_states(
             "status": status,
             "parallel": bool(row.get("parallel", True)),
         }
+        lane_meta = lane_role_rows.get((lane_id, role), {})
+        for key in ("request_id", "started_at", "last_event_at", "last_event_kind", "backend", "outcome_reason_code"):
+            token = str(lane_meta.get(key, "")).strip()
+            if token:
+                item[key] = token
+        try:
+            tool_count = int(lane_meta.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            item["tool_count"] = tool_count
+        touched_files = [str(x).strip() for x in (lane_meta.get("touched_files") or []) if str(x).strip()]
+        if touched_files:
+            item["touched_files"] = touched_files
         subtask_ids = [str(x).strip() for x in (row.get("subtask_ids") or []) if str(x).strip()]
         if subtask_ids:
             item["subtask_ids"] = subtask_ids
@@ -477,6 +2089,20 @@ def derive_lane_states(
             "status": status,
             "parallel": bool(row.get("parallel", True)),
         }
+        lane_meta = lane_role_rows.get((lane_id, role), {})
+        for key in ("request_id", "started_at", "last_event_at", "last_event_kind", "backend", "outcome_reason_code"):
+            token = str(lane_meta.get(key, "")).strip()
+            if token:
+                item[key] = token
+        try:
+            tool_count = int(lane_meta.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            item["tool_count"] = tool_count
+        touched_files = [str(x).strip() for x in (lane_meta.get("touched_files") or []) if str(x).strip()]
+        if touched_files:
+            item["touched_files"] = touched_files
         if depends:
             item["depends_on"] = depends
         if waiting_on:
@@ -548,6 +2174,19 @@ def apply_exec_critic_lifecycle(
         lifecycle_set_stage(task=task, stage="close", status="failed", note=reason or verdict)
 
     apply_review_lane_verdicts(task, critic)
+    followup_brief = build_followup_brief_snapshot(task)
+    if followup_brief:
+        apply_followup_brief_snapshot(task, followup_brief)
+    else:
+        for key in (
+            "followup_brief_version",
+            "followup_brief_status",
+            "followup_brief_summary",
+            "followup_brief_execution_lane_ids",
+            "followup_brief_review_lane_ids",
+            "followup_brief_reason",
+        ):
+            task.pop(key, None)
     refresh_task_tf_state(task)
 
 
@@ -638,14 +2277,32 @@ def sanitize_task_record(
     source_request_id = str(task.get("source_request_id", "")).strip()
     if source_request_id:
         task["source_request_id"] = source_request_id[:128]
+    intent_command = str(task.get("intent_command", "")).strip()
+    if intent_command:
+        task["intent_command"] = intent_command[:64]
+    intent_action = str(task.get("intent_action", "")).strip()
+    if intent_action:
+        task["intent_action"] = intent_action[:64]
+    intent_class = str(task.get("intent_class", "")).strip()
+    if intent_class:
+        task["intent_class"] = intent_class[:32]
+    intent_trace = str(task.get("intent_trace", "")).strip()
+    if intent_trace:
+        task["intent_trace"] = intent_trace[:400]
+    intent_recorded_at = str(task.get("intent_recorded_at", "")).strip()
+    if intent_recorded_at:
+        task["intent_recorded_at"] = intent_recorded_at[:64]
     retry_of = str(task.get("retry_of", "")).strip()
     if retry_of:
         task["retry_of"] = retry_of[:128]
     replan_of = str(task.get("replan_of", "")).strip()
     if replan_of:
         task["replan_of"] = replan_of[:128]
+    followup_of = str(task.get("followup_of", "")).strip()
+    if followup_of:
+        task["followup_of"] = followup_of[:128]
 
-    for child_key in ("retry_children", "replan_children"):
+    for child_key in ("retry_children", "replan_children", "followup_children"):
         raw_children = task.get(child_key)
         if isinstance(raw_children, list):
             normalized_children = []
@@ -673,6 +2330,231 @@ def sanitize_task_record(
     if todo_status:
         task["todo_status"] = todo_status[:32]
 
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        {
+            "version": task.get("request_contract_version"),
+            "contract_type": task.get("request_contract_type"),
+            "preset": task.get("request_contract_preset"),
+            "status": task.get("request_contract_status"),
+            "summary": task.get("request_contract_summary"),
+            "missing_fields": task.get("request_contract_missing_fields"),
+            "required_outputs": task.get("request_contract_required_outputs"),
+            "fields": task.get("request_contract_fields"),
+            "artifact_contracts": task.get("request_contract_artifact_contracts"),
+        }
+    )
+    if request_contract_snapshot:
+        apply_request_contract_snapshot(task, request_contract_snapshot)
+    else:
+        for key in (
+            "request_contract_version",
+            "request_contract_type",
+            "request_contract_status",
+            "request_contract_preset",
+            "request_contract_summary",
+            "request_contract_missing_fields",
+            "request_contract_required_outputs",
+            "request_contract_fields",
+            "request_contract_artifact_contracts",
+        ):
+            task.pop(key, None)
+
+    followup_brief_snapshot = normalize_followup_brief_snapshot(
+        {
+            "version": task.get("followup_brief_version"),
+            "status": task.get("followup_brief_status"),
+            "summary": task.get("followup_brief_summary"),
+            "execution_lane_ids": task.get("followup_brief_execution_lane_ids"),
+            "review_lane_ids": task.get("followup_brief_review_lane_ids"),
+            "reason": task.get("followup_brief_reason"),
+        }
+    )
+    if not followup_brief_snapshot:
+        followup_brief_snapshot = build_followup_brief_snapshot(task)
+    if followup_brief_snapshot:
+        apply_followup_brief_snapshot(task, followup_brief_snapshot)
+    else:
+        for key in (
+            "followup_brief_version",
+            "followup_brief_status",
+            "followup_brief_summary",
+            "followup_brief_execution_lane_ids",
+            "followup_brief_review_lane_ids",
+            "followup_brief_reason",
+        ):
+            task.pop(key, None)
+
+    background_run_snapshot = normalize_background_run_ticket_snapshot(
+        {
+            "version": task.get("background_run_ticket_version"),
+            "ticket_id": task.get("background_run_ticket_id"),
+            "status": task.get("background_run_status"),
+            "runner_target": task.get("background_run_runner_target"),
+            "launch_mode": task.get("background_run_launch_mode"),
+            "runtime_handle": task.get("background_run_runtime_handle"),
+            "runtime_summary": task.get("background_run_runtime_summary"),
+            "worker_result_status": task.get("background_run_worker_result_status"),
+            "worker_result_summary": task.get("background_run_worker_result_summary"),
+            "worker_gate_status": task.get("background_run_worker_gate_status"),
+            "worker_gate_summary": task.get("background_run_worker_gate_summary"),
+            "worker_profile_status": task.get("background_run_worker_profile_status"),
+            "worker_profile_summary": task.get("background_run_worker_profile_summary"),
+            "worker_checklist_status": task.get("background_run_worker_checklist_status"),
+            "worker_checklist_summary": task.get("background_run_worker_checklist_summary"),
+            "worker_items_summary": task.get("background_run_worker_items_summary"),
+            "worker_items": task.get("background_run_worker_items"),
+            "worker_item_classes_summary": task.get("background_run_worker_item_classes_summary"),
+            "worker_item_classes": task.get("background_run_worker_item_classes"),
+            "worker_records_summary": task.get("background_run_worker_records_summary"),
+            "worker_records": task.get("background_run_worker_records"),
+            "worker_record_rows_summary": task.get("background_run_worker_record_rows_summary"),
+            "worker_record_rows": task.get("background_run_worker_record_rows"),
+            "worker_record_set_summary": task.get("background_run_worker_record_set_summary"),
+            "worker_record_set": task.get("background_run_worker_record_set"),
+            "worker_preflight_status": task.get("background_run_worker_preflight_status"),
+            "worker_preflight_summary": task.get("background_run_worker_preflight_summary"),
+            "worker_preflight_rows_summary": task.get("background_run_worker_preflight_rows_summary"),
+            "worker_preflight_rows": task.get("background_run_worker_preflight_rows"),
+            "worker_result_actions": task.get("background_run_worker_result_actions"),
+            "worker_result_cautions": task.get("background_run_worker_result_cautions"),
+            "worker_result_evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+            "worker_update_stub_status": task.get("background_run_worker_update_stub_status"),
+            "worker_update_stub_summary": task.get("background_run_worker_update_stub_summary"),
+            "worker_update_stub_targets": task.get("background_run_worker_update_stub_targets"),
+            "created_at": task.get("background_run_created_at"),
+            "created_by": task.get("background_run_created_by"),
+            "source_surface": task.get("background_run_source_surface"),
+            "request_id": task.get("background_run_request_id"),
+            "project_key": task.get("background_run_project_key"),
+            "execution_brief_status": task.get("background_run_execution_brief_status"),
+            "evidence_bundle": task.get("background_run_evidence_bundle"),
+            "evidence_artifacts": task.get("background_run_evidence_artifacts"),
+            "launch_spec": {
+                "version": task.get("background_run_launch_spec_version"),
+                "spec_id": task.get("background_run_launch_spec_id"),
+                "kind": task.get("background_run_launch_spec_kind"),
+                "mode": task.get("background_run_launch_spec_mode"),
+                "summary": task.get("background_run_launch_spec_summary"),
+                "externalizable": task.get("background_run_launch_spec_externalizable"),
+                "provider_task_contract_profile": task.get("background_run_task_contract_profile"),
+                "provider_task_contract_summary": task.get("background_run_task_contract_summary"),
+                "provider_task_contract_module": task.get("background_run_task_contract_module"),
+                "provider_task_contract_module_summary": task.get("background_run_task_contract_module_summary"),
+                "provider_task_contract_policy": task.get("background_run_task_contract_policy"),
+                "provider_task_contract_policy_summary": task.get("background_run_task_contract_policy_summary"),
+                "model_pack_profile": task.get("background_run_model_pack_profile"),
+                "model_plan_summary": task.get("background_run_model_plan_summary"),
+                "model_worker_route_id": task.get("background_run_model_worker_route_id"),
+                "model_judge_route_id": task.get("background_run_model_judge_route_id"),
+                "model_escalation_route_id": task.get("background_run_model_escalation_route_id"),
+                "model_worker_endpoint_id": task.get("background_run_model_worker_endpoint_id"),
+                "model_judge_endpoint_id": task.get("background_run_model_judge_endpoint_id"),
+                "model_escalation_endpoint_id": task.get("background_run_model_escalation_endpoint_id"),
+                "model_worker_binding_summary": task.get("background_run_model_worker_binding_summary"),
+                "model_worker_probe_status": task.get("background_run_model_worker_probe_status"),
+                "model_worker_probe_summary": task.get("background_run_model_worker_probe_summary"),
+                "model_judge_binding_summary": task.get("background_run_model_judge_binding_summary"),
+                "model_judge_probe_status": task.get("background_run_model_judge_probe_status"),
+                "model_judge_probe_summary": task.get("background_run_model_judge_probe_summary"),
+                "model_escalation_binding_summary": task.get("background_run_model_escalation_binding_summary"),
+                "model_escalation_probe_status": task.get("background_run_model_escalation_probe_status"),
+                "model_escalation_probe_summary": task.get("background_run_model_escalation_probe_summary"),
+            },
+        }
+    )
+    if background_run_snapshot:
+        apply_background_run_ticket_snapshot(task, background_run_snapshot)
+    else:
+        for key in (
+            "background_run_ticket_version",
+            "background_run_ticket_id",
+            "background_run_status",
+            "background_run_runner_target",
+            "background_run_launch_mode",
+            "background_run_runtime_handle",
+            "background_run_runtime_summary",
+            "background_run_worker_result_status",
+            "background_run_worker_result_summary",
+            "background_run_worker_gate_status",
+            "background_run_worker_gate_summary",
+            "background_run_worker_profile_status",
+            "background_run_worker_profile_summary",
+            "background_run_worker_checklist_status",
+            "background_run_worker_checklist_summary",
+            "background_run_worker_items_summary",
+            "background_run_worker_items",
+            "background_run_worker_item_classes_summary",
+            "background_run_worker_item_classes",
+            "background_run_worker_records_summary",
+            "background_run_worker_records",
+            "background_run_worker_record_rows_summary",
+            "background_run_worker_record_rows",
+            "background_run_worker_record_set_summary",
+            "background_run_worker_record_set",
+            "background_run_worker_preflight_status",
+            "background_run_worker_preflight_summary",
+            "background_run_worker_preflight_rows_summary",
+            "background_run_worker_preflight_rows",
+            "background_run_worker_result_actions",
+            "background_run_worker_result_cautions",
+            "background_run_worker_result_evidence_refs",
+            "background_run_worker_update_stub_status",
+            "background_run_worker_update_stub_summary",
+            "background_run_worker_update_stub_targets",
+            "background_run_created_at",
+            "background_run_created_by",
+            "background_run_source_surface",
+            "background_run_request_id",
+            "background_run_project_key",
+            "background_run_execution_brief_status",
+            "background_run_evidence_bundle",
+            "background_run_evidence_artifacts",
+            "background_run_launch_spec_version",
+            "background_run_launch_spec_id",
+            "background_run_launch_spec_kind",
+            "background_run_launch_spec_mode",
+            "background_run_launch_spec_summary",
+            "background_run_launch_spec_externalizable",
+            "background_run_task_contract_profile",
+            "background_run_task_contract_summary",
+            "background_run_task_contract_module",
+            "background_run_task_contract_module_summary",
+            "background_run_task_contract_policy",
+            "background_run_task_contract_policy_summary",
+            "background_run_model_pack_profile",
+            "background_run_model_plan_summary",
+            "background_run_model_worker_route_id",
+            "background_run_model_judge_route_id",
+            "background_run_model_escalation_route_id",
+            "background_run_model_worker_endpoint_id",
+            "background_run_model_judge_endpoint_id",
+            "background_run_model_escalation_endpoint_id",
+            "background_run_model_worker_binding_summary",
+            "background_run_model_worker_probe_status",
+            "background_run_model_worker_probe_summary",
+            "background_run_model_judge_binding_summary",
+            "background_run_model_judge_probe_status",
+            "background_run_model_judge_probe_summary",
+            "background_run_model_escalation_binding_summary",
+            "background_run_model_escalation_probe_status",
+            "background_run_model_escalation_probe_summary",
+        ):
+            task.pop(key, None)
+
+    background_run_external_snapshot = derive_background_run_external_snapshot(task)
+    if background_run_external_snapshot:
+        task["background_run_external_phase"] = background_run_external_snapshot.get("phase", "")
+        task["background_run_external_note"] = background_run_external_snapshot.get("note", "")
+    else:
+        task.pop("background_run_external_phase", None)
+        task.pop("background_run_external_note", None)
+
+    reentry_rails_summary = build_reentry_rails_summary(task)
+    if reentry_rails_summary:
+        task["reentry_rails_summary"] = reentry_rails_summary
+    else:
+        task.pop("reentry_rails_summary", None)
+
     plan = task.get("plan")
     if isinstance(plan, dict):
         workers = []
@@ -683,7 +2565,7 @@ def sanitize_task_record(
                 if token and token not in workers:
                     workers.append(token)
         if not workers:
-            workers = dedupe_roles((task.get("plan_roles") or []) + (task.get("roles") or [])) or ["Worker"]
+            workers = dedupe_roles((task.get("plan_roles") or []) + (task.get("roles") or []))
         max_subtasks = 0
         raw_subtasks = plan.get("subtasks")
         if isinstance(raw_subtasks, list):
@@ -703,6 +2585,50 @@ def sanitize_task_record(
     plan_replans = task.get("plan_replans")
     if isinstance(plan_replans, list):
         task["plan_replans"] = normalize_plan_replans_payload(plan_replans, keep=history_limit)
+    try:
+        plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    except Exception:
+        plan_review_count = 0
+    if plan_review_count > 0:
+        task["plan_review_count"] = plan_review_count
+    else:
+        task.pop("plan_review_count", None)
+    plan_issue_history = _normalize_plan_issue_history(task.get("plan_issue_history"), keep=history_limit)
+    if plan_issue_history:
+        task["plan_issue_history"] = plan_issue_history
+    else:
+        task.pop("plan_issue_history", None)
+    plan_issue_codes = _normalize_plan_issue_codes(task.get("plan_issue_codes"))
+    if not plan_issue_codes and plan_issue_history:
+        merged_codes: List[str] = []
+        for row in plan_issue_history:
+            for code in list(row.get("issue_codes") or []):
+                token = str(code or "").strip().lower()
+                if token and token not in merged_codes:
+                    merged_codes.append(token[:64])
+        plan_issue_codes = merged_codes[:12]
+    if plan_issue_codes:
+        task["plan_issue_codes"] = plan_issue_codes
+    else:
+        task.pop("plan_issue_codes", None)
+    convergence_status = _normalize_plan_convergence_status(task.get("plan_convergence_status"))
+    if convergence_status:
+        task["plan_convergence_status"] = convergence_status
+    else:
+        task.pop("plan_convergence_status", None)
+    plan_stalled_reason = str(task.get("plan_stalled_reason", "")).strip()
+    if plan_stalled_reason:
+        task["plan_stalled_reason"] = plan_stalled_reason[:240]
+    else:
+        task.pop("plan_stalled_reason", None)
+    try:
+        plan_last_round = max(0, int(task.get("plan_last_round", 0) or 0))
+    except Exception:
+        plan_last_round = 0
+    if plan_last_round > 0:
+        task["plan_last_round"] = plan_last_round
+    else:
+        task.pop("plan_last_round", None)
     if isinstance(task.get("plan_gate_passed"), bool):
         task["plan_gate_passed"] = bool(task.get("plan_gate_passed"))
     plan_gate_reason = str(task.get("plan_gate_reason", "")).strip()
@@ -755,6 +2681,12 @@ def sanitize_task_record(
             dedupe_roles=dedupe_roles,
         )
         result.update(role_snapshot)
+        if str(task.get("job_contract_summary", "")).strip():
+            result["job_contract_summary"] = str(task.get("job_contract_summary", "")).strip()
+        if str(task.get("execution_brief_summary", "")).strip():
+            result["execution_brief_summary"] = str(task.get("execution_brief_summary", "")).strip()
+
+    refresh_task_planning_primitives(task, request_contract=request_contract_snapshot)
 
     refresh_task_tf_state(task)
 
@@ -1034,6 +2966,12 @@ def ensure_task_record(
     build_task_context: Callable[..., Dict[str, str]],
     lifecycle_stages: Iterable[str],
     keep_limit: int,
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
+    execution_brief: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     token = str(request_id or "").strip()
     tasks = ensure_project_tasks(entry)
@@ -1068,6 +3006,52 @@ def ensure_task_record(
             item["verifier_roles"] = dedupe_roles(verifier_roles)
         item["require_verifier"] = bool(require_verifier)
         item["updated_at"] = now
+
+    next_intent_command = str(intent_command or "").strip()
+    next_intent_action = str(intent_action or "").strip()
+    next_intent_class = str(intent_class or "").strip()
+    next_intent_trace = str(intent_trace or "").strip()
+    if next_intent_command:
+        item["intent_command"] = next_intent_command
+    if next_intent_action:
+        item["intent_action"] = next_intent_action
+    if next_intent_class:
+        item["intent_class"] = next_intent_class
+    if next_intent_trace:
+        item["intent_trace"] = next_intent_trace[:400]
+    if next_intent_command or next_intent_action or next_intent_class or next_intent_trace:
+        item["intent_recorded_at"] = now
+
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        request_contract
+        if isinstance(request_contract, dict)
+        else {
+            "version": item.get("request_contract_version"),
+            "contract_type": item.get("request_contract_type"),
+            "preset": item.get("request_contract_preset"),
+            "status": item.get("request_contract_status"),
+            "summary": item.get("request_contract_summary"),
+            "missing_fields": item.get("request_contract_missing_fields"),
+            "required_outputs": item.get("request_contract_required_outputs"),
+            "fields": item.get("request_contract_fields"),
+            "artifact_contracts": item.get("request_contract_artifact_contracts"),
+        }
+    )
+    if (
+        not request_contract_snapshot
+        and str(item.get("mode", mode or "")).strip().lower() == "dispatch"
+        and str(item.get("prompt", prompt or "")).strip()
+    ):
+        request_contract_snapshot = build_request_contract(
+            source_prompt=str(item.get("prompt", prompt or "")).strip(),
+            selected_roles=list(item.get("roles") or roles or []),
+        )
+    if request_contract_snapshot or isinstance(execution_brief, dict) or str(item.get("mode", mode or "")).strip().lower() == "dispatch":
+        refresh_task_planning_primitives(
+            item,
+            request_contract=request_contract_snapshot,
+            execution_brief=execution_brief if isinstance(execution_brief, dict) else None,
+        )
 
     assign_task_alias(entry, item, prompt=prompt, rebuild_index=False)
     item["context"] = build_task_context(request_id=token, entry=entry, task=item)
@@ -1131,7 +3115,7 @@ def summarize_task_monitor(
 ) -> str:
     tasks = ensure_project_tasks(entry)
     if not tasks:
-        return f"orch: {project_name}\n작업이 없습니다."
+        return f"runtime: {project_name}\n작업이 없습니다."
 
     backfill_task_aliases(entry)
     rows = sorted(tasks.items(), key=lambda kv: str((kv[1] or {}).get("updated_at", "")), reverse=True)
@@ -1150,7 +3134,7 @@ def summarize_task_monitor(
             invalid_stage_rows += 1
 
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"task monitor: latest {cap}",
         "format: label | status/stage | roles | updated",
         "summary: total={total} running={running} completed={completed} failed={failed} pending={pending}".format(
@@ -1163,6 +3147,17 @@ def summarize_task_monitor(
     ]
     if invalid_stage_rows:
         lines.append(f"warning: invalid lifecycle stage rows={invalid_stage_rows}")
+    latest_intent = runtime_latest_intent_summary(entry)
+    latest_action = load_latest_action_audit_for_runtime(
+        entry.get("team_dir"),
+        project_alias=entry.get("project_alias", ""),
+        request_ids=[str(req_id or "").strip() for req_id, _task in rows if str(req_id or "").strip()],
+    )
+    append_operator_status_summary_lines(
+        lines,
+        latest_intent=latest_intent,
+        latest_action=latest_action,
+    )
 
     def _phase2_request_count(value: Any) -> int:
         if isinstance(value, list):
@@ -1203,6 +3198,8 @@ def summarize_task_monitor(
         phase1_mode = str(task.get("phase1_mode", "")).strip()
         phase1_rounds = max(0, int(task.get("phase1_rounds", 0) or 0))
         phase1_providers = dedupe_roles(task.get("phase1_providers") or [])
+        phase1_planner_providers = dedupe_roles(task.get("phase1_planner_providers") or [])
+        phase1_critic_providers = dedupe_roles(task.get("phase1_critic_providers") or [])
         phase1_current_phase = str(task.get("phase1_current_phase", "")).strip()
         phase1_current_round = max(0, int(task.get("phase1_current_round", 0) or 0))
         phase1_current_total = max(0, int(task.get("phase1_current_total_rounds", 0) or 0))
@@ -1220,7 +3217,12 @@ def summarize_task_monitor(
                 ),
             )
             phase1_parts.append(phase1_token)
-            if phase1_providers:
+            if phase1_planner_providers or phase1_critic_providers:
+                if phase1_planner_providers:
+                    phase1_parts.append("planners=" + ",".join(phase1_planner_providers))
+                if phase1_critic_providers:
+                    phase1_parts.append("critics=" + ",".join(phase1_critic_providers))
+            elif phase1_providers:
                 phase1_parts.append("providers=" + ",".join(phase1_providers))
             current_actor = phase1_current_provider or phase1_current_planner or phase1_current_critic
             if current_actor:
@@ -1332,6 +3334,10 @@ def summarize_task_monitor(
         first_action = str(priority_action.get("action", "")).strip()
         if first_action:
             lines.append(f"  first: {first_action} | {str(priority_action.get('reason', '')).strip() or '-'}")
+        observatory = task_team_observatory_snapshot(task)
+        observatory_line = observatory_monitor_line(observatory)
+        if observatory_line:
+            lines.append(f"  {observatory_line}")
 
     lines.append("")
     lines.append("alias map (number/label -> request_id):")
@@ -1347,8 +3353,30 @@ def summarize_task_monitor(
     return "\n".join(lines)
 
 
-def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterable[str]], List[str]]) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
+def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterable[str]], List[str]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+
+    def _copy_observability_fields(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        for key in (
+            "request_id",
+            "started_at",
+            "last_event_at",
+            "last_event_kind",
+            "backend",
+            "outcome_reason_code",
+        ):
+            token = str(source.get(key, "")).strip()
+            if token:
+                target[key] = token
+        try:
+            tool_count = int(source.get("tool_count", 0) or 0)
+        except Exception:
+            tool_count = 0
+        if tool_count > 0:
+            target["tool_count"] = tool_count
+        touched_files = [str(item).strip() for item in (source.get("touched_files") or []) if str(item).strip()]
+        if touched_files:
+            target["touched_files"] = touched_files
 
     role_states = data.get("role_states")
     if isinstance(role_states, list):
@@ -1366,6 +3394,7 @@ def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterabl
             phase2_stage = str(item.get("phase2_stage", "")).strip().lower()
             if phase2_stage:
                 row["phase2_stage"] = phase2_stage
+            _copy_observability_fields(row, item)
             rows.append(row)
 
     if rows:
@@ -1387,6 +3416,7 @@ def normalize_role_rows(data: Dict[str, Any], *, dedupe_roles: Callable[[Iterabl
             phase2_stage = str(item.get("phase2_stage", "")).strip().lower()
             if phase2_stage:
                 row["phase2_stage"] = phase2_stage
+            _copy_observability_fields(row, item)
             rows.append(row)
         if rows:
             return rows
@@ -1505,6 +3535,10 @@ def sync_task_lifecycle(
     lifecycle_set_stage: Callable[..., None],
     normalize_task_status: Callable[[Any], str],
     sync_task_exec_context: Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, str]],
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> Optional[Dict[str, Any]]:
     snap = extract_request_snapshot(request_data, dedupe_roles=dedupe_roles)
     request_id = str(snap.get("gateway_request_id", "") or snap.get("request_id", "")).strip()
@@ -1527,7 +3561,31 @@ def sync_task_lifecycle(
         roles=roles,
         verifier_roles=verifiers,
         require_verifier=require_verifier,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
+    dispatch_metadata = (
+        request_data.get("dispatch_metadata")
+        if isinstance(request_data.get("dispatch_metadata"), dict)
+        else {}
+    )
+    request_contract_snapshot = normalize_request_contract_snapshot(
+        {
+            "version": dispatch_metadata.get("request_contract_version"),
+            "contract_type": dispatch_metadata.get("request_contract_type"),
+            "preset": dispatch_metadata.get("request_contract_preset"),
+            "status": dispatch_metadata.get("request_contract_status"),
+            "summary": dispatch_metadata.get("request_contract_summary"),
+            "missing_fields": dispatch_metadata.get("request_contract_missing_fields"),
+            "required_outputs": dispatch_metadata.get("request_contract_required_outputs"),
+            "fields": dispatch_metadata.get("request_contract_fields"),
+            "artifact_contracts": dispatch_metadata.get("request_contract_artifact_contracts"),
+        }
+    )
+    if request_contract_snapshot:
+        apply_request_contract_snapshot(task, request_contract_snapshot)
 
     assignments = int(snap.get("assignments", 0) or 0)
     replies = int(snap.get("replies", 0) or 0)
@@ -1624,6 +3682,19 @@ def sync_task_lifecycle(
         "failed_roles": sorted(failed_roles),
         "pending_roles": sorted(pending_roles),
     }
+    if request_contract_snapshot:
+        task["result"]["request_contract_type"] = str(request_contract_snapshot.get("contract_type", "")).strip()
+        task["result"]["request_contract_status"] = str(request_contract_snapshot.get("status", "")).strip()
+        if str(request_contract_snapshot.get("summary", "")).strip():
+            task["result"]["request_contract_summary"] = str(request_contract_snapshot.get("summary", "")).strip()
+        brief = build_execution_brief(request_contract_snapshot)
+        if str(brief.get("status", "")).strip():
+            task["result"]["execution_brief_status"] = str(brief.get("status", "")).strip()
+        if str(brief.get("summary", "")).strip():
+            task["result"]["execution_brief_summary"] = str(brief.get("summary", "")).strip()
+        job_contract = build_job_contract(request_contract_snapshot, brief)
+        if str(job_contract.get("summary", "")).strip():
+            task["result"]["job_contract_summary"] = str(job_contract.get("summary", "")).strip()
     rate_limit = request_data.get("rate_limit") if isinstance(request_data.get("rate_limit"), dict) else {}
     if rate_limit:
         task["rate_limit"] = dict(rate_limit)
@@ -1689,6 +3760,7 @@ def sync_task_lifecycle(
         apply_review_lane_verdicts(task)
     else:
         task.pop("lane_states", None)
+    refresh_task_planning_primitives(task, request_contract=request_contract_snapshot)
     refresh_task_tf_state(task)
     sync_task_exec_context(entry, task)
     return task

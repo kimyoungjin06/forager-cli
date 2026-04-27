@@ -446,6 +446,11 @@ def parse_quick_message(text: str) -> Optional[Dict[str, Any]]:
             norm.split(" ", 1)[1].strip(),
             usage="usage: followup <request_or_alias> [lane <L#|R#,...>]",
         ) | {"cmd": "orch-followup"}
+    if low.startswith("followup-exec ") or low.startswith("followup-run "):
+        return parse_request_lane_args(
+            norm.split(" ", 1)[1].strip(),
+            usage="usage: followup-exec <request_or_alias> [lane <L#|R#,...>]",
+        ) | {"cmd": "orch-followup-exec"}
     if low.startswith("동기화 "):
         return {"cmd": "sync", "rest": norm.split(" ", 1)[1].strip()}
 
@@ -748,6 +753,11 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
             return {"cmd": "replay", "target": f"show {argv[1].strip()}"}
         raise RuntimeError("usage: aoe replay [list|latest|<idx>|<id>|show <idx|id|latest>|purge]")
 
+    if cmd == "history":
+        if len(argv) == 0:
+            raise RuntimeError("usage: aoe history search <query> [--project O#|name] [--since 12h] [--limit N] [--scope control|runtime|task|dashboard|recovery|all]")
+        return {"cmd": "history", "rest": " ".join(str(item).strip() for item in argv if str(item).strip())}
+
     if cmd == "retry":
         if len(argv) == 0:
             raise RuntimeError("usage: aoe retry <request_or_alias> [lane <L#|R#,...>]")
@@ -774,6 +784,15 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
             usage="usage: aoe followup <request_or_alias> [lane <L#|R#,...>]",
         )
         return {"cmd": "orch-followup", "request_id": parsed["request_id"], "lane_ids": parsed["lane_ids"]}
+
+    if cmd in {"followup-exec", "followup-run"}:
+        if len(argv) == 0:
+            raise RuntimeError("usage: aoe followup-exec <request_or_alias> [lane <L#|R#,...>]")
+        parsed = parse_request_lane_args(
+            " ".join(str(item).strip() for item in argv if str(item).strip()),
+            usage="usage: aoe followup-exec <request_or_alias> [lane <L#|R#,...>]",
+        )
+        return {"cmd": "orch-followup-exec", "request_id": parsed["request_id"], "lane_ids": parsed["lane_ids"]}
 
     if cmd == "request":
         if len(argv) != 1:
@@ -999,6 +1018,367 @@ def parse_cli_message(text: str) -> Optional[Dict[str, Any]]:
                     orch_name = tok.strip()
                 i += 1
             return {"cmd": "orch-status", "orch": orch_name}
+
+        if sub in {"bgq-clean", "queue-clean", "cleanup-queue"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgq-clean [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgq-clean [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgq-clean", "orch": orch_name}
+
+        if sub in {"bgw-status", "worker-status"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-status [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-status [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-status", "orch": orch_name}
+
+        if sub in {"bgw-ping", "worker-ping"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-ping [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-ping [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-ping", "orch": orch_name}
+
+        if sub in {"bgw-task", "worker-task"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-task [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-task [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-task", "orch": orch_name}
+
+        if sub in {"bgx-status", "external-status", "background-external-status"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-status [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgx-status [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-status", "orch": orch_name}
+
+        if sub in {"bgx-handoff", "external-handoff", "background-external-handoff"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-handoff [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgx-handoff [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-handoff", "orch": orch_name}
+
+        if sub in {"bgx-ack", "external-ack", "background-external-ack"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-ack [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgx-ack [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-ack", "orch": orch_name}
+
+        if sub in {"bgx-result", "external-result", "background-external-result"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-result [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgx-result [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-result", "orch": orch_name}
+
+        if sub in {"bgx-emit-ack", "external-emit-ack", "background-external-emit-ack"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-emit-ack [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgx-emit-ack [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-emit-ack", "orch": orch_name}
+
+        if sub in {"bgx-emit-result", "external-emit-result", "background-external-emit-result"}:
+            orch_name: Optional[str] = None
+            result_status = "completed"
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgx-emit-result [--orch <name>] [completed|failed]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    token = tok.strip().lower()
+                    if token in {"completed", "failed"}:
+                        result_status = token
+                    else:
+                        if orch_name is not None:
+                            raise RuntimeError("usage: aoe orch bgx-emit-result [--orch <name>] [completed|failed]")
+                        orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgx-emit-result", "orch": orch_name, "rest": result_status}
+
+        if sub in {"model-ping", "model-invoke"}:
+            orch_name: Optional[str] = None
+            model_kind: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch model-ping [--orch <name>] <research|judge|escalation>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    lowered = tok.strip().lower()
+                    if lowered in {"research", "judge", "escalation"}:
+                        model_kind = lowered
+                    else:
+                        if orch_name is not None:
+                            raise RuntimeError("usage: aoe orch model-ping [--orch <name>] <research|judge|escalation>")
+                        orch_name = tok.strip()
+                i += 1
+            if not orch_name or not model_kind:
+                raise RuntimeError("usage: aoe orch model-ping [--orch <name>] <research|judge|escalation>")
+            return {"cmd": "orch-model-ping", "orch": orch_name, "rest": model_kind}
+
+        if sub in {"judge", "review-judge"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch judge [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch judge [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            if not orch_name:
+                raise RuntimeError("usage: aoe orch judge [--orch <name>]")
+            return {"cmd": "orch-judge", "orch": orch_name}
+
+        if sub in {"bgw-start", "worker-start"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-start [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-start [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-start", "orch": orch_name}
+
+        if sub in {"bgw-stop", "worker-stop"}:
+            orch_name: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bgw-stop [--orch <name>]")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is not None:
+                        raise RuntimeError("usage: aoe orch bgw-stop [--orch <name>]")
+                    orch_name = tok.strip()
+                i += 1
+            return {"cmd": "orch-bgw-stop", "orch": orch_name}
+
+        if sub in {"bg-runner", "background-runner", "runner-target"}:
+            orch_name: Optional[str] = None
+            runner_target: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux|github_runner|remote_worker>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is None:
+                        orch_name = tok.strip()
+                    elif runner_target is None:
+                        runner_target = tok.strip().lower()
+                    else:
+                        raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux|github_runner|remote_worker>")
+                i += 1
+            if not orch_name or not runner_target:
+                raise RuntimeError("usage: aoe orch bg-runner [--orch <name>] <local_background|local_tmux|github_runner|remote_worker>")
+            return {"cmd": "orch-bg-runner", "orch": orch_name, "runner_target": runner_target}
+
+        if sub in {"run-lock", "execution-lock"}:
+            orch_name: Optional[str] = None
+            run_lock_mode: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is None:
+                        orch_name = tok.strip()
+                    elif run_lock_mode is None:
+                        run_lock_mode = tok.strip().lower()
+                    else:
+                        raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
+                i += 1
+            if not orch_name or not run_lock_mode:
+                raise RuntimeError("usage: aoe orch run-lock [--orch <name>] <open|test_only>")
+            return {"cmd": "orch-run-lock", "orch": orch_name, "run_lock_mode": run_lock_mode}
+
+        if sub in {"bg-slots", "background-slots"}:
+            orch_name: Optional[str] = None
+            slot_limit: Optional[str] = None
+            runner_target: Optional[str] = None
+            i = 0
+            while i < len(sub_argv):
+                tok = sub_argv[i]
+                if tok == "--orch":
+                    i += 1
+                    if i >= len(sub_argv):
+                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] [<local_tmux|github_runner|remote_worker>] <limit>")
+                    orch_name = sub_argv[i].strip()
+                elif tok.startswith("--"):
+                    raise RuntimeError(f"unknown option: {tok}")
+                else:
+                    if orch_name is None:
+                        orch_name = tok.strip()
+                    elif runner_target is None and tok.strip().lower() in {"local_tmux", "github_runner", "remote_worker"}:
+                        runner_target = tok.strip().lower()
+                    elif slot_limit is None:
+                        slot_limit = tok.strip()
+                    else:
+                        raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] [<local_tmux|github_runner|remote_worker>] <limit>")
+                i += 1
+            if not orch_name or not slot_limit:
+                raise RuntimeError("usage: aoe orch bg-slots [--orch <name>] [<local_tmux|github_runner|remote_worker>] <limit>")
+            payload = {"cmd": "orch-bg-slots", "orch": orch_name, "slot_limit": slot_limit}
+            if runner_target:
+                payload["runner_target"] = runner_target
+            return payload
 
         if sub in {"repair", "init", "fix"}:
             orch_name: Optional[str] = None

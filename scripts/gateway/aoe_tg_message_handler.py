@@ -8,6 +8,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from aoe_tg_deprecation import DeprecatedSurfaceMatch, render_deprecated_surface_message
+from aoe_tg_operator_summary import save_latest_command_resolution
+
 
 def handle_text_message(
     args: Any,
@@ -62,6 +65,7 @@ def handle_text_message(
         project: str = "",
         request_id: str = "",
         task: Optional[Dict[str, Any]] = None,
+        task_short_id: str = "",
         stage: str = "",
         status: str = "",
         error_code: str = "",
@@ -69,6 +73,9 @@ def handle_text_message(
     ) -> None:
         if args.dry_run:
             return
+        task_row = task
+        if (not isinstance(task_row, dict)) and str(task_short_id or "").strip():
+            task_row = {"short_id": str(task_short_id).strip()}
         deps["log_gateway_event"](
             team_dir=log_ctx["team_dir"],
             mirror_team_dir=root_log_team_dir,
@@ -76,7 +83,7 @@ def handle_text_message(
             trace_id=message_trace_id,
             project=project,
             request_id=request_id,
-            task=task,
+            task=task_row,
             stage=stage,
             actor=f"telegram:{chat_id}",
             status=status,
@@ -92,7 +99,7 @@ def handle_text_message(
                 event=event,
                 project=project,
                 request_id=request_id,
-                task=task,
+                task=task_row,
                 stage=stage,
                 status=status,
                 error_code=error_code,
@@ -197,6 +204,31 @@ def handle_text_message(
             )
             return
 
+        if resolved.cmd == "deprecated":
+            deprecated = DeprecatedSurfaceMatch(
+                code=str(resolved.deprecated_code or "").strip() or "deprecated_surface.unknown",
+                surface=str(resolved.deprecated_surface or text_preview).strip() or text_preview,
+                replacement=str(resolved.deprecated_replacement or "").strip() or "/help",
+                note=str(resolved.deprecated_note or "").strip() or "Use the canonical replacement surface instead.",
+                next_step=str(resolved.deprecated_next_step or "").strip(),
+            )
+            send(
+                render_deprecated_surface_message(deprecated),
+                context="deprecated-surface",
+                with_menu=True,
+            )
+            log_event(
+                event="deprecated_surface",
+                stage="intake",
+                status="redirected",
+                detail=(
+                    f"code={deprecated.code} "
+                    f"surface={deprecated.surface[:120]} "
+                    f"replacement={deprecated.replacement}"
+                ),
+            )
+            return
+
         cmd_key = resolved.cmd or "run-default"
         if cmd_key == "replay":
             replay_scope = str(resolved.rest or "").strip().lower()
@@ -205,7 +237,32 @@ def handle_text_message(
                 cmd_key = "replay-read"
             else:
                 cmd_key = "replay-write"
-        log_event(event="command_resolved", stage="intake", status="accepted", detail=f"cmd={cmd_key}")
+        detail_parts = [f"cmd={cmd_key}"]
+        if str(resolved.intent_action or "").strip():
+            detail_parts.append(f"action={str(resolved.intent_action).strip()}")
+        if str(resolved.intent_class or "").strip():
+            detail_parts.append(f"class={str(resolved.intent_class).strip()}")
+        if str(resolved.intent_trace or "").strip():
+            detail_parts.append(f"trace={str(resolved.intent_trace).strip()[:240]}")
+        log_event(
+            event="command_resolved",
+            stage="intake",
+            status="accepted",
+            detail=" ".join(part for part in detail_parts if part),
+        )
+        if not args.dry_run:
+            try:
+                save_latest_command_resolution(
+                    default_log_team_dir,
+                    mirror_team_dir=root_log_team_dir,
+                    command=cmd_key,
+                    action=resolved.intent_action,
+                    intent_class=resolved.intent_class,
+                    trace=resolved.intent_trace,
+                    recorded_at=deps["now_iso"]() if callable(deps.get("now_iso")) else "",
+                )
+            except Exception:
+                pass
 
         chat_role = deps["resolve_chat_role"](chat_id, args)
         if deps["enforce_command_auth"](
@@ -379,6 +436,10 @@ def handle_text_message(
             run_auto_source=resolved.run_auto_source,
             run_control_mode=run_transition.run_control_mode,
             run_source_request_id=run_transition.run_source_request_id,
+            run_intent_command=str(resolved.cmd or cmd_key).strip(),
+            run_intent_action=resolved.intent_action,
+            run_intent_class=resolved.intent_class,
+            run_intent_trace=resolved.intent_trace,
             run_source_task=run_transition.run_source_task,
             run_selected_execution_lane_ids=run_transition.run_selected_execution_lane_ids,
             run_selected_review_lane_ids=run_transition.run_selected_review_lane_ids,

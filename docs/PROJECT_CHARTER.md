@@ -7,12 +7,13 @@
 - 이 프로젝트의 목적은 `AOE 기반 멀티 에이전트 팀 운영`을 실무형 워크플로로 고도화하는 것이다.
 - 사용자는 오직 Orchestrator와만 대화하고, 실행/검증은 역할별 Sub-session이 분담한다.
 - 핵심 문제는 장기 대화에서 컨텍스트가 비대해지는 점이며, 이를 태스크 단위 세션 분리로 해결한다.
+- 공식 운영 계층은 `Control Plane` -> `Project Runtime` -> `Task Team`이다.
 
 ## 2. Objectives
-- Telegram 자연어 인터페이스로 프로젝트별 Orch를 원격 제어한다.
-- Orch는 계획, 배정, 수합, 완료 판단만 수행한다.
+- Telegram 자연어 인터페이스로 프로젝트별 `Project Runtime`을 원격 제어한다.
+- `Project Runtime`은 계획, 배정, 수합, 완료 판단만 수행한다.
 - DataEngineer/Codex-Reviewer 등 역할 세션은 실행과 검증을 분리 수행한다.
-- 태스크 완료 시 서브세션은 종료하고 산출물/증거만 Orch에 귀속한다.
+- 태스크 완료 시 서브세션은 종료하고 산출물/증거만 `Project Runtime`에 귀속한다.
 
 ## 3. Non-Goals
 - 단일 장수명 세션에 모든 작업을 누적하는 방식은 목표가 아니다.
@@ -27,15 +28,16 @@
 
 ## 5. Scope
 - In scope:
-- Telegram gateway, Orch task lifecycle, role-based worker dispatch, 모니터링/별칭 UX
+- Telegram gateway, `Project Runtime` task lifecycle, role-based worker dispatch, 모니터링/별칭 UX
 - Out of scope:
 - GUI 대시보드 대체, 외부 SaaS 의존 강제, 업스트림 전체 기능 재설계
 
 ## 6. Operating Model
-- 사용자 -> Telegram -> Orch
-- Orch -> Sub-session dispatch (필요시에만 fan-out)
+- 사용자 -> Telegram -> `Control Plane`
+- `Control Plane` -> `Project Runtime`
+- `Project Runtime` -> Sub-session dispatch (필요시에만 fan-out)
 - Sub-session -> 결과/근거 회신
-- Orch -> 통합 응답 + 상태 종료
+- `Project Runtime` -> 통합 응답 + 상태 종료
 
 ## 7. Decision Records
 - 주요 구조 변경은 `docs/` 아래 ADR 또는 changelog 형태로 남긴다.

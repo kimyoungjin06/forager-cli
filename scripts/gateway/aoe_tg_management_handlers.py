@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import aoe_tg_management_acl as mgmt_acl_mod
 import aoe_tg_management_chat as mgmt_chat_mod
+import aoe_tg_history_search as history_search_mod
 from aoe_tg_ops_view import (
     blocked_bucket_count as ops_view_blocked_bucket_count,
     blocked_head_summary as ops_view_blocked_head_summary,
@@ -227,7 +228,7 @@ def _tutorial_text(*, lang: str) -> str:
             "3) Lock the active project (recommended before work)\n"
             f"- {p}use O2\n"
             f"- {p}focus O2   # hard lock (recommended)\n"
-            "- after /use, plain text and TF commands target that project by default\n"
+            "- after /use, plain text and Task Team commands target that project by default\n"
             "- after /focus, global wave commands are blocked or narrowed to that project\n"
             "- if /map shows [UNREADY], run /orch repair O2 before sync/next\n"
             "\n"
@@ -239,7 +240,7 @@ def _tutorial_text(*, lang: str) -> str:
             "5) Run\n"
             f"- {p}next     # run one in the active project\n"
             f"- {p}fanout   # global one-per-project wave\n"
-            f"- {p}todo proposals   # TF-generated follow-up inbox\n"
+            f"- {p}todo proposals   # Task Team-generated follow-up inbox\n"
             f"- {p}todo accept PROP-001 | {p}todo reject PROP-001\n"
             "\n"
             "6) After-work mode\n"
@@ -269,7 +270,7 @@ def _tutorial_text(*, lang: str) -> str:
         "3) 작업할 프로젝트 고정(권장)\n"
         f"- {p}use O2\n"
         f"- {p}focus O2   # hard lock (권장)\n"
-        "- /use 이후 평문/TF 명령은 해당 프로젝트를 기본 타겟으로 사용\n"
+        "- /use 이후 평문/Task Team 명령은 해당 프로젝트를 기본 타겟으로 사용\n"
         "- /focus 이후 전역 wave 명령은 차단되거나 해당 프로젝트로 축소됨\n"
         "- /map 에 [UNREADY]가 보이면 /orch repair O2 후에 sync/next 진행\n"
         "\n"
@@ -281,7 +282,7 @@ def _tutorial_text(*, lang: str) -> str:
         "5) 실행\n"
         f"- {p}next     # active 프로젝트에서 하나 실행\n"
         f"- {p}fanout   # 프로젝트별 1개씩 global wave\n"
-        f"- {p}todo proposals   # TF가 만든 follow-up inbox 확인\n"
+        f"- {p}todo proposals   # Task Team이 만든 follow-up inbox 확인\n"
         f"- {p}todo accept PROP-001 | {p}todo reject PROP-001\n"
         "\n"
         "6) 퇴근 모드(off-desk)\n"
@@ -570,7 +571,7 @@ def handle_management_command(
             send(
                 "cleared\n"
                 "- scope: queue\n"
-                f"- orch: {key}\n"
+                f"- runtime: {key}\n"
                 f"- mode: {mode}\n"
                 f"- removed: {removed}\n"
                 f"- remaining: {len(keep)}",
@@ -677,6 +678,18 @@ def handle_management_command(
             default_offdesk_report_level=DEFAULT_OFFDESK_REPORT_LEVEL,
             default_offdesk_room=DEFAULT_OFFDESK_ROOM,
         )
+
+    if cmd == "history":
+        send(
+            history_search_mod.render_history_search(
+                team_dir=Path(str(getattr(args, "team_dir", ""))).expanduser().resolve(),
+                manager_state=manager_state,
+                rest=rest,
+            ),
+            context="history-search",
+            with_menu=True,
+        )
+        return True
 
     if cmd in {"mode", "lang", "report", "quick-dispatch", "quick-direct", "cancel-pending"}:
         return mgmt_chat_mod.handle_chat_management_command(

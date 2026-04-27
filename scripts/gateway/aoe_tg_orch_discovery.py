@@ -3,7 +3,7 @@
 
 Goal
 - When the user already uses `aoe` (Agent of Empires) to manage local sessions,
-  the Telegram Mother-Orch should not require manual `/orch add ...` for every
+  the Telegram Control Plane should not require manual `/orch add ...` for every
   project. We can derive project roots from `aoe list --json --all`.
 
 Heuristics

@@ -114,6 +114,16 @@ def test_normalize_tf_plan_applies_build_quality_defaults() -> None:
     assert plan["meta"]["phase2_team_spec"]["integration_role"] == "Codex-Dev"
 
 
+def test_preset_completion_contract_returns_matrix_defaults() -> None:
+    contract = mod.preset_completion_contract("mixed")
+
+    assert contract["preset"] == "mixed"
+    assert "execution/review split integrity" in contract["focus"]
+    assert "work artifact and handoff/review evidence" in contract["done_when"]
+    assert "work lane is incomplete" in contract["rerun_when"]
+    assert "operator must arbitrate" in contract["manual_followup_when"]
+
+
 def test_normalize_phase2_team_spec_builds_parallel_execution_and_review_groups() -> None:
     spec = mod.normalize_phase2_team_spec(
         None,
@@ -171,6 +181,28 @@ def test_normalize_phase2_team_spec_expands_claude_companion_execution_and_revie
     assert "Claude-Writer" in spec["team_roles"]
     assert "Claude-Analyst" in spec["team_roles"]
     assert "Claude-Reviewer" in spec["team_roles"]
+
+
+def test_normalize_phase2_team_spec_review_preset_keeps_single_execution_owner() -> None:
+    spec = mod.normalize_phase2_team_spec(
+        None,
+        plan={
+            "summary": "review only",
+            "meta": {"phase2_team_preset": "review"},
+            "subtasks": [
+                {"id": "S1", "title": "Scope diff", "goal": "pick canonical diff range", "owner_role": "Codex-Reviewer"},
+                {"id": "S2", "title": "Write report", "goal": "summarize findings", "owner_role": "Codex-Reviewer"},
+            ],
+        },
+        roles=["Codex-Reviewer", "Claude-Reviewer"],
+        verifier_roles=["Codex-Reviewer", "Claude-Reviewer"],
+        require_verifier=True,
+    )
+
+    assert [row["role"] for row in spec["execution_groups"]] == ["Codex-Reviewer"]
+    assert spec["execution_mode"] == "single"
+    assert [row["role"] for row in spec["review_groups"]] == ["Codex-Reviewer", "Claude-Reviewer"]
+    assert spec["review_mode"] == "parallel"
 
 
 def test_normalize_tf_verdict_coerces_retry_and_manual_followup() -> None:
@@ -239,7 +271,7 @@ def test_orch_runtime_event_schema_wraps_backend_neutral_contract() -> None:
     schema = mod.orch_runtime_event_schema()
     assert schema["contract"] == "orch.runtime_event.v1"
     assert "required_fields" in schema
-    assert "runtime event contract is shared by local and experimental TF backends" in schema["notes"]
+    assert "runtime event contract is shared by local and experimental Task Team backends" in schema["notes"]
 
 
 def test_derive_tf_phase_prefers_planning_block_then_retry_then_completed() -> None:
@@ -281,3 +313,26 @@ def test_derive_tf_phase_reason_uses_gate_then_exec_then_stage_failure() -> None
     )
     assert mod.derive_tf_phase_reason({"exec_critic": {"reason": "need evidence"}}) == "need evidence"
     assert mod.derive_tf_phase_reason({"stages": {"verification": "failed"}}) == "verification failed"
+
+
+def test_derive_tf_phase_uses_stalled_convergence_as_manual_intervention() -> None:
+    stalled = mod.derive_tf_phase(
+        {
+            "status": "failed",
+            "stages": {"planning": "done", "execution": "pending"},
+            "plan_convergence_status": "stalled",
+            "plan_stalled_reason": "repeated acceptance gap",
+            "plan_gate_reason": "repeated acceptance gap",
+        }
+    )
+    assert stalled == "manual_intervention"
+    assert (
+        mod.derive_tf_phase_reason(
+            {
+                "plan_convergence_status": "stalled",
+                "plan_stalled_reason": "repeated acceptance gap",
+                "plan_gate_reason": "repeated acceptance gap",
+            }
+        )
+        == "repeated acceptance gap"
+    )

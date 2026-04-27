@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""External background runner handoff helpers."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Callable, Dict, List
+from urllib.parse import quote
+
+import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
+from aoe_tg_action_audit import append_action_audit_row
+from aoe_tg_artifact_backend import artifact_backend, load_json_file
+from aoe_tg_background_runs import (
+    advance_background_run_ticket,
+    claim_background_run_ticket,
+    list_background_run_tickets,
+    upsert_background_run_ticket,
+)
+from aoe_tg_request_contract import normalize_background_launch_spec_snapshot
+
+
+def _trim(raw: Any, limit: int) -> str:
+    return str(raw or "").strip()[: max(0, int(limit))]
+
+
+def external_background_handoff_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
+    return artifact_backend(team_dir).external_background_handoff_path(ticket_id=ticket_id, runner_target=runner_target)
+
+
+def external_background_result_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
+    return artifact_backend(team_dir).external_background_result_path(ticket_id=ticket_id, runner_target=runner_target)
+
+
+def external_background_ack_path(team_dir: Path, ticket_id: str, runner_target: str) -> Path:
+    return artifact_backend(team_dir).external_background_ack_path(ticket_id=ticket_id, runner_target=runner_target)
+
+
+def _artifact_path_for_team(team_dir: Path, artifact_path: Path) -> str:
+    return artifact_backend(team_dir).relative_artifact_path(artifact_path)
+def _append_external_background_audit(
+    *,
+    team_dir: Path,
+    ticket: Dict[str, Any],
+    runner_target: str,
+    phase: str,
+    note: str,
+    source_command: str,
+    outcome_reason_code: str,
+    next_step: str,
+    remediation: str,
+    at: str,
+) -> bool:
+    request_id = _trim(ticket.get("request_id", ""), 96)
+    link_href = f"/control/tasks/by-request/{quote(request_id, safe='')}" if request_id else "-"
+    link_label = "task detail" if request_id else "runtime detail"
+    label = request_id or _trim(ticket.get("ticket_id", ""), 96) or "-"
+    return append_action_audit_row(
+        str(team_dir),
+        headline=f"External Background {phase} | {label}",
+        status="updated",
+        outcome_kind="background_external",
+        outcome_status="updated",
+        outcome_reason_code=outcome_reason_code,
+        outcome_detail=note,
+        next_step=next_step,
+        remediation=remediation,
+        source_command=source_command,
+        link_label=link_label,
+        link_href=link_href,
+        at=at,
+    )
+
+
+def read_external_background_result(result_path: Path) -> Dict[str, Any]:
+    if not result_path.exists():
+        return {}
+    raw = load_json_file(result_path)
+    if not isinstance(raw, dict):
+        return {}
+    status = _trim(raw.get("status", ""), 32).lower()
+    if status not in {"completed", "failed"}:
+        return {}
+    evidence_artifacts = [
+        _trim(item, 240)
+        for item in list(raw.get("evidence_artifacts") or [])
+        if _trim(item, 240)
+    ]
+    return {
+        "ticket_id": _trim(raw.get("ticket_id", ""), 96),
+        "status": status,
+        "reason": _trim(raw.get("reason", ""), 160),
+        "summary": _trim(raw.get("summary", ""), 240),
+        "evidence_bundle": _trim(raw.get("evidence_bundle", ""), 320),
+        "evidence_artifacts": evidence_artifacts,
+    }
+
+
+def read_external_background_ack(ack_path: Path) -> Dict[str, Any]:
+    if not ack_path.exists():
+        return {}
+    raw = load_json_file(ack_path)
+    if not isinstance(raw, dict):
+        return {}
+    status = _trim(raw.get("status", ""), 32).lower()
+    if status not in {"claimed", "running", "acknowledged"}:
+        status = "acknowledged"
+    evidence_artifacts = [
+        _trim(item, 240)
+        for item in list(raw.get("evidence_artifacts") or [])
+        if _trim(item, 240)
+    ]
+    return {
+        "ticket_id": _trim(raw.get("ticket_id", ""), 96),
+        "status": status,
+        "worker_id": _trim(raw.get("worker_id", ""), 96),
+        "summary": _trim(raw.get("summary", ""), 240),
+        "evidence_artifacts": evidence_artifacts,
+    }
+
+
+def read_external_background_handoff(handoff_path: Path) -> Dict[str, Any]:
+    if not handoff_path.exists():
+        return {}
+    raw = load_json_file(handoff_path)
+    if not isinstance(raw, dict):
+        return {}
+    launch_spec = normalize_background_launch_spec_snapshot(raw.get("launch_spec"))
+    task_runtime = raw.get("task_runtime") if isinstance(raw.get("task_runtime"), dict) else {}
+    return {
+        "ticket_id": _trim(raw.get("ticket_id", ""), 96),
+        "runner_target": _trim(raw.get("runner_target", ""), 64).lower(),
+        "request_id": _trim(raw.get("request_id", ""), 96),
+        "project_key": _trim(raw.get("project_key", ""), 64),
+        "launch_mode": _trim(raw.get("launch_mode", ""), 64),
+        "source_surface": _trim(raw.get("source_surface", ""), 64),
+        "created_by": _trim(raw.get("created_by", ""), 96),
+        "emitted_at": _trim(raw.get("emitted_at", ""), 64),
+        "execution_brief_status": _trim(task_runtime.get("execution_brief_status", ""), 48),
+        "launch_spec_summary": _trim(launch_spec.get("summary", ""), 240),
+        "launch_spec_mode": _trim(launch_spec.get("mode", ""), 64),
+    }
+
+
+def emit_external_background_handoff(
+    *,
+    queue_path: Path,
+    ticket_id: str,
+    runner_target: str,
+    now_iso: Callable[[], str],
+    claimed_by: str = "",
+    source_surface: str = "",
+    launch_mode: str = "offdesk_manual",
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = _trim(runner_target, 64).lower()
+    if not token or target not in {"github_runner", "remote_worker"}:
+        return {}
+
+    claimed = claim_background_run_ticket(
+        queue_path,
+        token,
+        now_iso=now_iso,
+        runner_target=target,
+        launch_mode=launch_mode,
+        claimed_by=claimed_by,
+        source_surface=source_surface,
+    )
+    if not claimed or str(claimed.get("status", "")).strip().lower() != "dispatching":
+        return claimed
+
+    team_dir = queue_path.parent
+    launch_spec = normalize_background_launch_spec_snapshot(claimed.get("launch_spec"))
+    worker_probe = model_endpoint_adapter.probe_background_ticket_worker_binding(team_dir, claimed)
+    binding = worker_probe.get("binding") if isinstance(worker_probe.get("binding"), dict) else {}
+    binding_summary = _trim(binding.get("summary", ""), 240) if binding.get("bound") else ""
+    probe_status = _trim(worker_probe.get("probe_status", ""), 64)
+    probe_summary = _trim(worker_probe.get("summary", ""), 240)
+    if binding_summary:
+        launch_spec["model_worker_binding_summary"] = binding_summary
+    if probe_status:
+        launch_spec["model_worker_probe_status"] = probe_status
+    if probe_summary:
+        launch_spec["model_worker_probe_summary"] = probe_summary
+    claimed["launch_spec"] = launch_spec
+    claimed = upsert_background_run_ticket(queue_path, claimed, now_iso=now_iso) or claimed
+    if binding.get("bound") and (not bool(worker_probe.get("ok"))):
+        return advance_background_run_ticket(
+            queue_path,
+            token,
+            now_iso=now_iso,
+            status="failed",
+            runner_target=target,
+            launch_mode=launch_mode,
+            created_by=claimed_by,
+            source_surface=source_surface,
+            evidence_bundle=f"status=failed | reason=model_route_probe_failed | probe={probe_status or 'failed'}",
+        )
+
+    backend = artifact_backend(team_dir)
+    handoff_path = external_background_handoff_path(team_dir, token, target)
+    handoff_payload = {
+        "version": "2026-04-07.v1",
+        "emitted_at": now_iso(),
+        "runner_target": target,
+        "ticket_id": token,
+        "request_id": _trim(claimed.get("request_id", ""), 96),
+        "project_key": _trim(claimed.get("project_key", ""), 64),
+        "launch_mode": _trim(launch_mode or claimed.get("launch_mode", ""), 64),
+        "source_surface": _trim(source_surface or claimed.get("source_surface", ""), 64),
+        "created_by": _trim(claimed_by or claimed.get("created_by", ""), 96),
+        "launch_spec": launch_spec,
+        "task_runtime": {
+            "execution_brief_status": _trim(claimed.get("execution_brief_status", ""), 48),
+        },
+    }
+    backend.write_external_background_artifact(
+        kind="handoffs",
+        ticket_id=token,
+        runner_target=target,
+        payload=handoff_payload,
+    )
+    handoff_artifact = _artifact_path_for_team(team_dir, handoff_path)
+    runtime_summary = f"{target}_handoff={handoff_artifact}"
+    if binding_summary:
+        runtime_summary += f" | worker={binding_summary}"
+    if probe_status and probe_status != "unbound":
+        runtime_summary += f" | probe={probe_status}"
+    evidence_bundle = f"status=running | outcome=external_handoff_emitted | handoff={handoff_artifact}"
+    if probe_status and probe_status != "unbound":
+        evidence_bundle += f" | worker_probe={probe_status}"
+    return advance_background_run_ticket(
+        queue_path,
+        token,
+        now_iso=now_iso,
+        status="running",
+        runner_target=target,
+        launch_mode=launch_mode,
+        created_by=claimed_by,
+        source_surface=source_surface,
+        runtime_handle=handoff_artifact,
+        runtime_summary=runtime_summary,
+        evidence_bundle=evidence_bundle,
+        evidence_artifacts=[handoff_artifact],
+    )
+
+
+def emit_external_background_ack(
+    *,
+    queue_path: Path,
+    ticket_id: str,
+    runner_target: str,
+    now_iso: Callable[[], str],
+    worker_id: str = "",
+    summary: str = "",
+    evidence_artifacts: List[str] | None = None,
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = _trim(runner_target, 64).lower()
+    if not token or target not in {"github_runner", "remote_worker"}:
+        return {}
+    team_dir = queue_path.parent
+    backend = artifact_backend(team_dir)
+    ack_path = external_background_ack_path(team_dir, token, target)
+    payload = {
+        "version": "2026-04-08.v1",
+        "ticket_id": token,
+        "status": "acknowledged",
+        "worker_id": _trim(worker_id, 96) or f"test-harness:{target}",
+        "summary": _trim(summary, 240) or "test_only harness emitted external pickup acknowledgement",
+        "evidence_artifacts": [_trim(item, 240) for item in list(evidence_artifacts or []) if _trim(item, 240)],
+        "emitted_at": now_iso(),
+    }
+    backend.write_external_background_artifact(
+        kind="acks",
+        ticket_id=token,
+        runner_target=target,
+        payload=payload,
+    )
+    return {
+        "artifact_path": _artifact_path_for_team(team_dir, ack_path),
+        "payload": payload,
+    }
+
+
+def emit_external_background_result(
+    *,
+    queue_path: Path,
+    ticket_id: str,
+    runner_target: str,
+    now_iso: Callable[[], str],
+    status: str = "completed",
+    reason: str = "",
+    summary: str = "",
+    evidence_bundle: str = "",
+    evidence_artifacts: List[str] | None = None,
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = _trim(runner_target, 64).lower()
+    terminal_status = _trim(status, 32).lower()
+    if not token or target not in {"github_runner", "remote_worker"} or terminal_status not in {"completed", "failed"}:
+        return {}
+    team_dir = queue_path.parent
+    backend = artifact_backend(team_dir)
+    result_path = external_background_result_path(team_dir, token, target)
+    payload = {
+        "version": "2026-04-08.v1",
+        "ticket_id": token,
+        "status": terminal_status,
+        "reason": _trim(reason, 160) or ("test_only_external_result" if terminal_status == "completed" else "test_only_external_failure"),
+        "summary": _trim(summary, 240)
+        or (
+            "test_only harness emitted external completion result"
+            if terminal_status == "completed"
+            else "test_only harness emitted external failure result"
+        ),
+        "evidence_bundle": _trim(evidence_bundle, 320)
+        or (
+            f"status={terminal_status} | outcome=test_only_external_result"
+            if terminal_status == "completed"
+            else f"status={terminal_status} | outcome=test_only_external_failure"
+        ),
+        "evidence_artifacts": [_trim(item, 240) for item in list(evidence_artifacts or []) if _trim(item, 240)],
+        "emitted_at": now_iso(),
+    }
+    backend.write_external_background_artifact(
+        kind="results",
+        ticket_id=token,
+        runner_target=target,
+        payload=payload,
+    )
+    return {
+        "artifact_path": _artifact_path_for_team(team_dir, result_path),
+        "payload": payload,
+    }
+
+
+def poll_external_background_tickets(
+    *,
+    queue_path: Path,
+    now_iso: Callable[[], str],
+    ack_source_command: str = "",
+    result_source_command: str = "",
+) -> Dict[str, Any]:
+    team_dir = queue_path.parent
+    acknowledged: List[str] = []
+    completed: List[str] = []
+    failed: List[str] = []
+    changed = False
+    for runner_target in ("github_runner", "remote_worker"):
+        for row in list_background_run_tickets(queue_path, statuses=["running"], runner_target=runner_target):
+            ticket_id = _trim(row.get("ticket_id", ""), 96)
+            if not ticket_id:
+                continue
+            ack_path = external_background_ack_path(team_dir, ticket_id, runner_target)
+            result_path = external_background_result_path(team_dir, ticket_id, runner_target)
+            ack = read_external_background_ack(ack_path)
+            result = read_external_background_result(result_path)
+            runtime_handle = _trim(row.get("runtime_handle", ""), 240)
+            if not result:
+                if ack:
+                    evidence_artifacts = list(row.get("evidence_artifacts") or [])
+                    ack_rel = _artifact_path_for_team(team_dir, ack_path)
+                    if ack_rel and ack_rel not in evidence_artifacts:
+                        evidence_artifacts.append(ack_rel)
+                    for rel_path in list(ack.get("evidence_artifacts") or []):
+                        token = _trim(rel_path, 240)
+                        if token and token not in evidence_artifacts:
+                            evidence_artifacts.append(token)
+                    current_bundle = _trim(row.get("evidence_bundle", ""), 320)
+                    already_acked = "external_pickup_acknowledged" in current_bundle and (not ack_rel or ack_rel in evidence_artifacts)
+                    if not already_acked:
+                        summary = _trim(ack.get("summary", ""), 160)
+                        worker_id = _trim(ack.get("worker_id", ""), 96)
+                        runtime_summary = str(row.get("runtime_summary", "")).strip() or f"{runner_target}_handoff={runtime_handle}"
+                        if ack_rel and f"ack={ack_rel}" not in runtime_summary:
+                            runtime_summary = f"{runtime_summary} | ack={ack_rel}"
+                        evidence_bundle = f"status=running | outcome=external_pickup_acknowledged | ack={ack_rel or '-'}"
+                        if worker_id:
+                            evidence_bundle += f" | worker={worker_id}"
+                        if summary:
+                            evidence_bundle += f" | summary={summary}"
+                        advanced = advance_background_run_ticket(
+                            queue_path,
+                            ticket_id,
+                            now_iso=now_iso,
+                            status="running",
+                            runner_target=runner_target,
+                            runtime_handle=runtime_handle,
+                            runtime_summary=runtime_summary,
+                            evidence_bundle=evidence_bundle,
+                            evidence_artifacts=evidence_artifacts,
+                        )
+                        if advanced:
+                            changed = True
+                            acknowledged.append(ticket_id)
+                            _append_external_background_audit(
+                                team_dir=team_dir,
+                                ticket={**row, **advanced},
+                                runner_target=runner_target,
+                                phase="Pickup Ack",
+                                note=ack_rel or summary or worker_id or ticket_id,
+                                source_command=ack_source_command or f"/external ack {runner_target} {ticket_id}",
+                                outcome_reason_code="external_pickup_acknowledged",
+                                next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
+                                remediation=(
+                                    f"{runner_target} picked up the background run; wait for the result sidecar before taking the next operator action"
+                                ),
+                                at=now_iso(),
+                            )
+                continue
+            evidence_artifacts = list(row.get("evidence_artifacts") or [])
+            for artifact_path in (ack_path,):
+                rel_path = _artifact_path_for_team(team_dir, artifact_path)
+                if ack and rel_path and rel_path not in evidence_artifacts:
+                    evidence_artifacts.append(rel_path)
+            for artifact_path in (result_path,):
+                rel_path = _artifact_path_for_team(team_dir, artifact_path)
+                if rel_path and rel_path not in evidence_artifacts:
+                    evidence_artifacts.append(rel_path)
+            for rel_path in list(result.get("evidence_artifacts") or []):
+                token = _trim(rel_path, 240)
+                if token and token not in evidence_artifacts:
+                    evidence_artifacts.append(token)
+            status = str(result.get("status", "")).strip().lower()
+            if status not in {"completed", "failed"}:
+                continue
+            evidence_bundle = _trim(result.get("evidence_bundle", ""), 320)
+            if not evidence_bundle:
+                summary = _trim(result.get("summary", ""), 200)
+                reason = _trim(result.get("reason", ""), 160)
+                if status == "completed":
+                    evidence_bundle = (
+                        f"status=completed | outcome=external_result | runner={runner_target}"
+                        + (f" | summary={summary}" if summary else "")
+                    )
+                else:
+                    evidence_bundle = (
+                        f"status=failed | reason={reason or 'external_result_failed'} | runner={runner_target}"
+                        + (f" | summary={summary}" if summary else "")
+                    )
+            advanced = advance_background_run_ticket(
+                queue_path,
+                ticket_id,
+                now_iso=now_iso,
+                status=status,
+                runner_target=runner_target,
+                runtime_handle=runtime_handle,
+                runtime_summary=(str(row.get("runtime_summary", "")).strip() or f"{runner_target}_handoff={runtime_handle}"),
+                evidence_bundle=evidence_bundle,
+                evidence_artifacts=evidence_artifacts,
+            )
+            if advanced:
+                changed = True
+                if status == "completed":
+                    completed.append(ticket_id)
+                    _append_external_background_audit(
+                        team_dir=team_dir,
+                        ticket={**row, **advanced},
+                        runner_target=runner_target,
+                        phase="Result",
+                        note=evidence_bundle,
+                        source_command=result_source_command or f"/external result {runner_target} {ticket_id}",
+                        outcome_reason_code="external_result_completed",
+                        next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
+                        remediation="inspect the task detail and evidence bundle before issuing another rerun or follow-up action",
+                        at=now_iso(),
+                    )
+                else:
+                    failed.append(ticket_id)
+                    _append_external_background_audit(
+                        team_dir=team_dir,
+                        ticket={**row, **advanced},
+                        runner_target=runner_target,
+                        phase="Result",
+                        note=evidence_bundle,
+                        source_command=result_source_command or f"/external result {runner_target} {ticket_id}",
+                        outcome_reason_code="external_result_failed",
+                        next_step=f"/task {ticket_id if not _trim(row.get('request_id', ''), 96) else _trim(row.get('request_id', ''), 96)}",
+                        remediation="inspect the failed external result and evidence bundle before retrying or changing runner target",
+                        at=now_iso(),
+                    )
+    return {
+        "changed": changed,
+        "acknowledged_count": len(acknowledged),
+        "acknowledged_ticket_ids": acknowledged,
+        "completed_count": len(completed),
+        "failed_count": len(failed),
+        "completed_ticket_ids": completed,
+        "failed_ticket_ids": failed,
+    }

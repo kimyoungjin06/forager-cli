@@ -1,0 +1,268 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>{{ detail.project_alias }} {{ detail.project_label }}</h2>
+  <ul class="kv-list">
+    <li><span>runtime</span><strong>{{ detail.readiness }}</strong></li>
+    <li><span>status</span><strong>{{ detail.status }}</strong></li>
+    <li><span>attention</span><strong>{{ detail.attention_summary }}</strong></li>
+    <li><span>control_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
+    <li><span>first_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }} | next={{ detail.priority_action }}{% if detail.priority_reason and detail.priority_reason != '-' %} | {{ detail.priority_reason }}{% endif %}</strong></li>
+    {% if detail.next_focus %}<li><span>next_focus</span><strong>{{ detail.next_focus }}</strong></li>{% endif %}
+    <li><span>queue</span><strong>{{ detail.queue_summary }}</strong></li>
+    <li><span>proposals</span><strong>{{ detail.proposal_summary }}</strong></li>
+    <li><span>sync</span><strong>{{ detail.sync_summary }}</strong></li>
+    <li><span>provider_pressure</span><strong>{{ detail.provider_pressure_summary }}</strong></li>
+    <li><span>repeat_memory</span><strong>{{ detail.repeat_summary }}</strong></li>
+    <li><span>chat_console</span><strong><a href="{{ detail.chat_console_path }}">{{ detail.chat_console_label }}</a></strong></li>
+    <li><span>workspace</span><strong>{{ detail.workspace_summary }}</strong></li>
+    <li><span>document_registry</span><strong>{{ detail.document_registry_summary }}</strong></li>
+    <li><span>model_routing</span><strong>{{ detail.model_routing_summary }}</strong></li>
+    <li><span>model_registry</span><strong>{{ detail.model_registry_summary }}</strong></li>
+  </ul>
+  <details class="info-fold" open>
+    <summary>Decision Signals</summary>
+    <div class="fold-kv">
+      <ul class="kv-list">
+        <li><span>latest_judge</span><strong>{{ detail.latest_judge_summary }}</strong></li>
+        <li><span>latest_judge_decision</span><strong>{{ detail.latest_judge_decision_summary }}</strong></li>
+        <li><span>latest_judge_decision_bridge</span><strong>{{ detail.latest_judge_decision_bridge_summary }}</strong></li>
+        <li><span>replan_auto_decision</span><strong>{{ detail.latest_replan_auto_decision_summary }}</strong></li>
+        <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
+        <li><span>replan_auto_routing_policy</span><strong>{{ detail.latest_replan_auto_routing_policy_summary }}</strong></li>
+        <li><span>planning_handoff</span><strong>{{ detail.latest_planning_handoff_summary }}</strong></li>
+        <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
+        <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
+        <li><span>manual_step</span><strong>{{ detail.latest_manual_step_summary }}</strong></li>
+        <li><span>canonical_mutation</span><strong>{{ detail.latest_canonical_mutation_summary }}</strong></li>
+        <li><span>canonical_writeback</span><strong>{{ detail.latest_canonical_writeback_summary }}</strong></li>
+      </ul>
+    </div>
+  </details>
+  {% with
+    section_title='runtime_actions',
+    safe_hints=detail.runtime_command_hints,
+    safe_buttons=detail.runtime_safe_action_buttons,
+    phase2_hints=detail.runtime_phase2_action_hints,
+    phase2_buttons=detail.runtime_phase2_action_buttons
+  %}
+  {% include 'dashboard/_action_section.html' %}
+  {% endwith %}
+</section>
+
+{% if detail.active_task_label %}
+<section class="panel detail-hero">
+  <div class="detail-hero-header">
+    <div class="detail-hero-copy">
+      <p class="card-kicker">Runtime Detail</p>
+      <h2>Active Task</h2>
+      <p class="runtime-attention">{{ detail.project_alias }} {{ detail.project_label }} | {{ detail.active_task_label }} | {{ detail.active_task_status }}/{{ detail.active_task_phase }}</p>
+    </div>
+    <span class="status-pill">{{ detail.active_task_status }}</span>
+  </div>
+  <ul class="kv-list">
+    <li><span>task</span><strong><a href="{{ detail.active_task_path }}">{{ detail.active_task_label }}</a></strong></li>
+    <li><span>request_id</span><strong>{{ detail.active_task_request_id }}</strong></li>
+    <li><span>chat_console</span><strong><a href="{{ detail.chat_console_path }}">{{ detail.chat_console_label }}</a></strong></li>
+    <li><span>status</span><strong>{{ detail.active_task_status }}/{{ detail.active_task_phase }}</strong></li>
+    <li><span>preset</span><strong>{{ detail.active_task_preset }}</strong></li>
+    <li><span>phase2_shape</span><strong>{{ detail.active_task_phase2_shape }}</strong></li>
+    <li><span>phase2_quality</span><strong>{{ detail.active_task_phase2_quality }}</strong></li>
+    <li><span>execution_brief</span><strong>{{ detail.active_task_execution_brief_status }}</strong></li>
+    <li><span>brief_summary</span><strong>{{ detail.active_task_execution_brief_summary }}</strong></li>
+    <li><span>brief_do</span><strong>{{ detail.active_task_execution_brief_executable_slice }}</strong></li>
+    <li><span>brief_blocked</span><strong>{{ detail.active_task_execution_brief_blocked_slice }}</strong></li>
+    <li><span>brief_decision</span><strong>{{ detail.active_task_execution_brief_operator_decision }}</strong></li>
+    <li><span>job_contract</span><strong>{{ detail.active_task_job_contract_summary }}</strong></li>
+    <li><span>job_goal</span><strong>{{ detail.active_task_job_contract_goal }}</strong></li>
+    <li><span>job_scope</span><strong>{{ detail.active_task_job_contract_scope }}</strong></li>
+    <li><span>job_non_goals</span><strong>{{ detail.active_task_job_contract_non_goals }}</strong></li>
+    <li><span>job_acceptance</span><strong>{{ detail.active_task_job_contract_acceptance_checks }}</strong></li>
+    <li><span>job_artifacts</span><strong>{{ detail.active_task_job_contract_artifacts_to_touch }}</strong></li>
+    <li><span>job_rollback</span><strong>{{ detail.active_task_job_contract_rollback_hint }}</strong></li>
+    <li><span>planning_compact</span><strong>{{ detail.active_task_planning_compact_summary }}</strong></li>
+    <li><span>planning_lanes</span><strong>{{ detail.active_task_planning_lanes_summary }}</strong></li>
+    <li><span>approved_plan_gate</span><strong>{{ detail.active_task_approved_plan_gate_summary }}</strong></li>
+    <li><span>planner_lane</span><strong>{{ detail.active_task_planner_lane_summary }}</strong></li>
+    <li><span>critic_lane</span><strong>{{ detail.active_task_critic_lane_summary }}</strong></li>
+    <li><span>critic_review</span><strong>{{ detail.active_task_critic_review_summary }}</strong></li>
+    <li><span>critic_review_issues</span><strong>{{ detail.active_task_critic_review_blocking_issues }}</strong></li>
+    <li><span>critic_review_fixes</span><strong>{{ detail.active_task_critic_review_required_fixes }}</strong></li>
+    <li><span>approved_plan</span><strong>{{ detail.active_task_approved_plan_summary }}</strong></li>
+    <li><span>approved_plan_artifact</span><strong>{{ detail.active_task_approved_plan_artifact_rows }}</strong></li>
+    <li><span>debug_packet</span><strong>{{ detail.active_task_debug_packet_summary }}</strong></li>
+    <li><span>debug_symptom</span><strong>{{ detail.active_task_debug_packet_symptom }}</strong></li>
+    <li><span>debug_root</span><strong>{{ detail.active_task_debug_packet_root_cause }}</strong></li>
+    <li><span>debug_evidence</span><strong>{{ detail.active_task_debug_packet_evidence }}</strong></li>
+    <li><span>debug_attempt</span><strong>{{ detail.active_task_debug_packet_failed_attempt }}</strong></li>
+    <li><span>debug_next</span><strong>{{ detail.active_task_debug_packet_next_step }}</strong></li>
+    <li><span>phase_checkpoint</span><strong>{{ detail.active_task_phase_checkpoint_summary }}</strong></li>
+    <li><span>checkpoint_current</span><strong>{{ detail.active_task_phase_checkpoint_current_phase }}</strong></li>
+    <li><span>checkpoint_rows</span><strong>{{ detail.active_task_phase_checkpoint_rows }}</strong></li>
+    <li><span>followup_brief</span><strong>{{ detail.active_task_followup_brief_status }}</strong></li>
+    <li><span>followup_summary</span><strong>{{ detail.active_task_followup_brief_summary }}</strong></li>
+    <li><span>followup_exec_lanes</span><strong>{{ detail.active_task_followup_brief_execution_lanes }}</strong></li>
+    <li><span>followup_review_lanes</span><strong>{{ detail.active_task_followup_brief_review_lanes }}</strong></li>
+    <li><span>followup_reason</span><strong>{{ detail.active_task_followup_brief_reason }}</strong></li>
+    <li><span>context_pack</span><strong>{{ detail.active_task_context_pack_profile }}</strong></li>
+    <li><span>context_pack_summary</span><strong>{{ detail.active_task_context_pack_summary }}</strong></li>
+    <li><span>context_pack_docs</span><strong>{{ detail.active_task_context_pack_docs }}</strong></li>
+    <li><span>context_pack_excluded</span><strong>{{ detail.active_task_context_pack_excluded }}</strong></li>
+    <li><span>subagent_contract</span><strong>{{ detail.active_task_general_subagent_summary }}</strong></li>
+    <li><span>subagent_evidence</span><strong>{{ detail.active_task_general_subagent_artifact_summary }}</strong></li>
+    <li><span>subagent_artifact</span><strong>{{ detail.active_task_general_subagent_artifact_path }}</strong></li>
+    <li><span>model_plan</span><strong>{{ detail.active_task_model_plan_summary }}</strong></li>
+    <li><span>judge_binding</span><strong>{{ detail.active_task_judge_binding_summary }}</strong></li>
+    <li><span>judge_probe</span><strong>{{ detail.active_task_judge_probe_summary }}</strong></li>
+  </ul>
+  <details class="info-fold" open>
+    <summary>Decision Signals</summary>
+    <div class="fold-kv">
+      <ul class="kv-list">
+        <li><span>latest_judge</span><strong>{{ detail.latest_judge_summary }}</strong></li>
+        <li><span>latest_judge_decision</span><strong>{{ detail.latest_judge_decision_summary }}</strong></li>
+        <li><span>latest_judge_decision_bridge</span><strong>{{ detail.latest_judge_decision_bridge_summary }}</strong></li>
+        <li><span>replan_auto_decision</span><strong>{{ detail.latest_replan_auto_decision_summary }}</strong></li>
+        <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
+        <li><span>replan_auto_routing_policy</span><strong>{{ detail.latest_replan_auto_routing_policy_summary }}</strong></li>
+        <li><span>planning_handoff</span><strong>{{ detail.latest_planning_handoff_summary }}</strong></li>
+        <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
+        <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
+      </ul>
+    </div>
+  </details>
+  <details class="info-fold">
+    <summary>Execution Rails</summary>
+    <div class="fold-kv">
+      <ul class="kv-list">
+    <li><span>reentry_rails</span><strong>{{ detail.active_task_reentry_rails_summary }}</strong></li>
+    <li><span>background_run</span><strong>{{ detail.active_task_background_run_status }}</strong></li>
+    <li><span>runner_target</span><strong>{{ detail.active_task_background_run_runner_target }}</strong></li>
+    <li><span>background_ticket</span><strong>{{ detail.active_task_background_run_ticket_id }}</strong></li>
+    <li><span>launch_mode</span><strong>{{ detail.active_task_background_run_launch_mode }}</strong></li>
+    <li><span>runtime_handle</span><strong>{{ detail.active_task_background_run_runtime_handle }}</strong></li>
+    <li><span>runtime_summary</span><strong>{{ detail.active_task_background_run_runtime_summary }}</strong></li>
+    <li><span>background_external</span><strong>{{ detail.active_task_background_run_external_phase }}</strong></li>
+    <li><span>background_external_note</span><strong>{{ detail.active_task_background_run_external_note }}</strong></li>
+    <li><span>launch_spec</span><strong>{{ detail.active_task_background_run_launch_spec_summary }}</strong></li>
+    <li><span>background_task_contract</span><strong>{{ detail.active_task_background_run_task_contract_summary }}</strong></li>
+    <li><span>background_worker_module</span><strong>{{ detail.active_task_background_run_task_contract_module_summary }}</strong></li>
+    <li><span>background_worker_policy</span><strong>{{ detail.active_task_background_run_task_contract_policy_summary }}</strong></li>
+    <li><span>background_worker_gate</span><strong>{{ detail.active_task_background_run_worker_gate_summary }}</strong></li>
+    <li><span>background_worker_profile</span><strong>{{ detail.active_task_background_run_worker_profile_summary }}</strong></li>
+    <li><span>background_worker_checklist</span><strong>{{ detail.active_task_background_run_worker_checklist_summary }}</strong></li>
+    <li><span>background_worker_items</span><strong>{{ detail.active_task_background_run_worker_items_summary }}</strong></li>
+    <li><span>background_worker_item_tokens</span><strong>{{ detail.active_task_background_run_worker_items }}</strong></li>
+    <li><span>background_worker_item_classes</span><strong>{{ detail.active_task_background_run_worker_item_classes_summary }}</strong></li>
+    <li><span>background_worker_item_class_tokens</span><strong>{{ detail.active_task_background_run_worker_item_classes }}</strong></li>
+    <li><span>background_worker_records</span><strong>{{ detail.active_task_background_run_worker_records_summary }}</strong></li>
+    <li><span>background_worker_record_tokens</span><strong>{{ detail.active_task_background_run_worker_records }}</strong></li>
+    <li><span>background_worker_record_rows</span><strong>{{ detail.active_task_background_run_worker_record_rows_summary }}</strong></li>
+    <li><span>background_worker_record_row_tokens</span><strong>{{ detail.active_task_background_run_worker_record_rows }}</strong></li>
+    <li><span>background_worker_record_set</span><strong>{{ detail.active_task_background_run_worker_record_set_summary }}</strong></li>
+    <li><span>background_worker_record_set_tokens</span><strong>{{ detail.active_task_background_run_worker_record_set }}</strong></li>
+    <li><span>background_worker_preflight</span><strong>{{ detail.active_task_background_run_worker_preflight_summary }}</strong></li>
+    <li><span>background_worker_preflight_rows</span><strong>{{ detail.active_task_background_run_worker_preflight_rows_summary }}</strong></li>
+    <li><span>background_worker_preflight_row_tokens</span><strong>{{ detail.active_task_background_run_worker_preflight_rows }}</strong></li>
+    <li><span>background_worker_result</span><strong>{{ detail.active_task_background_run_worker_result_summary }}</strong></li>
+    <li><span>background_worker_actions</span><strong>{{ detail.active_task_background_run_worker_result_actions }}</strong></li>
+    <li><span>background_worker_cautions</span><strong>{{ detail.active_task_background_run_worker_result_cautions }}</strong></li>
+    <li><span>background_worker_refs</span><strong>{{ detail.active_task_background_run_worker_result_evidence_refs }}</strong></li>
+    <li><span>background_worker_update</span><strong>{{ detail.active_task_background_run_worker_update_operator_summary }}</strong></li>
+    <li><span>background_preference_artifact</span><strong>{{ detail.active_task_background_run_operator_preference_artifact_kind }}</strong></li>
+    <li><span>background_preference_preflight</span><strong>{{ detail.active_task_background_run_operator_preference_preflight_summary }}</strong></li>
+    <li><span>background_preference_applied</span><strong>{{ detail.active_task_background_run_operator_preference_applied_summary }}</strong></li>
+    <li><span>background_preference_candidates</span><strong>{{ detail.active_task_background_run_operator_preference_candidate_summary }}</strong></li>
+    <li><span>background_preference_confirm</span><strong>{{ detail.active_task_background_run_operator_preference_confirm_summary }}</strong></li>
+    <li><span>background_preference_manual</span><strong>{{ detail.active_task_background_run_operator_preference_manual_summary }}</strong></li>
+    <li><span>background_preference_disabled</span><strong>{{ detail.active_task_background_run_operator_preference_disabled_summary }}</strong></li>
+    <li><span>background_preference_decisions</span><strong>{{ detail.active_task_background_run_operator_preference_decision_summary }}</strong></li>
+    <li><span>background_worker_apply</span><strong>{{ detail.active_task_background_run_worker_update_proposal_summary }}</strong></li>
+    <li><span>background_worker_apply_accept</span><strong>{{ detail.active_task_background_run_worker_apply_accept_summary }}</strong></li>
+    <li><span>background_worker_syncback</span><strong>{{ detail.active_task_background_run_worker_syncback_summary }}</strong></li>
+    <li><span>background_worker_update_stub</span><strong>{{ detail.active_task_background_run_worker_update_stub_summary }}</strong></li>
+    <li><span>background_worker_targets</span><strong>{{ detail.active_task_background_run_worker_update_stub_targets }}</strong></li>
+    <li><span>background_worker_proposals</span><strong>{{ detail.active_task_background_run_worker_update_proposal_summary }}</strong></li>
+    <li><span>background_model_plan</span><strong>{{ detail.active_task_background_run_model_plan_summary }}</strong></li>
+    <li><span>background_judge_binding</span><strong>{{ detail.active_task_background_run_model_judge_binding_summary }}</strong></li>
+    <li><span>background_judge_probe</span><strong>{{ detail.active_task_background_run_model_judge_probe_summary }}</strong></li>
+    <li><span>background_escalation_binding</span><strong>{{ detail.active_task_background_run_model_escalation_binding_summary }}</strong></li>
+    <li><span>background_escalation_probe</span><strong>{{ detail.active_task_background_run_model_escalation_probe_summary }}</strong></li>
+    <li><span>evidence_bundle</span><strong>{{ detail.active_task_background_run_evidence_bundle }}</strong></li>
+    <li><span>evidence_artifacts</span><strong>{{ detail.active_task_background_run_evidence_artifacts }}</strong></li>
+    <li><span>background_worker</span><strong>{{ detail.background_worker_summary }}</strong></li>
+    <li><span>background_queue</span><strong>{{ detail.background_queue_summary }}</strong></li>
+    <li><span>background_scheduler</span><strong>{{ detail.background_scheduler_summary }}</strong></li>
+    <li><span>workspace</span><strong>{{ detail.workspace_summary }}</strong></li>
+    <li><span>document_registry</span><strong>{{ detail.document_registry_summary }}</strong></li>
+    <li><span>model_routing</span><strong>{{ detail.model_routing_summary }}</strong></li>
+    <li><span>model_registry</span><strong>{{ detail.model_registry_summary }}</strong></li>
+    <li><span>run_lock</span><strong>{{ detail.run_lock_mode }}</strong></li>
+    <li><span>run_lock_note</span><strong>{{ detail.run_lock_note }}</strong></li>
+    <li><span>background_slots</span><strong>active={{ detail.background_slot_active }} limit={{ detail.background_slot_limit }} | {{ detail.background_slot_pressure }}</strong></li>
+    <li><span>completion_focus</span><strong>{{ detail.active_task_completion_focus }}</strong></li>
+    <li><span>done_when</span><strong>{{ detail.active_task_completion_done }}</strong></li>
+    <li><span>rerun_when</span><strong>{{ detail.active_task_completion_rerun }}</strong></li>
+    <li><span>manual_followup_when</span><strong>{{ detail.active_task_completion_followup }}</strong></li>
+    <li><span>backend</span><strong>{{ detail.active_task_backend }}</strong></li>
+    {% if detail.active_task_backend_note %}<li><span>backend_note</span><strong>{{ detail.active_task_backend_note }}</strong></li>{% endif %}
+    <li><span>rate_limit</span><strong>{{ detail.active_task_rate_limit }}</strong></li>
+      </ul>
+    </div>
+  </details>
+  {% with
+    section_title='active_task_actions',
+    safe_hints=detail.active_task_command_hints,
+    safe_buttons=detail.active_task_safe_action_buttons,
+    phase2_hints=detail.active_task_phase2_action_hints,
+    phase2_buttons=detail.active_task_phase2_action_buttons
+  %}
+  {% include 'dashboard/_action_section.html' %}
+  {% endwith %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Recent Tasks</h2>
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Status</th>
+        <th>Preset</th>
+        <th>Phase2 Shape</th>
+        <th>Backend</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in detail.recent_tasks %}
+      <tr>
+        <td><a href="{{ row.detail_path }}">{{ row.label }}</a><br><span class="muted">{{ row.request_id }}</span></td>
+        <td>{{ row.status }}/{{ row.tf_phase }}</td>
+        <td>{{ row.preset }}</td>
+        <td>{{ row.phase2_shape }}</td>
+        <td>{{ row.backend_summary }}</td>
+        <td>{{ row.updated_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if detail.notes %}
+<section class="panel">
+  <h2>Runtime Notes</h2>
+  <ul class="notes">
+    {% for note in detail.notes %}
+    <li>{{ note }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Telegram Parity Snapshot</h2>
+  <pre class="code-block">{{ detail.lines | join('\n') }}</pre>
+</section>
+{% endblock %}

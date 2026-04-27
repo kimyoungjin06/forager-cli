@@ -146,7 +146,7 @@ def handle_orch_overview_command(
         manager_state["active"] = key
         if not args.dry_run:
             save_manager_state(args.manager_state_file, manager_state)
-        send(f"active orch changed: {key}")
+        send(f"active runtime changed: {key}")
         return True
 
     if cmd == "orch-pause":
@@ -174,8 +174,8 @@ def handle_orch_overview_command(
 
         summary_reason = str(entry.get("paused_reason", "")).strip() or "-"
         send(
-            "orch paused\n"
-            f"- orch: {key} ({alias})\n"
+            "runtime paused\n"
+            f"- runtime: {key} ({alias})\n"
             f"- reason: {summary_reason}\n"
             "note: /next, /fanout, /auto, /offdesk will skip paused orch by default.\n"
             "resume:\n"
@@ -201,8 +201,8 @@ def handle_orch_overview_command(
             if not args.dry_run:
                 save_manager_state(args.manager_state_file, manager_state)
             send(
-                "orch resumed\n"
-                f"- orch: {key} ({alias})\n"
+                "runtime resumed\n"
+                f"- runtime: {key} ({alias})\n"
                 "next:\n"
                 "- /queue\n"
                 "- /next",
@@ -212,8 +212,8 @@ def handle_orch_overview_command(
             return True
 
         send(
-            "orch already active\n"
-            f"- orch: {key} ({alias})",
+            "runtime already active\n"
+            f"- runtime: {key} ({alias})",
             context="orch-resume noop",
             with_menu=True,
         )
@@ -237,7 +237,7 @@ def handle_orch_overview_command(
             save_manager_state(args.manager_state_file, manager_state)
         send(
             "orch hidden from ops scope\n"
-            f"- orch: {key} ({alias})\n"
+            f"- runtime: {key} ({alias})\n"
             f"- reason: {str(entry.get('ops_hidden_reason', '')).strip() or '-'}\n"
             "note: /map, /queue, /next, /fanout, /offdesk, /auto default scope will skip this orch.\n"
             "restore:\n"
@@ -261,7 +261,7 @@ def handle_orch_overview_command(
                 save_manager_state(args.manager_state_file, manager_state)
             send(
                 "orch restored to ops scope\n"
-                f"- orch: {key} ({alias})\n"
+                f"- runtime: {key} ({alias})\n"
                 "next:\n"
                 f"- /orch status {alias}\n"
                 "- /map\n"
@@ -272,7 +272,7 @@ def handle_orch_overview_command(
             return True
         send(
             "orch already visible in ops scope\n"
-            f"- orch: {key} ({alias})",
+            f"- runtime: {key} ({alias})",
             context="orch-unhide noop",
             with_menu=True,
         )

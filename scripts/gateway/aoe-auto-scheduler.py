@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Non-blocking Mother-Orch auto scheduler (tmux sidecar).
+"""Non-blocking Control Plane auto scheduler (tmux sidecar).
 
-This process runs outside the Telegram polling gateway so long-running TF runs
+This process runs outside the Telegram polling gateway so long-running Task Team runs
 do not block message intake. It reuses gateway logic by importing
 `scripts/gateway/aoe-telegram-gateway.py` dynamically and calling
 `handle_text_message()` with `/next` (or `/fanout`) periodically.
@@ -698,7 +698,7 @@ def _candidate_todo_status(gw: Any, args: argparse.Namespace, project_key: str, 
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(prog="aoe-auto-scheduler", description="AOE Mother-Orch auto scheduler (tmux sidecar)")
+    p = argparse.ArgumentParser(prog="aoe-auto-scheduler", description="AOE Control Plane auto scheduler (tmux sidecar)")
     p.add_argument("--project-root", default=".")
     p.add_argument("--team-dir", default="")
     p.add_argument("--auto-state-file", default="")

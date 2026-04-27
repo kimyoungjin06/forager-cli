@@ -307,9 +307,9 @@ def _write_gateway_poll_state_with_failed_queue_ttl(tmp_path: Path) -> Path:
         ("/onlyme", "owner_only: yes"),
         ("/acl", "access control list"),
         ("/map", "project map:"),
-        ("/monitor 2", "orch: default"),
-        ("/monitor O1", "orch: default"),
-        ("모니터 2", "orch: default"),
+        ("/monitor 2", "runtime: default"),
+        ("/monitor O1", "runtime: default"),
+        ("모니터 2", "runtime: default"),
         ("/kpi 24", "window_hours:"),
         ("/pick", "최근 작업이 없습니다"),
         ("/todo", "todo: active="),
@@ -352,7 +352,7 @@ def test_orch_alias_use() -> None:
         simulate_text="aoe orch use O1",
         extra_args=["--no-slash-only"],
     )
-    assert "active orch changed: default" in out
+    assert "active runtime changed: default" in out
 
 
 @pytest.mark.smoke
@@ -1215,7 +1215,7 @@ def test_next_skips_paused_projects(tmp_path: Path) -> None:
         extra_args=["--manager-state-file", str(state_file)],
     )
     assert "next selected (global)" in out
-    assert "orch: proj2 (O2)" in out
+    assert "runtime: proj2 (O2)" in out
 
 
 @pytest.mark.smoke
@@ -1538,7 +1538,7 @@ def test_status_includes_poll_state_counters(tmp_path: Path) -> None:
     assert "last_failed_at=-" in out
     assert "poll_cursor: offset=1234" in out
     assert "updated_at=2026-02-26T00:00:00+0000" in out
-    assert "active_tf_count: 0 (pending=0 running=0)" in out
+    assert "active_team_count: 0 (pending=0 running=0)" in out
 
 
 @pytest.mark.smoke

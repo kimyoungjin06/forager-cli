@@ -21,7 +21,13 @@ from aoe_tg_provider_fallback import (
     load_provider_capacity_state,
     proactive_fallback_provider,
 )
-from aoe_tg_schema import default_plan_critic_payload, normalize_plan_critic_payload, plan_critic_primary_issue
+from aoe_tg_schema import (
+    apply_plan_critic_approval_mode,
+    default_plan_critic_payload,
+    normalize_plan_critic_payload,
+    plan_critic_primary_issue,
+    plan_payload_approval_mode,
+)
 
 
 def _trim_text(raw: Any, limit: int) -> str:
@@ -37,6 +43,223 @@ def _dedupe_lines(rows: List[str], *, limit: int) -> List[str]:
     return out[: max(1, int(limit or 1))]
 
 
+def _normalize_plan_issue_code(issue: Any) -> str:
+    low = str(issue or "").strip().lower()
+    if not low:
+        return ""
+    if "missing required contract fields" in low or "contract_incomplete" in low:
+        return "contract_incomplete"
+    if "contract ambiguity" in low or "contract_ambiguous" in low:
+        return "contract_ambiguous"
+    if "acceptance" in low or "완료조건" in low or "검증 기준" in low:
+        return "acceptance_gap"
+    if "artifact" in low or "산출물" in low or any(token in low for token in (".json", ".md", ".csv")):
+        return "artifact_contract_gap"
+    if "readonly" in low or "read-only" in low:
+        return "readonly_drift"
+    if "depends_on" in low or "dependency" in low or "의존" in low:
+        return "invalid_dependency"
+    if "owner" in low or "lane" in low or "role" in low or "소유" in low:
+        return "ownership_gap"
+    if "approval" in low or "dri" in low or "승인" in low:
+        return "approval_gap"
+    return "critic_issue"
+
+
+def _issue_codes_from_critic(critic: Dict[str, Any]) -> List[str]:
+    codes: List[str] = []
+    for issue in list((critic or {}).get("issues") or []):
+        code = _normalize_plan_issue_code(issue)
+        if code and code not in codes:
+            codes.append(code)
+    return codes[:8]
+
+
+def _dedupe_issue_codes(rows: List[Dict[str, Any]]) -> List[str]:
+    out: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for code in list(row.get("issue_codes") or []):
+            token = str(code or "").strip().lower()
+            if token and token not in out:
+                out.append(token[:64])
+    return out[:12]
+
+
+def _detect_stalled_issue(rows: List[Dict[str, Any]]) -> str:
+    primaries = [
+        str(row.get("primary_issue", "")).strip()
+        for row in rows
+        if isinstance(row, dict) and str(row.get("primary_issue", "")).strip()
+    ]
+    if len(primaries) < 2:
+        return ""
+    if primaries[-1] and primaries[-1] == primaries[-2]:
+        return primaries[-1][:240]
+    return ""
+
+
+def _review_pass_for_round(round_no: int) -> str:
+    idx = max(1, int(round_no or 1))
+    if idx <= 1:
+        return "contract"
+    if idx == 2:
+        return "execution"
+    return "verification"
+
+
+def _provider_csv_list(raw: Any, *, default: str = "codex,claude") -> List[str]:
+    source = str(raw or "").strip() or default
+    providers: List[str] = []
+    for token in source.split(","):
+        item = str(token or "").strip().lower()
+        if item and item not in providers:
+            providers.append(item)
+    return providers or [str(token).strip() for token in default.split(",") if str(token).strip()]
+
+
+def _issue_row(
+    *,
+    round_no: int,
+    provider: str,
+    critic: Dict[str, Any],
+    critic_provider: str = "",
+) -> Dict[str, Any]:
+    normalized = normalize_plan_critic_payload(critic or {}, max_items=8)
+    primary_issue = plan_critic_primary_issue(normalized, limit=240)
+    row: Dict[str, Any] = {
+        "round": max(1, int(round_no or 1)),
+        "review_pass": _review_pass_for_round(round_no),
+        "provider": str(provider or "").strip()[:64],
+        "status": "approved" if not list(normalized.get("issues") or []) else "issues",
+        "issue_count": len(list(normalized.get("issues") or [])),
+        "issue_codes": _issue_codes_from_critic(normalized),
+    }
+    if critic_provider:
+        row["critic_provider"] = str(critic_provider).strip()[:64]
+        row["planner_provider"] = str(provider or "").strip()[:64]
+    if primary_issue:
+        row["primary_issue"] = primary_issue
+    return row
+
+
+def _auth_session_scope_guidance(user_prompt: str) -> str:
+    low = str(user_prompt or "").strip().lower()
+    markers = (
+        "login",
+        "log in",
+        "signin",
+        "sign in",
+        "auth",
+        "session",
+        "token",
+        "expiry",
+        "expired",
+        "로그인",
+        "인증",
+        "세션",
+        "토큰",
+        "만료",
+    )
+    if not any(marker in low for marker in markers):
+        return ""
+    return (
+        "- auth/session/login expiry류 요청이면 먼저 실제 실패 경계(entrypoint, caller-visible state, persisted session/token store)를 추적하는 scope 확인 단계를 포함하라\n"
+        "- helper 함수 하나만으로 충분하다고 단정하지 말고, 그것이 유일한 공개 경계인지 확인하거나 다른 호출 지점/저장소 경로를 검토했음을 acceptance에 명시하라\n"
+    )
+
+
+def _single_execution_role_guidance(workers: List[str]) -> str:
+    execution_roles = [
+        role
+        for role in (workers or [])
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
+    if len(execution_roles) != 1:
+        return ""
+    role = str(execution_roles[0]).strip()
+    return (
+        f"- 현재 execution role이 `{role}` 하나뿐이면 single serial lane도 허용된다. 병렬 lane을 억지로 만들지 마라\n"
+        "- 대신 scope 확인, 구현, 테스트, evidence 단계의 순차 의존성과 각 단계 산출물을 명시해 dispatch 가능성을 보여라\n"
+    )
+
+
+def _single_execution_role_critic_guidance(workers: List[str]) -> str:
+    execution_roles = [
+        role
+        for role in (workers or [])
+        if role and not any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+    ]
+    if len(execution_roles) != 1:
+        return ""
+    role = str(execution_roles[0]).strip()
+    return (
+        f"- execution role이 `{role}` 하나뿐이면 single serial lane 자체만으로 blocker를 만들지 마라\n"
+        "- 대신 단계별 산출물, 순차 의존성, reviewer lane 연계가 명확한지 본다\n"
+    )
+
+
+def _request_contract_output_guidance(request_contract: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(request_contract, dict):
+        return ""
+    preset = str(request_contract.get("preset", "") or "").strip().lower()
+    outputs = [
+        str(item).strip()
+        for item in (request_contract.get("required_outputs") or [])
+        if str(item).strip()
+    ]
+    if not outputs:
+        return ""
+    deliverable_policy = request_contract.get("fields", {}).get("deliverable_policy", {})
+    review_outputs = [
+        str(item).strip()
+        for item in ((deliverable_policy or {}).get("review_outputs") or [])
+        if str(item).strip()
+    ]
+    artifact_contracts = request_contract.get("artifact_contracts", {}) if isinstance(request_contract.get("artifact_contracts"), dict) else {}
+    execution_outputs = [item for item in outputs if item not in review_outputs]
+    review_guidance = ""
+    if review_outputs:
+        review_contract_rows: List[str] = []
+        for output in review_outputs:
+            artifact = artifact_contracts.get(output)
+            if not isinstance(artifact, dict):
+                continue
+            path = str(artifact.get("path", "")).strip()
+            required_fields = [
+                str(item).strip()
+                for item in (artifact.get("required_fields") or [])
+                if str(item).strip()
+            ]
+            if path and required_fields:
+                review_contract_rows.append(
+                    f"- review lane은 {path}를 직접 작성해야 하고, acceptance에는 최소 다음 필드를 직접 고정해야 한다: {', '.join(required_fields)}"
+                )
+        review_execution_semantics = ""
+        if preset == "review":
+            review_execution_semantics = (
+                "- review preset의 readonly=true는 코드/런타임 상태를 바꾸지 말라는 뜻이지, 선언된 review_evidence/* 와 review_report.md 아티팩트를 쓰지 말라는 뜻이 아니다\n"
+                "- review preset에서는 reviewer-owned execution subtask가 canonical diff, auth/session scope, severity, test-gap evidence를 수집할 수 있다\n"
+                "- 다만 execution subtask는 review_output을 직접 작성하거나 final findings/done/rerun 판단을 소유하면 안 된다\n"
+            )
+        review_guidance = (
+            "- 다음 산출물은 execution subtask가 아니라 Phase2 review lane이 직접 갱신해야 한다: "
+            + ", ".join(review_outputs)
+            + "\n"
+            + review_execution_semantics
+            + "- execution subtask의 title/goal/acceptance에 review_outputs를 직접 쓰지 말고, review lane이 인용할 implementation/test/handoff evidence만 준비하라\n"
+            + "- review_output마다 최소 하나의 reviewer-owned subtask 또는 reviewer-lane acceptance가 있어야 한다. generic verifier만 두고 끝내면 안 된다\n"
+            + ("\n".join(review_contract_rows) + "\n" if review_contract_rows else "")
+        )
+    return (
+        "- request_contract.required_outputs 밖의 새 intermediate artifact를 invent하지 마라\n"
+        + review_guidance
+        + "- execution subtask는 execution-owned output만 직접 소유하고, 추가 산출물이 필요하면 기존 산출물 내부 규칙/메타데이터로 표현하라\n"
+        + f"- 이번 요청에서 execution subtask가 직접 소유 가능한 산출물은 다음만 허용된다: {', '.join(execution_outputs or outputs)}\n"
+    )
+
+
 def _planner_prompt(
     *,
     user_prompt: str,
@@ -46,8 +269,12 @@ def _planner_prompt(
     round_no: int,
     total_rounds: int,
     shared_feedback: str,
+    request_contract: Optional[Dict[str, Any]] = None,
 ) -> str:
     feedback = f"\n공유된 이전 회차 피드백:\n{shared_feedback}\n" if shared_feedback else ""
+    scope_guidance = _auth_session_scope_guidance(user_prompt)
+    serial_guidance = _single_execution_role_guidance(workers)
+    contract_output_guidance = _request_contract_output_guidance(request_contract)
     return (
         "너는 TF Phase1 planner다. 지금은 실행이 아니라 계획 수립 단계다.\n"
         "같은 미션이 여러 planner(Codex/Claude)에게 병렬로 전달되고, 각 회차마다 서로의 비판 내용을 반영해 계획을 개선한다.\n"
@@ -56,7 +283,7 @@ def _planner_prompt(
         "{\n"
         '  "summary": "한 줄 요약",\n'
         '  "subtasks": [\n'
-        '    {"id":"S1", "title":"...", "goal":"...", "owner_role":"ROLE", "acceptance":["..."]}\n'
+        '    {"id":"S1", "title":"...", "goal":"...", "owner_role":"ROLE", "acceptance":["..."], "depends_on":["S0"]}\n'
         "  ]\n"
         "}\n"
         "규칙:\n"
@@ -65,8 +292,16 @@ def _planner_prompt(
         f"- owner_role은 다음 중 하나만 사용: {', '.join(workers)}\n"
         f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
         "- 각 subtask는 겹치지 않는 산출물과 검증 기준을 가져야 한다\n"
-        "- 실행팀이 병렬로 일할 수 있도록 독립 가능한 단위로 분해한다\n"
+        "- 실행팀이 병렬로 일할 수 있으면 독립 가능한 단위로 분해한다\n"
+        "- 선행 단계 결과가 필요한 subtask는 depends_on에 선행 subtask id를 넣어라\n"
         "- Codex-Reviewer/critic이 최종 검증할 수 있도록 acceptance를 구체적으로 쓴다\n"
+        "- reviewer/verifier/QA/independent review 자체를 별도 execution subtask로 만들지 마라. 단, review preset에서는 reviewer-owned evidence collection step은 허용되지만 review_output 작성/최종 판정은 여전히 review lane만 담당한다\n"
+        "- 독립 리뷰, 회귀 판정, 승인 확인은 subtask가 아니라 acceptance/evidence로 남기고 Phase2 review lane이 담당하게 하라\n"
+        f"{scope_guidance}"
+        f"{serial_guidance}"
+        f"{contract_output_guidance}"
+        "- approval_mode는 기본적으로 policy다. 최종 승인/복귀는 Control Plane operator가 맡고, Task Team 내부 역할에 가짜 DRI/최종 승인자를 만들지 마라\n"
+        "- 사람 승인 필요는 acceptance/evidence/manual follow-up 성격으로 표현하라\n"
         "- 계획이 덜 완성됐으면 범위를 줄이고, ambiguity를 드러내라\n"
         f"{feedback}\n"
         f"사용자 요청:\n{user_prompt.strip()}\n"
@@ -83,6 +318,11 @@ def _critic_prompt(
     total_rounds: int,
 ) -> str:
     payload = json.dumps(plan, ensure_ascii=False)
+    scope_guidance = _auth_session_scope_guidance(user_prompt)
+    serial_guidance = _single_execution_role_critic_guidance(list(plan.get("meta", {}).get("worker_roles") or []))
+    review_contract_guidance = _request_contract_output_guidance(
+        plan.get("meta", {}).get("request_contract") if isinstance(plan.get("meta"), dict) else None
+    )
     return (
         "너는 TF Phase1 critic이다. 아래 계획이 실제 실행 단계(Phase2)로 넘어갈 만큼 충분히 구체적인지 비판적으로 검토해라.\n"
         "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
@@ -97,8 +337,17 @@ def _critic_prompt(
         f"- planner_provider: {planner_provider}\n"
         f"- round: {round_no}/{total_rounds}\n"
         "- execution gap, role mismatch, acceptance weakness, hidden dependency를 우선 지적한다\n"
-        "- plans that are too broad or not parallelizable should not be approved\n"
+        "- plans that are too broad or dispatch 책임이 모호하면 승인하지 마라\n"
         "- issues는 정말 dispatch를 막을 문제만 적는다\n\n"
+        "- review/approval/QA를 별도 execution subtask로 넣은 계획은 blocker로 지적한다. Phase2 review lane의 acceptance/evidence로 표현되어야 한다. 단, review preset에서 reviewer-owned evidence collection step 자체는 허용되며, blocker 기준은 review_output 작성/최종 판정이 execution으로 새는지 여부다\n"
+        "- review_output이 required인데 reviewer-owned subtask나 concrete acceptance 없이 generic verifier만 있으면 blocker로 지적한다\n"
+        f"{scope_guidance}"
+        f"{serial_guidance}"
+        f"{review_contract_guidance}"
+        "- auth/session/login expiry류 계획이 helper 함수 하나만 실제 실패 경계라고 가정하면 blocker로 지적한다\n"
+        "- operator approval/recovery는 Task Team 바깥의 Control Plane 책임이다\n"
+        "- reviewer/critic role이 있다는 이유만으로 human approver/DRI 부재를 blocker로 만들지 마라\n"
+        "- approval 필요성은 acceptance/evidence/manual follow-up으로 남겨라\n\n"
         f"사용자 요청:\n{user_prompt.strip()}\n\n"
         f"plan:\n{payload}\n"
     )
@@ -208,6 +457,7 @@ def run_phase1_ensemble_planning(
     available_roles: List[str],
     selected_roles: Optional[List[str]] = None,
     role_preset: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
     normalize_task_plan_payload: Callable[..., Dict[str, Any]],
     parse_json_object_from_text: Callable[[str], Optional[Dict[str, Any]]],
     run_provider_execs: Dict[str, Callable[[str, int], str]],
@@ -215,17 +465,21 @@ def run_phase1_ensemble_planning(
     report_progress: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     workers = [str(r).strip() for r in (available_roles or []) if str(r).strip()] or ["Codex-Reviewer"]
-    providers_csv = str(getattr(args, "plan_phase1_providers", "codex,claude") or "codex,claude")
-    preferred = []
-    for token in providers_csv.split(","):
-        item = str(token or "").strip().lower()
-        if item and item not in preferred:
-            preferred.append(item)
-    if not preferred:
-        preferred = ["codex", "claude"]
+    planner_requested = _provider_csv_list(
+        getattr(args, "plan_phase1_planner_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+    )
+    critic_requested = _provider_csv_list(
+        getattr(args, "plan_phase1_critic_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+    )
 
-    providers = [name for name in preferred if callable(run_provider_execs.get(name))]
-    if not providers:
+    planners = [name for name in planner_requested if callable(run_provider_execs.get(name))]
+    critics = [name for name in critic_requested if callable(run_provider_execs.get(name))]
+    providers: List[str] = []
+    for name in [*planners, *critics]:
+        if name not in providers:
+            providers.append(name)
+
+    if not planners:
         return {
             "plan_data": None,
             "plan_critic": default_plan_critic_payload(),
@@ -234,9 +488,39 @@ def run_phase1_ensemble_planning(
             "plan_error": "no planning providers available",
             "plan_gate_blocked": True,
             "plan_gate_reason": "no planning providers available",
+            "plan_review_count": 0,
+            "plan_issue_codes": ["critic_issue"],
+            "plan_issue_history": [],
+            "plan_convergence_status": "blocked",
+            "plan_stalled_reason": "",
+            "plan_last_round": 0,
             "phase1_rounds": 0,
             "phase1_mode": "ensemble",
             "phase1_providers": [],
+            "phase1_planner_providers": [],
+            "phase1_critic_providers": critics,
+        }
+
+    if not critics:
+        return {
+            "plan_data": None,
+            "plan_critic": default_plan_critic_payload(),
+            "plan_roles": [],
+            "plan_replans": [],
+            "plan_error": "no critic review providers available",
+            "plan_gate_blocked": True,
+            "plan_gate_reason": "no critic review providers available",
+            "plan_review_count": 0,
+            "plan_issue_codes": ["critic_issue"],
+            "plan_issue_history": [],
+            "plan_convergence_status": "blocked",
+            "plan_stalled_reason": "",
+            "plan_last_round": 0,
+            "phase1_rounds": 0,
+            "phase1_mode": "ensemble",
+            "phase1_providers": planners,
+            "phase1_planner_providers": planners,
+            "phase1_critic_providers": [],
         }
 
     rounds = max(3, int(getattr(args, "plan_phase1_rounds", 3) or 3))
@@ -249,6 +533,7 @@ def run_phase1_ensemble_planning(
     best_roles: List[str] = []
     shared_feedback = ""
     plan_replans: List[Dict[str, Any]] = []
+    plan_issue_history: List[Dict[str, Any]] = []
     degraded_by: List[str] = []
     retry_after_sec = 60
     provider_capacity_state = load_provider_capacity_state(getattr(args, "team_dir", ""))
@@ -272,6 +557,7 @@ def run_phase1_ensemble_planning(
                 round_no=round_no,
                 total_rounds=rounds,
                 shared_feedback=shared_feedback,
+                request_contract=request_contract,
             )
             try:
                 raw_plan, executed_provider, used_fallback = _run_provider_with_rate_limit_fallback(
@@ -295,6 +581,10 @@ def run_phase1_ensemble_planning(
                         "worker_roles": list(selected_roles or []),
                         "phase1_role_preset": role_preset,
                         "phase2_team_preset": role_preset,
+                        "phase1_planner_providers": list(planners),
+                        "phase1_critic_providers": list(critics),
+                        "phase1_providers": list(providers),
+                        "request_contract": request_contract or {},
                     },
                 )
             except Exception as exc:
@@ -345,29 +635,46 @@ def run_phase1_ensemble_planning(
                         provider_capacity_state=provider_capacity_state,
                     )
                     parsed_critic = parse_json_object_from_text(raw_critic)
-                    normalized = normalize_plan_critic_payload(parsed_critic, max_items=5)
+                    normalized = apply_plan_critic_approval_mode(
+                        parsed_critic,
+                        approval_mode=plan_payload_approval_mode(plan),
+                        max_items=5,
+                    )
+                    normalized = dict(normalized)
+                    normalized["critic_provider"] = critic_provider
+                    normalized["executed_provider"] = executed_critic_provider
                     if used_fallback:
-                        normalized = dict(normalized)
-                        normalized["executed_provider"] = executed_critic_provider
                         normalized["rate_limit_fallback"] = True
                     return normalized
                 except Exception as exc:
                     return {
                         "approved": False,
+                        "critic_provider": critic_provider,
+                        "executed_provider": executed_critic_provider,
                         "issues": [f"{critic_provider} critic failed: {_trim_text(exc, 180)}"],
                         "recommendations": [],
                     }
 
-            critic_rows = _run_parallel_calls(providers, _run_critic_provider)
+            critic_rows = _run_parallel_calls(critics, _run_critic_provider)
             for critic in critic_rows:
                 approvals.append(bool(critic.get("approved", True)) and not bool(critic.get("issues") or []))
                 issues.extend([_trim_text(item, 240) for item in (critic.get("issues") or [])])
                 recommendations.extend([_trim_text(item, 240) for item in (critic.get("recommendations") or [])])
 
+            critic_provider_rows = _dedupe_lines(
+                [
+                    str(critic.get("executed_provider") or critic.get("critic_provider") or "").strip()
+                    for critic in critic_rows
+                    if isinstance(critic, dict)
+                ],
+                limit=8,
+            )
             aggregate_critic = {
                 "approved": bool(approvals) and all(approvals),
                 "issues": _dedupe_lines(issues, limit=8),
                 "recommendations": _dedupe_lines(recommendations, limit=8),
+                "provider": critic_provider_rows[0] if critic_provider_rows else "",
+                "provider_set": critic_provider_rows,
             }
             return {
                 "provider": provider,
@@ -377,7 +684,7 @@ def run_phase1_ensemble_planning(
                 "critic": aggregate_critic,
             }
 
-        round_candidates = _run_parallel_calls(providers, _run_planner_provider)
+        round_candidates = _run_parallel_calls(planners, _run_planner_provider)
         for row in round_candidates:
             if bool(row.get("rate_limit_fallback")):
                 origin = str(row.get("provider", "")).strip().lower()
@@ -409,9 +716,17 @@ def run_phase1_ensemble_planning(
                     if limited
                     else f"phase1 round {round_no}: no valid planner output"
                 ),
+                "plan_review_count": len(plan_issue_history),
+                "plan_issue_codes": _dedupe_issue_codes(plan_issue_history),
+                "plan_issue_history": list(plan_issue_history),
+                "plan_convergence_status": "blocked",
+                "plan_stalled_reason": "",
+                "plan_last_round": round_no,
                 "phase1_rounds": round_no,
                 "phase1_mode": "ensemble",
                 "phase1_providers": providers,
+                "phase1_planner_providers": planners,
+                "phase1_critic_providers": critics,
                 "rate_limit": (
                     build_rate_limit_snapshot(
                         mode="blocked",
@@ -431,6 +746,14 @@ def run_phase1_ensemble_planning(
         best_plan = best_candidate["plan"]
         best_critic = best_candidate["critic"]
         best_roles = plan_roles_from_subtasks(best_plan)
+        plan_issue_history.append(
+            _issue_row(
+                round_no=round_no,
+                provider=str(best_candidate.get("provider", "")).strip(),
+                critic=best_critic,
+                critic_provider=str(best_critic.get("provider", "")).strip(),
+            )
+        )
         plan_replans.append(
             {
                 "attempt": round_no,
@@ -438,6 +761,7 @@ def run_phase1_ensemble_planning(
                 "subtasks": len(best_plan.get("subtasks") or []),
                 "providers": providers[:],
                 "best_provider": best_candidate["provider"],
+                "best_critic_provider": str(best_critic.get("provider", "")).strip(),
                 "issues": len(best_critic.get("issues") or []),
             }
         )
@@ -445,6 +769,16 @@ def run_phase1_ensemble_planning(
 
     plan_gate_blocked = bool(getattr(args, "plan_block_on_critic", True)) and bool(best_critic.get("issues") or [])
     plan_gate_reason = plan_critic_primary_issue(best_critic, limit=240) if plan_gate_blocked else ""
+    plan_review_count = len(plan_issue_history)
+    plan_issue_codes = _dedupe_issue_codes(plan_issue_history)
+    plan_stalled_reason = _detect_stalled_issue(plan_issue_history)
+    plan_convergence_status = "ready"
+    if plan_gate_blocked:
+        plan_convergence_status = "stalled" if plan_stalled_reason else "blocked"
+    elif plan_review_count < 3:
+        plan_gate_blocked = True
+        plan_gate_reason = f"planning convergence requires at least 3 critical reviews (got {plan_review_count})"
+        plan_convergence_status = "blocked"
     return {
         "plan_data": best_plan,
         "plan_critic": best_critic,
@@ -453,9 +787,17 @@ def run_phase1_ensemble_planning(
         "plan_error": "",
         "plan_gate_blocked": plan_gate_blocked,
         "plan_gate_reason": plan_gate_reason,
+        "plan_review_count": plan_review_count,
+        "plan_issue_codes": plan_issue_codes,
+        "plan_issue_history": plan_issue_history,
+        "plan_convergence_status": plan_convergence_status,
+        "plan_stalled_reason": plan_stalled_reason,
+        "plan_last_round": rounds,
         "phase1_rounds": rounds,
         "phase1_mode": "ensemble",
         "phase1_providers": providers,
+        "phase1_planner_providers": planners,
+        "phase1_critic_providers": critics,
         "rate_limit": (
             build_rate_limit_snapshot(
                 mode="degraded",

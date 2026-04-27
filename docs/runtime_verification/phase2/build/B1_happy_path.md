@@ -1,0 +1,183 @@
+# Build B1 Happy Path
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `B1`
+- preset:
+  - `build`
+- branch_target:
+  - `done`
+- status:
+  - `executed_done`
+- executed_at:
+  - `2026-03-27T20:09:20+09:00`
+  - `2026-03-30T10:55:45+09:00`
+  - `2026-03-30T11:06:20+09:00`
+  - `2026-03-30T11:17:05+09:00`
+  - `2026-03-30T11:35:30+09:00`
+  - `2026-03-30T11:44:44+09:00`
+  - `2026-03-30T11:56:08+09:00`
+  - `2026-03-30T12:09:41+09:00`
+  - `2026-03-30T12:21:28+09:00`
+  - `2026-03-30T13:11:17+09:00`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.`
+- normalized action:
+  - `dispatch_task`
+- target runtime:
+  - `O1 default` during live run
+  - visible registry alias `O2 demo-login-build` was added later for surface inspection
+
+## 3. Expected Contract
+- expected preset:
+  - `build`
+- expected lane shape:
+  - execution:
+    - implementation lane
+  - review:
+    - verifier/reviewer lane
+- expected completion branch:
+  - `done`
+- expected evidence:
+  - diff summary
+  - test or verification evidence
+  - impacted-component note
+
+## 4. Runtime Evidence
+- request_id:
+  - `r_20260327200920_c3e0106c`
+- request_id progression:
+  - `r_20260327200920_c3e0106c`
+    - `T-002`
+    - `plan_gate_reason=S1/S3/S4가 Phase2 배치에 없다. Codex-Analyst는 worker_roles/team_roles에 없고 execution_groups/execution_lanes에는 E2(S2)만 정의되어 있어 before/after 로그와 review.md를 생성할 실행 주체가 없다. 동시에 R1/R2는 존재하지 않는 E1/E3에 의존하므로 dispatch 그래프가 깨져 있다.`
+  - `r_20260330105545_374c1c18`
+    - `T-003`
+    - `plan_gate_reason=phase2_execution_plan.readonly=true가 S2/S3의 테스트·구현·artifacts 쓰기 요구와 충돌한다. 현재 명세대로 dispatch하면 실행 자체가 막힌다.`
+  - `r_20260330110620_8bc5d1d7`
+    - `T-004`
+    - `plan_gate_reason=S4는 독립 리뷰를 요구하지만 phase2_execution_plan에서 S1~S4 전체를 Codex-Dev 단일 lane(E1)에 배정했다. 구현자와 독립 판정자가 동일해 수용 기준을 충족할 실행 구성이 없다.`
+  - `r_20260330111705_c0b46401`
+    - `T-005`
+    - `plan_gate_reason=완료 조건이 실제 버그 지점을 고정하지 못한다. acceptance는 handleLoginFailure(session, reason)의 반환값만 규정하고 있어, 런타임에서 유지되는 세션 저장소/호출부 상태까지 정리해야 하는지 불명확하다. 이 상태로는 테스트가 통과해도 실제 로그인 실패 흐름의 세션 만료 누락이 남을 수 있다.`
+  - `r_20260330113530_84a51365`
+    - `T-006`
+    - `plan_gate_reason=phase2_execution_plan이 S1·S2·S3를 같은 execution lane에서 parallel=true로 dispatch한다. S2는 S1의 코드 수정 결과에, S3는 S2의 테스트 결과에 의존하므로 현재 정의로는 실행 순서와 산출물 의존성이 깨져 있다.`
+  - `r_20260330114444_f9ab93d1`
+    - `T-007`
+    - `plan_gate_reason=S1.owner_role=Codex-Analyst, S3.owner_role=Codex-Writer인데 worker_roles/team_roles/execution_lanes에는 이 역할들이 없어 dispatch 책임 매핑이 일관되지 않다.`
+  - `r_20260330115608_047460de`
+    - `T-008`
+    - `plan_gate_reason=src/session.js의 handleLoginFailure만이 실제 로그인 실패 경계라는 가정을 검증하는 단계가 없다. 호출 지점이나 저장소 정리 경로가 다른 곳에 있으면 실제 세션 만료 수정이 보장되지 않는다.`
+  - `r_20260330120941_a3fb68ae`
+    - `T-009`
+    - `plan_gate_reason=S2 acceptance가 helper 함수 한 곳만 바꾸는 방식으로 끝나지 않음을 강제하지만, 현재 레포의 공개 실패 경계는 handleLoginFailure 하나뿐이어서 정답 구현도 acceptance를 통과하지 못한다.`
+  - `r_20260330122128_cf40a458`
+    - `T-010`
+    - `plan_gate_reason=Phase2 execution lane이 단일 serial bucket(S1-S4)으로만 남아 dispatchable parallel work가 없다. detail은 log event 240-char limit에 걸려 잘렸지만, scope 확인/구현/테스트/evidence가 모두 한 lane에 뭉친 점이 첫 blocker였다.`
+  - `r_20260330131117_4c7273de`
+    - `T-011`
+    - `plan_gate_reason=S2/S3 acceptance가 기존 세션이 이미 존재하는 상태를 선행조건으로 요구하지 않는다. 빈 상태에서 session_expired -> token:null만 확인해도 통과할 수 있어, 실제 버그인 기존 token/persisted session 정리 누락이 남아도 완료 판정이 가능하다.`
+  - `r_20260330132201_3680eb9c`
+    - `T-012`
+    - `plan_stage=ready`
+    - `exec_branch=done`
+    - `note=auth/session acceptance floor와 single-serial build policy 완화 이후 planning gate를 통과했고, retry 1회 후 integration/close까지 완료`
+- planning:
+  - all runs used `phase1 ensemble rounds=3 providers=codex`
+  - `T-002` ~ `T-011`은 `plan_gate_passed=false`
+  - `T-012`는 `plan_gate_passed=true`
+- stage progression:
+  - planning:
+    - `T-002` ~ `T-011` runs completed 3 planner/critic rounds before block
+    - `T-012` reached `planning_ready`
+  - execution:
+    - `T-012` execution lane `E1` completed
+  - verification:
+    - `T-012` review lanes `R1`, `R2` completed with `success`
+  - integration:
+    - `T-012` completed after `exec_critic retry -> planning_reuse -> rerun_scope`
+  - close:
+    - `T-012` completed
+- critic/verifier verdict:
+  - `T-002` ~ `T-011`: `critic issues remain after auto-replan`
+  - `T-012`: `plan gate passed`, `exec_critic: success (after retry 2/3)`
+- final branch:
+  - `done`
+
+## 5. Surface Evidence
+- `/task` before visible project registration:
+  - correct blocked task was visible for `T-002` under hidden/default runtime lineage
+- `/monitor` before visible project registration:
+  - showed `T-002` as `failed/close/blocked`
+- `/offdesk review` after visible project registration:
+  - visible project `O2 demo-login-build` was present, but it was flagged only for bootstrap/backlog issues because the actual task lineage still lived under hidden/default runtime state
+- dashboard `Task Detail` after visible project registration:
+  - reachable at `/control/tasks/by-request/r_20260327200920_c3e0106c`, but rendered a duplicated `manual_intervention` task under `O2` instead of the original blocked `O1/T-002` lineage
+- dashboard `Recovery` after visible project registration:
+  - runtime `O2 demo-login-build` appeared, but reflected bootstrap-only state rather than the original blocked build task
+- `/task r_20260330132201_3680eb9c` after latest rerun:
+  - `status: completed`
+  - `team_phase: completed`
+  - `phase2_execution: single lanes=1`
+  - `phase2_review: parallel lanes=2`
+  - `phase2_lane_state: exec done=1 | review done=2 | review_verdict success=2`
+  - `exec_attempts: 2/3`
+  - `exec_reason: 세션 만료 분기 수정, 비만료 실패 회귀 테스트 추가, 테스트 통과 기록과 TF-012 증적 문서화까지 확인돼 사용자 요청을 충족한다.`
+- room/event evidence:
+  - `exec_critic_retry` at `2026-03-30T13:38:28+09:00`
+  - `todo_proposals_created` at `2026-03-30T13:43:08+09:00`
+  - `dispatch_completed` at `2026-03-30T13:43:25+09:00`
+- reviewer evidence:
+  - reviewer notes confirm `src/session.js`, `tests/session.test.js`, `report.md` and `npm test pass 3/fail 0`
+
+## 6. Result
+- result:
+  - `done`
+- mismatch class:
+  - `planning_drift`
+  - `surface_drift`
+  - `runtime_adapter_bug_fixed`
+  - `readonly_contract_fixed`
+  - `phase1_prompt_guardrail_fixed`
+  - `single_lane_parallel_fixed`
+  - `execution_owner_drift_fixed`
+  - `auth_scope_prompt_refined`
+  - `single_serial_policy_relaxed`
+  - `build_happy_path_completed`
+- mismatch notes:
+  - initial live run first exposed a real runtime seam bug: `handle_text_message(...).log_event()` rejected `task_short_id`; this was fixed in `scripts/gateway/aoe_tg_message_handler.py`
+  - first blocker after the seam fix was an invalid `build` Phase2 lane graph; contract normalization now repairs partial planner metadata so execution/review graph coverage is no longer the first failure
+  - second blocker was `phase2_execution_plan.readonly=true` on a mutating build task; live dispatch planning now defaults to mutable execution unless `readonly` is explicitly requested
+  - third blocker was a standalone `independent review` execution subtask; planner/critic prompts now explicitly forbid review/approval subtasks inside non-review execution plans
+  - fourth blocker exposed single-lane `parallel=true` drift for dependent subtasks; execution-plan normalization now coerces single-lane execution/review rows to `parallel=false`
+  - fifth blocker exposed `owner_role` drift inside a `build` preset; schema normalization now coerces non-mixed execution subtasks onto preset-aligned execution roles so `Codex-Analyst`/`Codex-Writer` owners do not survive into a pure build lane
+  - sixth blocker showed the original auth/session acceptance floor was directionally right but still too weak: the plan could patch a helper without proving it was the real failure boundary
+  - seventh blocker showed the first auth/session planner guidance overshot: it could make a verified helper-boundary fix impossible if the helper really was the only public boundary
+  - eighth blocker showed a policy conflict: single-role `build` plans were still being rejected just for remaining serial; planner/critic guidance now explicitly allows single serial execution lanes when `Codex-Dev` is the only execution role
+  - ninth blocker showed the auth/session verifier still accepted empty-state expiry checks; acceptance floor now explicitly requires pre-existing auth/session state before the failure path
+  - latest live run `T-012` clears the planning gate, reruns once under exec critic, and closes as `done`
+  - the remaining known issue on this path is not the build fix itself but runtime surface drift introduced by later visible-project registration (`orch add --set-active`)
+  - later visible-project registration via `aoe orch add ... --set-active` introduced a second mismatch: selected task refs and task detail surfaces for `O2` drifted away from the original hidden/default task lineage and showed `manual_intervention` instead of the original planning gate block
+- next fix:
+  - treat `B1` as complete and move to `D1`
+  - investigate `orch add --set-active` task lineage copy/drift into visible project registry before using dashboard/task detail as canonical evidence for migrated runtimes
+
+## 7. Raw References
+- runtime state refs:
+  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/orch_manager_state.json`
+- log refs:
+  - `/tmp/aoe_lv_b1_61BoBN/demo-login-build/.aoe-team/logs/gateway_events.jsonl`
+- artifact refs:
+  - `scripts/gateway/aoe_tg_message_handler.py`
+  - `scripts/gateway/aoe_tg_orch_contract.py`
+  - `scripts/gateway/aoe_tg_schema.py`
+  - `scripts/gateway/aoe_tg_plan_ensemble.py`
+  - `scripts/gateway/aoe_tg_control_plane.py`
+  - `tests/gateway/test_gateway_module_surfaces.py`
+  - `tests/gateway/test_phase1_planning.py`
+  - `http://127.0.0.1:18765/control/history?q=planning_gate`
+  - `http://127.0.0.1:18765/control/tasks/by-request/r_20260327200920_c3e0106c`

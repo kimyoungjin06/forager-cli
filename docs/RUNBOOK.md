@@ -97,7 +97,7 @@ provider capacity override 후 재개:
 `sudo loginctl enable-linger kimyoungjin06`
 
 ## 2.2 Preset Routing
-- Plain-text work requests are classified into explicit Orch presets before TF execution.
+- Plain-text work requests are classified into explicit runtime presets before Task Team execution.
 - Operators can read the current preset in:
   - `/task` -> `team_preset: phase1=... phase2=...`
   - `/monitor` -> `preset=...`
@@ -292,6 +292,8 @@ Operational rule:
 - `AOE_TF_WORK_ROOT`: worktree 모드에서 TF workdir 생성 루트 (default: `<project_root_parent>/.aoe-tf/`)
 - `AOE_TF_ARTIFACT_POLICY`: TF 실행 아티팩트/번들 보존 정책 (`success-only`|`all`|`none`, default `success-only`)
 - `AOE_TF_EXEC_CACHE_TTL_HOURS`: success TF exec cache TTL in hours (default 72, 0 disables; ignored when `AOE_TF_ARTIFACT_POLICY=all`)
+- `AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS`: dashboard action audit retention in days (default 14, 0 disables time-based pruning)
+- `AOE_DASHBOARD_ACTION_AUDIT_KEEP_ROWS`: dashboard action audit max retained rows after pruning (default 500)
 - `AOE_TF_DOC_MODE`: TF 문서 스캐폴드 모드 (`single`|`legacy`, default `single`)  
   `single`은 TF당 `report.md` 1장만 유지하고, `legacy`는 `ongoing/note/handoff` 스캐폴드를 유지
 
@@ -302,15 +304,15 @@ Operational rule:
 - `/ok` : 고위험 자동실행 확인 후 진행
 - `/retry <task>` : 동일 prompt/roles로 재실행
 - `/replan <task>` : planner/critic를 다시 생성해 재실행
-- `/queue` : (Mother-Orch) 전체 프로젝트 todo 큐 요약 보기
-- `/sync [all|O#|name]` : (Mother-Orch) 각 프로젝트의 `.aoe-team/AOE_TODO.md`를 todo 큐에 반영(추가/업데이트/완료)
-- `/sync recent [O#|name|all] [N]` : (Mother-Orch) 프로젝트 루트의 **최근 문서 N개(기본 3)** 를 스캔해 todo 후보를 추출 후 큐에 반영
-- `/next` : (Mother-Orch) 전체 프로젝트에서 다음 실행 가능한 Todo를 선택해 dispatch(TF)로 실행
+- `/queue` : (Control Plane) 전체 프로젝트 todo 큐 요약 보기
+- `/sync [all|O#|name]` : (Control Plane) 각 프로젝트의 `.aoe-team/AOE_TODO.md`를 todo 큐에 반영(추가/업데이트/완료)
+- `/sync recent [O#|name|all] [N]` : (Control Plane) 프로젝트 루트의 **최근 문서 N개(기본 3)** 를 스캔해 todo 후보를 추출 후 큐에 반영
+- `/next` : (Control Plane) 전체 프로젝트에서 다음 실행 가능한 Todo를 선택해 dispatch(Task Team)로 실행
 - `/orch pause <O#|name> [reason]` : 프로젝트 일시정지(글로벌 스케줄러에서 기본 제외)
 - `/orch resume <O#|name>` : 프로젝트 일시정지 해제
-- `/fanout [N] [force]` : (Mother-Orch) **프로젝트별로 1개씩** `/todo next`를 실행(순차 wave)
-- `/drain [N] [force]` : (Mother-Orch) `/next`를 N회 반복 실행(기본 10회, 최대 50회)
-- `/auto [on|off|status|recover]` : (Mother-Orch) tmux 백그라운드 스케줄러로 `/next`(또는 `fanout`)를 주기적으로 실행(게이트웨이 polling을 블록하지 않음)
+- `/fanout [N] [force]` : (Control Plane) **프로젝트별로 1개씩** `/todo next`를 실행(순차 wave)
+- `/drain [N] [force]` : (Control Plane) `/next`를 N회 반복 실행(기본 10회, 최대 50회)
+- `/auto [on|off|status|recover]` : (Control Plane) tmux 백그라운드 스케줄러로 `/next`(또는 `fanout`)를 주기적으로 실행(게이트웨이 polling을 블록하지 않음)
 - `/auto recover` : provider capacity 때문에 운영자가 `/auto off`로 멈춘 뒤, cooldown이 지난 auto scheduler를 다시 켬
 - `/auto recover force` : `retry_at` 이전이라도 운영자가 강제로 auto scheduler를 재개
 - `/auto on fanout recent` : (off-desk 권장) idle 상태에서 `/sync recent all quiet`를 1회 실행해 큐를 시드(seed)한 뒤, `/fanout` 스케줄링을 계속

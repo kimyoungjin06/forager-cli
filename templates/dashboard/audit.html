@@ -1,0 +1,210 @@
+{% extends 'dashboard/base.html' %}
+{% import 'dashboard/_facet_macros.html' as facets %}
+{% block content %}
+<section class="panel">
+  <h2>Action Audit</h2>
+  <form class="inline-form" method="get" action="/control/audit">
+    <label>
+      <span>Focus</span>
+      <select name="focus">
+        {% for token in ['all', 'auto-route', 'judge', 'preferences', 'retry', 'server-guard'] %}
+        <option value="{{ token }}" {% if audit.focus_filter == token %}selected{% endif %}>{{ token }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Chat</span>
+      <input type="text" name="chat" value="{{ audit.chat_filter }}" placeholder="123456">
+    </label>
+    <label>
+      <span>Project</span>
+      <input type="text" name="project" value="{{ audit.project_filter }}" placeholder="O3">
+    </label>
+    <label>
+      <span>Query</span>
+      <input type="text" name="q" value="{{ audit.query_filter }}" placeholder="artifact_kind:chart">
+    </label>
+    <label>
+      <span>Limit</span>
+      <input type="number" name="limit" min="1" max="100" value="{{ audit.limit }}">
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+  <ul class="kv-list">
+    <li><span>audit_path</span><strong>{{ audit.audit_path }}</strong></li>
+    <li><span>updated_at</span><strong>{{ audit.updated_at or '-' }}</strong></li>
+    <li><span>limit</span><strong>{{ audit.limit }}</strong></li>
+    <li><span>total_rows</span><strong>{{ audit.total_rows }}</strong></li>
+    <li><span>status_summary</span><strong>{{ audit.status_summary }}</strong></li>
+    <li><span>focus_summary</span><strong>{{ audit.focus_summary }}</strong></li>
+    <li><span>focus_filter</span><strong>{{ audit.focus_filter }}</strong></li>
+    <li><span>project_filter</span><strong>{{ audit.project_filter or '-' }}</strong></li>
+    <li><span>artifact_filter</span><strong>{{ audit.artifact_filter or '-' }}</strong></li>
+    <li><span>memory_scope_filter</span><strong>{{ audit.memory_scope_filter or '-' }}</strong></li>
+    <li><span>refresh_diff_filter</span><strong>{{ audit.refresh_diff_filter or '-' }}</strong></li>
+    <li><span>chat_event_filter</span><strong>{{ audit.chat_event_filter or '-' }}</strong></li>
+    <li><span>chat_mode_filter</span><strong>{{ audit.chat_mode_filter or '-' }}</strong></li>
+    <li><span>chat_filter</span><strong>{{ audit.chat_filter or '-' }}</strong></li>
+    <li><span>query_filter</span><strong>{{ audit.query_filter or '-' }}</strong></li>
+    <li><span>server_guard_latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
+    <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
+    {% if audit.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
+    {% if audit.error %}<li><span>audit_error</span><strong>{{ audit.error }}</strong></li>{% endif %}
+    {% if audit.focus_filter == 'server-guard' and snapshot.control_summary.server_guard_preview_groups %}
+      {% set live_group = snapshot.control_summary.server_guard_preview_groups[0] %}
+      <li><span>server_guard_focus</span><strong>{{ live_group.label }}</strong></li>
+      <li><span>action_copy</span><strong>{{ live_group.action_sentence or live_group.operator_sentence or '-' }}</strong></li>
+      <li><span>priority_link</span><strong>{{ live_group.priority_link_label or '-' }}{% if live_group.priority_link_note %} | {{ live_group.priority_link_note }}{% endif %}</strong></li>
+    {% endif %}
+  </ul>
+  {{ facets.audit_focus_facet_row(
+    ['all', 'auto-route', 'judge', 'preferences', 'retry', 'server-guard'],
+    audit.focus_counts,
+    audit.focus_filter,
+    audit.project_filter,
+    audit.chat_filter,
+    audit.query_filter,
+    audit.limit,
+  ) }}
+  {% if audit.project_counts %}
+  <p class="muted">
+    project:
+    {% for value, count in audit.project_counts.items() %}
+      {% if audit.project_filter == value %}
+      <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if value %}&project={{ value|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if audit.query_filter %}&q={{ audit.query_filter|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">{{ value }}={{ count }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if audit.project_filter %}
+    <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if audit.query_filter %}&q={{ audit.query_filter|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">all projects</a>
+    {% endif %}
+  </p>
+  {% endif %}
+  {% if audit.artifact_counts %}
+  <p class="muted">
+    artifact:
+    {% for value, count in audit.artifact_counts.items() %}
+      {% set artifact_query = ('artifact_kind:' ~ value) if not audit.artifact_query_base else (audit.artifact_query_base ~ ' ' ~ 'artifact_kind:' ~ value) %}
+      {% if audit.artifact_filter == value %}
+      <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.project_filter %}&project={{ audit.project_filter|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if artifact_query %}&q={{ artifact_query|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">{{ value }}={{ count }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if audit.artifact_filter %}
+    <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.project_filter %}&project={{ audit.project_filter|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if audit.artifact_query_base %}&q={{ audit.artifact_query_base|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">all artifacts</a>
+    {% endif %}
+  </p>
+  {% endif %}
+  {% if audit.memory_scope_counts %}
+  <p class="muted">
+    memory_scope:
+    {% for value, count in audit.memory_scope_counts.items() %}
+      {% set memory_scope_query = ('memory_scope:' ~ value) if not audit.memory_scope_query_base else (audit.memory_scope_query_base ~ ' ' ~ 'memory_scope:' ~ value) %}
+      {% if audit.memory_scope_filter == value %}
+      <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.project_filter %}&project={{ audit.project_filter|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if memory_scope_query %}&q={{ memory_scope_query|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">{{ value }}={{ count }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if audit.memory_scope_filter %}
+    <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.project_filter %}&project={{ audit.project_filter|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if audit.memory_scope_query_base %}&q={{ audit.memory_scope_query_base|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">all memory scopes</a>
+    {% endif %}
+  </p>
+  {% endif %}
+  {% if audit.refresh_diff_counts %}
+  <p class="muted">
+    refresh_diff:
+    {% for value, count in audit.refresh_diff_counts.items() %}
+      {% set refresh_diff_query = ('refresh_diff:' ~ value) if not audit.refresh_diff_query_base else (audit.refresh_diff_query_base ~ ' ' ~ 'refresh_diff:' ~ value) %}
+      {% if audit.refresh_diff_filter == value %}
+      <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.project_filter %}&project={{ audit.project_filter|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if refresh_diff_query %}&q={{ refresh_diff_query|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">{{ value }}={{ count }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if audit.refresh_diff_filter %}
+    <a class="action-history-badge" href="/control/audit?focus={{ audit.focus_filter }}{% if audit.project_filter %}&project={{ audit.project_filter|urlencode }}{% endif %}{% if audit.chat_filter %}&chat={{ audit.chat_filter }}{% endif %}{% if audit.refresh_diff_query_base %}&q={{ audit.refresh_diff_query_base|urlencode }}{% endif %}{% if audit.limit %}&limit={{ audit.limit }}{% endif %}">all refresh diffs</a>
+    {% endif %}
+  </p>
+  {% endif %}
+  {{ facets.audit_ordered_query_facet_row(
+    'chat_event',
+    ['reply', 'room_change', 'session'],
+    audit.chat_event_counts,
+    audit.chat_event_filter,
+    audit.chat_event_query_base,
+    'chat_event',
+    audit.focus_filter,
+    audit.project_filter,
+    audit.chat_filter,
+    audit.limit,
+    'all chat events',
+  ) }}
+  {{ facets.audit_ordered_query_facet_row(
+    'chat_mode',
+    ['direct', 'dispatch', 'room_post', 'room_use', 'raw'],
+    audit.chat_mode_counts,
+    audit.chat_mode_filter,
+    audit.chat_mode_query_base,
+    'chat_mode',
+    audit.focus_filter,
+    audit.project_filter,
+    audit.chat_filter,
+    audit.limit,
+    'all chat modes',
+  ) }}
+</section>
+
+<section class="panel">
+  <h2>Recent Actions</h2>
+  {% if audit.rows %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>At</th>
+        <th>Headline</th>
+        <th>Status</th>
+        <th>Next</th>
+        <th>Command</th>
+        <th>Link</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in audit.rows %}
+      {% set source_command = row.source_command|lower %}
+      {% set chat_mode = '' %}
+      {% if source_command.startswith('/direct ') %}
+        {% set chat_mode = 'direct' %}
+      {% elif source_command.startswith('/dispatch ') %}
+        {% set chat_mode = 'dispatch' %}
+      {% elif source_command.startswith('/room post ') %}
+        {% set chat_mode = 'room_post' %}
+      {% elif source_command.startswith('/room use ') %}
+        {% set chat_mode = 'room_use' %}
+      {% elif row.chat_id and (row.outcome_kind == 'chat_send' or (row.headline|lower).startswith('chat send')) %}
+        {% set chat_mode = 'raw' %}
+      {% endif %}
+      <tr>
+        <td>{{ row.at }}</td>
+        <td>{% if row.focus_badge %}<span class="action-history-badge{% if audit.focus_filter != 'all' and audit.focus_filter == row.focus_badge %} active-focus{% endif %}">{{ row.focus_badge }}</span> {% endif %}{% if chat_mode %}<span class="action-history-badge chat-mode-badge chat-mode-{{ chat_mode }}">{{ chat_mode }}</span> {% endif %}{{ row.headline_summary or row.headline }}{% if row.project_alias and row.project_alias != '-' %}<br><span class="muted">project={{ row.project_alias }}</span>{% endif %}{% if row.planning_compact_summary and row.planning_compact_summary != '-' %}<br><span class="muted">planning_compact: {{ row.planning_compact_summary|replace('planning=', '') }}</span>{% endif %}{% if row.subagent_contract_summary and row.subagent_contract_summary != '-' %}<br><span class="muted">subagent_contract: {{ row.subagent_contract_summary }}</span>{% endif %}{% if row.subagent_evidence_summary and row.subagent_evidence_summary != '-' %}<br><span class="muted">subagent_evidence: {{ row.subagent_evidence_summary }}</span>{% endif %}{% if row.subagent_gate_summary and row.subagent_gate_summary != '-' %}<br><span class="muted">subagent_gate: {{ row.subagent_gate_summary }}</span>{% endif %}{% if row.applied_preferences_summary and row.applied_preferences_summary != '-' %}<br><span class="muted">{{ row.applied_preferences_summary }}</span>{% endif %}{% if row.preference_candidate_summary and row.preference_candidate_summary != '-' %}<br><span class="muted">{{ row.preference_candidate_summary }}</span>{% endif %}{% if row.preference_candidate_scope_summary and row.preference_candidate_scope_summary != '-' %}<br><span class="muted">{{ row.preference_candidate_scope_summary }}</span>{% endif %}{% if row.preference_decision_summary and row.preference_decision_summary != '-' %}<br><span class="muted">{{ row.preference_decision_summary }}</span>{% endif %}{% if row.preference_memory_scope_summary and row.preference_memory_scope_summary != '-' %}<br><span class="muted">{{ row.preference_memory_scope_summary }}</span>{% endif %}{% if row.preference_refresh_diff_summary and row.preference_refresh_diff_summary != '-' %}<br><span class="muted">{{ row.preference_refresh_diff_summary }}</span>{% endif %}{% if row.chat_reply_summary and row.chat_reply_summary != '-' %}<br><span class="muted">{{ row.chat_reply_summary }}</span>{% endif %}{% if row.chat_room_change_summary and row.chat_room_change_summary != '-' %}<br><span class="muted">{{ row.chat_room_change_summary }}</span>{% endif %}{% if row.subagent_artifact_path and row.subagent_artifact_path != '-' %}<br><span class="muted">subagent_artifact: {{ row.subagent_artifact_path }}</span>{% endif %}{% if row.outcome_detail and row.outcome_detail != '-' %}<br><span class="muted">{{ row.outcome_detail }}</span>{% endif %}{% if row.remediation and row.remediation != '-' %}<br><span class="muted">{{ row.remediation }}</span>{% endif %}</td>
+        <td>{{ row.status }}</td>
+        <td>{{ row.next_step }}</td>
+        <td><code>{{ row.source_command }}</code></td>
+        <td>
+          {% if row.link_href and row.link_href != '-' %}
+          <a href="{{ row.link_href }}">{{ row.link_label or 'detail' }}</a>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">no action audit rows</p>
+  {% endif %}
+</section>
+{% endblock %}

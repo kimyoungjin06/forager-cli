@@ -40,6 +40,15 @@ truth:
 - `.aoe-team/auto_scheduler.json`
 - `.aoe-team/tf_exec_map.json`
 - `.aoe-team/telegram_gateway_state.json`
+- `.aoe-team/background_runs.json`
+- `.aoe-team/background_worker.json`
+- `.aoe-team/provider_capacity.json`
+- `.aoe-team/control/`
+- `.aoe-team/dashboard/`
+- `.aoe-team/recovery/`
+- `.aoe-team/background_run_handoffs/`
+- `.aoe-team/background_run_results/`
+- `.aoe-team/background_run_acks/`
 - `.aoe-team/logs/`
 - `.aoe-team/messages/`
 - `.aoe-team/tf_runs/`
@@ -55,6 +64,16 @@ Generated compatibility shims inside `.aoe-team/` are also runtime-local:
 - `.aoe-team/telegram_stack.sh`
 - `.aoe-team/worker_codex_handler.sh`
 
+Privilege escalation helpers must not be shipped from `.aoe-team/`.
+
+- Do not commit generated sudoers installers or host-specific `NOPASSWD` scripts.
+- Treat no-prompt root operation as an explicit local operator decision, not a
+  package default.
+- If a deployment needs privileged commands, create a temporary sudoers rule on
+  the target host with the narrowest command scope practical, validate it with
+  `visudo -cf`, and remove it when the maintenance window ends.
+- Avoid broad `NOPASSWD: ALL` rules for normal operation.
+
 ## 4. Pre-Deployment Checks
 
 From the repository root:
@@ -68,10 +87,19 @@ bash -n scripts/team/aoe-team-stack.sh \
   scripts/team/bootstrap_runtime_templates.sh
 ```
 
-If gateway tests are available in the environment:
+If gateway tests are available in the environment, run the default CLI
+regression wrapper:
 
 ```bash
 scripts/gateway_pytest.sh
+```
+
+Focused gateway suites:
+
+```bash
+bash scripts/gateway_smoke_test.sh
+bash scripts/gateway_error_test.sh
+bash scripts/gateway_dashboard_test.sh
 ```
 
 Minimum release check:

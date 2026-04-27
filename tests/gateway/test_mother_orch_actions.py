@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for Mother-Orch Action API helpers."""
+"""Regression tests for Control Action API helpers."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def test_unknown_action_raises_runtime_error() -> None:
     try:
         mod.normalize_mother_orch_action_call({"action": "invent_new_magic"})
     except RuntimeError as exc:
-        assert "unknown Mother-Orch action" in str(exc)
+        assert "unknown Control Plane action" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
 
@@ -140,6 +140,103 @@ def test_infer_action_call_maps_reporting_prompt_to_dispatch_task_even_with_acti
     assert row["action"] == "dispatch_task"
     assert row["project_key"] == "O4"
     assert row["readonly"] is False
+
+
+def test_infer_action_call_maps_offdesk_review_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "이제 오프데스크 모드용 할일을 검토해볼까",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert row["readonly"] is True
+    assert "selected=offdesk_review" in row["intent_trace"]
+
+
+def test_infer_action_call_prefers_offdesk_review_for_ambiguous_timing_prompt() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "퇴근 전 오늘 밤 할일을 검토하고 실행 후보도 같이 봐줘",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "safe_mode=prefer_control_review_over_dispatch" in row["intent_trace"]
+    assert "why_not_dispatch=recovery/offdesk timing markers outrank work markers" in row["intent_trace"]
+
+
+def test_infer_action_call_maps_offdesk_prepare_prompt_to_offdesk_prepare() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "퇴근 전에 오프데스크 준비 상태를 점검해줘",
+        default_project_key="O3",
+        has_active_task=False,
+    )
+
+    assert row["action"] == "offdesk_prepare"
+    assert row["intent_class"] == "status"
+
+
+def test_infer_action_call_maps_recovery_warning_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "내일 아침 복귀 전에 경고 프로젝트부터 먼저 보자",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "selected=offdesk_review" in row["intent_trace"]
+
+
+def test_infer_action_call_keeps_review_only_prompt_out_of_dispatch() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "실행 말고 오프데스크 검토만 먼저 해줘",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+
+
+def test_infer_action_call_maps_recovery_result_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "복귀 후 밤새 결과부터 먼저 보자",
+        default_project_key="O3",
+        has_active_task=True,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "selected=offdesk_review" in row["intent_trace"]
+
+
+def test_infer_action_call_prefers_offdesk_review_for_candidate_only_prompt() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "오늘 밤 후보만 추리고 실제 실행은 나중에 하자",
+        default_project_key="O3",
+        has_active_task=False,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "review:후보" in row["intent_trace"]
+    assert "why_not_dispatch=recovery/offdesk timing markers outrank work markers" in row["intent_trace"]
+
+
+def test_infer_action_call_maps_warning_project_review_prompt_to_offdesk_review() -> None:
+    row = mod.infer_mother_orch_action_call(
+        "경고 프로젝트만 먼저 모아서 검토해줘",
+        default_project_key="O3",
+        has_active_task=False,
+    )
+
+    assert row["action"] == "offdesk_review"
+    assert row["intent_class"] == "status"
+    assert "warning_scope:경고 프로젝트" in row["intent_trace"]
 
 
 def test_action_call_to_resolved_command_maps_monitor_and_offdesk() -> None:

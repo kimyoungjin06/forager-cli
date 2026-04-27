@@ -69,6 +69,57 @@ PRESET_EVIDENCE_DEFAULTS = {
         "Review, handoff, or risk evidence is captured.",
     ],
 }
+PRESET_COMPLETION_CONTRACTS = {
+    "writer": {
+        "primary_output": "draft/report/handoff/spec text",
+        "focus": "clarity, completeness, source grounding, unresolved claims",
+        "done_when": "deliverable is readable end-to-end, grounded in sources, and open issues are surfaced",
+        "rerun_when": "sections are missing, grounding is weak, or the deliverable is malformed",
+        "manual_followup_when": "audience, policy wording, or source-of-truth ambiguity needs operator judgment",
+    },
+    "analysis": {
+        "primary_output": "analytical conclusion or ranked findings",
+        "focus": "evidence quality, reasoning coherence, missing caveats",
+        "done_when": "conclusion is supported by inspectable evidence and explicit caveats",
+        "rerun_when": "conclusion is unsupported, evidence joins are weak, or caveats are missing",
+        "manual_followup_when": "operator preference or external interpretation decides the conclusion",
+    },
+    "build": {
+        "primary_output": "code/config/integration change",
+        "focus": "implementation delta, tests, integration risk",
+        "done_when": "implementation delta is clear and verification evidence covers the risky path",
+        "rerun_when": "tests fail, patch is incomplete, or integration edges are broken",
+        "manual_followup_when": "env/deploy/secret dependency or risky mutation approval blocks closure",
+    },
+    "data": {
+        "primary_output": "transformed dataset/query/report output",
+        "focus": "schema correctness, null handling, transform integrity",
+        "done_when": "schema/null evidence and sample output or validation result are present",
+        "rerun_when": "schema drifts, output is null-heavy, or a pipeline step is broken",
+        "manual_followup_when": "business-rule ambiguity or source data quality requires operator judgment",
+    },
+    "review": {
+        "primary_output": "review verdict, critique, or regression assessment",
+        "focus": "risk detection, regression coverage, missing evidence",
+        "done_when": "review artifact is complete even if the verdict is no change required",
+        "rerun_when": "review is shallow, unsupported, or misses required scope",
+        "manual_followup_when": "acceptance threshold or risk tradeoff must be decided by the operator",
+    },
+    "mixed": {
+        "primary_output": "work result plus handoff/review output",
+        "focus": "execution/review split integrity, handoff quality, unresolved coupling",
+        "done_when": "work artifact and handoff/review evidence both exist without lane drift",
+        "rerun_when": "work lane is incomplete, handoff drifts, or review lane mismatches the preset",
+        "manual_followup_when": "operator must arbitrate packaging, scope, or competing outputs",
+    },
+    "general": {
+        "primary_output": "fallback mixed work result",
+        "focus": "basic completion, evidence minimum, risk surfacing",
+        "done_when": "task-specific minimum evidence exists and the result is understandable",
+        "rerun_when": "result is partial, inconsistent, or unclear",
+        "manual_followup_when": "scope remains unclear or the task framing is insufficient",
+    },
+}
 
 
 def _is_review_role(role: str) -> bool:
@@ -178,6 +229,19 @@ def _merge_preset_evidence_defaults(
     return merged or acceptance or default_acceptance
 
 
+def preset_completion_contract(raw: Any) -> Dict[str, str]:
+    preset = _normalize_role_preset(raw)
+    contract = PRESET_COMPLETION_CONTRACTS.get(preset, PRESET_COMPLETION_CONTRACTS["general"])
+    return {
+        "preset": preset,
+        "primary_output": str(contract.get("primary_output", "")).strip() or "-",
+        "focus": str(contract.get("focus", "")).strip() or "-",
+        "done_when": str(contract.get("done_when", "")).strip() or "-",
+        "rerun_when": str(contract.get("rerun_when", "")).strip() or "-",
+        "manual_followup_when": str(contract.get("manual_followup_when", "")).strip() or "-",
+    }
+
+
 def normalize_tf_phase(raw: Any, default: str = "queued") -> str:
     return _normalize_choice(raw, TASK_STATUSES, default)
 
@@ -194,6 +258,8 @@ def derive_tf_phase(task: Any) -> str:
 
     plan_gate_passed = data.get("plan_gate_passed")
     plan_gate_reason = _trim_text(data.get("plan_gate_reason", ""), 240)
+    plan_convergence_status = str(data.get("plan_convergence_status", "")).strip().lower()
+    plan_stalled_reason = _trim_text(data.get("plan_stalled_reason", ""), 240)
     exec_critic = data.get("exec_critic") if isinstance(data.get("exec_critic"), dict) else {}
     exec_verdict = _normalize_choice(exec_critic.get("verdict"), VERDICT_STATUSES, "")
     rate_limit = data.get("rate_limit") if isinstance(data.get("rate_limit"), dict) else {}
@@ -203,6 +269,8 @@ def derive_tf_phase(task: Any) -> str:
         return "completed"
     if rate_limit_mode == "blocked":
         return "rate_limited"
+    if plan_convergence_status == "stalled":
+        return "manual_intervention"
     if plan_gate_passed is False or plan_gate_reason:
         return "blocked"
     if exec_verdict == "retry":
@@ -239,6 +307,8 @@ def derive_tf_phase_reason(task: Any) -> str:
     exec_critic = data.get("exec_critic") if isinstance(data.get("exec_critic"), dict) else {}
     exec_reason = _trim_text(exec_critic.get("reason", exec_critic.get("fix", "")), 240)
     plan_gate_reason = _trim_text(data.get("plan_gate_reason", ""), 240)
+    plan_convergence_status = str(data.get("plan_convergence_status", "")).strip().lower()
+    plan_stalled_reason = _trim_text(data.get("plan_stalled_reason", ""), 240)
     rate_limit = data.get("rate_limit") if isinstance(data.get("rate_limit"), dict) else {}
     if str(rate_limit.get("mode", "")).strip().lower() == "blocked":
         providers = [str(x).strip() for x in (rate_limit.get("limited_providers") or []) if str(x).strip()]
@@ -252,6 +322,8 @@ def derive_tf_phase_reason(task: Any) -> str:
         if retry_at:
             parts.append(f"retry_at={retry_at}")
         return "provider capacity unavailable" + (f" ({' '.join(parts)})" if parts else "")
+    if plan_convergence_status == "stalled":
+        return plan_stalled_reason or "planning stalled"
     if plan_gate_reason:
         return plan_gate_reason
     if exec_reason:
@@ -493,6 +565,8 @@ def _execution_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         rows = []
     group_map: Dict[str, Dict[str, Any]] = {}
     group_order: List[str] = []
+    subtask_role: Dict[str, str] = {}
+    subtask_depends: Dict[str, List[str]] = {}
     for idx, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             continue
@@ -504,6 +578,12 @@ def _execution_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
             or sid
         )
         goal = _trim_text(row.get("goal", title), 240) or title
+        subtask_role[sid] = role
+        subtask_depends[sid] = [
+            token
+            for token in _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=32)
+            if token and token != sid
+        ]
         if role not in group_map:
             group_order.append(role)
             group_map[role] = {
@@ -512,6 +592,7 @@ def _execution_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "subtask_ids": [],
                 "subtask_titles": [],
                 "goals": [],
+                "depends_on": [],
             }
         group = group_map[role]
         if sid not in group["subtask_ids"]:
@@ -521,6 +602,24 @@ def _execution_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         if goal not in group["goals"]:
             group["goals"].append(goal)
     if group_order:
+        role_to_group_id = {
+            role: str(group_map[role].get("group_id", "")).strip()
+            for role in group_order
+            if str(group_map[role].get("group_id", "")).strip()
+        }
+        for role in group_order:
+            group = group_map[role]
+            group_id = str(group.get("group_id", "")).strip()
+            depends: List[str] = []
+            for sid in list(group.get("subtask_ids") or []):
+                for dep_sid in subtask_depends.get(sid, []):
+                    dep_group_id = role_to_group_id.get(subtask_role.get(dep_sid, ""), "")
+                    if dep_group_id and dep_group_id != group_id and dep_group_id not in depends:
+                        depends.append(dep_group_id)
+            if depends:
+                group["depends_on"] = depends
+            else:
+                group.pop("depends_on", None)
         return [group_map[role] for role in group_order]
     return [
         {
@@ -533,23 +632,110 @@ def _execution_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
-def _plan_subtask_payloads(plan: Dict[str, Any]) -> List[Dict[str, str]]:
+def _plan_subtask_payloads(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows = plan.get("subtasks")
     if not isinstance(rows, list) or not rows:
         rows = plan.get("assignments")
     if not isinstance(rows, list):
         rows = []
-    payloads: List[Dict[str, str]] = []
+    payloads: List[Dict[str, Any]] = []
     for idx, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             continue
         sid = _trim_text(row.get("id", f"S{idx}"), 32) or f"S{idx}"
         title = _trim_text(row.get("title", row.get("goal", sid)), 160) or sid
         goal = _trim_text(row.get("goal", title), 240) or title
-        payloads.append({"id": sid, "title": title, "goal": goal})
+        owner_role = _trim_text(row.get("owner_role", row.get("role", "")), 64)
+        depends_on = _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=32)
+        depends_on = [token for token in depends_on if token != sid]
+        payload: Dict[str, Any] = {"id": sid, "title": title, "goal": goal}
+        if owner_role:
+            payload["owner_role"] = owner_role
+        if depends_on:
+            payload["depends_on"] = depends_on
+        payloads.append(payload)
     if payloads:
         return payloads
     return [{"id": "S1", "title": "Execute task", "goal": "Execute the requested task with verifiable evidence."}]
+
+
+def _review_groups_from_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = plan.get("subtasks")
+    if not isinstance(rows, list) or not rows:
+        rows = plan.get("assignments")
+    if not isinstance(rows, list):
+        rows = []
+    group_map: Dict[str, Dict[str, Any]] = {}
+    group_order: List[str] = []
+    subtask_role: Dict[str, str] = {}
+    subtask_depends: Dict[str, List[str]] = {}
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            continue
+        role = _trim_text(row.get("owner_role", row.get("role", "")), 64) or "Worker"
+        if not _is_review_role(role):
+            continue
+        sid = _trim_text(row.get("id", f"S{idx}"), 32) or f"S{idx}"
+        title = _trim_text(row.get("title", row.get("goal", sid)), 160) or sid
+        goal = _trim_text(row.get("goal", title), 240) or title
+        subtask_role[sid] = role
+        subtask_depends[sid] = [
+            token
+            for token in _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=32)
+            if token and token != sid
+        ]
+        if role not in group_map:
+            group_order.append(role)
+            group_map[role] = {
+                "group_id": f"R{len(group_order)}",
+                "role": role,
+                "kind": "verifier",
+                "scope": "phase2_outputs",
+                "subtask_ids": [],
+                "subtask_titles": [],
+                "goals": [],
+                "depends_on": [],
+            }
+        group = group_map[role]
+        if sid not in group["subtask_ids"]:
+            group["subtask_ids"].append(sid)
+        if title not in group["subtask_titles"]:
+            group["subtask_titles"].append(title)
+        if goal not in group["goals"]:
+            group["goals"].append(goal)
+    if group_order:
+        role_to_group_id = {
+            role: str(group_map[role].get("group_id", "")).strip()
+            for role in group_order
+            if str(group_map[role].get("group_id", "")).strip()
+        }
+        for role in group_order:
+            group = group_map[role]
+            group_id = str(group.get("group_id", "")).strip()
+            depends: List[str] = []
+            for sid in list(group.get("subtask_ids") or []):
+                for dep_sid in subtask_depends.get(sid, []):
+                    dep_group_id = role_to_group_id.get(subtask_role.get(dep_sid, ""), "")
+                    if dep_group_id and dep_group_id != group_id and dep_group_id not in depends:
+                        depends.append(dep_group_id)
+            if depends:
+                group["depends_on"] = depends
+            else:
+                group.pop("depends_on", None)
+        return [group_map[role] for role in group_order]
+    return []
+
+
+def _row_subtask_ids(rows: List[Dict[str, Any]]) -> set[str]:
+    out: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for item in (row.get("subtask_ids") or []):
+            token = str(item or "").strip()
+            if token:
+                out.add(token)
+    return out
 
 
 def _preset_execution_roles(preset: str, available_roles: List[str]) -> List[str]:
@@ -572,6 +758,8 @@ def _apply_execution_preset(
     preset_roles = _preset_execution_roles(normalized_preset, available_roles)
     if normalized_preset == "mixed":
         payloads = _plan_subtask_payloads(plan)
+        work_payloads = [row for row in payloads if not _is_review_role(str(row.get("owner_role", "")).strip())]
+        payload_ids = {row["id"] for row in work_payloads}
         worklike_roles = [role for role in _dedupe_roles(available_roles, limit=16) if not _is_review_role(role)]
         if not worklike_roles:
             return rows
@@ -582,16 +770,21 @@ def _apply_execution_preset(
             if isinstance(row, dict) and str(row.get("role", "")).strip()
         }
         mixed_rows = [row_map[role] for role in worklike_roles if role in row_map]
-        if mixed_rows:
+        if mixed_rows and payload_ids.issubset(_row_subtask_ids(mixed_rows)):
             return mixed_rows
 
+        if not work_payloads:
+            work_payloads = payloads
+            payload_ids = {row["id"] for row in work_payloads}
+            if mixed_rows and payload_ids.issubset(_row_subtask_ids(mixed_rows)):
+                return mixed_rows
         return [
             {
                 "group_id": f"E{idx}",
                 "role": role,
-                "subtask_ids": [row["id"] for row in payloads],
-                "subtask_titles": [row["title"] for row in payloads],
-                "goals": [row["goal"] for row in payloads],
+                "subtask_ids": [row["id"] for row in work_payloads],
+                "subtask_titles": [row["title"] for row in work_payloads],
+                "goals": [row["goal"] for row in work_payloads],
             }
             for idx, role in enumerate(worklike_roles, start=1)
         ]
@@ -605,7 +798,8 @@ def _apply_execution_preset(
         if isinstance(row, dict) and str(row.get("role", "")).strip()
     }
     ordered_matches = [row_map[role] for role in preset_roles if role in row_map]
-    if ordered_matches:
+    payload_ids = {row["id"] for row in _plan_subtask_payloads(plan)}
+    if ordered_matches and payload_ids.issubset(_row_subtask_ids(ordered_matches)):
         return ordered_matches
 
     payloads = _plan_subtask_payloads(plan)
@@ -671,16 +865,358 @@ def _default_phase2_roles_for_preset(
     return default_critic, default_integration
 
 
+def _request_contract_review_outputs(plan: Dict[str, Any]) -> List[str]:
+    if not isinstance(plan, dict):
+        return []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    fields = request_contract.get("fields") if isinstance(request_contract.get("fields"), dict) else {}
+    deliverable_policy = fields.get("deliverable_policy") if isinstance(fields.get("deliverable_policy"), dict) else {}
+    outputs = _normalize_text_list(
+        deliverable_policy.get("review_outputs", []),
+        limit=8,
+        item_limit=64,
+    )
+    if outputs:
+        return outputs
+    return []
+
+
+def _request_contract_artifact_contracts(plan: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(plan, dict):
+        return {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    raw = request_contract.get("artifact_contracts")
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, value in raw.items():
+        alias = _trim_text(key, 64)
+        if not alias or not isinstance(value, dict):
+            continue
+        out[alias] = value
+    return out
+
+
+def _request_contract_execution_deliverables_for_outputs(plan: Dict[str, Any], outputs: List[str]) -> List[Dict[str, Any]]:
+    artifact_contracts = _request_contract_artifact_contracts(plan)
+    deliverables: List[Dict[str, Any]] = []
+    for output in outputs:
+        artifact = artifact_contracts.get(output)
+        if not isinstance(artifact, dict):
+            continue
+        path = _trim_text(artifact.get("path", ""), 200)
+        required_fields = _normalize_text_list(artifact.get("required_fields", []), limit=12, item_limit=120)
+        acceptance_notes = _normalize_text_list(artifact.get("acceptance_notes", []), limit=6, item_limit=240)
+        row: Dict[str, Any] = {
+            "output": output,
+        }
+        if path:
+            row["path"] = path
+        if required_fields:
+            row["required_fields"] = required_fields
+        if acceptance_notes:
+            row["acceptance_notes"] = acceptance_notes
+        deliverables.append(row)
+    return deliverables
+
+
+def _request_contract_review_deliverables(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _request_contract_execution_deliverables_for_outputs(plan, _request_contract_review_outputs(plan))
+
+
+def _request_contract_execution_deliverables(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _request_contract_execution_deliverables_for_outputs(plan, _request_contract_execution_outputs(plan))
+
+
+def _request_contract_review_acceptance(plan: Dict[str, Any]) -> List[str]:
+    deliverables = _request_contract_review_deliverables(plan)
+    lines: List[str] = []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    fields = request_contract.get("fields") if isinstance(request_contract.get("fields"), dict) else {}
+    if _normalize_role_preset(request_contract.get("preset")) == "review" and _normalize_bool(request_contract.get("readonly", False), False):
+        lines.append("Readonly review flow may write only the declared review_evidence/* artifacts and review_report.md; code or runtime state mutation remains forbidden.")
+    for row in deliverables:
+        output = _trim_text(row.get("output", ""), 64) or "review output"
+        path = _trim_text(row.get("path", output), 200) or output
+        required_fields = _normalize_text_list(row.get("required_fields", []), limit=16, item_limit=120)
+        lines.append(f"Review lane directly writes {path} as the canonical {output} artifact.")
+        if required_fields:
+            chunk_size = 4
+            for idx in range(0, len(required_fields), chunk_size):
+                chunk = required_fields[idx : idx + chunk_size]
+                prefix = f"{path} keeps required sections/fields: " if idx == 0 else f"{path} also keeps sections/fields: "
+                lines.append(prefix + ", ".join(chunk) + ".")
+    quality_gate_policy = fields.get("quality_gate_policy") if isinstance(fields.get("quality_gate_policy"), dict) else {}
+    required_sections = _normalize_text_list(quality_gate_policy.get("required_sections", []), limit=16, item_limit=64)
+    required_evidence = _normalize_text_list(quality_gate_policy.get("required_evidence", []), limit=16, item_limit=64)
+    if required_sections:
+        chunk_size = 4
+        for idx in range(0, len(required_sections), chunk_size):
+            chunk = required_sections[idx : idx + chunk_size]
+            if not chunk:
+                continue
+            prefix = "Review lane verifies sections=" if idx == 0 else "Review lane also verifies sections="
+            lines.append(prefix + ", ".join(chunk) + ".")
+    if required_evidence:
+        chunk_size = 4
+        for idx in range(0, len(required_evidence), chunk_size):
+            chunk = required_evidence[idx : idx + chunk_size]
+            if not chunk:
+                continue
+            prefix = "Review lane verifies evidence=" if idx == 0 else "Review lane also verifies evidence="
+            lines.append(prefix + ", ".join(chunk) + ".")
+    if required_sections or required_evidence:
+        lines.append("If scope or evidence stays incomplete, review lane reports `rerun` instead of `done`.")
+        lines.append("Review lane owns the final disposition: it reports `done` only after review_report.md contains every required section and cited evidence, otherwise it reports `rerun`.")
+    return _normalize_text_list(lines, limit=16, item_limit=240)
+
+
+def _request_contract_execution_acceptance_for_outputs(plan: Dict[str, Any], outputs: List[str]) -> List[str]:
+    deliverables = _request_contract_execution_deliverables_for_outputs(plan, outputs)
+    writer_outputs = set(_request_contract_writer_outputs(plan))
+    lines: List[str] = []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    if _normalize_role_preset(request_contract.get("preset")) == "review" and _normalize_bool(request_contract.get("readonly", False), False):
+        lines.append("Readonly review flow may write only the declared review_evidence/* artifacts and review_report.md; code or runtime state mutation remains forbidden.")
+    for row in deliverables:
+        output = _trim_text(row.get("output", ""), 64) or "execution output"
+        path = _trim_text(row.get("path", output), 200) or output
+        required_fields = _normalize_text_list(row.get("required_fields", []), limit=16, item_limit=120)
+        lane_label = "Writer lane" if output in writer_outputs else "Execution lane"
+        lines.append(f"{lane_label} directly writes {path} as the canonical {output} artifact.")
+        if required_fields:
+            chunk_size = 4
+            for idx in range(0, len(required_fields), chunk_size):
+                chunk = required_fields[idx : idx + chunk_size]
+                prefix = f"{path} keeps required sections/fields: " if idx == 0 else f"{path} also keeps sections/fields: "
+                lines.append(prefix + ", ".join(chunk) + ".")
+        for note in _normalize_text_list(row.get("acceptance_notes", []), limit=6, item_limit=240):
+            lines.append(note)
+    return _normalize_text_list(lines, limit=20, item_limit=240)
+
+
+def _request_contract_execution_acceptance(plan: Dict[str, Any]) -> List[str]:
+    return _request_contract_execution_acceptance_for_outputs(plan, _request_contract_execution_outputs(plan))
+
+
+def _request_contract_writer_outputs(plan: Dict[str, Any]) -> List[str]:
+    if not isinstance(plan, dict):
+        return []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    fields = request_contract.get("fields") if isinstance(request_contract.get("fields"), dict) else {}
+    deliverable_policy = fields.get("deliverable_policy") if isinstance(fields.get("deliverable_policy"), dict) else {}
+    return _normalize_text_list(
+        deliverable_policy.get("writer_outputs", []),
+        limit=8,
+        item_limit=64,
+    )
+
+
+def _request_contract_execution_outputs(plan: Dict[str, Any]) -> List[str]:
+    if not isinstance(plan, dict):
+        return []
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    fields = request_contract.get("fields") if isinstance(request_contract.get("fields"), dict) else {}
+    deliverable_policy = fields.get("deliverable_policy") if isinstance(fields.get("deliverable_policy"), dict) else {}
+    required_outputs = _normalize_text_list(request_contract.get("required_outputs", []), limit=8, item_limit=64)
+    outputs: List[str] = []
+    explicit_outputs = _normalize_text_list(deliverable_policy.get("execution_outputs", []), limit=8, item_limit=64)
+    for item in explicit_outputs:
+        if item and item not in outputs:
+            outputs.append(item)
+    if deliverable_policy.get("work_result_required") and "work_result" in required_outputs:
+        if "work_result" not in outputs:
+            outputs.append("work_result")
+    return outputs
+
+
+def _request_contract_artifact_write_scope(plan: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    request_contract = meta.get("request_contract") if isinstance(meta.get("request_contract"), dict) else {}
+    if _normalize_role_preset(request_contract.get("preset")) != "review":
+        return {}
+    if not _normalize_bool(request_contract.get("readonly", False), False):
+        return {}
+    deliverables = _request_contract_execution_deliverables(plan) + _request_contract_review_deliverables(plan)
+    allowed_paths: List[str] = []
+    for row in deliverables:
+        path = _trim_text(row.get("path", ""), 200)
+        if path and path not in allowed_paths:
+            allowed_paths.append(path)
+    allowed_outputs = _dedupe_roles(
+        _request_contract_execution_outputs(plan) + _request_contract_review_outputs(plan),
+        limit=16,
+    )
+    if not allowed_paths and not allowed_outputs:
+        return {}
+    return {
+        "mode": "declared_outputs_only",
+        "allowed_outputs": allowed_outputs,
+        "allowed_paths": allowed_paths,
+        "forbidden_targets": ["repo source", "runtime state", "persistent operator state"],
+    }
+
+
+def _dependency_cycle_exists(rows: List[Dict[str, Any]], *, id_key: str) -> bool:
+    graph: Dict[str, List[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        node = str(row.get(id_key, "")).strip()
+        if not node:
+            continue
+        graph[node] = [
+            token
+            for token in _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=16)
+            if token and token != node
+        ]
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str) -> bool:
+        if node in visited:
+            return False
+        if node in visiting:
+            return True
+        visiting.add(node)
+        for dep in graph.get(node, []):
+            if dep in graph and visit(dep):
+                return True
+        visiting.remove(node)
+        visited.add(node)
+        return False
+
+    return any(visit(node) for node in list(graph))
+
+
+def _repair_cyclic_depends_from_fallback(
+    rows: List[Dict[str, Any]],
+    *,
+    id_key: str,
+    fallback_rows: List[Dict[str, Any]],
+    fallback_id_key: str | None = None,
+) -> None:
+    if not _dependency_cycle_exists(rows, id_key=id_key):
+        return
+    fallback_rows = [row for row in fallback_rows if isinstance(row, dict)]
+    fallback_id_key = fallback_id_key or id_key
+    if _dependency_cycle_exists(fallback_rows, id_key=fallback_id_key):
+        return
+
+    fallback_by_id: Dict[str, List[str]] = {}
+    fallback_by_role: Dict[str, List[str]] = {}
+    for row in fallback_rows:
+        node = str(row.get(fallback_id_key, "")).strip()
+        depends = _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=16)
+        if node and node not in fallback_by_id:
+            fallback_by_id[node] = depends
+        role = str(row.get("role", "")).strip()
+        if role and role not in fallback_by_role:
+            fallback_by_role[role] = depends
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        node = str(row.get(id_key, "")).strip()
+        role = str(row.get("role", "")).strip()
+        repaired = fallback_by_id.get(node)
+        if repaired is None and role:
+            repaired = fallback_by_role.get(role)
+        if repaired:
+            row["depends_on"] = list(repaired)
+        else:
+            row.pop("depends_on", None)
+
+
+def _rows_repeat_same_subtasks(rows: List[Dict[str, Any]]) -> bool:
+    payloads: List[List[str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        subtask_ids = _normalize_text_list(row.get("subtask_ids", []), limit=12, item_limit=32)
+        if subtask_ids:
+            payloads.append(subtask_ids)
+    if len(payloads) < 2:
+        return False
+    first = payloads[0]
+    if len(first) <= 1:
+        return False
+    return all(item == first for item in payloads[1:])
+
+
+def _repair_repeated_subtask_payloads_from_fallback(rows: List[Dict[str, Any]], *, fallback_rows: List[Dict[str, Any]]) -> None:
+    if not _rows_repeat_same_subtasks(rows):
+        return
+    fallback_rows = [row for row in fallback_rows if isinstance(row, dict)]
+    if _rows_repeat_same_subtasks(fallback_rows):
+        return
+
+    fallback_by_role: Dict[str, Dict[str, Any]] = {}
+    for row in fallback_rows:
+        role = str(row.get("role", "")).strip()
+        if role and role not in fallback_by_role:
+            fallback_by_role[role] = row
+
+    for idx, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role", "")).strip()
+        fallback = fallback_by_role.get(role)
+        if fallback is None and idx < len(fallback_rows):
+            fallback = fallback_rows[idx]
+        if not isinstance(fallback, dict):
+            continue
+        subtask_ids = _normalize_text_list(fallback.get("subtask_ids", []), limit=12, item_limit=32)
+        subtask_titles = _normalize_text_list(fallback.get("subtask_titles", []), limit=12, item_limit=160)
+        goals = _normalize_text_list(fallback.get("goals", []), limit=12, item_limit=240)
+        depends_on = _normalize_text_list(fallback.get("depends_on", []), limit=8, item_limit=16)
+        outputs = _normalize_text_list(fallback.get("outputs", []), limit=8, item_limit=64)
+        if subtask_ids:
+            row["subtask_ids"] = subtask_ids
+        else:
+            row.pop("subtask_ids", None)
+        if subtask_titles:
+            row["subtask_titles"] = subtask_titles
+        else:
+            row.pop("subtask_titles", None)
+        if goals:
+            row["goals"] = goals
+        else:
+            row.pop("goals", None)
+        if depends_on:
+            row["depends_on"] = depends_on
+        else:
+            row.pop("depends_on", None)
+        if outputs:
+            row["outputs"] = outputs
+        else:
+            row.pop("outputs", None)
+
+
 def _expand_execution_groups_with_companions(
     rows: List[Dict[str, Any]],
     *,
     available_roles: List[str],
+    preset: str = "general",
 ) -> List[Dict[str, Any]]:
+    if _normalize_role_preset(preset) == "review":
+        return rows
     available = set(_dedupe_roles(available_roles, limit=16))
     out: List[Dict[str, Any]] = []
     existing_roles = {str(row.get("role", "")).strip() for row in rows if str(row.get("role", "")).strip()}
     for row in rows:
         out.append(row)
+        if _normalize_text_list(row.get("outputs", []), limit=8, item_limit=64):
+            continue
         role = str(row.get("role", "")).strip()
         companion = COMPANION_ROLE_MAP.get(role)
         if not companion or companion not in available or companion in existing_roles:
@@ -711,6 +1247,12 @@ def normalize_phase2_team_spec(
 ) -> Dict[str, Any]:
     plan_data = plan if isinstance(plan, dict) else {}
     default_exec_groups = _execution_groups_from_plan(plan_data)
+    review_owned_outputs = _request_contract_review_outputs(plan_data)
+    review_deliverables = _request_contract_review_deliverables(plan_data)
+    review_acceptance = _request_contract_review_acceptance(plan_data)
+    writer_owned_outputs = _request_contract_writer_outputs(plan_data)
+    execution_owned_outputs = _request_contract_execution_outputs(plan_data)
+    artifact_write_scope = _request_contract_artifact_write_scope(plan_data)
     all_exec_roles = [str(row.get("role", "")).strip() for row in default_exec_groups if str(row.get("role", "")).strip()]
     meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
     phase2_team_preset = _normalize_role_preset(meta.get("phase2_team_preset"))
@@ -720,8 +1262,6 @@ def normalize_phase2_team_spec(
         verifier_roles=list(verifier_roles or []),
         require_verifier=require_verifier,
     )
-    default_depends = [str(row.get("group_id", "")).strip() for row in default_exec_groups if str(row.get("group_id", "")).strip()]
-
     data = raw if isinstance(raw, dict) else {}
     exec_rows = data.get("execution_groups")
     if not isinstance(exec_rows, list) or not exec_rows:
@@ -736,15 +1276,19 @@ def normalize_phase2_team_spec(
     execution_groups: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
         item = row if isinstance(row, dict) else {}
-        role = _trim_text(item.get("role", ""), 64) or default_exec_groups[min(idx - 1, len(default_exec_groups) - 1)]["role"]
+        fallback = default_exec_groups[min(idx - 1, len(default_exec_groups) - 1)]
+        role = _trim_text(item.get("role", ""), 64) or fallback["role"]
         subtask_ids = _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32)
         subtask_titles = _normalize_text_list(item.get("subtask_titles", []), limit=8, item_limit=160)
         goals = _normalize_text_list(item.get("goals", []), limit=8, item_limit=240)
         if not subtask_ids:
-            fallback = default_exec_groups[min(idx - 1, len(default_exec_groups) - 1)]
             subtask_ids = list(fallback.get("subtask_ids") or [])
             subtask_titles = list(fallback.get("subtask_titles") or [])
             goals = list(fallback.get("goals") or [])
+        depends_on = _normalize_text_list(item.get("depends_on", fallback.get("depends_on", [])), limit=8, item_limit=16)
+        outputs = _normalize_text_list(item.get("outputs", []), limit=8, item_limit=64)
+        deliverables = _request_contract_execution_deliverables_for_outputs(plan_data, outputs)
+        acceptance = _request_contract_execution_acceptance_for_outputs(plan_data, outputs)
         execution_groups.append(
             {
                 "group_id": _trim_text(item.get("group_id", f"E{idx}"), 16) or f"E{idx}",
@@ -752,15 +1296,78 @@ def normalize_phase2_team_spec(
                 "subtask_ids": subtask_ids,
                 "subtask_titles": subtask_titles,
                 "goals": goals,
+                "depends_on": depends_on,
+                "outputs": outputs,
+                "deliverables": deliverables,
+                "acceptance": acceptance,
             }
         )
+    _repair_repeated_subtask_payloads_from_fallback(
+        execution_groups,
+        fallback_rows=default_exec_groups,
+    )
+    if execution_owned_outputs:
+        for row in execution_groups:
+            role = str(row.get("role", "")).strip().lower()
+            if phase2_team_preset != "review" and any(
+                token in role for token in ("writer", "doc", "scribe", "review", "critic", "verif", "qa")
+            ):
+                continue
+            if not _normalize_text_list(row.get("outputs", []), limit=8, item_limit=64):
+                row["outputs"] = list(execution_owned_outputs)
+            break
+    if writer_owned_outputs:
+        for row in execution_groups:
+            role = str(row.get("role", "")).strip().lower()
+            if any(token in role for token in ("writer", "doc", "scribe")):
+                if not _normalize_text_list(row.get("outputs", []), limit=8, item_limit=64):
+                    row["outputs"] = list(writer_owned_outputs)
+                break
     execution_groups = _expand_execution_groups_with_companions(
         execution_groups,
         available_roles=available_roles,
+        preset=phase2_team_preset,
     )
     execution_mode = "parallel" if len(execution_groups) > 1 else "single"
+    execution_group_ids = [
+        str(row.get("group_id", "")).strip()
+        for row in execution_groups
+        if str(row.get("group_id", "")).strip()
+    ]
+    valid_execution_group_ids = set(execution_group_ids)
+    for row in execution_groups:
+        depends = [
+            token
+            for token in _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=16)
+            if token in valid_execution_group_ids and token != str(row.get("group_id", "")).strip()
+        ]
+        if depends:
+            row["depends_on"] = depends
+        else:
+            row.pop("depends_on", None)
+    _repair_cyclic_depends_from_fallback(
+        execution_groups,
+        id_key="group_id",
+        fallback_rows=default_exec_groups,
+        fallback_id_key="group_id",
+    )
+    for row in execution_groups:
+        outputs = _normalize_text_list(row.get("outputs", []), limit=8, item_limit=64)
+        deliverables = _request_contract_execution_deliverables_for_outputs(plan_data, outputs)
+        acceptance = _request_contract_execution_acceptance_for_outputs(plan_data, outputs)
+        if deliverables:
+            row["deliverables"] = deliverables
+        else:
+            row.pop("deliverables", None)
+        if acceptance:
+            row["acceptance"] = acceptance
+        else:
+            row.pop("acceptance", None)
+    default_depends = list(execution_group_ids)
 
     review_rows = data.get("review_groups")
+    if not isinstance(review_rows, list) or not review_rows:
+        review_rows = _review_groups_from_plan(plan_data)
     if not isinstance(review_rows, list) or not review_rows:
         review_rows = [
             {
@@ -769,25 +1376,96 @@ def normalize_phase2_team_spec(
                 "kind": "verifier" if role in set(review_roles) else "critic",
                 "scope": "phase2_outputs",
                 "depends_on": default_depends,
+                "outputs": list(review_owned_outputs) if idx == 1 else [],
+                "deliverables": list(review_deliverables) if idx == 1 else [],
+                "acceptance": list(review_acceptance) if idx == 1 else [],
             }
             for idx, role in enumerate(review_roles, start=1)
         ]
 
     review_groups: List[Dict[str, Any]] = []
+    valid_depends = set(default_depends)
     for idx, row in enumerate(review_rows, start=1):
         item = row if isinstance(row, dict) else {}
         role = _trim_text(item.get("role", ""), 64)
+        fallback_review_role = review_roles[min(idx - 1, len(review_roles) - 1)] if review_roles else ""
+        if not role:
+            role = fallback_review_role
+        elif review_roles and role not in set(review_roles):
+            role = fallback_review_role or review_roles[0]
         if not role:
             continue
+        depends_on = _normalize_text_list(item.get("depends_on", default_depends), limit=8, item_limit=16)
+        depends_on = [token for token in depends_on if token in valid_depends]
+        if not depends_on and default_depends:
+            depends_on = list(default_depends)
+        fallback_outputs = list(review_owned_outputs) if idx == 1 else []
+        outputs = _normalize_text_list(item.get("outputs", fallback_outputs), limit=8, item_limit=64)
+        fallback_deliverables = list(review_deliverables) if idx == 1 else []
+        deliverables = item.get("deliverables", fallback_deliverables)
+        if not isinstance(deliverables, list):
+            deliverables = list(fallback_deliverables)
+        normalized_deliverables: List[Dict[str, Any]] = []
+        for deliverable in deliverables:
+            if not isinstance(deliverable, dict):
+                continue
+            entry: Dict[str, Any] = {}
+            output = _trim_text(deliverable.get("output", ""), 64)
+            path = _trim_text(deliverable.get("path", ""), 200)
+            required_fields = _normalize_text_list(deliverable.get("required_fields", []), limit=12, item_limit=120)
+            acceptance_notes = _normalize_text_list(deliverable.get("acceptance_notes", []), limit=6, item_limit=240)
+            if output:
+                entry["output"] = output
+            if path:
+                entry["path"] = path
+            if required_fields:
+                entry["required_fields"] = required_fields
+            if acceptance_notes:
+                entry["acceptance_notes"] = acceptance_notes
+            if entry:
+                normalized_deliverables.append(entry)
+        fallback_acceptance = list(review_acceptance) if idx == 1 else []
+        acceptance = _normalize_text_list(item.get("acceptance", fallback_acceptance), limit=16, item_limit=240)
         review_groups.append(
             {
                 "group_id": _trim_text(item.get("group_id", f"R{idx}"), 16) or f"R{idx}",
                 "role": role,
                 "kind": _normalize_choice(item.get("kind"), ("critic", "verifier"), "verifier" if role in set(review_roles) else "critic"),
                 "scope": _trim_text(item.get("scope", "phase2_outputs"), 160) or "phase2_outputs",
-                "depends_on": _normalize_text_list(item.get("depends_on", default_depends), limit=8, item_limit=16),
+                "subtask_ids": _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32),
+                "subtask_titles": _normalize_text_list(item.get("subtask_titles", []), limit=8, item_limit=160),
+                "goals": _normalize_text_list(item.get("goals", []), limit=8, item_limit=240),
+                "depends_on": depends_on,
+                "outputs": outputs,
+                "deliverables": normalized_deliverables,
+                "acceptance": acceptance,
             }
         )
+    existing_review_roles = {
+        str(row.get("role", "")).strip()
+        for row in review_groups
+        if isinstance(row, dict) and str(row.get("role", "")).strip()
+    }
+    for role in review_roles:
+        token = str(role or "").strip()
+        if not token or token in existing_review_roles:
+            continue
+        review_groups.append(
+            {
+                "group_id": f"R{len(review_groups) + 1}",
+                "role": token,
+                "kind": "verifier",
+                "scope": "phase2_outputs",
+                "subtask_ids": [],
+                "subtask_titles": [],
+                "goals": [],
+                "depends_on": list(default_depends),
+                "outputs": [],
+                "deliverables": [],
+                "acceptance": [],
+            }
+        )
+        existing_review_roles.add(token)
     review_mode = "skip"
     if review_groups:
         review_mode = "parallel" if len(review_groups) > 1 else "single"
@@ -813,6 +1491,7 @@ def normalize_phase2_team_spec(
         "team_roles": team_roles,
         "critic_role": critic_role,
         "integration_role": integration_role,
+        "artifact_write_scope": artifact_write_scope,
     }
 
 
@@ -824,45 +1503,217 @@ def normalize_phase2_execution_plan(
 ) -> Dict[str, Any]:
     spec = team_spec if isinstance(team_spec, dict) else {}
     data = raw if isinstance(raw, dict) else {}
+    artifact_write_scope = data.get("artifact_write_scope")
+    if not isinstance(artifact_write_scope, dict):
+        artifact_write_scope = spec.get("artifact_write_scope") if isinstance(spec.get("artifact_write_scope"), dict) else {}
 
     execution_groups = spec.get("execution_groups") if isinstance(spec.get("execution_groups"), list) else []
     review_groups = spec.get("review_groups") if isinstance(spec.get("review_groups"), list) else []
+    spec_subtask_ids = _row_subtask_ids(execution_groups)
+    execution_group_roles = [
+        str(row.get("role", "")).strip()
+        for row in execution_groups
+        if isinstance(row, dict) and str(row.get("role", "")).strip()
+    ]
+    review_group_roles = [
+        str(row.get("role", "")).strip()
+        for row in review_groups
+        if isinstance(row, dict) and str(row.get("role", "")).strip()
+    ]
 
     exec_rows = data.get("execution_lanes")
-    if not isinstance(exec_rows, list) or not exec_rows:
+    if (
+        not isinstance(exec_rows, list)
+        or not exec_rows
+        or (spec_subtask_ids and not spec_subtask_ids.issubset(_row_subtask_ids(exec_rows)))
+    ):
         exec_rows = execution_groups
+    exec_parallel_default = len(exec_rows) > 1
     execution_lanes: List[Dict[str, Any]] = []
     for idx, row in enumerate(exec_rows, start=1):
         item = row if isinstance(row, dict) else {}
+        fallback_group = execution_groups[idx - 1] if idx - 1 < len(execution_groups) and isinstance(execution_groups[idx - 1], dict) else {}
+        subtask_ids = _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32)
+        lane_parallel_default = exec_parallel_default if len(subtask_ids) <= 1 else False
+        role = _trim_text(item.get("role", ""), 64)
+        fallback_role = _trim_text(fallback_group.get("role", ""), 64)
+        if not role:
+            role = fallback_role or "Worker"
+        elif execution_group_roles and role not in execution_group_roles:
+            role = fallback_role or execution_group_roles[0]
         execution_lanes.append(
             {
                 "lane_id": _trim_text(item.get("lane_id", item.get("group_id", f"L{idx}")), 16) or f"L{idx}",
-                "role": _trim_text(item.get("role", "Worker"), 64) or "Worker",
-                "subtask_ids": _normalize_text_list(item.get("subtask_ids", []), limit=8, item_limit=32),
-                "parallel": _normalize_bool(item.get("parallel", True), True),
+                "role": role,
+                "subtask_ids": subtask_ids,
+                "depends_on": _normalize_text_list(item.get("depends_on", []), limit=8, item_limit=16),
+                "outputs": _normalize_text_list(item.get("outputs", []), limit=8, item_limit=64),
+                "deliverables": item.get("deliverables", []),
+                "acceptance": item.get("acceptance", []),
+                "parallel": False if len(subtask_ids) > 1 else _normalize_bool(item.get("parallel", lane_parallel_default), lane_parallel_default),
             }
         )
     if not execution_lanes:
         execution_lanes = [{"lane_id": "L1", "role": "Worker", "subtask_ids": ["S1"], "parallel": False}]
+    if len(execution_lanes) <= 1:
+        for row in execution_lanes:
+            row["parallel"] = False
+    execution_lane_ids = [
+        str(row.get("lane_id", "")).strip()
+        for row in execution_lanes
+        if str(row.get("lane_id", "")).strip()
+    ]
+    valid_depends = set(execution_lane_ids)
+    for row in execution_lanes:
+        depends_on = [
+            token
+            for token in _normalize_text_list(row.get("depends_on", []), limit=8, item_limit=16)
+            if token in valid_depends and token != str(row.get("lane_id", "")).strip()
+        ]
+        if depends_on:
+            row["depends_on"] = depends_on
+        else:
+            row.pop("depends_on", None)
+        outputs = _normalize_text_list(row.get("outputs", []), limit=8, item_limit=64)
+        if outputs:
+            row["outputs"] = outputs
+        else:
+            row.pop("outputs", None)
+    _repair_repeated_subtask_payloads_from_fallback(
+        execution_lanes,
+        fallback_rows=execution_groups,
+    )
+    _repair_cyclic_depends_from_fallback(
+        execution_lanes,
+        id_key="lane_id",
+        fallback_rows=execution_groups,
+        fallback_id_key="group_id",
+    )
+    for idx, row in enumerate(execution_lanes):
+        fallback_group = execution_groups[idx] if idx < len(execution_groups) and isinstance(execution_groups[idx], dict) else {}
+        fallback_outputs = _normalize_text_list(
+            row.get("outputs") or fallback_group.get("outputs", []),
+            limit=8,
+            item_limit=64,
+        )
+        if fallback_outputs:
+            row["outputs"] = fallback_outputs
+        else:
+            row.pop("outputs", None)
+        raw_deliverables = row.get("deliverables", fallback_group.get("deliverables", []))
+        if not isinstance(raw_deliverables, list) or not raw_deliverables:
+            raw_deliverables = list(fallback_group.get("deliverables", [])) if isinstance(fallback_group.get("deliverables", []), list) else []
+        deliverables: List[Dict[str, Any]] = []
+        for deliverable in raw_deliverables:
+            if not isinstance(deliverable, dict):
+                continue
+            entry: Dict[str, Any] = {}
+            output = _trim_text(deliverable.get("output", ""), 64)
+            path = _trim_text(deliverable.get("path", ""), 200)
+            required_fields = _normalize_text_list(deliverable.get("required_fields", []), limit=12, item_limit=120)
+            acceptance_notes = _normalize_text_list(deliverable.get("acceptance_notes", []), limit=6, item_limit=240)
+            if output:
+                entry["output"] = output
+            if path:
+                entry["path"] = path
+            if required_fields:
+                entry["required_fields"] = required_fields
+            if acceptance_notes:
+                entry["acceptance_notes"] = acceptance_notes
+            if entry:
+                deliverables.append(entry)
+        fallback_acceptance = _normalize_text_list(
+            row.get("acceptance") or fallback_group.get("acceptance", []),
+            limit=16,
+            item_limit=240,
+        )
+        if deliverables:
+            row["deliverables"] = deliverables
+        else:
+            row.pop("deliverables", None)
+        if fallback_acceptance:
+            row["acceptance"] = fallback_acceptance
+        else:
+            row.pop("acceptance", None)
 
     review_rows = data.get("review_lanes")
     if not isinstance(review_rows, list) or not review_rows:
         review_rows = review_groups
     review_lanes: List[Dict[str, Any]] = []
+    review_parallel_default = len(review_rows) > 1 if isinstance(review_rows, list) else len(review_groups) > 1
     for idx, row in enumerate(review_rows, start=1):
         item = row if isinstance(row, dict) else {}
+        fallback_review_group = review_groups[idx - 1] if idx - 1 < len(review_groups) and isinstance(review_groups[idx - 1], dict) else {}
         role = _trim_text(item.get("role", ""), 64)
+        fallback_role = _trim_text(fallback_review_group.get("role", ""), 64)
+        if not role:
+            role = fallback_role
+        elif review_group_roles and role not in review_group_roles:
+            role = fallback_role or review_group_roles[0]
         if not role:
             continue
+        depends_on = _normalize_text_list(item.get("depends_on", execution_lane_ids), limit=8, item_limit=16)
+        depends_on = [token for token in depends_on if token in valid_depends]
+        if not depends_on and execution_lane_ids:
+            depends_on = list(execution_lane_ids)
+        fallback_outputs = _normalize_text_list(
+            item.get(
+                "outputs",
+                (review_groups[idx - 1].get("outputs", []) if idx - 1 < len(review_groups) and isinstance(review_groups[idx - 1], dict) else []),
+            ),
+            limit=8,
+            item_limit=64,
+        )
+        fallback_deliverables = (
+            review_groups[idx - 1].get("deliverables", [])
+            if idx - 1 < len(review_groups) and isinstance(review_groups[idx - 1], dict)
+            else []
+        )
+        raw_deliverables = item.get("deliverables", fallback_deliverables)
+        if not isinstance(raw_deliverables, list):
+            raw_deliverables = list(fallback_deliverables) if isinstance(fallback_deliverables, list) else []
+        deliverables: List[Dict[str, Any]] = []
+        for deliverable in raw_deliverables:
+            if not isinstance(deliverable, dict):
+                continue
+            entry: Dict[str, Any] = {}
+            output = _trim_text(deliverable.get("output", ""), 64)
+            path = _trim_text(deliverable.get("path", ""), 200)
+            required_fields = _normalize_text_list(deliverable.get("required_fields", []), limit=12, item_limit=120)
+            acceptance_notes = _normalize_text_list(deliverable.get("acceptance_notes", []), limit=6, item_limit=240)
+            if output:
+                entry["output"] = output
+            if path:
+                entry["path"] = path
+            if required_fields:
+                entry["required_fields"] = required_fields
+            if acceptance_notes:
+                entry["acceptance_notes"] = acceptance_notes
+            if entry:
+                deliverables.append(entry)
+        fallback_acceptance = _normalize_text_list(
+            item.get(
+                "acceptance",
+                (review_groups[idx - 1].get("acceptance", []) if idx - 1 < len(review_groups) and isinstance(review_groups[idx - 1], dict) else []),
+            ),
+            limit=16,
+            item_limit=240,
+        )
         review_lanes.append(
             {
                 "lane_id": _trim_text(item.get("lane_id", item.get("group_id", f"R{idx}")), 16) or f"R{idx}",
                 "role": role,
                 "kind": _normalize_choice(item.get("kind"), ("critic", "verifier"), "verifier"),
-                "depends_on": _normalize_text_list(item.get("depends_on", []), limit=8, item_limit=16),
-                "parallel": _normalize_bool(item.get("parallel", True), True),
+                "depends_on": depends_on,
+                "outputs": fallback_outputs,
+                "deliverables": deliverables,
+                "acceptance": fallback_acceptance,
+                "parallel": _normalize_bool(item.get("parallel", review_parallel_default), review_parallel_default),
             }
         )
+    if len(review_lanes) <= 1:
+        for row in review_lanes:
+            row["parallel"] = False
 
     execution_mode = _normalize_choice(data.get("execution_mode"), TEAM_EXECUTION_MODES, str(spec.get("execution_mode", "single") or "single"))
     review_mode = _normalize_choice(data.get("review_mode"), TEAM_REVIEW_MODES, str(spec.get("review_mode", "skip") or "skip"))
@@ -883,6 +1734,7 @@ def normalize_phase2_execution_plan(
         "parallel_workers": len(execution_lanes) > 1,
         "parallel_reviews": len(review_lanes) > 1,
         "readonly": _normalize_bool(data.get("readonly", readonly), readonly),
+        "artifact_write_scope": artifact_write_scope,
     }
 
 
@@ -892,10 +1744,16 @@ def attach_phase2_team_spec(
     roles: List[str] | None = None,
     verifier_roles: List[str] | None = None,
     require_verifier: bool = False,
+    readonly: bool | None = None,
 ) -> Dict[str, Any]:
     data = dict(plan or {}) if isinstance(plan, dict) else {}
     meta_in = data.get("meta")
     meta = dict(meta_in or {}) if isinstance(meta_in, dict) else {}
+    resolved_readonly = _normalize_bool(
+        meta.get("readonly", False) if readonly is None else readonly,
+        False,
+    )
+    meta["readonly"] = resolved_readonly
     team_spec = normalize_phase2_team_spec(
         meta.get("phase2_team_spec"),
         plan=data,
@@ -907,7 +1765,7 @@ def attach_phase2_team_spec(
     meta["phase2_execution_plan"] = normalize_phase2_execution_plan(
         meta.get("phase2_execution_plan"),
         team_spec=team_spec,
-        readonly=True,
+        readonly=resolved_readonly,
     )
     data["meta"] = meta
     return data
@@ -980,6 +1838,7 @@ def normalize_tf_plan(
         roles=requested_roles,
         verifier_roles=review_roles if normalized["critic"]["required"] else [],
         require_verifier=bool(normalized["critic"]["required"]),
+        readonly=bool(spec.get("readonly", True)),
     )
 
 
@@ -1131,7 +1990,7 @@ def normalize_orch_followup_proposals(
 def orch_runtime_event_schema() -> Dict[str, Any]:
     schema = dict(tf_runtime_event_schema())
     notes = list(schema.get("notes") or [])
-    notes.append("runtime event contract is shared by local and experimental TF backends")
+    notes.append("runtime event contract is shared by local and experimental Task Team backends")
     schema["notes"] = notes
     schema["contract"] = "orch.runtime_event.v1"
     return schema

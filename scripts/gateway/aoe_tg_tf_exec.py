@@ -379,16 +379,71 @@ def stage_review_prompt(base_prompt: str, execution_state: Dict[str, Any], revie
         suffix = f" after {', '.join(depends_on)}" if depends_on else ""
         lane_lines.append(f"- {lane_id} [{role}/{kind}]{suffix}")
     lane_block = "\n".join(lane_lines) if lane_lines else "- reviewer lane"
+    evidence_lines = _stage_review_evidence_lines(execution_state)
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- linked execution evidence not captured"
     return (
         str(base_prompt or "").rstrip()
         + "\n\n"
         + "Phase2 review-only pass.\n"
         + "Review the completed execution outputs. Do not start new implementation work.\n"
         + (f"Execution request: {exec_request_id}\n" if exec_request_id else "")
+        + "The current review workspace may not contain execution changes. Use the linked execution evidence paths below before judging the result.\n"
         + "Review lanes:\n"
         + lane_block
         + "\n"
+        + "Execution evidence:\n"
+        + evidence_block
+        + "\n"
     )
+
+
+def _stage_review_evidence_lines(execution_state: Dict[str, Any], *, max_items: int = 4, max_paths: int = 4) -> List[str]:
+    if not isinstance(execution_state, dict):
+        return []
+    replies = execution_state.get("reply_messages")
+    if not isinstance(replies, list) or not replies:
+        replies = execution_state.get("replies")
+    if not isinstance(replies, list):
+        return []
+
+    lines: List[str] = []
+    seen: set[str] = set()
+    for row in replies:
+        if not isinstance(row, dict):
+            continue
+        body = str(row.get("body", "")).strip()
+        if not body:
+            continue
+        actor = (
+            str(row.get("from", "")).strip()
+            or str(row.get("role", "")).strip()
+            or str(row.get("actor", "")).strip()
+            or "worker"
+        )
+        request_id = str(row.get("request_id", "")).strip()
+        path_hits: List[str] = []
+        for token in re.findall(r"\]\((/[^)\s]+)\)", body):
+            norm = str(token).strip()
+            if norm and norm not in path_hits:
+                path_hits.append(norm)
+        if not path_hits:
+            for token in re.findall(r"(/tmp/[^\s`\"')]+)", body):
+                norm = str(token).strip()
+                if norm and norm not in path_hits:
+                    path_hits.append(norm)
+        if not path_hits:
+            continue
+        key = f"{actor}|{request_id}|{'|'.join(path_hits[:max_paths])}"
+        if key in seen:
+            continue
+        seen.add(key)
+        label = actor
+        if request_id:
+            label += f" {request_id}"
+        lines.append(f"- {label}: {', '.join(path_hits[:max_paths])}")
+        if len(lines) >= max_items:
+            break
+    return lines
 
 
 def merge_request_states(execution_state: Dict[str, Any], review_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -464,6 +519,14 @@ def merge_request_states(execution_state: Dict[str, Any], review_state: Optional
         "replies": int(exec_counts.get("replies", len(exec_data.get("replies") or [])) or 0)
         + int(review_counts.get("replies", len(review_data.get("replies") or [])) or 0),
     }
+    merged_tool_count = max(
+        _state_tool_count(exec_data),
+        _state_tool_count(review_data),
+        int(merged["counts"].get("replies", 0) or 0),
+        len(replies),
+    )
+    if merged_tool_count > 0:
+        merged["tool_count"] = merged_tool_count
     merged["phase2_review_triggered"] = True
     return merged
 
@@ -579,12 +642,71 @@ def aggregate_parallel_stage_states(
     )
     if degraded_by:
         aggregate["degraded_by"] = degraded_by
+    aggregate_tool_count = sum(max(0, _state_tool_count(row)) for row in ordered_states)
+    if aggregate_tool_count <= 0:
+        aggregate_tool_count = int(aggregate["counts"].get("replies", 0) or 0)
+    if aggregate_tool_count > 0:
+        aggregate["tool_count"] = aggregate_tool_count
     return aggregate
+
+
+def _state_tool_count(state: Dict[str, Any]) -> int:
+    if not isinstance(state, dict):
+        return 0
+    counts = state.get("counts") if isinstance(state.get("counts"), dict) else {}
+    runtime_events = state.get("runtime_events") if isinstance(state.get("runtime_events"), list) else []
+    latest_event = runtime_events[-1] if runtime_events and isinstance(runtime_events[-1], dict) else {}
+    latest_payload = latest_event.get("payload") if isinstance(latest_event.get("payload"), dict) else {}
+
+    tool_count = 0
+    for candidate in (
+        state.get("tool_count"),
+        state.get("reply_count"),
+        counts.get("replies"),
+        latest_payload.get("tool_count"),
+        latest_payload.get("reply_count"),
+        latest_payload.get("tools_used"),
+        latest_payload.get("tool_calls"),
+        state.get("reply_messages"),
+        state.get("replies"),
+    ):
+        if isinstance(candidate, int):
+            tool_count = max(tool_count, int(candidate))
+        elif isinstance(candidate, list):
+            tool_count = max(tool_count, len([row for row in candidate if row]))
+    return tool_count
 
 
 def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage: str) -> Dict[str, Any]:
     if not isinstance(state, dict):
         return {}
+    runtime_events = state.get("runtime_events") if isinstance(state.get("runtime_events"), list) else []
+    latest_event = runtime_events[-1] if runtime_events and isinstance(runtime_events[-1], dict) else {}
+    latest_event_at = str(latest_event.get("ts", "")).strip() or str(state.get("updated_at", "")).strip()
+    latest_event_kind = str(latest_event.get("stage", "")).strip() or str(latest_event.get("kind", "")).strip()
+    latest_event_payload = latest_event.get("payload") if isinstance(latest_event.get("payload"), dict) else {}
+    artifacts = state.get("artifacts") if isinstance(state.get("artifacts"), list) else []
+    touched_files: List[str] = []
+    for row in artifacts:
+        if not isinstance(row, dict):
+            continue
+        for key in ("path", "source_path", "output_path", "file_path"):
+            token = str(row.get(key, "")).strip()
+            if token and token not in touched_files:
+                touched_files.append(token)
+    tool_count = _state_tool_count(state)
+    observability: Dict[str, Any] = {
+        "request_id": str(state.get("request_id", "")).strip() or str(state.get("gateway_request_id", "")).strip(),
+        "started_at": str(state.get("created_at", "")).strip(),
+        "last_event_at": latest_event_at,
+        "last_event_kind": latest_event_kind,
+        "backend": str(state.get("backend", "")).strip(),
+        "outcome_reason_code": str(latest_event_payload.get("reason_code", "")).strip(),
+    }
+    if touched_files:
+        observability["touched_files"] = touched_files
+    if tool_count > 0:
+        observability["tool_count"] = tool_count
     annotated = dict(state)
     role_states = annotated.get("role_states")
     if isinstance(role_states, list):
@@ -595,6 +717,9 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
             item = dict(row)
             item.setdefault("lane_id", lane_id)
             item.setdefault("phase2_stage", phase2_stage)
+            for key, value in observability.items():
+                if value not in ("", None, []):
+                    item.setdefault(key, value)
             new_rows.append(item)
         annotated["role_states"] = new_rows
     roles_obj = annotated.get("roles")
@@ -606,6 +731,9 @@ def annotate_lane_role_rows(state: Dict[str, Any], *, lane_id: str, phase2_stage
             item = dict(row)
             item.setdefault("lane_id", lane_id)
             item.setdefault("phase2_stage", phase2_stage)
+            for key, value in observability.items():
+                if value not in ("", None, []):
+                    item.setdefault(key, value)
             new_roles.append(item)
         annotated["roles"] = new_roles
     return annotated
@@ -1024,6 +1152,16 @@ def ensure_tf_exec_workspace(
             meta["phase1_providers"] = [
                 str(row).strip() for row in phase1_providers if str(row).strip()
             ]
+        phase1_planner_providers = metadata.get("phase1_planner_providers")
+        if isinstance(phase1_planner_providers, list) and phase1_planner_providers:
+            meta["phase1_planner_providers"] = [
+                str(row).strip() for row in phase1_planner_providers if str(row).strip()
+            ]
+        phase1_critic_providers = metadata.get("phase1_critic_providers")
+        if isinstance(phase1_critic_providers, list) and phase1_critic_providers:
+            meta["phase1_critic_providers"] = [
+                str(row).strip() for row in phase1_critic_providers if str(row).strip()
+            ]
         lane_summary = phase2_execution_lane_summary(metadata)
         if lane_summary["execution_roles"]:
             meta["execution_lane_roles"] = list(lane_summary["execution_roles"])
@@ -1202,6 +1340,16 @@ def run_aoe_orch(
         effective_priority = "P2"
     effective_timeout = max(1, int(args.orch_timeout_sec if timeout_override is None else timeout_override))
     effective_no_wait = bool(args.no_wait if no_wait_override is None else no_wait_override)
+    coordinator_role = ""
+    try:
+        cfg = Path(str(args.team_dir)) / "orchestrator.json"
+        if cfg.exists():
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            coordinator = data.get("coordinator")
+            if isinstance(coordinator, dict):
+                coordinator_role = str(coordinator.get("role", "")).strip()
+    except Exception:
+        coordinator_role = ""
 
     def cleanup_request_artifacts(request_id: str, tf_meta: Dict[str, Any]) -> None:
         try:
@@ -1240,15 +1388,27 @@ def run_aoe_orch(
             run_command=run_command,
         )
         try:
-            preview_roles = resolve_dispatch_roles_from_preview(
-                args,
-                stage_prompt,
-                request_id=request_id,
-                roles_override=stage_roles_csv,
-                priority=effective_priority,
-                timeout_sec=effective_timeout,
-                run_command=run_command,
-            )
+            try:
+                preview_roles = resolve_dispatch_roles_from_preview(
+                    args,
+                    stage_prompt,
+                    request_id=request_id,
+                    roles_override=stage_roles_csv,
+                    priority=effective_priority,
+                    timeout_sec=effective_timeout,
+                    run_command=run_command,
+                )
+            except Exception as exc:
+                low = str(exc or "").strip().lower()
+                if "no target roles found for orchestration" in low:
+                    requested_roles = [str(role).strip() for role in str(stage_roles_csv or "").split(",") if str(role).strip()]
+                    detail = f"requested_roles={','.join(requested_roles) or '-'}"
+                    if coordinator_role and requested_roles and all(role == coordinator_role for role in requested_roles):
+                        detail += f" coordinator_role={coordinator_role} (coordinator-only role cannot be dispatched as a worker)"
+                    raise RuntimeError(
+                        f"aoe-orch preview found no target roles for {stage_name}: {detail}"
+                    ) from exc
+                raise
             worker_roles = merge_worker_roles_with_lane_summary(preview_roles, stage_lane_summary)
             if not worker_roles:
                 raise RuntimeError(f"aoe-orch run preview resolved no worker roles for {stage_name}")

@@ -1,0 +1,298 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel">
+  <h2>Nightly Session Summary</h2>
+  <p class="muted">recovered operator state from the latest nightly summary artifact</p>
+  {% if recovery.exists and recovery.runtimes and recovery.runtimes[0].latest_planning_compact_summary and recovery.runtimes[0].latest_planning_compact_summary != '-' %}
+  <p class="muted"><strong>nightly_planning_compact</strong> {{ recovery.runtimes[0].latest_planning_compact_summary }}</p>
+  {% endif %}
+  {% if recovery.exists and recovery.runtimes and recovery.runtimes[0].latest_subagent_evidence_summary and recovery.runtimes[0].latest_subagent_evidence_summary != '-' %}
+  <p class="muted"><strong>nightly_subagent_evidence</strong> {{ recovery.runtimes[0].latest_subagent_evidence_summary }}</p>
+  {% endif %}
+  {% if recovery.exists and recovery.runtimes and recovery.runtimes[0].latest_subagent_gate_summary and recovery.runtimes[0].latest_subagent_gate_summary != '-' %}
+  <p class="muted"><strong>nightly_subagent_gate</strong> {{ recovery.runtimes[0].latest_subagent_gate_summary }}</p>
+  {% endif %}
+  {% if recovery.exists %}
+  <ul class="kv-list">
+    <li><span>artifact</span><strong>{{ recovery.artifact_path }}</strong></li>
+    <li><span>updated_at</span><strong>{{ recovery.updated_at or '-' }}</strong></li>
+    <li><span>generated_at</span><strong>{{ recovery.generated_at }}</strong></li>
+    <li><span>snapshot_taken_at</span><strong>{{ recovery.snapshot_taken_at }}</strong></li>
+    <li><span>automation_posture</span><strong>{{ recovery.automation_posture }}</strong></li>
+    <li><span>auto_mode</span><strong>{{ recovery.auto_mode }}</strong></li>
+    <li><span>offdesk_mode</span><strong>{{ recovery.offdesk_mode }}</strong></li>
+    <li><span>state_root_mode</span><strong>{{ snapshot.control_summary.state_root_mode }}</strong></li>
+    <li><span>state_root_path</span><strong>{{ snapshot.control_summary.state_root_path }}</strong></li>
+    <li><span>provider_capacity</span><strong>{{ recovery.provider_capacity_summary }}</strong></li>
+    <li><span>next_retry_at</span><strong>{{ recovery.next_retry_at }}</strong></li>
+    <li><span>next_retry_target</span><strong>{{ recovery.next_retry_target }}</strong></li>
+    <li><span>repeat_memory</span><strong>{{ recovery.repeat_memory_summary }}</strong></li>
+    <li><span>execution_brief_summary</span><strong>{{ recovery.execution_brief_summary }}</strong></li>
+    <li><span>background_run_summary</span><strong>{{ recovery.background_run_summary }}</strong></li>
+    <li><span>background_worker_summary</span><strong>{{ recovery.background_worker_summary }}</strong></li>
+    <li><span>latest_intent_command</span><strong>{{ recovery.latest_intent_command }}</strong></li>
+    <li><span>latest_intent_action</span><strong>{{ recovery.latest_intent_action }}</strong></li>
+    <li><span>latest_intent_trace</span><strong>{{ recovery.latest_intent_trace }}</strong></li>
+    <li><span>first_focus</span><strong>{{ recovery.latest_intent_focus }}</strong></li>
+    <li><span>server_guard</span><strong>{{ recovery.server_guard.summary }}</strong></li>
+    <li><span>server_guard_reasons</span><strong>{{ recovery.server_guard.reason_summary }}</strong></li>
+    <li><span>server_guard_note</span><strong>{{ recovery.server_guard.note }}</strong></li>
+    <li><span>server_guard_next</span><strong>{{ recovery.server_guard.next_step }}</strong></li>
+    <li><span>server_guard_focus</span><strong>{{ recovery.server_guard.focus_label }}</strong></li>
+    <li><span>server_guard_action_copy</span><strong>{{ recovery.server_guard.action_copy }}</strong></li>
+    <li><span>server_guard_priority_link</span><strong>{{ recovery.server_guard.priority_link_label }}{% if recovery.server_guard.priority_link_note and recovery.server_guard.priority_link_note != '-' %} | {{ recovery.server_guard.priority_link_note }}{% endif %}</strong></li>
+    <li><span>server_guard_snapshot</span><strong>{{ recovery.server_guard.snapshot_path }}</strong></li>
+    <li><span>server_guard_latest_action</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_action_path }}">{{ snapshot.control_summary.server_guard_latest_action_summary }}</a></strong></li>
+    <li><span>server_guard_latest_result</span><strong><a href="{{ snapshot.control_summary.server_guard_latest_result_path }}">{{ snapshot.control_summary.server_guard_latest_result_summary }}</a></strong></li>
+    <li><span>focus_filter</span><strong>{{ recovery_focus or 'all' }}</strong></li>
+    {% if recovery.stale %}<li><span>stale</span><strong>yes</strong></li>{% endif %}
+    {% if recovery.error %}<li><span>artifact_error</span><strong>{{ recovery.error }}</strong></li>{% endif %}
+  </ul>
+  <p class="muted">
+    filter:
+    {% for value in ['all', 'server-guard'] %}
+      {% if (recovery_focus or 'all') == value %}
+      <span class="action-history-badge active-focus">{{ value }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/recovery{% if value != 'all' %}?focus={{ value }}{% endif %}">{{ value }}</a>
+      {% endif %}
+    {% endfor %}
+  </p>
+  {% if recovery.server_guard.recommended_actions %}
+  {% with title='server_guard_actions', actions=recovery.server_guard.recommended_actions %}
+    {% include 'dashboard/_server_guard_actions.html' %}
+  {% endwith %}
+  {% endif %}
+  {% if recovery.runtimes %}
+  <ul class="kv-list compact">
+    <li><span>planning_compact</span><strong>{{ recovery.runtimes[0].latest_planning_compact_summary }}</strong></li>
+    <li><span>planning_lanes</span><strong>{{ recovery.runtimes[0].active_task_planning_lanes_summary }}</strong></li>
+    <li><span>approved_plan_gate</span><strong>{{ recovery.runtimes[0].active_task_approved_plan_gate_summary }}</strong></li>
+  </ul>
+  {% endif %}
+  {% with
+    section_title='control_actions',
+    safe_hints=[],
+    safe_buttons=[],
+    phase2_hints=[],
+    phase2_buttons=recovery.control_phase2_action_buttons
+  %}
+  {% include 'dashboard/_action_section.html' %}
+  {% endwith %}
+  {% else %}
+  <p class="muted">nightly summary artifact not found</p>
+  <pre class="code-block">python3 scripts/dashboard/nightly_session_summary.py --control-root {{ snapshot.control_root }}</pre>
+  {% endif %}
+</section>
+
+{% if recovery.exists %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="section-kicker">Recovery Threads</p>
+      <h2>Server Guard Preset Threads</h2>
+      <p class="section-note">latest pressure preview -> preset apply 흐름을 recovery surface에서 직접 읽습니다.</p>
+    </div>
+    <span class="badge">{{ snapshot.control_summary.server_guard_threads|length }}</span>
+  </div>
+  <div class="chat-hints">
+    <a class="action-history-badge" href="/control/chat">Open Chat Console</a>
+    <a class="action-history-badge" href="/control/audit?focus=server-guard">Server Guard Audit</a>
+    <a class="action-history-badge" href="/control/health/view">Open Health View</a>
+  </div>
+  {% if snapshot.control_summary.server_guard_threads %}
+    {% with
+      thread=snapshot.control_summary.server_guard_threads[0],
+      title='Latest Server Guard Thread',
+      kicker='Recovery Focus',
+      compact=false
+    %}
+      {% include 'dashboard/_server_guard_thread_highlight.html' %}
+    {% endwith %}
+    {% if snapshot.control_summary.server_guard_threads|length > 1 %}
+      {% with threads=snapshot.control_summary.server_guard_threads[1:], compact=true, show_empty=false %}
+        {% include 'dashboard/_server_guard_threads.html' %}
+      {% endwith %}
+    {% endif %}
+  {% else %}
+  <div class="server-guard-thread-empty">
+    <p><strong>server_guard_threads</strong></p>
+    <p class="muted">No recent server guard preset thread yet. Use the links above to inspect pressure, audit, or move into chat operator flow.</p>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if recovery.runtimes %}
+<section class="panel">
+  <h2>Recovered Runtimes</h2>
+  <p class="muted">nightly reconstruction of runtime pressure, action rails, and next-step signals</p>
+  <div class="runtime-list">
+    {% for runtime in recovery.runtimes %}
+    <div class="runtime-card {{ runtime.status }}">
+      <div class="runtime-card-header">
+        <div class="runtime-card-copy">
+          <p class="card-kicker">Runtime {{ runtime.readiness }}</p>
+          <h3>
+            <a href="{{ runtime.runtime_path }}">{{ runtime.project_alias }} {{ runtime.project_label }}</a>
+            {% if runtime.latest_subagent_evidence_summary and runtime.latest_subagent_evidence_summary != '-' %}
+            <span class="muted">| {{ runtime.latest_subagent_evidence_summary }}</span>
+            {% endif %}
+            {% if runtime.latest_subagent_gate_summary and runtime.latest_subagent_gate_summary != '-' %}
+            <span class="muted">| {{ runtime.latest_subagent_gate_summary }}</span>
+            {% endif %}
+          </h3>
+          <p class="runtime-attention">{{ runtime.attention_summary }}</p>
+          <p><strong>chat_console</strong> <a href="{{ runtime.chat_console_path }}">{{ runtime.chat_console_label }}</a></p>
+        </div>
+        <span class="status-pill {{ runtime.status }}">{{ runtime.status }}</span>
+      </div>
+      <p><strong>first_focus</strong> {{ recovery.latest_intent_focus }} | next={{ runtime.priority_action }}</p>
+      <p><strong>next_focus</strong> {{ runtime.next_focus }}</p>
+      <p><strong>queue</strong> {{ runtime.queue_summary }}</p>
+      <p><strong>provider_pressure</strong> {{ runtime.provider_pressure_summary }}</p>
+      <p><strong>repeat</strong> {{ runtime.repeat_summary }}</p>
+      {% with
+        section_title='runtime_actions',
+        safe_hints=runtime.runtime_command_hints,
+        safe_buttons=runtime.runtime_safe_action_buttons,
+        phase2_hints=runtime.runtime_phase2_action_hints,
+        phase2_buttons=runtime.runtime_phase2_action_buttons
+      %}
+      {% include 'dashboard/_action_section.html' %}
+      {% endwith %}
+      {% if runtime.active_task_label %}
+      <p><strong>active_task</strong> <a href="{{ runtime.active_task_path }}">{{ runtime.active_task_label }}</a> | {{ runtime.active_task_status }}/{{ runtime.active_task_phase }}</p>
+      <p><strong>preset</strong> {{ runtime.active_task_preset }}</p>
+      <p><strong>shape</strong> {{ runtime.active_task_phase2_shape }}</p>
+      <p><strong>quality</strong> {{ runtime.active_task_phase2_quality }}</p>
+      <p><strong>context_pack</strong> {{ runtime.active_task_context_pack_summary }}</p>
+      <p><strong>subagent_contract</strong> {{ runtime.active_task_general_subagent_summary }}</p>
+      <p><strong>subagent_evidence</strong> {{ runtime.active_task_general_subagent_artifact_summary }}</p>
+      <p><strong>subagent_gate</strong> {{ runtime.active_task_general_subagent_gate_summary }}</p>
+      <p><strong>subagent_artifact</strong> {{ runtime.active_task_general_subagent_artifact_path }}</p>
+      <p><strong>model_plan</strong> {{ runtime.active_task_model_plan_summary }}</p>
+      <details class="info-fold" open>
+        <summary>Decision Signals</summary>
+        <div class="fold-stack">
+          <p><strong>latest_judge</strong> {{ runtime.latest_judge_summary }}</p>
+          <p><strong>latest_judge_decision</strong> {{ runtime.latest_judge_decision_summary }}</p>
+          <p><strong>latest_judge_decision_bridge</strong> {{ runtime.latest_judge_decision_bridge_summary }}</p>
+          <p><strong>replan_auto_decision</strong> {{ runtime.latest_replan_auto_decision_summary }}</p>
+          <p><strong>auto_route</strong> {{ runtime.latest_replan_auto_operator_summary }}</p>
+          <p><strong>replan_auto_routing_policy</strong> {{ runtime.latest_replan_auto_routing_policy_summary }}</p>
+          <p><strong>planning_compact</strong> {{ runtime.latest_planning_compact_summary }}</p>
+          <p><strong>subagent_gate</strong> {{ runtime.latest_subagent_gate_summary }}</p>
+          <p><strong>planning_handoff</strong> {{ runtime.latest_planning_handoff_summary }}</p>
+          <p><strong>latest_replan_auto_route</strong> {{ runtime.latest_replan_auto_route_summary }}</p>
+          <p><strong>auto_route_status</strong> {{ runtime.latest_replan_auto_route_status_summary }}</p>
+          <p><strong>manual_step</strong> {{ runtime.latest_manual_step_summary }}</p>
+          <p><strong>canonical_mutation</strong> {{ runtime.latest_canonical_mutation_summary }}</p>
+          <p><strong>canonical_writeback</strong> {{ runtime.latest_canonical_writeback_summary }}</p>
+        </div>
+      </details>
+      <details class="info-fold">
+        <summary>Execution Rails</summary>
+        <div class="fold-stack">
+          <p><strong>reentry_rails</strong> {{ runtime.active_task_reentry_rails_summary }}</p>
+          <p><strong>background_run</strong> {{ runtime.active_task_background_run_status }} | {{ runtime.active_task_background_run_runner_target }}</p>
+          <p><strong>worker_update</strong> {{ runtime.active_task_background_run_worker_update_operator_summary }}</p>
+          <p><strong>preference_preflight</strong> {{ runtime.active_task_background_run_operator_preference_preflight_summary }}</p>
+          <p><strong>preference_applied</strong> {{ runtime.active_task_background_run_operator_preference_applied_summary }}</p>
+          <p><strong>preference_candidates</strong> {{ runtime.active_task_background_run_operator_preference_candidate_summary }}</p>
+          <p><strong>preference_decisions</strong> {{ runtime.active_task_background_run_operator_preference_decision_summary }}</p>
+          <p><strong>worker_apply</strong> {{ runtime.active_task_background_run_worker_update_proposal_summary }}</p>
+          <p><strong>worker_apply_accept</strong> {{ runtime.active_task_background_run_worker_apply_accept_summary }}</p>
+          <p><strong>worker_syncback</strong> {{ runtime.active_task_background_run_worker_syncback_summary }}</p>
+          <p><strong>background_ticket</strong> {{ runtime.active_task_background_run_ticket_id }}</p>
+          <p><strong>background_external</strong> {{ runtime.active_task_background_run_external_phase }} | {{ runtime.active_task_background_run_external_note }}</p>
+          <p><strong>background_model_plan</strong> {{ runtime.active_task_background_run_model_plan_summary }}</p>
+          <p><strong>evidence_bundle</strong> {{ runtime.active_task_background_run_evidence_bundle }}</p>
+          <p><strong>evidence_artifacts</strong> {{ runtime.active_task_background_run_evidence_artifacts }}</p>
+          <p><strong>run_lock</strong> {{ runtime.run_lock_mode }}</p>
+          <p><strong>run_lock_note</strong> {{ runtime.run_lock_note }}</p>
+          <p><strong>background_slots</strong> active={{ runtime.background_slot_active }} limit={{ runtime.background_slot_limit }} | {{ runtime.background_slot_pressure }}</p>
+          <p><strong>background_worker</strong> {{ runtime.background_worker_summary }}</p>
+          <p><strong>background_queue</strong> {{ runtime.background_queue_summary }}</p>
+          <p><strong>background_scheduler</strong> {{ runtime.background_scheduler_summary }}</p>
+          <p><strong>background_scheduler_note</strong> {{ runtime.background_scheduler_note }}</p>
+          <p><strong>workspace</strong> {{ runtime.workspace_summary }}</p>
+          <p><strong>document_registry</strong> {{ runtime.document_registry_summary }}</p>
+          <p><strong>model_routing</strong> {{ runtime.model_routing_summary }}</p>
+          <p><strong>model_registry</strong> {{ runtime.model_registry_summary }}</p>
+          <p><strong>completion_focus</strong> {{ runtime.active_task_completion_focus }}</p>
+          <p><strong>done_when</strong> {{ runtime.active_task_completion_done }}</p>
+          <p><strong>rerun_when</strong> {{ runtime.active_task_completion_rerun }}</p>
+          <p><strong>manual_followup_when</strong> {{ runtime.active_task_completion_followup }}</p>
+          <p><strong>backend</strong> {{ runtime.active_task_backend }}</p>
+          {% if runtime.active_task_backend_note %}<p><strong>backend_note</strong> {{ runtime.active_task_backend_note }}</p>{% endif %}
+          <p><strong>rate_limit</strong> {{ runtime.active_task_rate_limit }}</p>
+        </div>
+      </details>
+      {% with
+        section_title='active_task_actions',
+        safe_hints=runtime.active_task_command_hints,
+        safe_buttons=runtime.active_task_safe_action_buttons,
+        phase2_hints=runtime.active_task_phase2_action_hints,
+        phase2_buttons=runtime.active_task_phase2_action_buttons
+      %}
+      {% include 'dashboard/_action_section.html' %}
+      {% endwith %}
+      {% endif %}
+      {% if runtime.task_teams %}
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th>Task Team</th>
+            <th>Status</th>
+            <th>Preset</th>
+            <th>Phase2 Shape</th>
+            <th>Backend</th>
+            <th>Hints</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in runtime.task_teams %}
+          <tr>
+            <td><a href="{{ task.detail_path }}">{{ task.label }}</a><br><span class="muted">{{ task.request_id }}</span><br><span class="muted"><a href="{{ task.chat_console_path }}">{{ task.chat_console_label }}</a></span></td>
+            <td>{{ task.status }}/{{ task.tf_phase }}</td>
+            <td>{{ task.preset }}</td>
+            <td>
+              {{ task.phase2_shape }}<br>
+              <span class="muted">{{ task.completion_focus }}</span><br>
+              <span class="muted">obs {{ task.observatory_headline }}</span><br>
+              <span class="muted">first {{ task.observatory_first_focus }}</span>
+            </td>
+            <td>
+              {{ task.backend_summary }}<br>
+              <span class="muted">{{ task.observatory_bottleneck_lane }} / {{ task.observatory_bottleneck_reason }}</span><br>
+              <span class="muted">files={{ task.observatory_touched_file_count }} conflicts={{ task.observatory_conflict_file_count }}</span>
+            </td>
+            <td>
+              {% if task.observatory_first_focus and task.observatory_first_focus != '-' %}
+              <p class="muted"><strong>obs</strong> {{ task.observatory_first_focus }}</p>
+              {% endif %}
+              {% if task.observatory_touched_file_count or task.observatory_conflict_file_count %}
+              <p class="muted"><strong>obs_files</strong> touched={{ task.observatory_touched_file_count }} conflicts={{ task.observatory_conflict_file_count }}</p>
+              {% endif %}
+              {% with
+                section_title='',
+                safe_hints=task.command_hints,
+                safe_buttons=task.safe_action_buttons,
+                phase2_hints=task.phase2_action_hints,
+                phase2_buttons=task.phase2_action_buttons
+              %}
+              {% include 'dashboard/_action_section.html' %}
+              {% endwith %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

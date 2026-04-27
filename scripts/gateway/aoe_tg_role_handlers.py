@@ -29,7 +29,7 @@ def handle_add_role_command(
     if args.dry_run:
         send(
             "[DRY-RUN] add-role\n"
-            f"- orch: {key}\n"
+            f"- runtime: {key}\n"
             f"- role: {add_role_name}\n"
             f"- provider: {add_role_provider or 'codex'}\n"
             f"- launch: {add_role_launch or '(default)'}\n"
@@ -44,5 +44,5 @@ def handle_add_role_command(
         launch=add_role_launch,
         spawn=add_role_spawn,
     )
-    send(f"orch: {key}\n{result}", context="add-role")
+    send(f"runtime: {key}\n{result}", context="add-role")
     return True

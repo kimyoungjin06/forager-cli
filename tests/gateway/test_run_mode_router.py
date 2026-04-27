@@ -108,3 +108,280 @@ def test_offdesk_plaintext_maps_to_control_command() -> None:
 
     assert resolved.cmd == "offdesk"
     assert resolved.rest == "prepare"
+
+
+def test_ambiguous_offdesk_timing_prompt_keeps_control_trace() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="퇴근 전 오늘 밤 할일을 검토하고 실행 후보도 같이 봐줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+    assert resolved.intent_class == "status"
+    assert "safe_mode=prefer_control_review_over_dispatch" in resolved.intent_trace
+
+
+def test_recovery_review_prompt_maps_to_offdesk_review() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="복귀 후 어젯밤 결과를 먼저 검토해줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+
+
+def test_offdesk_prepare_prompt_with_check_only_maps_to_prepare() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="오늘 밤 돌릴 것 점검만 먼저 해줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "prepare"
+
+
+def test_recovery_warning_prompt_prefers_offdesk_review_over_dispatch() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="내일 아침 복귀 전에 경고 프로젝트부터 먼저 보자",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+
+
+def test_explicit_review_only_prompt_stays_in_control_plane() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="실행 말고 오프데스크 검토만 먼저 해줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+
+
+def test_recovery_result_prompt_prefers_offdesk_review_over_monitor() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="복귀 후 밤새 결과부터 먼저 보자",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+
+
+def test_candidate_only_prompt_prefers_offdesk_review_over_dispatch() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="오늘 밤 후보만 추리고 실제 실행은 나중에 하자",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+    assert "why_not_dispatch=recovery/offdesk timing markers outrank work markers" in resolved.intent_trace
+
+
+def test_warning_project_review_prompt_prefers_offdesk_review() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+    gw.set_default_mode(manager_state, "939062873", "direct")
+
+    resolved = resolver.resolve_message_command(
+        text="경고 프로젝트만 먼저 모아서 검토해줘",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "offdesk"
+    assert resolved.rest == "review"
+    assert resolved.intent_action == "offdesk_review"
+
+
+def test_legacy_mother_orch_surface_returns_deprecated_envelope() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/mother-orch status",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "deprecated"
+    assert resolved.deprecated_code == "deprecated_surface.mother_orch"
+    assert resolved.deprecated_replacement == "/auto status"
+
+
+def test_legacy_swarm_cli_surface_returns_deprecated_envelope() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="aoe swarm status",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "deprecated"
+    assert resolved.deprecated_code == "deprecated_surface.swarm"
+    assert resolved.deprecated_replacement == "/monitor"
+
+
+def test_legacy_orch_map_surface_returns_deprecated_envelope() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    resolved = resolver.resolve_message_command(
+        text="/orch map",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert resolved.cmd == "deprecated"
+    assert resolved.deprecated_code == "deprecated_surface.orch_map"
+    assert resolved.deprecated_replacement == "/map"
+
+
+def test_legacy_lifecycle_and_cleanup_surfaces_return_deprecated_envelopes() -> None:
+    manager_state = gw.default_manager_state(ROOT, ROOT / ".aoe-team")
+
+    lifecycle = resolver.resolve_message_command(
+        text="aoe lifecycle",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+    cleanup = resolver.resolve_message_command(
+        text="/cleanup",
+        slash_only=False,
+        manager_state=manager_state,
+        chat_id="939062873",
+        dry_run=True,
+        manager_state_file=ROOT / ".aoe-team" / "orch_manager_state.json",
+        get_pending_mode=gw.get_pending_mode,
+        get_default_mode=gw.get_default_mode,
+        clear_pending_mode=gw.clear_pending_mode,
+        save_manager_state=lambda path, state: None,
+    )
+
+    assert lifecycle.cmd == "deprecated"
+    assert lifecycle.deprecated_code == "deprecated_surface.lifecycle_alias"
+    assert lifecycle.deprecated_replacement == "aoe task"
+    assert cleanup.cmd == "deprecated"
+    assert cleanup.deprecated_code == "deprecated_surface.gc_alias"
+    assert cleanup.deprecated_replacement == "/gc"

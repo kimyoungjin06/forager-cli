@@ -137,7 +137,7 @@ def maybe_send_manual_followup_alert(
     item["updated_at"] = now_iso()
     lines = [
         "manual follow-up needed",
-        f"- orch: {project_key} ({alias})",
+        f"- runtime: {project_key} ({alias})",
         f"- id: {token}",
         f"- blocked_count: {blocked_count}",
     ]
@@ -296,7 +296,7 @@ def maybe_capture_todo_proposals(
     alias = project_alias(entry, key)
     lines = [
         "new todo proposals",
-        f"- orch: {key} ({alias})",
+        f"- runtime: {key} ({alias})",
         f"- source_request: {req_id}",
         f"- created: {created_count}",
     ]
@@ -462,6 +462,10 @@ def dispatch_and_sync_task(
     set_chat_selected_task_ref: Callable[..., None],
     now_iso: Callable[[], str],
     sync_task_lifecycle: Callable[..., Optional[Dict[str, Any]]],
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> DispatchSyncResult:
     state = run_aoe_orch(
         p_args,
@@ -490,6 +494,10 @@ def dispatch_and_sync_task(
         verifier_roles=verifier_roles,
         require_verifier=bool(require_verifier),
         verifier_candidates=verifier_candidates,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
     if task is not None:
         task["initiator_chat_id"] = str(chat_id)

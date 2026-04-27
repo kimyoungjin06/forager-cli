@@ -494,7 +494,7 @@ def handle_tf_command(
     if sub in {"", "list", "ls", "help", "h", "?"}:
         key, entry, _p_args = get_context(None)
         alias = str((entry or {}).get("project_alias", "")).strip() or "-"
-        send(f"{_tf_usage()}\n\nactive orch: {key} ({alias})", context="tf-usage", with_menu=True)
+        send(f"{_tf_usage()}\n\nactive runtime: {key} ({alias})", context="tf-usage", with_menu=True)
         return {"terminal": True}
 
     recipe_id = sub
@@ -511,12 +511,12 @@ def handle_tf_command(
         send(f"unknown tf recipe: {recipe_id}\n\n{_tf_usage()}", context="tf-unknown", with_menu=True)
         return {"terminal": True}
 
-    # Use current active orch unless user already switched via /use.
+    # use current active runtime unless user already switched via /use.
     key, entry, _p_args = get_context(None)
     alias = str((entry or {}).get("project_alias", "")).strip() or "-"
     project_root_raw = str((entry or {}).get("project_root", "")).strip()
     if not project_root_raw:
-        send("tf error: missing project_root for active orch", context="tf-error", with_menu=True)
+        send("tf error: missing project_root for active runtime", context="tf-error", with_menu=True)
         return {"terminal": True}
 
     if recipe.id == "mod2-proof":
@@ -529,7 +529,7 @@ def handle_tf_command(
             if not tags:
                 send(
                     "mod2-proof tags: (empty)\n"
-                    f"- orch: {key} ({alias})\n"
+                    f"- runtime: {key} ({alias})\n"
                     "hint: no matching contract-ci summary files found under data/metadata.",
                     context="tf-mod2-tags-empty",
                     with_menu=True,
@@ -538,7 +538,7 @@ def handle_tf_command(
 
             lines = [
                 "mod2-proof tags",
-                f"- orch: {key} ({alias})",
+                f"- runtime: {key} ({alias})",
                 "format: idx) tag | overall_ok | pending | generated_at_utc",
             ]
             for idx, row in enumerate(tags, start=1):
@@ -593,7 +593,7 @@ def handle_tf_command(
             "tf proof (local)\n"
             f"- recipe: {recipe.id}\n"
             f"- tag: {tag}\n"
-            f"- orch: {key} ({alias})\n"
+            f"- runtime: {key} ({alias})\n"
             f"- verdict: {verdict} ({reason})\n"
             f"- contract_ci.overall_ok: {overall_ok}\n"
             f"- autolabel.n_auto_pending: {pending}\n"
@@ -605,7 +605,7 @@ def handle_tf_command(
         return {"terminal": True}
 
     if chat_role == "readonly":
-        send("permission denied: readonly chat cannot start TF runs. (/tf list is allowed)", context="tf-deny", with_menu=True)
+        send("permission denied: readonly chat cannot start Task Team runs. (/tf list is allowed)", context="tf-deny", with_menu=True)
         return {"terminal": True}
 
     tag = (arg1 or recipe.default_tag).strip()
@@ -616,7 +616,7 @@ def handle_tf_command(
         "tf dispatch starting\n"
         f"- recipe: {recipe.id}\n"
         f"- tag: {tag}\n"
-        f"- orch: {key} ({alias})\n"
+        f"- runtime: {key} ({alias})\n"
         "note: proof recipes are read-only (they validate existing artifacts).",
         context="tf-start",
         with_menu=True,

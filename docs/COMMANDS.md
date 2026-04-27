@@ -13,7 +13,7 @@
 
 ## 1) Upstream: `aoe-orch` (실행 엔진)
 
-의미: 실제로 TF/Orch 작업을 “실행”하는 엔진이다. Telegram 게이트웨이/스케줄러는 최종적으로 `aoe-orch`를 호출한다.
+의미: 실제로 Task Team/Project Runtime 작업을 “실행”하는 엔진이다. Telegram 게이트웨이/스케줄러는 최종적으로 `aoe-orch`를 호출한다.
 
 이 레포에서 최소 전제로 사용하는 서브커맨드(대표):
 
@@ -48,9 +48,9 @@
 
 ---
 
-## 3) 이 레포: `aoe-team-stack` (Mother-Orch tmux 스택 제어)
+## 3) 이 레포: `aoe-team-stack` (Control Plane tmux 스택 제어)
 
-의미: Mother-Orch(게이트웨이 + 워커 + UI + 스케줄러)를 tmux 세션들로 띄우고, **세션 전환 UX(Alt+1..9 / 페이지)**까지 포함해 관리한다. (세션 힌트는 tmux status bar 상단 라인으로 표시)
+의미: Control Plane(게이트웨이 + 워커 + UI + 스케줄러)를 tmux 세션들로 띄우고, **세션 전환 UX(Alt+1..9 / 페이지)**까지 포함해 관리한다. (세션 힌트는 tmux status bar 상단 라인으로 표시)
 
 설치:
 
@@ -88,6 +88,10 @@ worker runtime 권한 정책:
   - `AOE_CLAUDE_FALLBACK_TO_CODEX=1`
 - Codex fallback env:
   - `AOE_CODEX_FALLBACK_TO_CLAUDE=1`
+- Control Plane provider order:
+  - `AOE_CONTROL_PROVIDERS=codex,claude`
+  - 예: `AOE_CONTROL_PROVIDERS=claude,codex`
+  - 적용 대상: orchestrator direct/synth, legacy planner/critic/repair, follow-up proposal extraction
 - `full` 계열은 worker runtime에서 사실상 YOLO/full-access로 해석된다.
   - Codex: `--dangerously-bypass-approvals-and-sandbox`
   - Claude: `--dangerously-skip-permissions --permission-mode bypassPermissions`
@@ -106,7 +110,7 @@ worker runtime 권한 정책:
 
 ## 4) 이 레포: Telegram 원격 콘솔(슬래시 명령)
 
-의미: 원격에서 Mother-Orch를 운영하기 위한 “콘솔”이다.
+의미: 원격에서 Control Plane을 운영하기 위한 “콘솔”이다.
 
 권장 입력:
 
@@ -138,7 +142,7 @@ worker runtime 권한 정책:
 
 ### C. 모니터링(상태/태스크)
 
-- `/status`: 게이트웨이/큐/TF 개수 등 상태 요약
+- `/status`: 게이트웨이/큐/Task Team 개수 등 상태 요약
 - `/map`: 프로젝트(O1..) 매핑
   - 옵션: `AOE_ORCH_AUTO_DISCOVER=1`이면 `aoe list --json --all`을 스캔해(Workspace root 하위) 미등록 프로젝트를 자동 등록한다. (추가로 `AOE_ORCH_AUTO_INIT=1`이면 `<project_root>/.aoe-team/AOE_TODO.md` 템플릿도 자동 생성)
 - `/use <O#|name>`: active 프로젝트(Orch) 전환
@@ -153,7 +157,7 @@ worker runtime 권한 정책:
 - `/kpi [hours]`: 최근 KPI/이벤트 요약
 - `/request <T-###|request_id>`: request 원문/상태 조회(선택 태스크도 갱신)
 
-### C2. TF Recipes(증거 기반 점검)
+### C2. `/tf` Recipes(증거 기반 점검)
 
 목적: “스모크/추정”이 아니라 **기존 산출물(JSON/YAML 등)을 실제로 읽어** proof 수준의 상태를 빠르게 확인한다.
 
@@ -169,10 +173,10 @@ worker runtime 권한 정책:
     - proof 기준에 따라 `proof_success|proof_retry|proof_fail` verdict 산출
     - 결과를 보고서로 저장: `docs/investigations_mo/projects/<O#>/tfs/TF-M2PROOF-<tag>/report.md`
 
-### D. Todo/스케줄링(Mother-Orch)
+### D. Todo/스케줄링(Control Plane)
 
 - `/todo`: 프로젝트 todo 조회(서브명령 포함)
-- `/todo proposals`: TF 실행 결과에서 올라온 후속 todo proposal inbox 조회
+- `/todo proposals`: Task Team 실행 결과에서 올라온 후속 todo proposal inbox 조회
 - `/todo accept <PROP-xxx|number>`: proposal을 main todo queue로 승격
 - `/todo reject <PROP-xxx|number> [reason]`: proposal 폐기
 - `/todo syncback [preview]`: runtime todo 상태를 canonical `TODO.md`에 반영한다. `done`은 체크박스 완료로 표시하고, runtime에서 새로 생긴 accepted proposal/manual todo는 append하며, blocked/manual_followup은 문서 하단 notes block으로 남긴다. `preview`를 붙이면 파일을 바꾸지 않고 계획만 보여준다.
@@ -269,11 +273,140 @@ pause/resume 동작 규칙:
 - `/gc` : room 로그(기본 14일) + TF 실행 캐시(기본 72시간 TTL)를 정책에 따라 정리
 - `/gc force` : room GC를 강제로 재실행(하루 1회 마커 무시)
 
+### F-2. State Root Migration
+
+- `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <state-root>`
+  - legacy `<project_root>/.aoe-team` 기준으로 centralized `AOE_STATE_DIR/<project-id>/` migration plan을 출력
+- `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <state-root> --apply`
+  - missing artifact를 copy-first로 migration
+- `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <state-root> --apply --force`
+  - existing target artifact도 overwrite
+
+포함 artifact:
+
+- `telegram_gateway_state.json`
+- `orch_manager_state.json`
+- `telegram_chat_aliases.json`
+- `auto_scheduler.json`
+- `offdesk_state.json`
+- `provider_capacity.json`
+- `control/latest-intent.json`
+- `dashboard/action-history.jsonl`
+- `logs/gateway_events.jsonl`
+- `recovery/nightly-session-summary/*`
+
+### F-3. Runtime Doctor
+
+- `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo>`
+  - resolved state root, artifact readability, runtime config, binary presence를 점검
+- `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo> --json`
+  - machine-readable JSON report 출력
+- `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo> --team-dir <path>`
+  - explicit team dir 기준으로 same checks 실행
+
+현재 점검 범위:
+
+- state root selection / drift
+  - `AOE_STATE_DIR` configured but legacy fallback still active
+  - `AOE_TEAM_DIR` overriding `AOE_STATE_DIR`
+  - legacy + centralized dual state presence
+- artifact readability
+  - `telegram_gateway_state.json`
+  - `orch_manager_state.json`
+  - `telegram_chat_aliases.json`
+  - `provider_capacity.json`
+  - `control/latest-intent.json`
+  - `dashboard/action-history.jsonl`
+  - `recovery/nightly-session-summary/latest.json`
+- runtime config presence
+  - `orchestrator.json`
+- binary presence
+  - `aoe-orch`
+  - `aoe-team`
+  - `tmux` (`warn` only)
+
+### F-4. Runtime Setup Guide
+
+- `python3 scripts/gateway/aoe_tg_setup_guide.py --project-root <repo>`
+  - 현재 runtime 상태를 보고 bootstrap / env / migration / systemd / dashboard / doctor next-step을 순서대로 출력
+- `python3 scripts/gateway/aoe_tg_setup_guide.py --project-root <repo> --json`
+  - machine-readable setup step report 출력
+
+현재 setup step이 안내하는 실제 명령:
+
+- runtime bootstrap
+  - `bash scripts/team/bootstrap_runtime_templates.sh --project-root <repo> --team-dir <resolved-team-dir>`
+- state root migration
+  - `python3 scripts/gateway/aoe_tg_state_root_migration.py --project-root <repo> --state-dir <AOE_STATE_DIR>`
+- systemd install
+  - `bash scripts/systemd/install_user_services.sh`
+- local dashboard
+  - `python3 scripts/dashboard/control_dashboard.py --control-root <repo> --host 127.0.0.1 --port 8765`
+- doctor rerun
+  - `python3 scripts/gateway/aoe_tg_doctor.py --project-root <repo>`
+
 ### G. 복구/재실행
 
 - `/retry <T-###|request_id> [lane <L#|R#,...>]`: 같은 입력으로 재실행. lane을 주면 critic이 허용한 실행/review lane만 다시 돎
 - `/replan <T-###|request_id> [lane <L#|R#,...>]`: 플래너/크리틱을 다시 붙여 재계획 후 실행. lane을 주면 해당 lane만 범위를 좁힘
 - `/replay [list|latest|<idx>|<id>|show <...>|purge]`: 핸들러 오류 입력 큐 조회/재실행/정리
+- `/history search <query> [--project O#|name] [--since 12h] [--limit N] [--scope control|runtime|task|dashboard|recovery|all]`: gateway events, dashboard action audit, nightly summary, latest intent, current manager state를 합쳐 recovery-relevant history를 검색
+
+### G-2. Compatibility / Deprecation Envelope
+
+초기 deprecated surface는 deterministic response로만 처리한다.
+source of truth:
+
+- `scripts/gateway/aoe_tg_deprecation.py`
+
+- `/mother`
+- `/mother-orch`
+- `aoe mother`
+- `aoe mother-orch`
+- `/swarm`
+- `aoe swarm`
+- `/orch map`
+- `aoe orch map`
+- `/tasks`
+- `/board`
+- `/lifecycle`
+- `aoe lifecycle`
+- `/follow-up`
+- `aoe follow-up`
+- `/off-desk`
+- `aoe off-desk`
+- `/cleanup`
+- `aoe cleanup`
+
+응답 계약:
+
+- `deprecated surface`
+- `code: deprecated_surface.<name>`
+- `replacement: <canonical surface>`
+- `note: <migration wording>`
+- `next: <operator hint>`
+
+현재 canonical replacement:
+
+- `mother-orch` 계열
+  - 기본 replacement: `/auto status`
+  - recovery intent면 `/offdesk review`
+- `swarm` 계열
+  - 기본 replacement: `/task`
+  - runtime status intent면 `/monitor`
+- `orch map` 계열
+  - 기본 replacement: `/map`
+  - CLI는 `aoe orch list`
+- `tasks` / `board`
+  - replacement: `/monitor`
+- `lifecycle`
+  - replacement: `/task`
+- `follow-up`
+  - replacement: `/followup`
+- `off-desk`
+  - replacement: `/offdesk`
+- `cleanup`
+  - replacement: `/gc`
 
 ---
 
@@ -301,7 +434,7 @@ pause/resume 동작 규칙:
 
 - `aoe orch add ...` 실행 시 대상 프로젝트의 `<project_root>/.aoe-team/AOE_TODO.md`가 없으면 자동으로 생성한다.
 - `/todo followup`: 현재 프로젝트의 `manual_followup` backlog만 표시
-- `/todo proposals`: 현재 프로젝트의 TF follow-up proposal inbox 표시
+- `/todo proposals`: 현재 프로젝트의 Task Team follow-up proposal inbox 표시
 - `/todo accept <PROP-xxx|number>`: proposal을 backlog에 승격하고 lineage(`proposal_id`, `created_from_request_id`, `created_from_todo_id`)를 남긴다.
 - `/todo reject <PROP-xxx|number> [reason]`: proposal을 거절하고 inbox에서 닫는다.
 - `/todo ack <TODO-xxx|number>`: blocked todo를 사람이 확인한 뒤 다시 `open`으로 되돌린다. `manual_followup`/blocked 메타도 함께 정리된다.

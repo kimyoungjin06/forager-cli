@@ -9,7 +9,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_orch_roles import classify_dispatch_role_preset, normalize_role_preset
-from aoe_tg_schema import default_plan_critic_payload, normalize_plan_critic_payload, plan_critic_primary_issue
+from aoe_tg_schema import (
+    apply_plan_critic_approval_mode,
+    default_plan_critic_payload,
+    normalize_plan_critic_payload,
+    plan_critic_primary_issue,
+    plan_payload_approval_mode,
+)
+from aoe_tg_task_state import refresh_task_planning_primitives
 
 
 @dataclass
@@ -28,14 +35,116 @@ class PlanMeta:
     plan_error: str = ""
     plan_gate_blocked: bool = False
     plan_gate_reason: str = ""
+    plan_review_count: int = 0
+    plan_issue_codes: List[str] = field(default_factory=list)
+    plan_issue_history: List[Dict[str, Any]] = field(default_factory=list)
+    plan_convergence_status: str = ""
+    plan_stalled_reason: str = ""
+    plan_last_round: int = 0
     planning_enabled: bool = False
     reuse_source_plan: bool = False
     phase1_mode: str = ""
     phase1_rounds: int = 0
     phase1_providers: List[str] = field(default_factory=list)
+    phase1_planner_providers: List[str] = field(default_factory=list)
+    phase1_critic_providers: List[str] = field(default_factory=list)
     phase1_role_preset: str = ""
     phase2_team_preset: str = ""
     rate_limit: Dict[str, Any] = field(default_factory=dict)
+
+
+def _normalize_plan_issue_code(issue: Any) -> str:
+    low = str(issue or "").strip().lower()
+    if not low:
+        return ""
+    if "missing required contract fields" in low or "contract_incomplete" in low:
+        return "contract_incomplete"
+    if "contract ambiguity" in low or "contract_ambiguous" in low:
+        return "contract_ambiguous"
+    if "acceptance" in low or "완료조건" in low or "검증 기준" in low:
+        return "acceptance_gap"
+    if "artifact" in low or "산출물" in low or any(token in low for token in (".json", ".md", ".csv")):
+        return "artifact_contract_gap"
+    if "readonly" in low or "read-only" in low:
+        return "readonly_drift"
+    if "depends_on" in low or "dependency" in low or "의존" in low:
+        return "invalid_dependency"
+    if "owner" in low or "lane" in low or "role" in low or "소유" in low:
+        return "ownership_gap"
+    if "approval" in low or "dri" in low or "승인" in low:
+        return "approval_gap"
+    return "critic_issue"
+
+
+def _review_pass_for_round(round_no: int) -> str:
+    idx = max(1, int(round_no or 1))
+    if idx <= 1:
+        return "contract"
+    if idx == 2:
+        return "execution"
+    return "verification"
+
+
+def _issue_codes_from_critic(critic: Dict[str, Any]) -> List[str]:
+    codes: List[str] = []
+    for issue in list((critic or {}).get("issues") or []):
+        code = _normalize_plan_issue_code(issue)
+        if code and code not in codes:
+            codes.append(code)
+    return codes[:8]
+
+
+def _build_issue_row(
+    *,
+    round_no: int,
+    critic: Dict[str, Any],
+    provider: str = "",
+    planner_provider: str = "",
+    critic_provider: str = "",
+) -> Dict[str, Any]:
+    normalized = normalize_plan_critic_payload(critic or {}, max_items=8)
+    primary_issue = plan_critic_primary_issue(normalized, limit=240)
+    row: Dict[str, Any] = {
+        "round": max(1, int(round_no or 1)),
+        "review_pass": _review_pass_for_round(round_no),
+        "status": "approved" if not list(normalized.get("issues") or []) else "issues",
+        "issue_count": len(list(normalized.get("issues") or [])),
+        "issue_codes": _issue_codes_from_critic(normalized),
+    }
+    if primary_issue:
+        row["primary_issue"] = primary_issue
+    if provider:
+        row["provider"] = str(provider).strip()[:64]
+    if planner_provider:
+        row["planner_provider"] = str(planner_provider).strip()[:64]
+    if critic_provider:
+        row["critic_provider"] = str(critic_provider).strip()[:64]
+    return row
+
+
+def _dedupe_issue_codes(rows: List[Dict[str, Any]]) -> List[str]:
+    out: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for code in list(row.get("issue_codes") or []):
+            token = str(code or "").strip().lower()
+            if token and token not in out:
+                out.append(token[:64])
+    return out[:12]
+
+
+def _detect_stalled_issue(rows: List[Dict[str, Any]]) -> str:
+    primaries = [
+        str(row.get("primary_issue", "")).strip()
+        for row in rows
+        if isinstance(row, dict) and str(row.get("primary_issue", "")).strip()
+    ]
+    if len(primaries) < 2:
+        return ""
+    if primaries[-1] and primaries[-1] == primaries[-2]:
+        return primaries[-1][:240]
+    return ""
 
 
 def apply_success_first_prompt_fallbacks(prompt: str) -> tuple[str, List[str]]:
@@ -153,6 +262,7 @@ def compute_dispatch_plan(
     args: Any,
     p_args: Any,
     prompt: str,
+    request_contract: Optional[Dict[str, Any]] = None,
     dispatch_mode: bool,
     run_control_mode: str,
     run_source_task: Optional[Dict[str, Any]],
@@ -168,6 +278,8 @@ def compute_dispatch_plan(
     phase1_ensemble_planning: Optional[Callable[..., Dict[str, Any]]] = None,
     report_progress: Optional[Callable[..., None]] = None,
 ) -> PlanMeta:
+    request_contract_meta = request_contract if isinstance(request_contract, dict) else {}
+    effective_prompt = str(prompt or "").strip()
     plan_data: Optional[Dict[str, Any]] = None
     plan_critic: Dict[str, Any] = default_plan_critic_payload()
     plan_roles: List[str] = []
@@ -175,16 +287,45 @@ def compute_dispatch_plan(
     plan_error = ""
     plan_gate_blocked = False
     plan_gate_reason = ""
+    plan_review_count = 0
+    plan_issue_codes: List[str] = []
+    plan_issue_history: List[Dict[str, Any]] = []
+    plan_convergence_status = ""
+    plan_stalled_reason = ""
+    plan_last_round = 0
     planning_enabled = bool(args.task_planning) or (run_control_mode == "replan")
     reuse_source_plan = (
-        run_control_mode == "retry"
+        run_control_mode in {"retry", "followup"}
         and isinstance(run_source_task, dict)
         and isinstance(run_source_task.get("plan"), dict)
     )
     phase1_mode = ""
     phase1_rounds = 0
     phase1_providers: List[str] = []
-    role_preset = classify_dispatch_role_preset(prompt, selected_roles=selected_roles)
+    phase1_planner_providers: List[str] = []
+    phase1_critic_providers: List[str] = []
+    for token in str(
+        getattr(args, "plan_phase1_planner_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+        or getattr(args, "plan_phase1_providers", "codex,claude")
+    ).split(","):
+        item = str(token).strip().lower()
+        if item and item not in phase1_planner_providers:
+            phase1_planner_providers.append(item)
+    for token in str(
+        getattr(args, "plan_phase1_critic_providers", getattr(args, "plan_phase1_providers", "codex,claude"))
+        or getattr(args, "plan_phase1_providers", "codex,claude")
+    ).split(","):
+        item = str(token).strip().lower()
+        if item and item not in phase1_critic_providers:
+            phase1_critic_providers.append(item)
+    for token in [*phase1_planner_providers, *phase1_critic_providers]:
+        if token not in phase1_providers:
+            phase1_providers.append(token)
+    role_preset = normalize_role_preset(
+        request_contract_meta.get("request_contract_preset")
+        or request_contract_meta.get("preset")
+        or classify_dispatch_role_preset(effective_prompt, selected_roles=selected_roles)
+    )
     team_preset = normalize_role_preset(role_preset)
     rate_limit: Dict[str, Any] = {}
 
@@ -196,26 +337,35 @@ def compute_dispatch_plan(
                 source_plan = run_source_task.get("plan")
                 plan_data = normalize_task_plan_payload(
                     source_plan if isinstance(source_plan, dict) else None,
-                    user_prompt=prompt,
+                    user_prompt=effective_prompt,
                     workers=available_worker_roles(available_roles),
                     max_subtasks=max(1, int(args.plan_max_subtasks)),
                     meta_overrides={
                         "worker_roles": list(selected_roles or []),
+                        "phase1_planner_providers": list(phase1_planner_providers),
+                        "phase1_critic_providers": list(phase1_critic_providers),
+                        "phase1_providers": list(phase1_providers),
                         "phase1_role_preset": role_preset,
                         "phase2_team_preset": team_preset,
+                        "request_contract": request_contract_meta,
                     },
                 )
                 raw_critic = run_source_task.get("plan_critic")
-                plan_critic = normalize_plan_critic_payload(raw_critic, max_items=8)
+                plan_critic = apply_plan_critic_approval_mode(
+                    raw_critic,
+                    approval_mode=plan_payload_approval_mode(plan_data),
+                    max_items=8,
+                )
 
             if (plan_data is None) and planning_enabled:
                 if bool(getattr(args, "plan_phase1_ensemble", True)) and callable(phase1_ensemble_planning):
                     ensemble = phase1_ensemble_planning(
                         p_args,
-                        prompt,
+                        effective_prompt,
                         available_roles,
                         selected_roles=selected_roles,
                         role_preset=role_preset,
+                        request_contract=request_contract_meta,
                         report_progress=report_progress,
                     )
                     plan_data = ensemble.get("plan_data")
@@ -225,30 +375,66 @@ def compute_dispatch_plan(
                     plan_error = str(ensemble.get("plan_error", "") or "").strip()
                     plan_gate_blocked = bool(ensemble.get("plan_gate_blocked", False))
                     plan_gate_reason = str(ensemble.get("plan_gate_reason", "") or "").strip()
+                    plan_review_count = max(
+                        0,
+                        int(
+                            ensemble.get("plan_review_count", 0)
+                            or ensemble.get("phase1_rounds", 0)
+                            or len(ensemble.get("plan_issue_history") or [])
+                            or len(ensemble.get("plan_replans") or [])
+                        ),
+                    )
+                    plan_issue_history = list(ensemble.get("plan_issue_history") or [])
+                    plan_issue_codes = [str(item).strip() for item in (ensemble.get("plan_issue_codes") or []) if str(item).strip()]
+                    plan_convergence_status = str(ensemble.get("plan_convergence_status", "") or "").strip().lower()
+                    plan_stalled_reason = str(ensemble.get("plan_stalled_reason", "") or "").strip()
+                    plan_last_round = max(
+                        0,
+                        int(
+                            ensemble.get("plan_last_round", 0)
+                            or plan_review_count
+                            or ensemble.get("phase1_rounds", 0)
+                        ),
+                    )
                     phase1_mode = str(ensemble.get("phase1_mode", "ensemble") or "ensemble")
                     phase1_rounds = max(0, int(ensemble.get("phase1_rounds", 0) or 0))
                     phase1_providers = [str(x).strip() for x in (ensemble.get("phase1_providers") or []) if str(x).strip()]
+                    phase1_planner_providers = [
+                        str(x).strip() for x in (ensemble.get("phase1_planner_providers") or []) if str(x).strip()
+                    ]
+                    phase1_critic_providers = [
+                        str(x).strip() for x in (ensemble.get("phase1_critic_providers") or []) if str(x).strip()
+                    ]
                     rate_limit = dict(ensemble.get("rate_limit") or {}) if isinstance(ensemble.get("rate_limit"), dict) else {}
                 else:
                     if callable(report_progress):
                         report_progress(phase="planner", detail="building execution plan")
                     plan_data = build_task_execution_plan(
                         p_args,
-                        user_prompt=prompt,
+                        user_prompt=effective_prompt,
                         available_roles=available_roles,
                         max_subtasks=max(1, int(args.plan_max_subtasks)),
+                        request_contract=request_contract_meta,
                     )
                     if isinstance(plan_data, dict):
                         meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
                         meta = dict(meta)
                         if selected_roles:
                             meta["worker_roles"] = list(selected_roles)
+                        meta["phase1_planner_providers"] = list(phase1_planner_providers)
+                        meta["phase1_critic_providers"] = list(phase1_critic_providers)
+                        meta["phase1_providers"] = list(phase1_providers)
                         meta["phase1_role_preset"] = role_preset
                         meta["phase2_team_preset"] = team_preset
                         plan_data["meta"] = meta
                     if callable(report_progress):
                         report_progress(phase="critic", detail="reviewing generated plan")
-                    plan_critic = critique_task_execution_plan(p_args, prompt, plan_data)
+                    plan_critic = apply_plan_critic_approval_mode(
+                        critique_task_execution_plan(p_args, prompt, plan_data),
+                        approval_mode=plan_payload_approval_mode(plan_data),
+                        max_items=8,
+                    )
+                    plan_issue_history.append(_build_issue_row(round_no=1, critic=plan_critic))
 
                     if bool(args.plan_auto_replan):
                         max_replans = max(0, int(args.plan_replan_attempts))
@@ -278,7 +464,14 @@ def compute_dispatch_plan(
                                     attempt=attempt,
                                     total=max_replans,
                                 )
-                            plan_critic = critique_task_execution_plan(p_args, prompt, plan_data)
+                            plan_critic = apply_plan_critic_approval_mode(
+                                critique_task_execution_plan(p_args, prompt, plan_data),
+                                approval_mode=plan_payload_approval_mode(plan_data),
+                                max_items=8,
+                            )
+                            plan_issue_history.append(
+                                _build_issue_row(round_no=attempt + 1, critic=plan_critic)
+                            )
                             plan_replans.append(
                                 {
                                     "attempt": attempt,
@@ -286,6 +479,10 @@ def compute_dispatch_plan(
                                     "subtasks": len(plan_data.get("subtasks") or []),
                                 }
                             )
+                    plan_review_count = len(plan_issue_history)
+                    plan_issue_codes = _dedupe_issue_codes(plan_issue_history)
+                    plan_last_round = max(0, int(plan_review_count or 0))
+                    plan_stalled_reason = _detect_stalled_issue(plan_issue_history)
 
             plan_roles = plan_roles_from_subtasks(plan_data)
             if plan_roles:
@@ -295,14 +492,32 @@ def compute_dispatch_plan(
                 lead_issue = plan_critic_primary_issue(plan_critic, limit=240) or "critic unresolved after auto-replan"
                 plan_gate_blocked = True
                 plan_gate_reason = lead_issue
+                plan_convergence_status = "stalled" if plan_stalled_reason else "blocked"
+                if callable(report_progress):
+                    report_progress(phase="blocked", detail=plan_gate_reason)
+            elif (
+                isinstance(plan_data, dict)
+                and phase1_mode == "ensemble"
+                and max(0, int(plan_review_count or phase1_rounds or 0)) < 3
+            ):
+                plan_gate_blocked = True
+                plan_gate_reason = (
+                    f"planning convergence requires at least 3 critical reviews "
+                    f"(got {max(0, int(plan_review_count or phase1_rounds or 0))})"
+                )
+                plan_convergence_status = "blocked"
                 if callable(report_progress):
                     report_progress(phase="blocked", detail=plan_gate_reason)
             elif isinstance(plan_data, dict) and callable(report_progress):
                 critic_state = "issues" if critic_has_blockers(plan_critic) else "ok"
+                if not plan_convergence_status:
+                    plan_convergence_status = "ready"
                 report_progress(
                     phase="ready",
                     detail=f"subtasks={len(plan_data.get('subtasks') or [])} critic={critic_state} replans={len(plan_replans)}",
                 )
+            elif not plan_convergence_status and planning_enabled and not plan_gate_blocked:
+                plan_convergence_status = "ready"
         except Exception as e:
             plan_data = None
             plan_critic = default_plan_critic_payload()
@@ -311,6 +526,31 @@ def compute_dispatch_plan(
             plan_error = str(e).strip()[:260]
             if callable(report_progress):
                 report_progress(phase="fallback", detail=plan_error or "planning failed; dispatching original prompt")
+            plan_convergence_status = "failed"
+
+    if reuse_source_plan and isinstance(run_source_task, dict):
+        plan_review_count = max(0, int(run_source_task.get("plan_review_count", 0) or 0))
+        plan_last_round = max(0, int(run_source_task.get("plan_last_round", 0) or plan_review_count))
+        if isinstance(run_source_task.get("plan_issue_history"), list):
+            plan_issue_history = list(run_source_task.get("plan_issue_history") or [])
+        if isinstance(run_source_task.get("plan_issue_codes"), list):
+            plan_issue_codes = [str(item).strip() for item in (run_source_task.get("plan_issue_codes") or []) if str(item).strip()]
+        plan_convergence_status = str(run_source_task.get("plan_convergence_status", "") or plan_convergence_status).strip().lower()
+        plan_stalled_reason = str(run_source_task.get("plan_stalled_reason", "") or plan_stalled_reason).strip()
+
+    if not plan_issue_codes:
+        plan_issue_codes = _dedupe_issue_codes(plan_issue_history)
+    if not plan_last_round:
+        plan_last_round = max(0, int(plan_review_count or phase1_rounds or len(plan_issue_history) or 0))
+    if not plan_stalled_reason:
+        plan_stalled_reason = _detect_stalled_issue(plan_issue_history)
+    if not plan_convergence_status:
+        if plan_gate_blocked:
+            plan_convergence_status = "stalled" if plan_stalled_reason else "blocked"
+        elif isinstance(plan_data, dict):
+            plan_convergence_status = "ready"
+        elif plan_error:
+            plan_convergence_status = "failed"
 
     return PlanMeta(
         selected_roles=selected_roles,
@@ -321,11 +561,19 @@ def compute_dispatch_plan(
         plan_error=plan_error,
         plan_gate_blocked=plan_gate_blocked,
         plan_gate_reason=plan_gate_reason,
+        plan_review_count=plan_review_count,
+        plan_issue_codes=plan_issue_codes,
+        plan_issue_history=plan_issue_history,
+        plan_convergence_status=plan_convergence_status,
+        plan_stalled_reason=plan_stalled_reason,
+        plan_last_round=plan_last_round,
         planning_enabled=planning_enabled,
         reuse_source_plan=reuse_source_plan,
         phase1_mode=phase1_mode,
         phase1_rounds=phase1_rounds,
         phase1_providers=phase1_providers,
+        phase1_planner_providers=phase1_planner_providers,
+        phase1_critic_providers=phase1_critic_providers,
         phase1_role_preset=role_preset,
         phase2_team_preset=team_preset,
         rate_limit=rate_limit,
@@ -348,6 +596,14 @@ def emit_planning_progress(
     phase_token = str(phase or "").strip().lower() or "planning"
     suffix = f" attempt={attempt}/{total}" if int(attempt or 0) > 0 and int(total or 0) > 0 else ""
     detail_text = str(detail or "").strip()
+    task_row = task if isinstance(task, dict) else None
+    task_short_id = ""
+    if task_row:
+        task_short_id = (
+            str(task_row.get("short_id", "")).strip()
+            or str(task_row.get("label", "")).strip()
+            or str(task_row.get("request_id", "")).strip()
+        )
     log_status = "running"
     if phase_token in {"ready", "reuse"}:
         log_status = "completed"
@@ -357,7 +613,8 @@ def emit_planning_progress(
         event=f"planning_{phase_token}",
         project=key,
         request_id=str(request_id or "").strip(),
-        task=task if isinstance(task, dict) else None,
+        task=task_row,
+        task_short_id=task_short_id,
         stage="planning",
         status=log_status,
         detail=f"{detail_text}{suffix}".strip(),
@@ -375,7 +632,7 @@ def emit_planning_progress(
         "blocked": "planning: blocked",
     }
     lines = [heading_map.get(phase_token, f"planning: {phase_token}")]
-    lines.append(f"- orch: {key}")
+    lines.append(f"- runtime: {key}")
     if detail_text:
         lines.append(f"- detail: {detail_text}")
     if suffix:
@@ -395,9 +652,19 @@ def apply_plan_and_lineage(
     plan_roles: List[str],
     plan_replans: List[Dict[str, Any]],
     plan_error: str,
+    plan_gate_blocked: bool = False,
+    plan_gate_reason: str = "",
+    plan_review_count: int = 0,
+    plan_issue_codes: Optional[List[str]] = None,
+    plan_issue_history: Optional[List[Dict[str, Any]]] = None,
+    plan_convergence_status: str = "",
+    plan_stalled_reason: str = "",
+    plan_last_round: int = 0,
     phase1_mode: str = "",
     phase1_rounds: int = 0,
     phase1_providers: Optional[List[str]] = None,
+    phase1_planner_providers: Optional[List[str]] = None,
+    phase1_critic_providers: Optional[List[str]] = None,
     phase1_role_preset: str = "",
     phase2_team_preset: str = "",
     critic_has_blockers: Callable[[Dict[str, Any]], bool],
@@ -411,6 +678,51 @@ def apply_plan_and_lineage(
     if task is None:
         return
 
+    task["plan_review_count"] = max(0, int(plan_review_count or 0))
+    if plan_issue_codes:
+        task["plan_issue_codes"] = [str(item).strip()[:64] for item in plan_issue_codes if str(item).strip()]
+    else:
+        task.pop("plan_issue_codes", None)
+    if plan_issue_history:
+        task["plan_issue_history"] = list(plan_issue_history)
+    else:
+        task.pop("plan_issue_history", None)
+    if plan_convergence_status:
+        task["plan_convergence_status"] = str(plan_convergence_status).strip().lower()[:32]
+    else:
+        task.pop("plan_convergence_status", None)
+    if plan_stalled_reason:
+        task["plan_stalled_reason"] = str(plan_stalled_reason).strip()[:240]
+    else:
+        task.pop("plan_stalled_reason", None)
+    if int(plan_last_round or 0) > 0:
+        task["plan_last_round"] = int(plan_last_round)
+    else:
+        task.pop("plan_last_round", None)
+    if phase1_mode:
+        task["phase1_mode"] = str(phase1_mode).strip()
+    if int(phase1_rounds or 0) > 0:
+        task["phase1_rounds"] = int(phase1_rounds)
+    if phase1_providers:
+        task["phase1_providers"] = [str(item).strip() for item in phase1_providers if str(item).strip()]
+    planner_rows = [str(item).strip() for item in (phase1_planner_providers or phase1_providers or []) if str(item).strip()]
+    critic_rows = [str(item).strip() for item in (phase1_critic_providers or phase1_providers or []) if str(item).strip()]
+    if planner_rows:
+        task["phase1_planner_providers"] = planner_rows
+    if critic_rows:
+        task["phase1_critic_providers"] = critic_rows
+    task["plan_gate_passed"] = not bool(plan_gate_blocked)
+    if plan_gate_reason:
+        task["plan_gate_reason"] = str(plan_gate_reason).strip()[:240]
+    elif isinstance(plan_critic, dict):
+        fallback_reason = plan_critic_primary_issue(plan_critic, limit=240)
+        if fallback_reason:
+            task["plan_gate_reason"] = fallback_reason
+        else:
+            task.pop("plan_gate_reason", None)
+    else:
+        task.pop("plan_gate_reason", None)
+
     if isinstance(plan_data, dict):
         meta = plan_data.get("meta") if isinstance(plan_data.get("meta"), dict) else {}
         role_preset = normalize_role_preset(meta.get("phase1_role_preset") or phase1_role_preset)
@@ -419,16 +731,8 @@ def apply_plan_and_lineage(
         task["plan_critic"] = plan_critic
         task["plan_roles"] = plan_roles
         task["plan_replans"] = plan_replans
-        if phase1_mode:
-            task["phase1_mode"] = str(phase1_mode).strip()
-        if int(phase1_rounds or 0) > 0:
-            task["phase1_rounds"] = int(phase1_rounds)
-        if phase1_providers:
-            task["phase1_providers"] = [str(item).strip() for item in phase1_providers if str(item).strip()]
         task["phase1_role_preset"] = role_preset
         task["phase2_team_preset"] = team_preset
-        task["plan_gate_passed"] = not critic_has_blockers(plan_critic)
-        task["plan_gate_reason"] = plan_critic_primary_issue(plan_critic, limit=240)
         lifecycle_set_stage(
             task,
             "planning",
@@ -437,13 +741,16 @@ def apply_plan_and_lineage(
                 f"subtasks={len(plan_data.get('subtasks') or [])} "
                 f"critic={'ok' if not critic_has_blockers(plan_critic) else 'issues'} "
                 f"replans={len(plan_replans)} "
-                f"phase1={str(phase1_mode or 'single')} rounds={max(0, int(phase1_rounds or 0))}"
+                f"phase1={str(phase1_mode or 'single')} rounds={max(0, int(phase1_rounds or 0))} "
+                f"reviews={max(0, int(plan_review_count or 0))} "
+                f"convergence={str(plan_convergence_status or '-').strip() or '-'}"
             ),
         )
     elif plan_error:
         lifecycle_set_stage(task, "planning", "done", note=f"fallback_no_plan: {plan_error}")
 
-    if run_control_mode not in {"retry", "replan"} or (not run_source_request_id):
+    if run_control_mode not in {"retry", "replan", "followup"} or (not run_source_request_id):
+        refresh_task_planning_primitives(task)
         task["tf_phase"] = normalize_tf_phase(derive_tf_phase(task), "queued")
         tf_phase_reason = derive_tf_phase_reason(task)
         if tf_phase_reason:
@@ -464,6 +771,9 @@ def apply_plan_and_lineage(
     if run_control_mode == "retry":
         task["retry_of"] = run_source_request_id
         child_field = "retry_children"
+    elif run_control_mode == "followup":
+        task["followup_of"] = run_source_request_id
+        child_field = "followup_children"
     else:
         task["replan_of"] = run_source_request_id
         child_field = "replan_children"
@@ -484,6 +794,7 @@ def apply_plan_and_lineage(
             source_context["last_child_request_id"] = req_id
         source_context["last_child_at"] = lineage_ts
 
+    refresh_task_planning_primitives(task)
     task["tf_phase"] = normalize_tf_phase(derive_tf_phase(task), "queued")
     tf_phase_reason = derive_tf_phase_reason(task)
     if tf_phase_reason:

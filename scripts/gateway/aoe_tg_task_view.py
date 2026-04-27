@@ -6,8 +6,35 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from aoe_tg_action_audit import (
+    load_latest_action_audit_for_task,
+    load_latest_judge_decision_bridge_summary_for_runtime,
+    load_latest_replan_auto_route_status_summary_for_runtime,
+    load_latest_replan_auto_routing_policy_summary_for_runtime,
+)
+from aoe_tg_context_pack import load_context_pack
+from aoe_tg_operator_summary import task_intent_summary
+from aoe_tg_operator_surface import append_operator_status_summary_lines
 from aoe_tg_orch_contract import derive_tf_phase, derive_tf_phase_reason, normalize_tf_phase
 from aoe_tg_role_aliases import canonicalize_role_name
+from aoe_tg_worker_task_contract import (
+    derive_worker_task_module_checklist,
+    derive_worker_task_module_gate,
+    derive_worker_task_module_item_classes,
+    derive_worker_task_module_items,
+    derive_worker_task_module_preflight,
+    derive_worker_task_module_preflight_rows,
+    derive_worker_task_module_record_rows,
+    derive_worker_task_module_record_set,
+    derive_worker_task_module_records,
+    derive_worker_task_module_profile,
+    resolve_worker_module_policy,
+)
+from aoe_tg_team_observatory import (
+    observatory_lane_lines,
+    observatory_task_line,
+    task_team_observatory_snapshot,
+)
 
 
 DEFAULT_PROJECT_ALIAS_MAX = 999
@@ -60,6 +87,178 @@ def dedupe_roles(roles: Iterable[str]) -> List[str]:
         seen.add(key)
         out.append(token)
     return out
+
+
+def planning_lane_operator_summary(task: Dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return "-"
+    planners = dedupe_roles(task.get("phase1_planner_providers") or task.get("phase1_providers") or [])
+    critics = dedupe_roles(task.get("phase1_critic_providers") or task.get("phase1_providers") or [])
+    current_planner = (
+        str(task.get("phase1_current_planner", "")).strip()
+        or str(task.get("phase1_current_provider", "")).strip()
+        or (planners[0] if planners else "")
+    )
+    current_critic = str(task.get("phase1_current_critic", "")).strip() or (critics[0] if critics else "")
+    has_context = any(
+        (
+            planners,
+            critics,
+            str(task.get("phase1_mode", "")).strip(),
+            isinstance(task.get("plan"), dict),
+            str(task.get("approved_plan_status", "")).strip(),
+        )
+    )
+    if not has_context:
+        return "-"
+    parts = [
+        "draft via " + (", ".join(planners) if planners else "-"),
+        "review via " + (", ".join(critics) if critics else "-"),
+    ]
+    current_parts: List[str] = []
+    if current_planner:
+        current_parts.append(f"planner={current_planner}")
+    if current_critic:
+        current_parts.append(f"critic={current_critic}")
+    if current_parts:
+        parts.append("active " + " ".join(current_parts))
+    return " | ".join(parts)[:240]
+
+
+def approved_plan_gate_operator_summary(task: Dict[str, Any]) -> str:
+    if not isinstance(task, dict):
+        return "-"
+    critics = dedupe_roles(task.get("phase1_critic_providers") or task.get("phase1_providers") or [])
+    status = str(task.get("approved_plan_status", "")).strip().lower()
+    if status not in {"missing", "pending", "blocked", "approved"}:
+        if isinstance(task.get("plan"), dict) or critics or str(task.get("phase1_mode", "")).strip():
+            status = "pending"
+        else:
+            return "-"
+    if status == "approved":
+        base = "dispatch unlocked after critic approval"
+    elif status == "blocked":
+        base = "dispatch blocked until critic clears issues"
+    elif status == "pending":
+        base = "dispatch waits for critic-approved plan"
+    else:
+        base = "dispatch waits for approved plan artifact"
+    if critics:
+        base = f"{base} | review via {', '.join(critics)}"
+    return base[:240]
+
+
+def _append_unique_summary_part(parts: List[str], value: str) -> None:
+    token = str(value or "").strip()
+    if not token or token == "-":
+        return
+    if token in parts:
+        return
+    for existing in parts:
+        if token in existing or existing in token:
+            return
+    parts.append(token)
+
+
+def planning_operator_bundle(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+    planner_lane: str = "",
+    critic_lane: str = "",
+) -> Dict[str, str]:
+    task_data = task if isinstance(task, dict) else {}
+    if task_data:
+        planning_lanes = planning_lane_operator_summary(task_data)
+        approved_plan_gate = approved_plan_gate_operator_summary(task_data)
+        approved_plan = str(task_data.get("approved_plan_summary", "")).strip() or approved_plan
+        planner_lane = str(task_data.get("planner_lane_summary", "")).strip() or planner_lane
+        critic_lane = str(task_data.get("critic_lane_summary", "")).strip() or critic_lane
+    parts: List[str] = []
+    _append_unique_summary_part(parts, planning_lanes)
+    _append_unique_summary_part(parts, approved_plan_gate)
+    _append_unique_summary_part(parts, approved_plan)
+    planning_compact = " | ".join(parts)[:320] if parts else "-"
+    return {
+        "planning_compact": planning_compact,
+        "planning_review": planning_compact,
+        "planning_lanes": str(planning_lanes or "").strip() or "-",
+        "approved_plan_gate": str(approved_plan_gate or "").strip() or "-",
+        "approved_plan": str(approved_plan or "").strip() or "-",
+        "planner_lane": str(planner_lane or "").strip() or "-",
+        "critic_lane": str(critic_lane or "").strip() or "-",
+    }
+
+
+def planning_compact_operator_summary(
+    *,
+    planning_compact: str = "",
+    planning_review: str = "",
+    approved_plan: str = "",
+) -> str:
+    parts: List[str] = []
+    _append_unique_summary_part(parts, str(planning_compact or "").strip() or str(planning_review or "").strip())
+    _append_unique_summary_part(parts, str(approved_plan or "").strip())
+    return " | ".join(parts)[:320] if parts else "-"
+
+
+def planning_review_operator_summary(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+    planning_handoff: str = "",
+) -> str:
+    summary = planning_operator_bundle(
+        task,
+        planning_lanes=planning_lanes,
+        approved_plan_gate=approved_plan_gate,
+        approved_plan=approved_plan,
+    ).get("planning_compact", "-")
+    return summary
+
+
+def planning_operator_note(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    notes: Optional[Iterable[str]] = None,
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+) -> str:
+    parts: List[str] = []
+    for note in notes or []:
+        _append_unique_summary_part(parts, str(note or "").strip())
+    _append_unique_summary_part(
+        parts,
+        planning_operator_bundle(
+            task,
+            planning_lanes=planning_lanes,
+            approved_plan_gate=approved_plan_gate,
+            approved_plan=approved_plan,
+        ).get("planning_compact", "-"),
+    )
+    return " | ".join(parts)[:320] if parts else "-"
+
+
+def planning_preset_operator_note(
+    task: Optional[Dict[str, Any]] = None,
+    *,
+    base_note: str = "",
+    planning_lanes: str = "",
+    approved_plan_gate: str = "",
+    approved_plan: str = "",
+) -> str:
+    return planning_operator_note(
+        task,
+        notes=[base_note],
+        planning_lanes=planning_lanes,
+        approved_plan_gate=approved_plan_gate,
+        approved_plan=approved_plan,
+    )
 
 
 def critic_has_blockers(critic: Dict[str, Any]) -> bool:
@@ -132,6 +331,10 @@ def build_task_context(
         put("exec_mode", source.get("exec_mode"))
         put("source_request_id", source.get("source_request_id"))
         put("control_mode", source.get("control_mode"))
+        put("intent_command", source.get("intent_command"))
+        put("intent_action", source.get("intent_action"))
+        put("intent_class", source.get("intent_class"))
+        put("intent_trace", source.get("intent_trace"))
         put("gateway_request_id", source.get("gateway_request_id"))
 
     if isinstance(tf_meta, dict):
@@ -161,6 +364,10 @@ def build_task_context(
         put("task_alias", task.get("alias"))
         put("source_request_id", task.get("source_request_id"))
         put("control_mode", task.get("control_mode"))
+        put("intent_command", task.get("intent_command"))
+        put("intent_action", task.get("intent_action"))
+        put("intent_class", task.get("intent_class"))
+        put("intent_trace", task.get("intent_trace"))
 
     if context.get("task_short_id"):
         context["tf_id"] = task_short_to_tf_id(context["task_short_id"])
@@ -183,21 +390,23 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     stages = task.get("stages") or {}
 
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"task: {label}",
         f"request_id: {request_id}",
         f"status: {status}",
-        f"tf_phase: {normalize_tf_phase(derive_tf_phase(task), 'queued')}",
+        f"team_phase: {normalize_tf_phase(derive_tf_phase(task), 'queued')}",
         f"mode: {mode}",
         f"roles: {', '.join(roles) if roles else '-'}",
         f"verifier_roles: {', '.join(verifiers) if verifiers else '-'}",
     ]
     tf_phase_reason = str(task.get("tf_phase_reason", "")).strip() or derive_tf_phase_reason(task)
     if tf_phase_reason:
-        lines.append(f"tf_phase_reason: {tf_phase_reason}")
+        lines.append(f"team_phase_reason: {tf_phase_reason}")
     phase1_mode = str(task.get("phase1_mode", "")).strip()
     phase1_rounds = max(0, int(task.get("phase1_rounds", 0) or 0))
     phase1_providers = dedupe_roles(task.get("phase1_providers") or [])
+    phase1_planner_providers = dedupe_roles(task.get("phase1_planner_providers") or [])
+    phase1_critic_providers = dedupe_roles(task.get("phase1_critic_providers") or [])
     phase1_candidate_roles = dedupe_roles(task.get("phase1_candidate_roles") or [])
     phase1_role_preset = str(task.get("phase1_role_preset", "")).strip()
     phase2_team_preset = str(task.get("phase2_team_preset", "")).strip()
@@ -207,14 +416,31 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     phase1_current_provider = str(task.get("phase1_current_provider", "")).strip()
     phase1_current_planner = str(task.get("phase1_current_planner", "")).strip()
     phase1_current_critic = str(task.get("phase1_current_critic", "")).strip()
-    if phase1_mode or phase1_rounds or phase1_providers:
-        lines.append(
-            "phase1: {mode} rounds={rounds} providers={providers}".format(
+    if phase1_mode or phase1_rounds or phase1_providers or phase1_planner_providers or phase1_critic_providers:
+        phase1_parts = [
+            "phase1: {mode} rounds={rounds}".format(
                 mode=phase1_mode or "single",
                 rounds=phase1_rounds or 1,
-                providers=", ".join(phase1_providers) if phase1_providers else "-",
             )
-        )
+        ]
+        if phase1_planner_providers or phase1_critic_providers:
+            phase1_parts.append(
+                "planners={planners}".format(
+                    planners=", ".join(phase1_planner_providers) if phase1_planner_providers else "-"
+                )
+            )
+            phase1_parts.append(
+                "critics={critics}".format(
+                    critics=", ".join(phase1_critic_providers) if phase1_critic_providers else "-"
+                )
+            )
+        else:
+            phase1_parts.append(
+                "providers={providers}".format(
+                    providers=", ".join(phase1_providers) if phase1_providers else "-"
+                )
+            )
+        lines.append(" ".join(phase1_parts))
     if phase1_current_phase or phase1_current_round or phase1_current_provider or phase1_current_planner or phase1_current_critic:
         actor_parts: List[str] = []
         if phase1_current_provider:
@@ -276,6 +502,49 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     source=context.get("source_request_id"),
                 )
             )
+        latest_intent = task_intent_summary(task)
+        latest_action = load_latest_action_audit_for_task(context.get("team_dir"), request_id)
+        append_operator_status_summary_lines(
+            lines,
+            latest_intent=latest_intent,
+            latest_action=latest_action,
+        )
+        team_dir_raw = str(context.get("team_dir", "")).strip()
+        if team_dir_raw:
+            pack = load_context_pack(
+                team_dir_raw,
+                entry={
+                    "name": context.get("project_key", ""),
+                    "project_alias": context.get("project_alias", ""),
+                    "project_root": context.get("project_root", ""),
+                },
+                task=task,
+                project_root=context.get("project_root", ""),
+            )
+            lines.append(f"context_pack: {str(pack.get('summary', '')).strip() or '-'}")
+            lines.append(f"context_pack_docs: {str(pack.get('docs_summary', '')).strip() or '-'}")
+            if str(pack.get("excluded_summary", "")).strip() and str(pack.get("excluded_summary", "")).strip() != "-":
+                lines.append(f"context_pack_excluded: {str(pack.get('excluded_summary', '')).strip()}")
+            project_alias = str(context.get("project_alias", "")).strip()
+            if project_alias:
+                latest_judge_decision_bridge_summary = load_latest_judge_decision_bridge_summary_for_runtime(
+                    team_dir_raw,
+                    project_alias=project_alias,
+                )
+                latest_replan_auto_routing_policy_summary = load_latest_replan_auto_routing_policy_summary_for_runtime(
+                    team_dir_raw,
+                    project_alias=project_alias,
+                )
+                latest_replan_auto_route_status_summary = load_latest_replan_auto_route_status_summary_for_runtime(
+                    team_dir_raw,
+                    project_alias=project_alias,
+                )
+                if latest_judge_decision_bridge_summary not in {"", "-"}:
+                    lines.append(f"latest_judge_decision_bridge: {latest_judge_decision_bridge_summary}")
+                if latest_replan_auto_routing_policy_summary not in {"", "-"}:
+                    lines.append(f"replan_auto_routing_policy: {latest_replan_auto_routing_policy_summary}")
+                if latest_replan_auto_route_status_summary not in {"", "-"}:
+                    lines.append(f"auto_route_status: {latest_replan_auto_route_status_summary}")
 
     lines.append("lifecycle:")
     for name in LIFECYCLE_STAGES:
@@ -447,6 +716,10 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                 if action and action != "none":
                     verdict_suffix += f"/{action}"
             lines.append(f"- critic {gid} [{role}/{kind}/{mode}]{status_suffix}{verdict_suffix}{suffix}")
+        observatory = task_team_observatory_snapshot(task)
+        if observatory.get("lanes"):
+            lines.append(observatory_task_line(observatory))
+            lines.extend(observatory_lane_lines(observatory, limit=4))
 
         for row in subtasks[:6]:
             if not isinstance(row, dict):
@@ -478,6 +751,707 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
             gate_reason = str(task.get("plan_gate_reason", "")).strip()
             if gate_reason:
                 lines.append("plan_gate_reason: " + gate_reason[:240])
+
+    execution_brief_status = str(task.get("execution_brief_status", "")).strip().lower()
+    execution_brief_summary = str(task.get("execution_brief_summary", "")).strip()
+    if execution_brief_status or execution_brief_summary:
+        lines.append("execution_brief: " + (execution_brief_status or "-"))
+        if execution_brief_summary:
+            lines.append("execution_brief_summary: " + execution_brief_summary[:240])
+    executable_slice = [str(item).strip() for item in (task.get("execution_brief_executable_slice") or []) if str(item).strip()]
+    if executable_slice:
+        lines.append("execution_brief_do: " + ", ".join(executable_slice[:6]))
+    blocked_slice = [str(item).strip() for item in (task.get("execution_brief_blocked_slice") or []) if str(item).strip()]
+    if blocked_slice:
+        lines.append("execution_brief_blocked: " + ", ".join(blocked_slice[:6]))
+    operator_decision = str(task.get("execution_brief_operator_decision", "")).strip()
+    if operator_decision:
+        lines.append("execution_brief_decision: " + operator_decision[:240])
+    job_contract_summary = str(task.get("job_contract_summary", "")).strip()
+    if job_contract_summary:
+        lines.append("job_contract: " + job_contract_summary[:240])
+    job_goal = str(task.get("job_contract_goal", "")).strip()
+    if job_goal:
+        lines.append("job_goal: " + job_goal[:240])
+    job_scope = [str(item).strip() for item in (task.get("job_contract_scope") or []) if str(item).strip()]
+    if job_scope:
+        lines.append("job_scope: " + ", ".join(job_scope[:6]))
+    job_non_goals = [str(item).strip() for item in (task.get("job_contract_non_goals") or []) if str(item).strip()]
+    if job_non_goals:
+        lines.append("job_non_goals: " + ", ".join(job_non_goals[:4]))
+    job_acceptance = [str(item).strip() for item in (task.get("job_contract_acceptance_checks") or []) if str(item).strip()]
+    if job_acceptance:
+        lines.append("job_acceptance: " + " | ".join(job_acceptance[:4])[:240])
+    job_artifacts = [str(item).strip() for item in (task.get("job_contract_artifacts_to_touch") or []) if str(item).strip()]
+    if job_artifacts:
+        lines.append("job_artifacts: " + ", ".join(job_artifacts[:6])[:240])
+    job_rollback = str(task.get("job_contract_rollback_hint", "")).strip()
+    if job_rollback:
+        lines.append("job_rollback: " + job_rollback[:240])
+    planner_lane_summary = str(task.get("planner_lane_summary", "")).strip()
+    if planner_lane_summary:
+        lines.append("planner_lane: " + planner_lane_summary[:240])
+    critic_lane_summary = str(task.get("critic_lane_summary", "")).strip()
+    if critic_lane_summary:
+        lines.append("critic_lane: " + critic_lane_summary[:240])
+    critic_review_summary = str(task.get("critic_review_summary", "")).strip()
+    if critic_review_summary:
+        lines.append("critic_review: " + critic_review_summary[:240])
+    critic_review_issues = [str(item).strip() for item in (task.get("critic_review_blocking_issues") or []) if str(item).strip()]
+    if critic_review_issues:
+        lines.append("critic_review_issues: " + " | ".join(critic_review_issues[:4])[:240])
+    critic_review_fixes = [str(item).strip() for item in (task.get("critic_review_required_fixes") or []) if str(item).strip()]
+    if critic_review_fixes:
+        lines.append("critic_review_fixes: " + " | ".join(critic_review_fixes[:4])[:240])
+    approved_plan_summary = str(task.get("approved_plan_summary", "")).strip()
+    if approved_plan_summary:
+        lines.append("approved_plan: " + approved_plan_summary[:240])
+    approved_plan_rows = [str(item).strip() for item in (task.get("approved_plan_artifact_rows") or []) if str(item).strip()]
+    if approved_plan_rows:
+        lines.append("approved_plan_artifact: " + " | ".join(approved_plan_rows[:4])[:240])
+    planning_bundle = planning_operator_bundle(task)
+    planning_compact = str(planning_bundle.get("planning_compact", "")).strip()
+    if planning_compact and planning_compact != "-":
+        lines.append("planning_compact: " + planning_compact[:240])
+    planning_lanes = str(planning_bundle.get("planning_lanes", "")).strip()
+    if planning_lanes and planning_lanes != "-":
+        lines.append("planning_lanes: " + planning_lanes[:240])
+    approved_plan_gate = str(planning_bundle.get("approved_plan_gate", "")).strip()
+    if approved_plan_gate and approved_plan_gate != "-":
+        lines.append("approved_plan_gate: " + approved_plan_gate[:240])
+    debug_packet_summary = str(task.get("debug_packet_summary", "")).strip()
+    if debug_packet_summary:
+        lines.append("debug_packet: " + debug_packet_summary[:240])
+    debug_symptom = str(task.get("debug_packet_symptom", "")).strip()
+    if debug_symptom:
+        lines.append("debug_symptom: " + debug_symptom[:240])
+    debug_root = str(task.get("debug_packet_root_cause", "")).strip()
+    if debug_root:
+        lines.append("debug_root_cause: " + debug_root[:240])
+    debug_evidence = [str(item).strip() for item in (task.get("debug_packet_evidence") or []) if str(item).strip()]
+    if debug_evidence:
+        lines.append("debug_evidence: " + ", ".join(debug_evidence[:6])[:240])
+    debug_next = str(task.get("debug_packet_next_step", "")).strip()
+    if debug_next:
+        lines.append("debug_next_step: " + debug_next[:240])
+    phase_checkpoint_summary = str(task.get("phase_checkpoint_summary", "")).strip()
+    if phase_checkpoint_summary:
+        lines.append("phase_checkpoint: " + phase_checkpoint_summary[:240])
+    phase_checkpoint_current = str(task.get("phase_checkpoint_current_phase", "")).strip()
+    if phase_checkpoint_current:
+        lines.append("phase_checkpoint_current: " + phase_checkpoint_current[:240])
+    phase_checkpoint_rows = [str(item).strip() for item in (task.get("phase_checkpoint_rows") or []) if str(item).strip()]
+    if phase_checkpoint_rows:
+        lines.append("phase_checkpoint_rows: " + " | ".join(phase_checkpoint_rows[:4])[:240])
+
+    background_run_status = str(task.get("background_run_status", "")).strip().lower()
+    background_runner = str(task.get("background_run_runner_target", "")).strip()
+    background_ticket = str(task.get("background_run_ticket_id", "")).strip()
+    background_launch = str(task.get("background_run_launch_mode", "")).strip()
+    if background_run_status or background_runner or background_ticket:
+        lines.append("background_run: " + (background_run_status or "-"))
+        detail_parts: List[str] = []
+        if background_runner:
+            detail_parts.append(f"runner={background_runner}")
+        if background_ticket:
+            detail_parts.append(f"ticket={background_ticket}")
+        if background_launch:
+            detail_parts.append(f"launch={background_launch}")
+        if detail_parts:
+            lines.append("background_run_detail: " + " | ".join(detail_parts)[:240])
+    background_runtime_handle = str(task.get("background_run_runtime_handle", "")).strip()
+    background_runtime_summary = str(task.get("background_run_runtime_summary", "")).strip()
+    if background_runtime_handle or background_runtime_summary:
+        runtime_parts: List[str] = []
+        if background_runtime_handle:
+            runtime_parts.append(f"handle={background_runtime_handle}")
+        if background_runtime_summary:
+            runtime_parts.append(background_runtime_summary)
+        lines.append("background_run_runtime: " + " | ".join(runtime_parts)[:240])
+    background_external_phase = str(task.get("background_run_external_phase", "")).strip()
+    background_external_note = str(task.get("background_run_external_note", "")).strip()
+    if background_external_phase or background_external_note:
+        external_parts: List[str] = []
+        if background_external_phase:
+            external_parts.append(background_external_phase)
+        if background_external_note:
+            external_parts.append(background_external_note)
+        lines.append("background_run_external: " + " | ".join(external_parts)[:240])
+    background_evidence = str(task.get("background_run_evidence_bundle", "")).strip()
+    if background_evidence:
+        lines.append("background_run_evidence: " + background_evidence[:240])
+    background_artifacts = [str(item).strip() for item in (task.get("background_run_evidence_artifacts") or []) if str(item).strip()]
+    if background_artifacts:
+        lines.append("background_run_artifacts: " + ", ".join(background_artifacts[:6]))
+    background_launch_spec = str(task.get("background_run_launch_spec_summary", "")).strip()
+    if background_launch_spec:
+        lines.append("background_run_launch_spec: " + background_launch_spec[:240])
+    background_model_plan = str(task.get("background_run_model_plan_summary", "")).strip()
+    if background_model_plan:
+        lines.append("background_run_model_plan: " + background_model_plan[:240])
+    background_task_contract = str(task.get("background_run_task_contract_summary", "")).strip()
+    if background_task_contract:
+        lines.append("background_run_task_contract: " + background_task_contract[:240])
+    background_task_contract_module_summary = str(task.get("background_run_task_contract_module_summary", "")).strip()
+    background_task_contract_module = str(task.get("background_run_task_contract_module", "")).strip().lower()
+    if not background_task_contract_module_summary and background_task_contract_module not in {"", "-", "general"}:
+        background_task_contract_module_summary = background_task_contract_module
+    if background_task_contract_module_summary:
+        lines.append("background_run_worker_module: " + background_task_contract_module_summary[:240])
+    background_task_contract_policy_summary = str(task.get("background_run_task_contract_policy_summary", "")).strip()
+    if not background_task_contract_policy_summary and background_task_contract_module not in {"", "-", "general"}:
+        background_task_contract_policy_summary = str(
+            resolve_worker_module_policy({"module_kind": background_task_contract_module}).get("summary", "")
+        ).strip()
+    if background_task_contract_policy_summary and background_task_contract_policy_summary != "-":
+        lines.append("background_run_worker_policy: " + background_task_contract_policy_summary[:240])
+    background_worker_gate = str(task.get("background_run_worker_gate_summary", "")).strip()
+    if not background_worker_gate and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_gate = str(
+            derive_worker_task_module_gate(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_gate:
+        lines.append("background_run_worker_gate: " + background_worker_gate[:240])
+    background_worker_profile = str(task.get("background_run_worker_profile_summary", "")).strip()
+    if not background_worker_profile and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_profile = str(
+            derive_worker_task_module_profile(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_profile:
+        lines.append("background_run_worker_profile: " + background_worker_profile[:240])
+    background_worker_checklist = str(task.get("background_run_worker_checklist_summary", "")).strip()
+    if not background_worker_checklist and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_checklist = str(
+            derive_worker_task_module_checklist(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_checklist:
+        lines.append("background_run_worker_checklist: " + background_worker_checklist[:240])
+    background_worker_items = str(task.get("background_run_worker_items_summary", "")).strip()
+    if not background_worker_items and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_items = str(
+            derive_worker_task_module_items(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_items:
+        lines.append("background_run_worker_items: " + background_worker_items[:240])
+    background_worker_item_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_items") if isinstance(task.get("background_run_worker_items"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_item_tokens:
+        lines.append("background_run_worker_item_tokens: " + ", ".join(background_worker_item_tokens[:6])[:240])
+    background_worker_item_classes = str(task.get("background_run_worker_item_classes_summary", "")).strip()
+    if not background_worker_item_classes and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_item_classes = str(
+            derive_worker_task_module_item_classes(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items_kind": "",
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_item_classes:
+        lines.append("background_run_worker_item_classes: " + background_worker_item_classes[:240])
+    background_worker_item_class_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_item_classes") if isinstance(task.get("background_run_worker_item_classes"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_item_class_tokens:
+        lines.append("background_run_worker_item_class_tokens: " + ", ".join(background_worker_item_class_tokens[:6])[:240])
+    background_worker_records = str(task.get("background_run_worker_records_summary", "")).strip()
+    if not background_worker_records and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_records = str(
+            derive_worker_task_module_records(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+                item_classes={
+                    "module_kind": background_task_contract_module,
+                    "classes": background_worker_item_class_tokens,
+                    "summary_line": background_worker_item_classes,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_records:
+        lines.append("background_run_worker_records: " + background_worker_records[:240])
+    background_worker_record_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_records") if isinstance(task.get("background_run_worker_records"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_record_tokens:
+        lines.append("background_run_worker_record_tokens: " + ", ".join(background_worker_record_tokens[:6])[:240])
+    background_worker_record_rows = str(task.get("background_run_worker_record_rows_summary", "")).strip()
+    if not background_worker_record_rows and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_record_rows = str(
+            derive_worker_task_module_record_rows(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+                item_classes={
+                    "module_kind": background_task_contract_module,
+                    "classes": background_worker_item_class_tokens,
+                    "summary_line": background_worker_item_classes,
+                },
+                records={
+                    "module_kind": background_task_contract_module,
+                    "records": background_worker_record_tokens,
+                    "summary_line": background_worker_records,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_record_rows:
+        lines.append("background_run_worker_record_rows: " + background_worker_record_rows[:240])
+    background_worker_record_row_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_record_rows") if isinstance(task.get("background_run_worker_record_rows"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_record_row_tokens:
+        lines.append("background_run_worker_record_row_tokens: " + ", ".join(background_worker_record_row_tokens[:6])[:240])
+    background_worker_record_set = str(task.get("background_run_worker_record_set_summary", "")).strip()
+    if not background_worker_record_set and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_record_set = str(
+            derive_worker_task_module_record_set(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+                item_classes={
+                    "module_kind": background_task_contract_module,
+                    "classes": background_worker_item_class_tokens,
+                    "summary_line": background_worker_item_classes,
+                },
+                records={
+                    "module_kind": background_task_contract_module,
+                    "records": background_worker_record_tokens,
+                    "summary_line": background_worker_records,
+                },
+                record_rows={
+                    "module_kind": background_task_contract_module,
+                    "rows": background_worker_record_row_tokens,
+                    "summary_line": background_worker_record_rows,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_record_set:
+        lines.append("background_run_worker_record_set: " + background_worker_record_set[:240])
+    background_worker_record_set_tokens = []
+    for item in (
+        (task.get("background_run_worker_record_set") if isinstance(task.get("background_run_worker_record_set"), list) else [])
+        or []
+    ):
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind", "")).strip() or "record"
+        label = str(item.get("label", "")).strip() or "-"
+        state = str(item.get("state", "")).strip() or "-"
+        note = str(item.get("note", "")).strip()
+        token = f"{kind}:{label}|state={state}"
+        if note and note != "-":
+            token += f"|note={note}"
+        background_worker_record_set_tokens.append(token[:160])
+    if background_worker_record_set_tokens:
+        lines.append(
+            "background_run_worker_record_set_tokens: "
+            + ", ".join(background_worker_record_set_tokens[:6])[:240]
+        )
+    background_worker_preflight = str(task.get("background_run_worker_preflight_summary", "")).strip()
+    if not background_worker_preflight and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_preflight = str(
+            derive_worker_task_module_preflight(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+                item_classes={
+                    "module_kind": background_task_contract_module,
+                    "classes": background_worker_item_class_tokens,
+                    "summary_line": background_worker_item_classes,
+                },
+                records={
+                    "module_kind": background_task_contract_module,
+                    "records": background_worker_record_tokens,
+                    "summary_line": background_worker_records,
+                },
+                record_rows={
+                    "module_kind": background_task_contract_module,
+                    "rows": background_worker_record_row_tokens,
+                    "summary_line": background_worker_record_rows,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_preflight:
+        lines.append("background_run_worker_preflight: " + background_worker_preflight[:240])
+    background_worker_preflight_rows = str(task.get("background_run_worker_preflight_rows_summary", "")).strip()
+    if not background_worker_preflight_rows and background_task_contract_module not in {"", "-", "general"}:
+        background_worker_preflight_rows = str(
+            derive_worker_task_module_preflight_rows(
+                {
+                    "module_kind": background_task_contract_module,
+                    "module_policy": task.get("background_run_task_contract_policy"),
+                    "artifact_targets": task.get("background_run_worker_update_stub_targets"),
+                },
+                {
+                    "status": task.get("background_run_worker_result_status"),
+                    "summary": task.get("background_run_worker_result_summary"),
+                    "actions": task.get("background_run_worker_result_actions"),
+                    "cautions": task.get("background_run_worker_result_cautions"),
+                    "evidence_refs": task.get("background_run_worker_result_evidence_refs"),
+                },
+                gate={"state": task.get("background_run_worker_gate_status"), "summary_line": background_worker_gate},
+                profile={
+                    "state": task.get("background_run_worker_profile_status"),
+                    "summary_line": background_worker_profile,
+                },
+                checklist={
+                    "state": task.get("background_run_worker_checklist_status"),
+                    "summary_line": background_worker_checklist,
+                },
+                items={
+                    "module_kind": background_task_contract_module,
+                    "items": background_worker_item_tokens,
+                    "summary_line": background_worker_items,
+                },
+                item_classes={
+                    "module_kind": background_task_contract_module,
+                    "classes": background_worker_item_class_tokens,
+                    "summary_line": background_worker_item_classes,
+                },
+                records={
+                    "module_kind": background_task_contract_module,
+                    "records": background_worker_record_tokens,
+                    "summary_line": background_worker_records,
+                },
+                record_rows={
+                    "module_kind": background_task_contract_module,
+                    "rows": background_worker_record_row_tokens,
+                    "summary_line": background_worker_record_rows,
+                },
+                preflight={
+                    "module_kind": background_task_contract_module,
+                    "state": task.get("background_run_worker_preflight_status"),
+                    "summary_line": background_worker_preflight,
+                },
+            ).get("summary_line", "")
+        ).strip()
+    if background_worker_preflight_rows:
+        lines.append("background_run_worker_preflight_rows: " + background_worker_preflight_rows[:240])
+    background_worker_preflight_row_tokens = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_preflight_rows") if isinstance(task.get("background_run_worker_preflight_rows"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_preflight_row_tokens:
+        lines.append("background_run_worker_preflight_row_tokens: " + ", ".join(background_worker_preflight_row_tokens[:6])[:240])
+    background_worker_result = str(task.get("background_run_worker_result_summary", "")).strip()
+    if background_worker_result:
+        lines.append("background_run_worker_result: " + background_worker_result[:240])
+    background_worker_result_actions = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_result_actions") if isinstance(task.get("background_run_worker_result_actions"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_result_actions:
+        lines.append("background_run_worker_actions: " + ", ".join(background_worker_result_actions[:4])[:240])
+    background_worker_result_cautions = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_result_cautions") if isinstance(task.get("background_run_worker_result_cautions"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_result_cautions:
+        lines.append("background_run_worker_cautions: " + ", ".join(background_worker_result_cautions[:4])[:240])
+    background_worker_result_refs = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_result_evidence_refs") if isinstance(task.get("background_run_worker_result_evidence_refs"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_result_refs:
+        lines.append("background_run_worker_refs: " + ", ".join(background_worker_result_refs[:6])[:240])
+    background_worker_update_stub = str(task.get("background_run_worker_update_stub_summary", "")).strip()
+    if background_worker_update_stub:
+        lines.append("background_run_worker_update_stub: " + background_worker_update_stub[:240])
+    background_worker_update_targets = [
+        str(item).strip()
+        for item in (
+            (task.get("background_run_worker_update_stub_targets") if isinstance(task.get("background_run_worker_update_stub_targets"), list) else [])
+            or []
+        )
+        if str(item).strip()
+    ]
+    if background_worker_update_targets:
+        lines.append("background_run_worker_targets: " + ", ".join(background_worker_update_targets[:6])[:240])
+    background_worker_update_proposals = str(task.get("background_run_worker_update_proposal_summary", "")).strip()
+    if background_worker_update_proposals:
+        lines.append("background_run_worker_update_proposals: " + background_worker_update_proposals[:240])
+    background_worker_apply_accept = str(task.get("background_run_worker_apply_accept_summary", "")).strip()
+    if background_worker_apply_accept:
+        lines.append("background_run_worker_apply_accept: " + background_worker_apply_accept[:240])
+    background_worker_syncback = str(task.get("background_run_worker_syncback_summary", "")).strip()
+    if background_worker_syncback:
+        lines.append("background_run_worker_syncback: " + background_worker_syncback[:240])
+    background_manual_step_execution = str(task.get("background_run_manual_step_execution_summary", "")).strip()
+    if background_manual_step_execution:
+        lines.append("background_run_manual_step_execution: " + background_manual_step_execution[:240])
+    background_canonical_writeback = str(task.get("background_run_canonical_writeback_summary", "")).strip()
+    if background_canonical_writeback:
+        lines.append("background_run_canonical_writeback: " + background_canonical_writeback[:240])
+    background_canonical_mutation = str(task.get("background_run_canonical_mutation_summary", "")).strip()
+    if background_canonical_mutation:
+        lines.append("background_run_canonical_mutation: " + background_canonical_mutation[:240])
+    background_judge_binding = str(task.get("background_run_model_judge_binding_summary", "")).strip()
+    if background_judge_binding:
+        lines.append("background_run_model_judge: " + background_judge_binding[:240])
+    background_judge_probe = str(task.get("background_run_model_judge_probe_summary", "")).strip()
+    if background_judge_probe:
+        lines.append("background_run_model_judge_probe: " + background_judge_probe[:240])
+    background_escalation_binding = str(task.get("background_run_model_escalation_binding_summary", "")).strip()
+    if background_escalation_binding:
+        lines.append("background_run_model_escalation: " + background_escalation_binding[:240])
+    background_escalation_probe = str(task.get("background_run_model_escalation_probe_summary", "")).strip()
+    if background_escalation_probe:
+        lines.append("background_run_model_escalation_probe: " + background_escalation_probe[:240])
+    reentry_rails_summary = str(task.get("reentry_rails_summary", "")).strip()
+    if reentry_rails_summary:
+        lines.append("reentry_rails: " + reentry_rails_summary[:240])
+
+    try:
+        plan_review_count = max(0, int(task.get("plan_review_count", 0) or 0))
+    except Exception:
+        plan_review_count = 0
+    plan_convergence_status = str(task.get("plan_convergence_status", "")).strip().lower()
+    try:
+        plan_last_round = max(0, int(task.get("plan_last_round", 0) or 0))
+    except Exception:
+        plan_last_round = 0
+    if plan_review_count or plan_convergence_status or plan_last_round:
+        lines.append(
+            "plan_convergence: {status} reviews={reviews} last_round={round_no}".format(
+                status=plan_convergence_status or "-",
+                reviews=plan_review_count or 0,
+                round_no=plan_last_round or plan_review_count or 0,
+            )
+        )
+    plan_stalled_reason = str(task.get("plan_stalled_reason", "")).strip()
+    if plan_stalled_reason:
+        lines.append("plan_stalled_reason: " + plan_stalled_reason[:240])
+    plan_issue_history = task.get("plan_issue_history") if isinstance(task.get("plan_issue_history"), list) else []
+    if plan_issue_history:
+        latest_issue = plan_issue_history[-1] if isinstance(plan_issue_history[-1], dict) else {}
+        latest_pass = str(latest_issue.get("review_pass", "")).strip().lower()
+        latest_issue_text = str(latest_issue.get("primary_issue", "")).strip()
+        if latest_pass or latest_issue_text:
+            lines.append(
+                "plan_review_focus: {review_pass} | {issue}".format(
+                    review_pass=latest_pass or "-",
+                    issue=(latest_issue_text[:240] if latest_issue_text else "-"),
+                )
+            )
 
     replans = task.get("plan_replans")
     if isinstance(replans, list) and replans:
@@ -523,6 +1497,15 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
                     review=", ".join(manual_review) if manual_review else "-",
                 )
             )
+    followup_brief_status = str(task.get("followup_brief_status", "")).strip()
+    if followup_brief_status:
+        lines.append("followup_brief: " + followup_brief_status[:64])
+        followup_brief_summary = str(task.get("followup_brief_summary", "")).strip()
+        if followup_brief_summary:
+            lines.append("followup_brief_summary: " + followup_brief_summary[:240])
+        followup_brief_reason = str(task.get("followup_brief_reason", "")).strip()
+        if followup_brief_reason:
+            lines.append("followup_brief_reason: " + followup_brief_reason[:240])
 
     result = task.get("result")
     if isinstance(result, dict):

@@ -183,6 +183,7 @@ def enforce_dispatch_policies(
     ensure_verifier_roles: Callable[..., tuple[List[str], List[str], bool, List[str]]],
     dispatch_roles: str,
     send: Callable[..., bool],
+    record_outcome: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> DispatchPolicyResult:
     verifier_roles: List[str] = []
     verifier_added = False
@@ -204,6 +205,16 @@ def enforce_dispatch_policies(
     dispatch_roles = ",".join(selected_roles)
 
     if bool(args.require_verifier) and not verifier_roles:
+        if callable(record_outcome):
+            record_outcome(
+                {
+                    "kind": "retry_run",
+                    "status": "blocked",
+                    "reason_code": "verifier_gate_setup",
+                    "next_step": "/offdesk review",
+                    "detail": "verifier gate enabled but no verifier role is available",
+                }
+            )
         send(
             "error: verifier gate enabled but no verifier role is available.\n"
             f"required_candidates={', '.join(verifier_candidates) or '-'}\n"
@@ -219,6 +230,16 @@ def enforce_dispatch_policies(
         )
 
     if plan_gate_blocked:
+        if callable(record_outcome):
+            record_outcome(
+                {
+                    "kind": "retry_run",
+                    "status": "blocked",
+                    "reason_code": "planning_gate",
+                    "next_step": "/offdesk review",
+                    "detail": str(plan_gate_reason or "unresolved issues").strip() or "plan gate blocked",
+                }
+            )
         send(
             "plan gate blocked: critic issues remain after auto-replan.\n"
             f"reason: {plan_gate_reason or 'unresolved issues'}\n"

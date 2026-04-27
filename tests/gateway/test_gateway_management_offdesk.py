@@ -2,6 +2,9 @@
 """Gateway management, auto, and offdesk workflow regression tests."""
 
 from _gateway_test_support import *  # noqa: F401,F403
+import aoe_tg_operator_summary as operator_summary
+
+
 def _call_management_status(
     *,
     tmp_path: Path,
@@ -128,6 +131,69 @@ def _call_management_status_with_markup(
     return sent[-1]
 
 
+def _write_gateway_events_log(tmp_path: Path, *details: str) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    logs_dir = team_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for idx, detail in enumerate(details, start=1):
+        rows.append(
+            {
+                "timestamp": f"2026-03-21T02:4{idx}:00+09:00",
+                "event": "command_resolved",
+                "status": "accepted",
+                "detail": detail,
+            }
+        )
+    (logs_dir / "gateway_events.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+    if details:
+        latest = operator_summary.parse_command_resolved_detail(details[-1])
+        operator_summary.save_latest_command_resolution(
+            team_dir,
+            command=latest.get("command", ""),
+            action=latest.get("action", ""),
+            intent_class=latest.get("intent_class", ""),
+            trace=latest.get("trace", ""),
+            recorded_at=rows[-1]["timestamp"],
+        )
+
+
+def _write_action_audit_log(tmp_path: Path, *rows: dict) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    payloads = rows or (
+        {
+            "at": "2026-03-21T02:49:00+09:00",
+            "headline": "Retry | blocked",
+            "status": "blocked",
+            "outcome_kind": "retry_run",
+            "outcome_status": "blocked",
+            "outcome_reason_code": "planning_gate",
+            "outcome_detail": "plan gate blocked",
+            "next_step": "/offdesk review",
+            "remediation": "inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again",
+            "link_label": "task detail",
+            "link_href": "/control/tasks/by-request/REQ-1",
+            "source_command": "/retry T-001",
+        },
+    )
+    (audit_dir / "action-history.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in payloads) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_nightly_summary_log(tmp_path: Path, payload: dict) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    recovery_dir = team_dir / "recovery" / "nightly-session-summary"
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+    (recovery_dir / "latest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def _management_control_kwargs(
     *,
     tmp_path: Path,
@@ -208,6 +274,153 @@ def _management_control_kwargs(
         default_offdesk_report_level=mgmt_handlers.DEFAULT_OFFDESK_REPORT_LEVEL,
         default_offdesk_room=mgmt_handlers.DEFAULT_OFFDESK_ROOM,
     )
+
+
+def test_history_search_matches_gateway_events_and_task_hint(tmp_path: Path) -> None:
+    manager_state = _empty_state()
+    manager_state["projects"]["local_map"] = {
+        "name": "local_map",
+        "display_name": "LocalMap",
+        "project_alias": "O3",
+        "project_root": str(tmp_path / "LocalMap"),
+        "team_dir": str(tmp_path / "LocalMap" / ".aoe-team"),
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "prompt": "Investigate planning gate issue",
+                "status": "blocked",
+                "updated_at": "2026-03-27T02:54:00+09:00",
+            }
+        },
+    }
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=run action=dispatch_task class=runtime trace=reason=planning_gate blocked",
+    )
+    team_dir = tmp_path / ".aoe-team"
+    logs_dir = team_dir / "logs"
+    rows = [
+        {
+            "timestamp": "2026-03-27T02:54:00+09:00",
+            "event": "dispatch_result",
+            "project": "local_map",
+            "request_id": "REQ-1",
+            "task_short_id": "T-001",
+            "stage": "planning",
+            "status": "failed",
+            "error_code": "planning_gate",
+            "detail": "plan gate blocked after critic issues remain",
+        }
+    ]
+    (logs_dir / "gateway_events.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=manager_state,
+        cmd="history",
+        rest="search planning_gate",
+    )
+
+    assert "history search" in body
+    assert "planning_gate" in body
+    assert "O3 T-001" in body
+    assert "next: /task T-001" in body
+
+
+def test_history_search_matches_dashboard_action_audit(tmp_path: Path) -> None:
+    manager_state = _empty_state()
+    manager_state["projects"]["local_map"] = {
+        "name": "local_map",
+        "display_name": "LocalMap",
+        "project_alias": "O3",
+        "project_root": str(tmp_path / "LocalMap"),
+        "team_dir": str(tmp_path / "LocalMap" / ".aoe-team"),
+        "tasks": {
+            "REQ-1": {
+                "request_id": "REQ-1",
+                "short_id": "T-001",
+                "prompt": "Retry task",
+                "status": "blocked",
+                "updated_at": "2026-03-27T02:54:00+09:00",
+            }
+        },
+    }
+    _write_action_audit_log(
+        tmp_path,
+        {
+            "at": "2026-03-27T03:00:00+09:00",
+            "headline": "Retry | blocked",
+            "status": "blocked",
+            "outcome_kind": "retry_run",
+            "outcome_status": "blocked",
+            "outcome_reason_code": "planning_gate",
+            "outcome_detail": "plan gate blocked",
+            "next_step": "/offdesk review",
+            "remediation": "inspect planning critic issues",
+            "link_label": "task detail",
+            "link_href": "/control/tasks/by-request/REQ-1",
+            "source_command": "/retry T-001",
+        },
+    )
+
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=manager_state,
+        cmd="history",
+        rest="search --scope dashboard retry",
+    )
+
+    assert "Retry | blocked | reason=planning_gate" in body
+    assert "next: /offdesk review" in body
+
+
+def test_history_search_matches_recovery_summary(tmp_path: Path) -> None:
+    manager_state = _empty_state()
+    payload = {
+        "generated_at": "2026-03-27T09:00:00+09:00",
+        "runtimes": [
+            {
+                "project_key": "local_map",
+                "project_alias": "O3",
+                "project_label": "LocalMap",
+                "status": "attention",
+                "attention_summary": "blocked overnight",
+                "priority_action": "/offdesk review",
+                "priority_reason": "review blocked runtime first",
+                "next_focus": "clear planning blockers",
+                "provider_pressure_summary": "codex limited",
+                "task_teams": [],
+            }
+        ],
+    }
+    _write_nightly_summary_log(tmp_path, payload)
+
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=manager_state,
+        cmd="history",
+        rest="search --scope recovery blocked overnight",
+    )
+
+    assert "nightly runtime" in body
+    assert "O3" in body
+    assert "next: /offdesk review" in body
+
+
+def test_history_search_reports_zero_matches(tmp_path: Path) -> None:
+    body = _call_management_status(
+        tmp_path=tmp_path,
+        manager_state=_empty_state(),
+        cmd="history",
+        rest="search no_such_token",
+    )
+
+    assert "- matches: 0" in body
+    assert "/offdesk review" in body
 
 
 def _management_chat_kwargs(
@@ -997,6 +1210,10 @@ def test_offdesk_flow_module_matches_management_prepare_report_and_markup(tmp_pa
     report_b = offdesk_flow.offdesk_prepare_project_report(state, "proj3", entry)
 
     assert report_a == report_b
+    assert report_b["active_task_worker_update_summary"] == "-"
+    assert report_b["active_task_worker_apply_summary"] == "-"
+    assert report_b["active_task_worker_apply_accept_summary"] == "-"
+    assert report_b["active_task_worker_syncback_summary"] == "-"
     assert mgmt_handlers._offdesk_review_reply_markup([report_a]) == offdesk_flow.offdesk_review_reply_markup([report_b])
     assert mgmt_handlers._offdesk_prepare_reply_markup([report_a], blocked_count=1) == offdesk_flow.offdesk_prepare_reply_markup([report_b], blocked_count=1)
 
@@ -1050,6 +1267,108 @@ def test_auto_status_shows_replace_sync_prefetch_mode(tmp_path: Path) -> None:
     text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="auto", rest="status")
 
     assert "- prefetch: sync_recent+replace (full-scope; since ignored)" in text
+
+
+def test_auto_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_review class=status trace=selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+    )
+    _write_action_audit_log(tmp_path)
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="auto", rest="status")
+
+    assert "- latest_intent: offdesk | offdesk_review" in text
+    assert "- first_focus: execution으로 넘기기 전에 offdesk review와 active runtime 상태를 먼저 확인" in text
+    assert "- latest_intent_trace: selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
+    assert "- latest_action_next: /offdesk review" in text
+    assert "- latest_action_note: inspect planning critic issues and approval blockers in /task and /offdesk review before retrying again" in text
+    assert f"- state_root: legacy | {team_dir.resolve()}" in text
+
+
+def test_offdesk_status_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+    )
+    _write_action_audit_log(tmp_path)
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
+
+    assert "offdesk mode" in text
+    assert "- latest_intent: offdesk | offdesk_prepare" in text
+    assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
+    assert "- latest_action_next: /offdesk review" in text
+    assert f"- state_root: legacy | {team_dir.resolve()}" in text
+
+
+def test_offdesk_status_surfaces_external_background_phase(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    state = gw.default_manager_state(tmp_path, team_dir)
+    state["projects"]["default"]["project_alias"] = "O1"
+    state["projects"]["default"]["display_name"] = "default"
+    state["projects"]["default"]["system_project"] = False
+    state["projects"]["default"]["ops_hidden"] = False
+    state["projects"]["default"].pop("ops_hidden_reason", None)
+    state["projects"]["default"]["tasks"] = {
+        "REQ-EXT-001": {
+            "request_id": "REQ-EXT-001",
+            "short_id": "T-401",
+            "alias": "external-run",
+            "status": "running",
+            "updated_at": "2026-04-07T22:00:00+09:00",
+            "background_run_status": "running",
+            "background_run_runner_target": "github_runner",
+            "background_run_external_phase": "pickup_acknowledged",
+            "background_run_external_note": "background_run_acks/github-runner-bgt-ext-001.json",
+        }
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
+
+    assert "last_task_background_external: github_runner | pickup_acknowledged | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "active_task_background_external_next: /orch bgx-status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
+    assert "first: /orch bgx-status O1 | background_run_acks/github-runner-bgt-ext-001.json" in text
+
+
+def test_offdesk_status_surfaces_test_only_external_harness_next_step(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    state = gw.default_manager_state(tmp_path, team_dir)
+    state["projects"]["default"]["project_alias"] = "O1"
+    state["projects"]["default"]["display_name"] = "default"
+    state["projects"]["default"]["system_project"] = False
+    state["projects"]["default"]["ops_hidden"] = False
+    state["projects"]["default"].pop("ops_hidden_reason", None)
+    state["projects"]["default"]["run_lock_mode"] = "test_only"
+    state["projects"]["default"]["tasks"] = {
+        "REQ-EXT-001": {
+            "request_id": "REQ-EXT-001",
+            "short_id": "T-401",
+            "alias": "external-run",
+            "status": "running",
+            "updated_at": "2026-04-07T22:00:00+09:00",
+            "background_run_status": "running",
+            "background_run_runner_target": "github_runner",
+            "background_run_external_phase": "handoff_emitted",
+            "background_run_external_note": "background_run_handoffs/github-runner-bgt-ext-001.json",
+        }
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="status long")
+
+    assert "active_task_background_external_next: /orch bgx-emit-ack O1 | background_run_handoffs/github-runner-bgt-ext-001.json" in text
+    assert "first: /orch bgx-emit-ack O1 | background_run_handoffs/github-runner-bgt-ext-001.json" in text
 
 
 def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_path: Path) -> None:
@@ -1150,7 +1469,7 @@ def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_p
     assert "- last_reason: no_runnable_open_todo" in text
     assert "- next_retry_at: 2026-03-14T03:10:00+09:00" in text
     assert "- provider_capacity: tasks=2 projects=2 providers=claude=2, codex=1" in text
-    assert "- capacity_policy: critical | both primary providers are blocked across multiple tasks/projects" in text
+    assert "- capacity_policy: critical | both primary providers are blocked with recent repeat history count=2 latest=O1" in text
     assert "- capacity_operator_action: /auto off" in text
     assert "- capacity_recovery_repeat_summary: count=2 latest=O1 last=2026-03-14T03:29:00+09:00" in text
     assert "- capacity_memory_updated_at: 2026-03-14T03:00:30+09:00" in text
@@ -1315,6 +1634,27 @@ def test_offdesk_prepare_reports_runtime_queue_and_next_actions(tmp_path: Path) 
     assert "- /offdesk on" in text
     assert "- /sync preview O2 24h" in text
     assert "- /todo O2 syncback preview" in text
+
+
+def test_offdesk_prepare_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+    )
+    _write_action_audit_log(tmp_path)
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="prepare")
+
+    assert "offdesk prepare" in text
+    assert "- no orch projects registered" in text
+    assert "- latest_intent: offdesk | offdesk_prepare" in text
+    assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
+    assert "- latest_action_next: /offdesk review" in text
 
 
 def test_offdesk_prepare_warns_when_syncback_drift_exists_without_other_issues(tmp_path: Path) -> None:
@@ -1672,10 +2012,342 @@ def test_offdesk_review_surfaces_flagged_projects_and_next_actions(tmp_path: Pat
     assert "- O2 TwinPaper [warn]" in text
     assert "proposal_triage: priorities=P2=1 | kinds=followup=1" in text
     assert "proposal_top: PROP-001[P2 followup 0.00] shadow gate follow-up" in text
-    assert "do: /todo O2 syncback preview, /todo O2 proposals, /todo O2 followup" in text
+    assert "do: /todo O2 syncback preview, /todo O2 proposals, /todo O2 followup, /sync bootstrap O2 24h, /sync preview O2 24h" in text
     assert "- O3 Nano [warn]" in text
-    assert "do: /todo O3 syncback preview" in text
+    assert "do: /todo O3 syncback preview, /sync bootstrap O3 24h" in text
     assert "- resolve flagged items, then /offdesk on" in text
+
+
+def test_offdesk_review_empty_surfaces_latest_intent_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    _write_gateway_events_log(
+        tmp_path,
+        "cmd=offdesk action=offdesk_prepare class=status trace=selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch",
+    )
+    _write_action_audit_log(tmp_path)
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review")
+
+    assert "offdesk review" in text
+    assert "- no orch projects registered" in text
+    assert "- latest_intent: offdesk | offdesk_prepare" in text
+    assert "- first_focus: 오늘 밤 scope, provider capacity, auto posture를 먼저 점검" in text
+    assert "- latest_intent_trace: selected=offdesk_prepare; matched=timing:오늘 밤,prepare:점검; safe_mode=prefer_control_review_over_dispatch" in text
+    assert "- latest_action: Retry | blocked | reason=planning_gate" in text
+    assert "- latest_action_next: /offdesk review" in text
+
+
+def test_offdesk_review_surfaces_latest_judge_summary(tmp_path: Path) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / "Research"
+    team_dir = project_root / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] draft memo\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T18:00:00+09:00",
+                "headline": "Offdesk Judge | executed",
+                "status": "executed",
+                "outcome_kind": "offdesk_judge",
+                "outcome_status": "executed",
+                "outcome_reason_code": "ok",
+                "outcome_detail": "endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed",
+                "next_step": "/offdesk review O5",
+                "remediation": "inspect the judge response together with execution brief, followup brief, and runtime status before acting",
+                "source_command": "/orch judge O5",
+                "link_href": "/control/runtimes/O5",
+                "response_text": json.dumps(
+                    {
+                        "verdict": "continue",
+                        "confidence": "medium",
+                        "reasoning": "brief executable",
+                        "next_step": "/retry T-501",
+                        "caution": "review lane remains",
+                    }
+                ),
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "at": "2026-04-09T18:06:00+09:00",
+                "headline": "Replan Auto Route | applied",
+                "status": "executed",
+                "outcome_kind": "replan_auto_route",
+                "outcome_status": "executed",
+                "outcome_reason_code": "judge_policy_ready",
+                "outcome_detail": "retry_command=/retry T-501",
+                "next_step": "/retry T-501",
+                "remediation": "inspect the retried task outcome and judge policy reuse before applying another auto-route",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "at": "2026-04-09T18:09:00+09:00",
+                "headline": "Syncback Apply | executed",
+                "status": "executed",
+                "outcome_kind": "runtime_syncback_apply",
+                "outcome_status": "executed",
+                "outcome_reason_code": "completed",
+                "outcome_detail": "path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0",
+                "next_step": "/sync preview O5 24h",
+                "remediation": "verify canonical TODO drift is cleared before applying another accepted artifact syncback",
+                "source_command": "/todo O5 syncback apply",
+                "link_href": "/control/runtimes/O5",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "at": "2026-04-09T18:05:00+09:00",
+                "headline": "Retry | blocked",
+                "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "planning critic blocked retry",
+                "next_step": "/retry T-501",
+                "remediation": "judge decision reuse: action=retry next=/retry T-501",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+                "latest_judge_decision_bridge": {
+                    "source": "latest_offdesk_judge",
+                    "verdict": "continue",
+                    "confidence": "medium",
+                    "recommended_action": "retry",
+                    "candidate_next_step": "/retry T-501",
+                    "applied": True,
+                    "applied_next_step": "/retry T-501",
+                    "decision_mode": "promoted_next_step",
+                    "supports_auto_decision": True,
+                },
+                "replan_auto_decision": {
+                    "source": "latest_offdesk_judge",
+                    "current_action": "replan",
+                    "suggested_action": "retry",
+                    "suggested_next_step": "/retry T-501",
+                    "decision_mode": "promoted_next_step",
+                    "bridge_applied": True,
+                    "supports_auto_decision": True,
+                    "can_auto_apply": True,
+                    "confidence": "medium",
+                },
+                "replan_auto_routing_policy": {
+                    "source": "latest_offdesk_judge",
+                    "status": "ready",
+                    "current_action": "replan",
+                    "suggested_action": "retry",
+                    "suggested_next_step": "/retry T-501",
+                    "decision_mode": "promoted_next_step",
+                    "supports_auto_decision": True,
+                    "can_auto_apply": True,
+                    "requires_operator_confirmation": True,
+                    "confidence": "medium",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["research"] = {
+        "name": "research",
+        "display_name": "Research",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "draft memo", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "last_sync_at": "2026-03-10T20:00:00+0900",
+        "last_sync_mode": "scenario",
+        "tasks": {
+            "req-research": {
+                "request_id": "req-research",
+                "short_id": "T-501",
+                "label": "T-501",
+                "status": "running",
+                "updated_at": "2026-04-09T18:07:00+09:00",
+                "created_at": "2026-04-09T17:55:00+09:00",
+                "background_run_worker_update_stub_status": "ready",
+                "background_run_worker_update_stub_summary": "status=ready | targets=reports/summary.md | actions=1 | refs=1",
+                "background_run_worker_update_stub_targets": ["reports/summary.md"],
+                "background_run_worker_update_proposal_summary": "status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md",
+                "background_run_worker_update_proposal_ids": ["PROP-001"],
+                "background_run_worker_apply_accept_summary": "state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00",
+                "background_run_worker_syncback_summary": "state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T18:09:00+09:00",
+            }
+        },
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review O5")
+
+    assert "offdesk review" in text
+    assert "latest_judge: Offdesk Judge | executed | next=/offdesk review O5 | endpoint=claude_code_cli-opus provider=claude_code_cli model=opus status=completed" in text
+    assert "latest_judge_decision: action=retry | verdict=continue | confidence=medium | next=/retry T-501 | brief executable" in text
+    assert "latest_judge_decision_bridge: mode=promoted_next_step | action=retry | verdict=continue | confidence=medium | next=/retry T-501 | auto=yes" in text
+    assert "replan_auto_decision: from=replan | to=retry | confidence=medium | next=/retry T-501 | mode=promoted_next_step | auto=yes" in text
+    assert "auto_route: ready+applied=/retry T-501 | at=2026-04-09T18:06:00+09:00 | apply=dashboard:Apply Judge Auto-Route | api:auto_route_apply=true" in text
+    assert "worker_update: status=ready | proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
+    assert "worker_apply: status=ready | apply_proposals=1 | ids=PROP-001 | targets=reports/summary.md" in text
+    assert "worker_apply_accept: state=applied | todo=TODO-002 | proposal=PROP-001 | targets=reports/summary.md | at=2026-04-09T18:08:00+09:00" in text
+    assert "worker_syncback: state=applied | todo=TODO-002 | path=TODO.md | lines=14 | done=1 reopen=0 append=1 blocked=0 | at=2026-04-09T18:09:00+09:00" in text
+    assert "canonical_writeback: Syncback Apply | executed | state=executed | next=/sync preview O5 24h | at=2026-04-09T18:09:00+09:00 | path=TODO.md lines=14 done=1 reopen=0 append=1 blocked=0" in text
+    assert "first: /retry T-501 |" in text
+
+
+def test_offdesk_review_surfaces_manual_review_ready_copy(tmp_path: Path) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / "Research"
+    team_dir = project_root / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] draft memo\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T18:05:00+09:00",
+                "headline": "Replan | blocked",
+                "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "planning critic blocked retry",
+                "next_step": "/orch judge O5",
+                "remediation": "judge decision reuse: action=manual_review next=/orch judge O5",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+                "replan_auto_routing_policy": {
+                    "source": "latest_offdesk_judge",
+                    "status": "manual_ready",
+                    "current_action": "replan",
+                    "suggested_action": "manual_review",
+                    "suggested_next_step": "/orch judge O5",
+                    "decision_mode": "judge_manual_review",
+                    "supports_auto_decision": True,
+                    "can_auto_apply": False,
+                    "requires_operator_confirmation": True,
+                    "confidence": "medium",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["research"] = {
+        "name": "research",
+        "display_name": "Research",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "draft memo", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "tasks": {
+            "req-research": {
+                "request_id": "req-research",
+                "short_id": "T-501",
+                "label": "T-501",
+                "status": "blocked",
+                "updated_at": "2026-04-09T18:07:00+09:00",
+                "created_at": "2026-04-09T17:55:00+09:00",
+            }
+        },
+    }
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="offdesk", rest="review O5")
+
+    assert "auto_route: manual_review=/orch judge O5 | waiting_for_operator" in text
+    assert "manual_review_ready: manual_review=/orch judge O5 | waiting_for_operator" in text
+
+
+def test_offdesk_review_surfaces_manual_execute_ready_copy_and_action(tmp_path: Path) -> None:
+    state = gw.default_manager_state(tmp_path, tmp_path / ".aoe-team")
+    project_root = tmp_path / "ResearchExec"
+    team_dir = project_root / ".aoe-team"
+    audit_dir = team_dir / "dashboard"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "TODO.md").write_text("# Tasks\n- [ ] execute memo patch\n", encoding="utf-8")
+    (team_dir / "AOE_TODO.md").write_text("@include ../TODO.md\n", encoding="utf-8")
+    (team_dir / "orchestrator.json").write_text("{}", encoding="utf-8")
+    (audit_dir / "action-history.jsonl").write_text(
+        json.dumps(
+            {
+                "at": "2026-04-09T18:05:00+09:00",
+                "headline": "Replan | blocked",
+                "status": "blocked",
+                "outcome_kind": "retry_run",
+                "outcome_status": "blocked",
+                "outcome_reason_code": "planning_gate",
+                "outcome_detail": "planning critic blocked retry",
+                "next_step": "/followup-exec T-501 lane L2",
+                "remediation": "judge decision reuse: action=followup_execute next=/followup-exec T-501 lane L2",
+                "source_command": "/replan T-501 lane L1",
+                "link_href": "/control/runtimes/O5",
+                "replan_auto_routing_policy": {
+                    "source": "latest_offdesk_judge",
+                    "status": "manual_ready",
+                    "current_action": "replan",
+                    "suggested_action": "followup_execute",
+                    "suggested_next_step": "/followup-exec T-501 lane L2",
+                    "decision_mode": "judge_manual_execute",
+                    "supports_auto_decision": True,
+                    "can_auto_apply": False,
+                    "requires_operator_confirmation": True,
+                    "confidence": "medium",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state["projects"]["research_exec"] = {
+        "name": "research_exec",
+        "display_name": "ResearchExec",
+        "project_alias": "O5",
+        "project_root": str(project_root),
+        "team_dir": str(team_dir),
+        "runtime_ready": True,
+        "todos": [{"id": "TODO-001", "summary": "execute memo patch", "priority": "P1", "status": "open"}],
+        "todo_proposals": [],
+        "tasks": {
+            "req-research-exec": {
+                "request_id": "req-research-exec",
+                "short_id": "T-501",
+                "label": "T-501",
+                "status": "blocked",
+                "updated_at": "2026-04-09T18:07:00+09:00",
+                "created_at": "2026-04-09T17:55:00+09:00",
+            }
+        },
+    }
+
+    body, markup = _call_management_status_with_markup(
+        tmp_path=tmp_path,
+        manager_state=state,
+        cmd="offdesk",
+        rest="review O5",
+    )
+
+    assert "auto_route: manual_execute=/followup-exec T-501 lane L2 | waiting_for_operator" in body
+    assert "manual_execute_ready: manual_execute=/followup-exec T-501 lane L2 | waiting_for_operator" in body
+    assert "first: /followup-exec T-501 lane L2 |" in body
+    buttons = _button_texts(markup)
+    assert "/followup-exec T-501 lane L2" in buttons
+    assert buttons.index("/followup-exec T-501 lane L2") < buttons.index("/orch judge O5")
 
 
 def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path: Path) -> None:
@@ -1744,10 +2416,32 @@ def test_offdesk_review_reply_markup_includes_active_task_retry_actions(tmp_path
     assert "/retry T-101 lane L2,R1" in body
     assert "/task T-101" in body
     buttons = _button_texts(markup)
+    assert "/orch judge O6" in buttons
     assert "/task T-101" in buttons
     assert "/retry T-101 lane L2,R1" in buttons
     assert "/orch status O6" in buttons
     assert "/todo O6" in buttons
+
+
+def test_offdesk_review_reply_markup_includes_auto_route_ready_action() -> None:
+    markup = offdesk_flow.offdesk_review_reply_markup(
+        [
+            {
+                "alias": "O5",
+                "priority_action": "/orch judge O5",
+                "replan_auto_route_ready_action": "/retry T-501",
+                "active_task_label": "T-501",
+                "active_task_tf_phase": "blocked",
+                "status": "warn",
+            }
+        ]
+    )
+
+    buttons = _button_texts(markup)
+    assert "/orch judge O5" in buttons
+    assert "/retry T-501" in buttons
+    assert "/task T-501" in buttons
+    assert buttons.index("/retry T-501") < buttons.index("/orch judge O5")
 
 
 def test_offdesk_review_prefers_task_link_for_active_planning_task(tmp_path: Path) -> None:
@@ -1874,10 +2568,11 @@ def test_offdesk_review_reply_markup_includes_clean_actions(tmp_path: Path) -> N
     )
 
     assert "offdesk review" in body
-    assert "- status: clean" in body
+    assert "- flagged: 1" in body
+    assert "- O3 Nano [warn]" in body
     buttons = _button_texts(markup)
-    assert "/offdesk on" in buttons
-    assert "/auto status" in buttons
+    assert "/sync bootstrap O3 24h" in buttons
+    assert "/orch status O3" in buttons
     assert "/offdesk prepare" in buttons
     assert "/map" in buttons
     assert "/help" in buttons

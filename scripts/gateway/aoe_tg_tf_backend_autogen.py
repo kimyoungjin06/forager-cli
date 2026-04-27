@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only AutoGen Core TF backend.
+"""Read-only AutoGen Core Task Team backend.
 
 This backend is intentionally conservative:
 
@@ -841,8 +841,9 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
                 stage="runtime.completed",
                 kind="lifecycle",
                 status="success" if review.success else "warning",
-                summary="completed sandbox read-only TF run",
+                summary="completed sandbox read-only Task Team run",
                 payload={
+                    "tool_count": 2,
                     "reply_count": 2,
                     "verdict": review.verdict,
                     "item_count": analysis.item_count,
@@ -927,6 +928,7 @@ async def _run_autogen_runtime(request: TFBackendRequest, deps: TFBackendDeps) -
         "requested_roles": list(roles["requested"]),
         "executed_roles": list(roles["executed"]),
         "dropped_roles": list(roles["dropped"]),
+        "tool_count": int(response.counts.get("replies", len(response.replies)) or 0),
         "runtime_events": runtime_events,
         "followup_proposals": list(response.followup_proposals),
         "artifacts": [

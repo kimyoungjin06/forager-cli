@@ -85,6 +85,9 @@ import aoe_tg_room_runtime as room_runtime_mod
 import aoe_tg_orch_registry as orch_registry_mod
 import aoe_tg_orch_roles as orch_roles_mod
 import aoe_tg_orch_responses as orch_responses_mod
+import aoe_tg_control_plane as control_plane_mod
+import aoe_tg_gateway_runtime_ops as gateway_runtime_ops_mod
+import aoe_tg_gateway_text as gateway_text_mod
 import aoe_tg_plan_ensemble as plan_ensemble_mod
 import aoe_tg_poll_loop as poll_loop_mod
 import aoe_tg_message_handler as message_handler_mod
@@ -94,6 +97,7 @@ import aoe_tg_tf_exec as tf_exec_mod
 import aoe_tg_tf_backend_selection as tf_backend_selection_mod
 import aoe_tg_tf_backend_local as tf_backend_local_mod
 import aoe_tg_tf_backend_autogen as tf_backend_autogen_mod
+import aoe_tg_runtime_read as runtime_read_mod
 from aoe_tg_message_flow import (
     RunTransitionState,
     apply_confirm_transition_to_resolved,
@@ -114,6 +118,12 @@ from aoe_tg_todo_state import merge_todo_proposals
 from aoe_tg_investigations_sync import sync_investigations_docs
 from aoe_tg_ops_policy import (
     visible_ops_project_keys,
+)
+from aoe_tg_provider_fallback import (
+    fallback_provider_for,
+    is_rate_limit_error,
+    load_provider_capacity_state,
+    proactive_fallback_provider,
 )
 from aoe_tg_package_paths import templates_root, worker_handler_script
 import aoe_tg_project_state as project_state_mod
@@ -178,6 +188,7 @@ from aoe_tg_task_state import (
     get_task_record as get_task_record_state,
     latest_task_request_refs as latest_task_request_refs_state,
     lifecycle_set_stage as lifecycle_set_stage_state,
+    normalize_role_rows as normalize_role_rows_state,
     normalize_task_alias_key as normalize_task_alias_key_state,
     parse_task_seq_from_short_id as parse_task_seq_from_short_id_state,
     rebuild_task_alias_index as rebuild_task_alias_index_state,
@@ -277,6 +288,7 @@ READONLY_ALLOWED_COMMANDS = {
     "offdesk",
     "auto",
     "replay-read",
+    "history",
     "cancel-pending",
 }
 
@@ -775,7 +787,7 @@ def is_path_within(target: Path, root: Optional[Path]) -> bool:
 
 
 def default_manager_state(project_root: Path, team_dir: Path) -> Dict[str, Any]:
-    return runtime_default_manager_state(project_root, team_dir, now_iso=now_iso)
+    return runtime_read_mod.default_manager_state(project_root, team_dir)
 
 
 def sanitize_task_record(raw_task: Dict[str, Any], req_id: str) -> Dict[str, Any]:
@@ -788,7 +800,7 @@ def sanitize_task_record(raw_task: Dict[str, Any], req_id: str) -> Dict[str, Any
         normalize_task_status=normalize_task_status,
         now_iso=now_iso,
         history_limit=DEFAULT_TASK_HISTORY_LIMIT,
-        normalize_task_plan_schema=normalize_task_plan_schema,
+        normalize_task_plan_schema=normalize_task_plan_payload,
         normalize_plan_critic_payload=normalize_plan_critic_payload,
         normalize_plan_replans_payload=normalize_plan_replans_payload,
         plan_critic_primary_issue=plan_critic_primary_issue,
@@ -798,23 +810,7 @@ def sanitize_task_record(raw_task: Dict[str, Any], req_id: str) -> Dict[str, Any
 
 
 def load_manager_state(path: Path, project_root: Path, team_dir: Path) -> Dict[str, Any]:
-    return runtime_load_manager_state(
-        path,
-        project_root,
-        team_dir,
-        default_manager_state=default_manager_state,
-        now_iso=now_iso,
-        normalize_project_name=normalize_project_name,
-        sanitize_task_record=sanitize_task_record,
-        trim_project_tasks=trim_project_tasks,
-        normalize_task_alias_key=normalize_task_alias_key,
-        bool_from_json=bool_from_json,
-        normalize_project_alias=normalize_project_alias,
-        backfill_task_aliases=backfill_task_aliases,
-        ensure_project_aliases=ensure_project_aliases,
-        sanitize_project_lock_row=sanitize_project_lock_row,
-        sanitize_chat_session_row=sanitize_chat_session_row,
-    )
+    return runtime_read_mod.load_manager_state(path, project_root, team_dir)
 
 
 def save_manager_state(path: Path, state: Dict[str, Any]) -> None:
@@ -1162,67 +1158,7 @@ def ensure_verifier_roles(
 
 
 def normalize_role_rows(data: Dict[str, Any]) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
-
-    role_states = data.get("role_states")
-    if isinstance(role_states, list):
-        for item in role_states:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role", "")).strip()
-            if not role:
-                continue
-            status = str(item.get("status", "pending")).strip().lower() or "pending"
-            rows.append({"role": role, "status": status})
-
-    if rows:
-        return rows
-
-    roles_obj = data.get("roles")
-    if isinstance(roles_obj, list) and roles_obj and isinstance(roles_obj[0], dict):
-        for item in roles_obj:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role", "")).strip()
-            if not role:
-                continue
-            status = str(item.get("status", "pending")).strip().lower() or "pending"
-            rows.append({"role": role, "status": status})
-        if rows:
-            return rows
-
-    done_set = {str(x).strip() for x in (data.get("done_roles") or []) if str(x).strip()}
-    failed_set = {str(x).strip() for x in (data.get("failed_roles") or []) if str(x).strip()}
-    pending_set = {str(x).strip() for x in (data.get("pending_roles") or data.get("unresolved_roles") or []) if str(x).strip()}
-
-    if isinstance(roles_obj, list):
-        for item in roles_obj:
-            role = str(item).strip()
-            if not role:
-                continue
-            if role in failed_set:
-                status = "failed"
-            elif role in done_set:
-                status = "done"
-            elif role in pending_set:
-                status = "pending"
-            else:
-                status = "pending"
-            rows.append({"role": role, "status": status})
-        if rows:
-            return rows
-
-    all_roles = dedupe_roles(list(done_set) + list(failed_set) + list(pending_set))
-    for role in all_roles:
-        if role in failed_set:
-            status = "failed"
-        elif role in done_set:
-            status = "done"
-        else:
-            status = "pending"
-        rows.append({"role": role, "status": status})
-
-    return rows
+    return normalize_role_rows_state(data, dedupe_roles=dedupe_roles)
 
 
 def extract_request_snapshot(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1335,6 +1271,12 @@ def ensure_task_record(
     roles: List[str],
     verifier_roles: List[str],
     require_verifier: bool,
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
+    execution_brief: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return ensure_task_record_state(
         entry,
@@ -1349,6 +1291,12 @@ def ensure_task_record(
         build_task_context=build_task_context,
         lifecycle_stages=LIFECYCLE_STAGES,
         keep_limit=DEFAULT_TASK_KEEP_PER_PROJECT,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
+        request_contract=request_contract,
+        execution_brief=execution_brief,
     )
 
 
@@ -1374,6 +1322,10 @@ def sync_task_lifecycle(
     verifier_roles: Optional[List[str]],
     require_verifier: bool,
     verifier_candidates: List[str],
+    intent_command: str = "",
+    intent_action: str = "",
+    intent_class: str = "",
+    intent_trace: str = "",
 ) -> Optional[Dict[str, Any]]:
     return sync_task_lifecycle_state(
         entry,
@@ -1389,6 +1341,10 @@ def sync_task_lifecycle(
         lifecycle_set_stage=lifecycle_set_stage,
         normalize_task_status=normalize_task_status,
         sync_task_exec_context=sync_task_exec_context,
+        intent_command=intent_command,
+        intent_action=intent_action,
+        intent_class=intent_class,
+        intent_trace=intent_trace,
     )
 
 
@@ -1403,53 +1359,26 @@ def run_aoe_init(
     team_dir: Path,
     overview: str,
 ) -> str:
-    cfg = team_dir / "orchestrator.json"
-    if cfg.exists():
-        return "[SKIP] already initialized (.aoe-team/orchestrator.json exists)"
-
-    cmd = [
-        args.aoe_orch_bin,
-        "init",
-        "--project-root",
-        str(project_root),
-        "--team-dir",
-        str(team_dir),
-        "--overview",
+    return gateway_runtime_ops_mod.run_aoe_init(
+        args,
+        project_root,
+        team_dir,
         overview,
-    ]
-    proc = run_command(cmd, env=None, timeout_sec=max(60, int(args.orch_command_timeout_sec)))
-    text = (proc.stdout or proc.stderr or "").strip()
-    if proc.returncode != 0:
-        low = text.lower()
-        if "file exists" in low and "agents.md" in low:
-            logs = repair_runtime(
-                aoe_orch_bin=args.aoe_orch_bin,
-                template_root=templates_root(),
-                project_root=project_root,
-                team_dir=team_dir,
-                overview=overview,
-                timeout_sec=max(60, int(args.orch_command_timeout_sec)),
-                force=False,
-            )
-            return "\n".join(["[FALLBACK] runtime seeded without touching project-root AGENTS.md", *logs])
-        raise RuntimeError(f"aoe-orch init failed: {text[:1200]}")
-    return text or "[OK] initialized"
+        run_command=run_command,
+        repair_runtime=repair_runtime,
+        templates_root=templates_root,
+    )
+
 
 
 def run_aoe_spawn(args: argparse.Namespace, project_root: Path, team_dir: Path) -> str:
-    cmd = [
-        args.aoe_orch_bin,
-        "spawn",
-        "--project-root",
-        str(project_root),
-        "--team-dir",
-        str(team_dir),
-    ]
-    proc = run_command(cmd, env=None, timeout_sec=max(60, int(args.orch_command_timeout_sec)))
-    text = (proc.stdout or proc.stderr or "").strip()
-    if proc.returncode != 0:
-        raise RuntimeError(f"aoe-orch spawn failed: {text[:1200]}")
-    return text or "[OK] spawned"
+    return gateway_runtime_ops_mod.run_aoe_spawn(
+        args,
+        project_root,
+        team_dir,
+        run_command=run_command,
+    )
+
 
 
 def summarize_three_stage_request(
@@ -1457,65 +1386,13 @@ def summarize_three_stage_request(
     request_data: Dict[str, Any],
     task: Optional[Dict[str, Any]] = None,
 ) -> str:
-    request_id = str(request_data.get("request_id", "-")).strip() or "-"
-    counts = request_data.get("counts") or {}
-    assignments = int(counts.get("assignments", 0) or 0)
-    replies = int(counts.get("replies", 0) or 0)
-    complete = bool(request_data.get("complete", False))
+    return gateway_runtime_ops_mod.summarize_three_stage_request(
+        project_name,
+        request_data,
+        task=task,
+        task_display_label=task_display_label,
+    )
 
-    roles = request_data.get("roles") or []
-    running: List[str] = []
-    failed: List[str] = []
-    done: List[str] = []
-
-    for row in roles:
-        role = str(row.get("role", "?")).strip() or "?"
-        status = str(row.get("status", "?")).strip().lower()
-        item = f"{role}({status})"
-        if status in {"done"}:
-            done.append(item)
-        elif status in {"failed", "error", "fail"}:
-            failed.append(item)
-        else:
-            running.append(item)
-
-    stage1 = "완료" if assignments > 0 else "대기"
-    if failed:
-        stage2 = "이슈"
-    elif running:
-        stage2 = "진행중"
-    elif assignments > 0:
-        stage2 = "완료"
-    else:
-        stage2 = "대기"
-
-    if complete and not failed:
-        stage3 = "완료"
-    elif replies > 0:
-        stage3 = "부분완료"
-    else:
-        stage3 = "대기"
-
-    lines = [
-        f"orch: {project_name}",
-        f"task: {task_display_label(task or {}, fallback_request_id=request_id)}",
-        f"request_id: {request_id}",
-        "3단계 진행확인",
-        f"1) 접수/배정: {stage1} (assignments={assignments})",
-        f"2) 실행: {stage2}" + (f" | running={', '.join(running)}" if running else ""),
-        f"3) 완료/회신: {stage3} (replies={replies}, complete={'yes' if complete else 'no'})",
-    ]
-
-    if done:
-        lines.append("done: " + ", ".join(done))
-    if failed:
-        lines.append("failed: " + ", ".join(failed))
-
-    unresolved = request_data.get("unresolved_roles") or []
-    if unresolved:
-        lines.append("unresolved: " + ", ".join(str(x) for x in unresolved))
-
-    return "\n".join(lines)
 
 
 
@@ -1564,201 +1441,62 @@ def classify_dispatch_role_preset(
 
 
 def run_codex_exec(args: argparse.Namespace, prompt: str, timeout_sec: int = 480) -> str:
-    fd, out_path_raw = tempfile.mkstemp(prefix="aoe_tg_", suffix=".txt")
-    os.close(fd)
-    out_path = Path(out_path_raw)
-
-    perm_mode = (os.environ.get("AOE_CODEX_PERMISSION_MODE", "full") or "full").strip().lower()
-    run_as_root_raw = (os.environ.get("AOE_CODEX_RUN_AS_ROOT", "0") or "0").strip().lower()
-    run_as_root = run_as_root_raw in {"1", "true", "yes", "on"}
-
-    cmd = [
-        "codex",
-        "exec",
-        "--skip-git-repo-check",
-        "--disable",
-        "multi_agent",
-        "-C",
-        str(args.project_root),
-        "-o",
-        str(out_path),
+    return control_plane_mod.run_codex_exec(
+        args,
         prompt,
-    ]
-
-    if perm_mode in {"full", "unsafe", "bypass", "dangerous"}:
-        cmd.extend(["--dangerously-bypass-approvals-and-sandbox"])
-    elif perm_mode in {"danger", "danger-full-access"}:
-        cmd.extend(["--sandbox", "danger-full-access"])
-    elif perm_mode in {"workspace", "workspace-write", "safe", ""}:
-        cmd.extend(["--sandbox", "workspace-write"])
-    elif perm_mode in {"read-only", "readonly"}:
-        cmd.extend(["--sandbox", "read-only"])
-    else:
-        cmd.extend(["--sandbox", "workspace-write"])
-
-    root_output_mode = False
-    if run_as_root:
-        can_sudo = subprocess.run(
-            ["sudo", "-n", "true"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0
-        if can_sudo:
-            env_pairs: List[str] = []
-            for k in [
-                "HOME",
-                "OPENAI_API_KEY",
-                "OPENAI_BASE_URL",
-                "OPENAI_ORG_ID",
-                "OPENAI_PROJECT_ID",
-                "HTTP_PROXY",
-                "HTTPS_PROXY",
-                "NO_PROXY",
-                "ALL_PROXY",
-            ]:
-                v = os.environ.get(k, "")
-                if v:
-                    env_pairs.append(f"{k}={v}")
-            cmd = ["sudo", "-n", "env", *env_pairs, *cmd]
-            root_output_mode = True
-
-    try:
-        if root_output_mode:
-            # In sticky /tmp, sudo process may fail to overwrite pre-created user temp files.
-            try:
-                out_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-        proc = run_command(cmd, env=None, timeout_sec=timeout_sec)
-        if proc.returncode != 0:
-            detail = (proc.stderr or proc.stdout or "").strip()
-            raise RuntimeError(f"codex exec failed: {detail[:1000]}")
-
-        body = ""
-        if out_path.exists():
-            try:
-                body = out_path.read_text(encoding="utf-8").strip()
-            except Exception:
-                body = ""
-
-        if not body:
-            body = (proc.stdout or "").strip()
-
-        if not body:
-            raise RuntimeError("codex exec returned empty output")
-
-        return body
-    finally:
-        try:
-            out_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        timeout_sec=timeout_sec,
+        run_command=run_command,
+        subprocess_run=subprocess.run,
+    )
 
 
 def run_claude_exec(args: argparse.Namespace, prompt: str, timeout_sec: int = 480) -> str:
-    perm_mode = (os.environ.get("AOE_CLAUDE_PERMISSION_MODE", os.environ.get("AOE_CODEX_PERMISSION_MODE", "full")) or "full").strip().lower()
-    run_as_root_raw = (os.environ.get("AOE_CLAUDE_RUN_AS_ROOT", os.environ.get("AOE_CODEX_RUN_AS_ROOT", "0")) or "0").strip().lower()
-    run_as_root = run_as_root_raw in {"1", "true", "yes", "on"}
-
-    cmd = [
-        "claude",
-        "-p",
+    return control_plane_mod.run_claude_exec(
+        args,
         prompt,
-        "--output-format",
-        "text",
-        "--add-dir",
-        str(args.project_root),
-        "--no-session-persistence",
-    ]
-
-    if perm_mode in {"full", "unsafe", "bypass", "dangerous", "danger", "danger-full-access"}:
-        cmd.extend(["--dangerously-skip-permissions", "--permission-mode", "bypassPermissions"])
-    elif perm_mode in {"workspace", "workspace-write", "safe", ""}:
-        cmd.extend(["--permission-mode", "acceptEdits"])
-    elif perm_mode in {"read-only", "readonly"}:
-        cmd.extend(["--permission-mode", "plan"])
-    elif perm_mode in {"auto", "default", "dontask", "dont-ask", "acceptedits", "bypasspermissions", "plan"}:
-        mode_map = {
-            "dontask": "dontAsk",
-            "dont-ask": "dontAsk",
-            "acceptedits": "acceptEdits",
-            "bypasspermissions": "bypassPermissions",
-        }
-        cmd.extend(["--permission-mode", mode_map.get(perm_mode, perm_mode)])
-    else:
-        cmd.extend(["--dangerously-skip-permissions", "--permission-mode", "bypassPermissions"])
-
-    if run_as_root:
-        can_sudo = subprocess.run(
-            ["sudo", "-n", "true"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0
-        if can_sudo:
-            env_pairs: List[str] = []
-            for k in [
-                "HOME",
-                "PATH",
-                "ANTHROPIC_API_KEY",
-                "ANTHROPIC_BASE_URL",
-                "ANTHROPIC_AUTH_TOKEN",
-                "CLAUDE_CODE_USE_BEDROCK",
-                "CLAUDE_CODE_OAUTH_TOKEN",
-                "CLAUDE_CONFIG_DIR",
-                "AWS_REGION",
-                "AWS_DEFAULT_REGION",
-                "AWS_PROFILE",
-                "AWS_ACCESS_KEY_ID",
-                "AWS_SECRET_ACCESS_KEY",
-                "AWS_SESSION_TOKEN",
-                "HTTP_PROXY",
-                "HTTPS_PROXY",
-                "NO_PROXY",
-                "ALL_PROXY",
-            ]:
-                v = os.environ.get(k, "")
-                if v:
-                    env_pairs.append(f"{k}={v}")
-            cmd = ["sudo", "-n", "env", *env_pairs, *cmd]
-
-    proc = subprocess.run(
-        cmd,
-        text=True,
-        capture_output=True,
-        cwd=str(args.project_root),
-        timeout=max(5, int(timeout_sec)),
+        timeout_sec=timeout_sec,
+        subprocess_run=subprocess.run,
     )
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()
-        raise RuntimeError(f"claude exec failed: {detail[:1000]}")
-    body = (proc.stdout or "").strip()
-    if not body:
-        raise RuntimeError("claude exec returned empty output")
-    return body
+
+
+def configured_control_providers(args: argparse.Namespace) -> List[str]:
+    return control_plane_mod.configured_control_providers(args)
+
+
+def available_control_provider_execs(
+    args: argparse.Namespace,
+) -> tuple[List[str], Dict[str, Callable[[str, int], str]], List[str], List[str]]:
+    return control_plane_mod.available_control_provider_execs(
+        args,
+        configured_control_providers_fn=configured_control_providers,
+        run_codex_exec_fn=lambda _args, prompt, timeout_sec: run_codex_exec(_args, prompt, timeout_sec=timeout_sec),
+        run_claude_exec_fn=lambda _args, prompt, timeout_sec: run_claude_exec(_args, prompt, timeout_sec=timeout_sec),
+        which=shutil.which,
+    )
+
+
+def run_control_plane_exec(
+    args: argparse.Namespace,
+    prompt: str,
+    *,
+    timeout_sec: int = 480,
+    stage: str = "control",
+) -> str:
+    return control_plane_mod.run_control_plane_exec(
+        args,
+        prompt,
+        timeout_sec=timeout_sec,
+        stage=stage,
+        available_control_provider_execs_fn=available_control_provider_execs,
+        load_provider_capacity_state_fn=load_provider_capacity_state,
+        proactive_fallback_provider_fn=proactive_fallback_provider,
+        fallback_provider_for_fn=fallback_provider_for,
+        is_rate_limit_error_fn=is_rate_limit_error,
+    )
+
+
 def parse_json_object_from_text(text: str) -> Optional[Dict[str, Any]]:
-    src = (text or "").strip()
-    if not src:
-        return None
-
-    try:
-        obj = json.loads(src)
-        if isinstance(obj, dict):
-            return obj
-    except Exception:
-        pass
-
-    decoder = json.JSONDecoder()
-    for i, ch in enumerate(src):
-        if ch != "{":
-            continue
-        try:
-            obj, _ = decoder.raw_decode(src[i:])
-        except Exception:
-            continue
-        if isinstance(obj, dict):
-            return obj
-
-    return None
+    return control_plane_mod.parse_json_object_from_text(text)
 
 
 def available_worker_roles(available_roles: List[str]) -> List[str]:
@@ -1788,38 +1526,7 @@ def critic_has_blockers(critic: Dict[str, Any]) -> bool:
 
 
 def planning_stage_timeout_sec(args: argparse.Namespace, stage: str) -> int:
-    stage_token = str(stage or "").strip().lower()
-    env_map = {
-        "planner": "AOE_PLAN_PLANNER_TIMEOUT_SEC",
-        "critic": "AOE_PLAN_CRITIC_TIMEOUT_SEC",
-        "repair": "AOE_PLAN_REPAIR_TIMEOUT_SEC",
-    }
-    default_caps = {
-        "planner": 240,
-        "critic": 180,
-        "repair": 240,
-    }
-    min_floors = {
-        "planner": 60,
-        "critic": 45,
-        "repair": 60,
-    }
-    try:
-        base = int(getattr(args, "orch_command_timeout_sec", DEFAULT_ORCH_COMMAND_TIMEOUT_SEC) or DEFAULT_ORCH_COMMAND_TIMEOUT_SEC)
-    except Exception:
-        base = DEFAULT_ORCH_COMMAND_TIMEOUT_SEC
-    cap = int(default_caps.get(stage_token, 180))
-    floor = int(min_floors.get(stage_token, 60))
-
-    raw_override = os.environ.get(env_map.get(stage_token, ""), "").strip()
-    if raw_override:
-        try:
-            override = int(raw_override)
-            return max(floor, min(override, max(base, floor)))
-        except Exception:
-            pass
-
-    return max(floor, min(cap, max(base, floor)))
+    return control_plane_mod.planning_stage_timeout_sec(args, stage)
 
 
 def build_task_execution_plan(
@@ -1828,29 +1535,17 @@ def build_task_execution_plan(
     available_roles: List[str],
     max_subtasks: int,
 ) -> Dict[str, Any]:
-    workers = available_worker_roles(available_roles)
-
-    planner_prompt = (
-        "너는 작업 오케스트레이션 planner다. 사용자 요청을 실행 가능한 sub-task 계획으로 분해해라.\n"
-        "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
-        "JSON 스키마:\n"
-        "{\n"
-        "  \"summary\": \"한 줄 요약\",\n"
-        "  \"subtasks\": [\n"
-        "    {\"id\":\"S1\", \"title\":\"...\", \"goal\":\"...\", \"owner_role\":\"ROLE\", \"acceptance\":[\"...\"]}\n"
-        "  ]\n"
-        "}\n"
-        "제약:\n"
-        f"- owner_role은 다음 중 하나만 사용: {', '.join(workers)}\n"
-        f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
-        "- 각 subtask는 서로 다른 산출물을 갖도록 분해\n"
-        "- acceptance는 검증 가능한 문장 1~3개\n\n"
-        f"사용자 요청:\n{user_prompt.strip()}\n"
+    return control_plane_mod.build_task_execution_plan(
+        args,
+        user_prompt,
+        available_roles,
+        max_subtasks,
+        available_worker_roles_fn=available_worker_roles,
+        run_control_plane_exec_fn=run_control_plane_exec,
+        planning_stage_timeout_sec_fn=planning_stage_timeout_sec,
+        parse_json_object_from_text_fn=parse_json_object_from_text,
+        normalize_task_plan_payload_fn=normalize_task_plan_payload,
     )
-
-    raw = run_codex_exec(args, planner_prompt, timeout_sec=planning_stage_timeout_sec(args, "planner"))
-    parsed = parse_json_object_from_text(raw)
-    return normalize_task_plan_payload(parsed, user_prompt=user_prompt, workers=workers, max_subtasks=max_subtasks)
 
 
 def critique_task_execution_plan(
@@ -1858,30 +1553,15 @@ def critique_task_execution_plan(
     user_prompt: str,
     plan: Dict[str, Any],
 ) -> Dict[str, Any]:
-    payload = json.dumps(plan, ensure_ascii=False)
-    critic_prompt = (
-        "너는 task plan critic이다. 아래 계획의 누락/과도분해/검증불가 항목을 점검해라.\n"
-        "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
-        "JSON 스키마:\n"
-        "{\n"
-        "  \"approved\": true|false,\n"
-        "  \"issues\": [\"...\"],\n"
-        "  \"recommendations\": [\"...\"]\n"
-        "}\n"
-        "규칙:\n"
-        "- issues는 치명/중요 문제만\n"
-        "- recommendations는 실행 가능한 수정 제안만\n\n"
-        f"사용자 요청:\n{user_prompt.strip()}\n\n"
-        f"plan:\n{payload}\n"
+    return control_plane_mod.critique_task_execution_plan(
+        args,
+        user_prompt,
+        plan,
+        run_control_plane_exec_fn=run_control_plane_exec,
+        planning_stage_timeout_sec_fn=planning_stage_timeout_sec,
+        parse_json_object_from_text_fn=parse_json_object_from_text,
+        normalize_plan_critic_payload_fn=normalize_plan_critic_payload,
     )
-
-    try:
-        raw = run_codex_exec(args, critic_prompt, timeout_sec=planning_stage_timeout_sec(args, "critic"))
-        parsed = parse_json_object_from_text(raw)
-    except Exception:
-        parsed = None
-
-    return normalize_plan_critic_payload(parsed, max_items=5)
 
 
 def repair_task_execution_plan(
@@ -1893,34 +1573,20 @@ def repair_task_execution_plan(
     max_subtasks: int,
     attempt_no: int,
 ) -> Dict[str, Any]:
-    workers = available_worker_roles(available_roles)
-    current_payload = json.dumps(current_plan, ensure_ascii=False)
-    critic_payload = json.dumps(critic, ensure_ascii=False)
-
-    repair_prompt = (
-        "너는 task planner다. critic 이슈를 반영해 계획을 고쳐라.\n"
-        "반드시 JSON 객체만 출력한다. 설명 문장 금지.\n"
-        "JSON 스키마:\n"
-        "{\n"
-        "  \"summary\": \"한 줄 요약\",\n"
-        "  \"subtasks\": [\n"
-        "    {\"id\":\"S1\", \"title\":\"...\", \"goal\":\"...\", \"owner_role\":\"ROLE\", \"acceptance\":[\"...\"]}\n"
-        "  ]\n"
-        "}\n"
-        "제약:\n"
-        f"- owner_role은 다음 중 하나만 사용: {', '.join(workers)}\n"
-        f"- subtasks는 1~{max(1, int(max_subtasks))}개\n"
-        "- acceptance는 검증 가능한 문장 1~3개\n"
-        "- critic issues를 가능한 한 모두 해소\n\n"
-        f"attempt: {int(attempt_no)}\n"
-        f"사용자 요청:\n{user_prompt.strip()}\n\n"
-        f"current_plan:\n{current_payload}\n\n"
-        f"critic:\n{critic_payload}\n"
+    return control_plane_mod.repair_task_execution_plan(
+        args,
+        user_prompt,
+        current_plan,
+        critic,
+        available_roles,
+        max_subtasks,
+        attempt_no,
+        available_worker_roles_fn=available_worker_roles,
+        run_control_plane_exec_fn=run_control_plane_exec,
+        planning_stage_timeout_sec_fn=planning_stage_timeout_sec,
+        parse_json_object_from_text_fn=parse_json_object_from_text,
+        normalize_task_plan_payload_fn=normalize_task_plan_payload,
     )
-
-    raw = run_codex_exec(args, repair_prompt, timeout_sec=planning_stage_timeout_sec(args, "repair"))
-    parsed = parse_json_object_from_text(raw)
-    return normalize_task_plan_payload(parsed, user_prompt=user_prompt, workers=workers, max_subtasks=max_subtasks)
 
 
 def plan_roles_from_subtasks(plan: Dict[str, Any]) -> List[str]:
@@ -1941,108 +1607,13 @@ def build_planned_dispatch_prompt(
     plan: Dict[str, Any],
     critic: Dict[str, Any],
 ) -> str:
-    subtasks = plan.get("subtasks") or []
-    summary = str(plan.get("summary", "")).strip()
-    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
-    team_spec = meta.get("phase2_team_spec") if isinstance(meta.get("phase2_team_spec"), dict) else {}
-    phase1_role_preset = str(meta.get("phase1_role_preset", "")).strip()
-    phase2_team_preset = str(meta.get("phase2_team_preset", "")).strip()
-    critic_role = str(team_spec.get("critic_role", "")).strip()
-    integration_role = str(team_spec.get("integration_role", "")).strip()
-    evidence_required = [str(item).strip() for item in (plan.get("evidence_required") or []) if str(item).strip()]
+    return gateway_text_mod.build_planned_dispatch_prompt(
+        user_prompt,
+        plan,
+        critic,
+        critic_has_blockers=critic_has_blockers,
+    )
 
-    lines: List[str] = []
-    lines.append("원사용자 요청:")
-    lines.append(user_prompt.strip())
-    lines.append("")
-    if summary:
-        lines.append("계획 요약:")
-        lines.append(summary)
-        lines.append("")
-
-    lines.append("실행할 sub-task:")
-    for row in subtasks:
-        if not isinstance(row, dict):
-            continue
-        sid = str(row.get("id", "")).strip() or "S"
-        title = str(row.get("title", "")).strip() or "subtask"
-        goal = str(row.get("goal", "")).strip() or title
-        role = str(row.get("owner_role", "")).strip() or "Worker"
-        lines.append(f"- {sid} [{role}] {title}: {goal}")
-
-    execution_groups = team_spec.get("execution_groups") if isinstance(team_spec.get("execution_groups"), list) else []
-    review_groups = team_spec.get("review_groups") if isinstance(team_spec.get("review_groups"), list) else []
-    if execution_groups:
-        lines.append("")
-        lines.append(
-            "Phase2 execution lanes: {mode}".format(
-                mode=str(team_spec.get("execution_mode", "single")).strip() or "single"
-            )
-        )
-        for row in execution_groups[:8]:
-            if not isinstance(row, dict):
-                continue
-            gid = str(row.get("group_id", "")).strip() or "E"
-            role = str(row.get("role", "")).strip() or "Worker"
-            subtask_ids = [str(item).strip() for item in (row.get("subtask_ids") or []) if str(item).strip()]
-            lines.append(f"- lane {gid} [{role}] -> {', '.join(subtask_ids) if subtask_ids else '-'}")
-    if review_groups:
-        lines.append("")
-        lines.append(
-            "Phase2 critic lanes: {mode}".format(
-                mode=str(team_spec.get("review_mode", "skip")).strip() or "skip"
-            )
-        )
-        for row in review_groups[:6]:
-            if not isinstance(row, dict):
-                continue
-            gid = str(row.get("group_id", "")).strip() or "R"
-            role = str(row.get("role", "")).strip() or "Codex-Reviewer"
-            kind = str(row.get("kind", "")).strip() or "verifier"
-            depends_on = [str(item).strip() for item in (row.get("depends_on") or []) if str(item).strip()]
-            dep_txt = f" after {', '.join(depends_on)}" if depends_on else ""
-            lines.append(f"- review {gid} [{role}/{kind}]{dep_txt}")
-
-    if phase1_role_preset or phase2_team_preset or critic_role or integration_role or evidence_required:
-        lines.append("")
-        lines.append("Phase2 quality contract:")
-        if phase1_role_preset or phase2_team_preset:
-            lines.append(
-                "- preset: phase1={phase1} phase2={phase2}".format(
-                    phase1=phase1_role_preset or "-",
-                    phase2=phase2_team_preset or phase1_role_preset or "-",
-                )
-            )
-        if critic_role:
-            lines.append(f"- critic role: {critic_role}")
-        if integration_role:
-            lines.append(f"- integration role: {integration_role}")
-        for item in evidence_required[:4]:
-            lines.append(f"- evidence: {item}")
-
-    issues = critic.get("issues") or []
-    recs = critic.get("recommendations") or []
-    approved = not critic_has_blockers(critic)
-
-    if not approved or issues or recs:
-        lines.append("")
-        lines.append("critic 체크:")
-        if issues:
-            for item in issues[:5]:
-                lines.append(f"- issue: {str(item)}")
-        if recs:
-            for item in recs[:5]:
-                lines.append(f"- fix: {str(item)}")
-
-    lines.append("")
-    lines.append("Phase2 실행 규칙:")
-    lines.append("- 가능한 역할은 병렬로 동시에 진행한다.")
-    lines.append("- critic/verifier 역할은 핵심 산출물에 대해 병렬로 비판 검토한다.")
-    lines.append("- quality contract의 preset/critic/integration/evidence를 기본 완료 기준으로 따른다.")
-    lines.append("- 실행 결과는 역할별 산출물 + 검증 근거 + 남은 리스크를 명확히 남긴다.")
-    lines.append("")
-    lines.append("위 계획과 체크사항을 반영해 역할별 실행/검증 결과를 산출해라.")
-    return "\n".join(lines)
 
 
 def run_phase1_ensemble_planning(
@@ -2051,77 +1622,25 @@ def run_phase1_ensemble_planning(
     available_roles: List[str],
     selected_roles: Optional[List[str]] = None,
     role_preset: str = "",
+    request_contract: Optional[Dict[str, Any]] = None,
     report_progress: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
-    providers_csv = str(getattr(args, "plan_phase1_providers", "codex,claude") or "codex,claude")
-    requested = []
-    for token in providers_csv.split(","):
-        item = str(token or "").strip().lower()
-        if item and item not in requested:
-            requested.append(item)
-    if not requested:
-        requested = ["codex", "claude"]
-
-    runner_catalog: Dict[str, tuple[str, Callable[[str, int], str]]] = {
-        "codex": ("codex", lambda prompt, timeout_sec: run_codex_exec(args, prompt, timeout_sec=timeout_sec)),
-        "claude": ("claude", lambda prompt, timeout_sec: run_claude_exec(args, prompt, timeout_sec=timeout_sec)),
-    }
-    unsupported = [name for name in requested if name not in runner_catalog]
-    if unsupported:
-        detail = f"unsupported phase1 providers: {', '.join(unsupported)}"
-        return {
-            "plan_data": None,
-            "plan_critic": default_plan_critic_payload(),
-            "plan_roles": [],
-            "plan_replans": [],
-            "plan_error": detail,
-            "plan_gate_blocked": True,
-            "plan_gate_reason": detail,
-            "phase1_rounds": 0,
-            "phase1_mode": "ensemble",
-            "phase1_providers": requested,
-        }
-
-    available_execs: Dict[str, Callable[[str, int], str]] = {}
-    missing_binaries: List[str] = []
-    for name in requested:
-        binary, runner = runner_catalog[name]
-        if shutil.which(binary):
-            available_execs[name] = runner
-        else:
-            missing_binaries.append(binary)
-
-    min_providers = max(1, int(getattr(args, "plan_phase1_min_providers", 2) or 2))
-    if len(available_execs) < min_providers:
-        detail = (
-            f"phase1 ensemble requires at least {min_providers} providers; "
-            f"available={','.join(sorted(available_execs)) or 'none'} "
-            f"missing={','.join(missing_binaries) or 'none'}"
-        )
-        return {
-            "plan_data": None,
-            "plan_critic": default_plan_critic_payload(),
-            "plan_roles": [],
-            "plan_replans": [],
-            "plan_error": detail,
-            "plan_gate_blocked": True,
-            "plan_gate_reason": detail,
-            "phase1_rounds": 0,
-            "phase1_mode": "ensemble",
-            "phase1_providers": list(available_execs),
-        }
-
-    return plan_ensemble_mod.run_phase1_ensemble_planning(
-        args=args,
-        user_prompt=user_prompt,
-        available_roles=available_roles,
+    return control_plane_mod.run_phase1_ensemble_planning(
+        args,
+        user_prompt,
+        available_roles,
         selected_roles=selected_roles,
         role_preset=role_preset,
-        normalize_task_plan_payload=normalize_task_plan_payload,
-        parse_json_object_from_text=parse_json_object_from_text,
-        run_provider_execs=available_execs,
-        plan_roles_from_subtasks=plan_roles_from_subtasks,
+        request_contract=request_contract,
         report_progress=report_progress,
+        run_codex_exec_fn=lambda _args, prompt, timeout_sec: run_codex_exec(_args, prompt, timeout_sec=timeout_sec),
+        run_claude_exec_fn=lambda _args, prompt, timeout_sec: run_claude_exec(_args, prompt, timeout_sec=timeout_sec),
+        parse_json_object_from_text_fn=parse_json_object_from_text,
+        normalize_task_plan_payload_fn=normalize_task_plan_payload,
+        plan_roles_from_subtasks_fn=plan_roles_from_subtasks,
+        default_plan_critic_payload_fn=default_plan_critic_payload,
+        run_phase1_ensemble_planning_fn=plan_ensemble_mod.run_phase1_ensemble_planning,
+        which=shutil.which,
     )
 
 
@@ -2132,7 +1651,7 @@ def run_orchestrator_direct(args: argparse.Namespace, user_prompt: str, reply_la
         reply_lang=reply_lang,
         default_reply_lang=DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=normalize_chat_lang_token,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
     )
 
 def synthesize_orchestrator_response(
@@ -2148,7 +1667,7 @@ def synthesize_orchestrator_response(
         reply_lang=reply_lang,
         default_reply_lang=DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=normalize_chat_lang_token,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
     )
 
 
@@ -2172,7 +1691,7 @@ def critique_task_execution_result(
         default_reply_lang=DEFAULT_REPLY_LANG,
         normalize_chat_lang_token=normalize_chat_lang_token,
         mask_sensitive_text=mask_sensitive_text,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
         parse_json_object_from_text=parse_json_object_from_text,
         normalize_exec_critic_payload=normalize_exec_critic_payload,
         now_iso=now_iso,
@@ -2196,7 +1715,7 @@ def extract_followup_todo_proposals(
         default_orch_command_timeout_sec=DEFAULT_ORCH_COMMAND_TIMEOUT_SEC,
         normalize_chat_lang_token=normalize_chat_lang_token,
         mask_sensitive_text=mask_sensitive_text,
-        run_codex_exec=run_codex_exec,
+        run_control_exec=run_control_plane_exec,
         parse_json_object_from_text=parse_json_object_from_text,
     )
 
@@ -2407,79 +1926,34 @@ def run_aoe_orch(
     no_wait_override: Optional[bool] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    selection = tf_backend_selection_mod.resolve_effective_tf_backend(Path(str(args.team_dir)))
-    backend_name = normalize_tf_backend_name(selection.get("effective_backend"), default=DEFAULT_TF_BACKEND)
-    adapter = (
-        tf_backend_autogen_mod.autogen_core_backend()
-        if backend_name == AUTOGEN_CORE_TF_BACKEND
-        else tf_backend_local_mod.local_backend()
-    )
-    available, availability_reason = availability_tuple(adapter.availability())
-    if not available:
-        config_path = str(selection.get("config_path", "") or "").strip()
-        config_hint = f" config={config_path}" if config_path else ""
-        raise RuntimeError(
-            f"tf backend unavailable: backend={backend_name}"
-            f" reason={availability_reason or 'unavailable'}"
-            f" selection={selection.get('selection_reason', 'default_local')}{config_hint}"
-        )
-
-    request_metadata = {
-        "backend": backend_name,
-        "selection_reason": str(selection.get("selection_reason", "") or ""),
-        "profile": str(selection.get("profile", "") or ""),
-        "sandbox_only": bool(selection.get("sandbox_only", True)),
-        "config_path": str(selection.get("config_path", "") or ""),
-    }
-    if isinstance(metadata, dict):
-        for key, value in metadata.items():
-            if not isinstance(key, str):
-                continue
-            request_metadata[str(key).strip()] = value
-
-    request = build_tf_backend_request(
-        args=args,
-        prompt=prompt,
-        chat_id=chat_id,
+    return gateway_runtime_ops_mod.run_aoe_orch(
+        args,
+        prompt,
+        chat_id,
         roles_override=roles_override,
         priority_override=priority_override,
         timeout_override=timeout_override,
         no_wait_override=no_wait_override,
-        metadata=request_metadata,
-    )
-    deps = build_tf_backend_deps(
+        metadata=metadata,
+        path_cls=Path,
+        resolve_effective_tf_backend=tf_backend_selection_mod.resolve_effective_tf_backend,
+        normalize_tf_backend_name=normalize_tf_backend_name,
+        default_tf_backend=DEFAULT_TF_BACKEND,
+        autogen_core_tf_backend=AUTOGEN_CORE_TF_BACKEND,
+        autogen_core_backend=tf_backend_autogen_mod.autogen_core_backend,
+        local_backend=tf_backend_local_mod.local_backend,
+        availability_tuple=availability_tuple,
+        build_tf_backend_request=build_tf_backend_request,
+        build_tf_backend_deps=build_tf_backend_deps,
         default_tf_exec_mode=DEFAULT_TF_EXEC_MODE,
         default_tf_work_root_name=DEFAULT_TF_WORK_ROOT_NAME,
         default_tf_exec_map_file=DEFAULT_TF_EXEC_MAP_FILE,
         default_tf_worker_startup_grace_sec=DEFAULT_TF_WORKER_STARTUP_GRACE_SEC,
         now_iso=now_iso,
         run_command=run_command,
+        mirror_tf_backend_runtime_events=mirror_tf_backend_runtime_events,
     )
-    result = adapter.run(request, deps)
-    if not isinstance(result, dict):
-        result = {"result": result}
-    result = dict(result)
-    result["backend"] = backend_name
-    result["backend_profile"] = str(selection.get("profile", "") or "")
-    result["backend_selection_reason"] = str(selection.get("selection_reason", "") or "")
-    result["backend_config_path"] = str(selection.get("config_path", "") or "")
-    result["backend_availability_reason"] = str(availability_reason or "")
 
-    runtime_events = result.get("runtime_events")
-    if not isinstance(runtime_events, list):
-        runtime_events = result.get("events")
-    if isinstance(runtime_events, list) and runtime_events:
-        mirror_tf_backend_runtime_events(
-            team_dir=Path(str(args.team_dir)),
-            backend=backend_name,
-            runtime_events=runtime_events,
-            trace_id=str(getattr(args, "_aoe_trace_id", "") or ""),
-            project=str(getattr(args, "_aoe_project_key", "") or ""),
-            request_id=str(result.get("request_id", "") or ""),
-            task=result.get("task") if isinstance(result.get("task"), dict) else None,
-            mirror_team_dir=Path(str(getattr(args, "_aoe_root_team_dir", args.team_dir))),
-        )
-    return result
 
 
 def run_aoe_add_role(
@@ -2489,67 +1963,15 @@ def run_aoe_add_role(
     launch: Optional[str],
     spawn: bool,
 ) -> str:
-    cmd: List[str] = [
-        args.aoe_orch_bin,
-        "add-role",
-        "--project-root",
-        str(args.project_root),
-        "--team-dir",
-        str(args.team_dir),
-        "--role",
+    return gateway_runtime_ops_mod.run_aoe_add_role(
+        args,
         role,
-        "--json",
-    ]
+        provider,
+        launch,
+        spawn,
+        run_command=run_command,
+    )
 
-    if provider:
-        cmd.extend(["--provider", provider])
-    if launch:
-        cmd.extend(["--launch", launch])
-    if spawn:
-        cmd.append("--spawn")
-    else:
-        cmd.append("--no-spawn")
-
-    proc = run_command(cmd, env=None, timeout_sec=60)
-    payload = (proc.stdout or proc.stderr or "").strip()
-    if proc.returncode != 0:
-        raise RuntimeError(f"aoe-orch add-role failed: {payload[:1200]}")
-
-    try:
-        data = json.loads(payload)
-    except Exception:
-        return payload or f"[OK] role added: {role}"
-
-    if not isinstance(data, dict):
-        return payload or f"[OK] role added: {role}"
-
-    r = str(data.get("role", role))
-    sess = str(data.get("session", ""))
-    prov = str(data.get("provider", provider or "codex"))
-    launch_used = str(data.get("launch", launch or ""))
-    exists = bool(data.get("exists", False))
-    updated = bool(data.get("updated", False))
-
-    lines = [f"role ready: {r}", f"provider: {prov}"]
-    if launch_used:
-        lines.append(f"launch: {launch_used}")
-    if sess:
-        lines.append(f"session: {sess}")
-    lines.append(f"exists_before: {'yes' if exists else 'no'}")
-    lines.append(f"updated: {'yes' if updated else 'no'}")
-
-    spawn_info = data.get("spawn_info") or {}
-    spawned = spawn_info.get("spawned") or []
-    existing_rows = spawn_info.get("existing") or []
-    failed = spawn_info.get("failed") or []
-    if spawned:
-        lines.append(f"spawned: {len(spawned)}")
-    if existing_rows:
-        lines.append(f"already_running: {len(existing_rows)}")
-    if failed:
-        lines.append(f"spawn_failed: {len(failed)}")
-
-    return "\n".join(lines)
 
 
 def run_aoe_status(args: argparse.Namespace) -> str:
@@ -2668,246 +2090,13 @@ def summarize_request_state(state: Dict[str, Any], task: Optional[Dict[str, Any]
 
 
 def help_text(ui_lang: str = DEFAULT_UI_LANG) -> str:
-    p = preferred_command_prefix()
-    text = (
-        "AOE Telegram Gateway commands\n"
-        f"command prefix: {p}  (env: AOE_TG_COMMAND_PREFIXES; supports '/' and/or '!')\n"
-        f"tip: unique abbreviations are accepted (ex: {p}st -> {p}status, {p}cle -> {p}clear)\n"
-        "\n"
-        "routine (copy/paste examples)\n"
-        f"- {p}tutorial                  # quickstart guide\n"
-        f"- {p}map                       # project map (O1..)\n"
-        f"- {p}use O2                    # switch active project (soft focus)\n"
-        f"- {p}focus O2                  # hard lock to one project\n"
-        f"- {p}sync all 1h               # seed queue from scenario files; falls back to project todo docs if scenario is empty\n"
-        f"- {p}sync                      # repeat last {p}sync args (chat-local)\n"
-        f"- {p}queue                     # global todo queue\n"
-        f"- {p}queue followup            # projects with manual follow-up backlog only\n"
-        f"- {p}fanout                    # one todo per project wave\n"
-        f"- {p}offdesk on                # after-work preset (auto fanout recent)\n"
-        f"- {p}auto status               # scheduler status\n"
-        f"- {p}panic                     # emergency stop (auto/offdesk off)\n"
-        f"- {p}clear pending             # clear pending/confirm\n"
-        f"- {p}room tail 20               # latest room events\n"
-        "\n"
-        "Quick mode (prefix-only default)\n"
-        "- /status /check /task /monitor /kpi /map /help /tutorial\n"
-        "- /queue  (global todo queue view)\n"
-        "- /queue followup  (projects with manual_followup backlog only)\n"
-        "- /sync [O#|name|all] [since 3h|1h]  (import <project_root>/.aoe-team/AOE_TODO.md into queue; if empty, fallback to todo-ish files/recent docs; empty args repeats last /sync)\n"
-        "- /sync preview [replace] [O#|name|all] [since 3h|1h]  (show source files, source classes/confidence, and would-add/update/done/prune counts without changing queue; plain /sync fallback now bootstraps from recent md docs + salvage + todo files)\n"
-        "- /sync bootstrap [O#|name|all] [since 24h]  (explicit bootstrap path: prefer recent docs + salvage when canonical backlog is missing, stale, or untrusted)\n"
-        "- /sync recent [O#|name|all] [N] [since 3h]  (scan N recent todo-ish docs; default N=3)\n"
-        "- /sync salvage [O#|name|all] [N] [since 3h]  (broader recent-doc salvage: recovers 'next steps/남은 일/follow-up' sections; loose follow-ups go to /todo proposals)\n"
-        "- /sync files [O#|name|all] [N] [since 3h]  (scan todo-ish files by filename; default N=80)\n"
-        "- /sync replace [O#|name]  (full-scope sync + cancel stale sync-managed open todos that no longer appear in source)\n"
-        "- optional override: <project>/.aoe-team/sync_policy.json  (path globs / confidence / group tuning)\n"
-        "- /next   (global todo scheduler)\n"
-        "- /fanout (one todo per project wave)\n"
-        "- /drain  (repeat /next N times)\n"
-        "- /auto   (background /next loop via tmux scheduler; stops on confirm/stuck/too-many-failures)\n"
-        "- /auto on fanout recent since 12h maxfail=3  (idle prefetch: /sync files all since 12h + /sync salvage all since 12h)\n"
-        "- /auto on fanout recent replace-sync  (idle prefetch: /sync replace all quiet; full-scope, since ignored)\n"
-        "- /offdesk [on|off|status|prepare|review]  (preset: report short + routing off + auto fanout recent; prepare = preflight, review = flagged-project drill-down)\n"
-        "- /offdesk on replace-sync  (same preset, but idle prefetch uses /sync replace all quiet)\n"
-        "- /panic  (emergency stop: auto/offdesk off + clear pending/confirm + routing off)\n"
-        "- /clear  (clear pending/routing/room/queue; safe defaults)\n"
-        "- /todo   (project backlog)\n"
-        "- /todo proposals   (TF follow-up proposal inbox)\n"
-        "- /todo followup   (manual follow-up backlog only)\n"
-        "- /todo add [P1|P2|P3] <summary>\n"
-        "- /todo accept <PROP-xxx|number>   (promote proposal into main todo queue)\n"
-        "- /todo reject <PROP-xxx|number> [reason]   (discard proposal)\n"
-        "- /todo ack <TODO-xxx|number>   (reopen blocked todo after manual review)\n"
-        "- /todo ackrun <TODO-xxx|number>   (reopen blocked todo and dispatch it now)\n"
-        "- /todo syncback [preview]   (write runtime done/blocked notes/new accepted items back to canonical TODO.md)\n"
-        "- /todo done <TODO-xxx|number>\n"
-        "- /todo next   (run next open todo)\n"
-        "- /room   (ephemeral board: /room post|tail|list|use)\n"
-        "- /gc     (cleanup room logs + tf exec cache)\n"
-        "- /tf     (proof checks, local; writes report under docs/investigations_mo; ex: /tf mod2-proof tags | /tf mod2-proof latest)\n"
-        "- /use <O1|name> (active orch switch; soft focus)\n"
-        "- /focus [O1|name|off] (hard project lock / unlock)\n"
-        "- /orch pause <O#|name> [reason]\n"
-        "- /orch resume <O#|name>\n"
-        "- /orch hide <O#|name> [reason]\n"
-        "- /orch unhide <O#|name>\n"
-        "- /mode [on|off|direct]\n"
-        "- /on /off\n"
-        "- /lang [ko|en]\n"
-        "- /report [short|normal|long|off]\n"
-        "- /replay [list|latest|<idx>|<id>|show <idx|id|latest>|purge]\n"
-        "- /ok (고위험 자동실행 확인)\n"
-        "- /whoami /lockme /onlyme\n"
-        "- /acl /grant /revoke\n"
-        "- /pick [번호|task_label]   (빈칸이면 최근 목록)\n"
-        "- /dispatch <요청>   (서브에이전트 배정)\n"
-        "- /direct <질문>     (오케스트레이터 직접 답변)\n"
-        "- /dispatch 또는 /direct만 입력하면 다음 메시지 1회 모드\n"
-        "- /cancel (대기 모드 해제)\n"
-        "\n"
-        "Slash mode\n"
-        "- /help\n"
-        "- /status\n"
-        "- /mode [on|off|direct|dispatch]\n"
-        "- /lang [ko|en]\n"
-        "- /report [short|normal|long|off]\n"
-        "- /on /off\n"
-        "- /replay [list|latest|<idx>|<id>|show <idx|id|latest>|purge]\n"
-        "- /ok\n"
-        "- /onlyme   # 1:1 owner-only claim (lock + owner_only)\n"
-        "- /acl\n"
-        "- /grant <allow|admin|readonly> <chat_id|alias>\n"
-        "- /revoke <allow|admin|readonly|all> <chat_id|alias>\n"
-        "- /kpi [hours]\n"
-        "- /map\n"
-        "- /use <O1|name>          # active project switch (soft focus)\n"
-        "- /focus [O1|name|off]    # hard lock one project / unlock\n"
-        "- 단일 프로젝트 권장 흐름: /map -> /use O# -> /focus O# -> 평문 또는 /sync O# -> /next\n"
-        "- /use 후에는 평문/TF가 해당 프로젝트를 기본 타겟으로 사용\n"
-        "- /focus 후에는 /queue, /next, /sync all, /offdesk가 해당 프로젝트에 맞게 축소되고 /fanout은 차단됨\n"
-        "- /queue\n"
-        "- /sync [all|O#|name]\n"
-        "- /sync preview [replace] [all|O#|name] [since 3h|1h]\n"
-        "- /sync recent [O#|name|all] [N]\n"
-        "- /sync salvage [O#|name|all] [N]\n"
-        "- /sync files [O#|name|all] [N]\n"
-        "- /sync replace [O#|name]\n"
-        "- optional: <project>/.aoe-team/sync_policy.json\n"
-        "- /next                   # active project 우선 단일 실행\n"
-        "- /fanout [N] [force]     # global wave, 프로젝트별 1개씩\n"
-        "- /drain [N] [force]\n"
-        "- /auto [on|off|status [short|long]]\n"
-        "- /auto on fanout recent since 12h maxfail=3\n"
-        "- /auto on fanout recent replace-sync\n"
-        "- /offdesk [on|off|status [short|long]|prepare|review]\n"
-        "- /offdesk on replace-sync\n"
-        "- /panic [status]\n"
-        "- /clear [pending|routing|room|queue]\n"
-        "- /todo\n"
-        "- /todo proposals\n"
-        "- /todo add [P1|P2|P3] <summary>\n"
-        "- /todo accept <PROP-xxx|number>\n"
-        "- /todo reject <PROP-xxx|number> [reason]\n"
-        "- /todo ack <TODO-xxx|number>\n"
-        "- /todo ackrun <TODO-xxx|number>\n"
-        "- /todo syncback [preview]\n"
-        "- /todo done <TODO-xxx|number>\n"
-        "- /todo next\n"
-        "- /tf [list|<recipe> [tag]]\n"
-        "- /room [list|use|post|tail]\n"
-        "- /gc [force]\n"
-        "- /orch pause <O#|name> [reason]\n"
-        "- /orch resume <O#|name>\n"
-        "- /orch hide <O#|name> [reason]\n"
-        "- /orch unhide <O#|name>\n"
-        "- /orch repair [all|O#|name]\n"
-        "- /pick [number|request_or_alias]  # empty shows recent menu\n"
-        "- /cancel [request_or_alias]\n"
-        "- /retry <request_or_alias> [lane <L#|R#,...>]\n"
-        "- /replan <request_or_alias> [lane <L#|R#,...>]\n"
-        "- /followup <request_or_alias> [lane <L#|R#,...>]\n"
-        "- /request <request_or_alias>\n"
-        "- /run <prompt>\n"
-        "- /add-role <Role|--name Name> [--provider <name>] [--launch <cmd>] [--spawn|--no-spawn]\n"
-        "- /add-claude <Role|--name Name> [--launch <cmd>] [--spawn|--no-spawn]\n"
-        "- /add-codex <Role|--name Name> [--launch <cmd>] [--spawn|--no-spawn]\n"
-        "\n"
-        "CLI mode\n"
-        "- aoe status\n"
-        "- aoe mode [on|off|direct|dispatch]\n"
-        "- aoe lang [ko|en]\n"
-        "- aoe report [short|normal|long|off]\n"
-        "- aoe on | aoe off\n"
-        "- aoe replay [list|latest|<idx>|<id>|show <idx|id|latest>|purge]\n"
-        "- aoe ok\n"
-        "- aoe acl\n"
-        "- aoe grant <allow|admin|readonly> <chat_id|alias>\n"
-        "- aoe revoke <allow|admin|readonly|all> <chat_id|alias>\n"
-        "- aoe kpi [hours]\n"
-        "- aoe map\n"
-        "- aoe orch use <name>     # set active project (soft focus)\n"
-        "- aoe focus [O#|name|off]\n"
-        "- aoe unlock\n"
-        "- aoe queue\n"
-        "- aoe drain [N] [force]\n"
-        "- aoe fanout [N] [force]  # global wave\n"
-        "- aoe auto [on|off|status]\n"
-        "- aoe offdesk [on|off|status]\n"
-        "- aoe panic [status]\n"
-        "- aoe monitor [limit]\n"
-        "- aoe next                # active project 우선 단일 실행\n"
-        "- aoe todo [add|done|next] ...\n"
-        "- aoe room [list|use|post|tail] ...\n"
-        "- aoe gc [force]\n"
-        "- aoe pick <number|request_or_alias>\n"
-        "- aoe cancel [request_or_alias]\n"
-        "- aoe retry <request_or_alias> [lane <L#|R#,...>]\n"
-        "- aoe replan <request_or_alias> [lane <L#|R#,...>]\n"
-        "- aoe followup <request_or_alias> [lane <L#|R#,...>]\n"
-        "- aoe request <request_or_alias>\n"
-        "- aoe run [--direct|--dispatch] [--roles <csv>] [--priority P1|P2|P3] [--timeout-sec N] [--no-wait] <prompt>\n"
-        "- aoe add-role <Role|--name Name> [--provider <name>] [--launch <cmd>] [--spawn|--no-spawn]\n"
-        "- aoe add-claude <Role|--name Name> [--launch <cmd>] [--spawn|--no-spawn]\n"
-        "- aoe add-codex <Role|--name Name> [--launch <cmd>] [--spawn|--no-spawn]\n"
-        "\n"
-        "Orch Manager\n"
-        "- aoe orch list (or: aoe orch map)\n"
-        "- aoe orch use <name>\n"
-        "- aoe orch add <name> --path <project_root> [--overview <text>] [--init|--no-init] [--spawn|--no-spawn]\n"
-        "- aoe orch repair [all|--orch <name>]\n"
-        "- aoe orch pause <name> [reason]\n"
-        "- aoe orch resume <name>\n"
-        "- aoe orch hide <name> [reason]\n"
-        "- aoe orch unhide <name>\n"
-        "- aoe orch status [--orch <name>]\n"
-        "- aoe orch kpi [--orch <name>] [--hours <n>]\n"
-        "- aoe orch monitor [--orch <name>] [--limit <n>]\n"
-        "- aoe orch run [--orch <name>] [--direct|--dispatch] [--roles <csv>] [--priority P1|P2|P3] [--timeout-sec N] [--no-wait] <prompt>\n"
-        "- aoe orch check [--orch <name>] [<request_or_alias>]   # 3단계 진행확인\n"
-        "- aoe orch task [--orch <name>] [<request_or_alias>]    # lifecycle 상태\n"
-        "- aoe orch pick [--orch <name>] <number|request_or_alias>\n"
-        "- aoe orch cancel [--orch <name>] [<request_or_alias>]\n"
-        "- aoe orch retry [--orch <name>] <request_or_alias>\n"
-        "- aoe orch replan [--orch <name>] <request_or_alias>\n"
-        "\n"
-        "Routing\n"
-        "- default: prefix-only (plain text ignored unless pending/default mode)\n"
-        "- soft focus: /use <O#|name> sets the default project used by plain text and TF commands\n"
-        "- hard lock: /focus <O#|name> narrows /queue, /next, /sync all, /offdesk to one project and blocks /fanout\n"
-        "- unlock: /focus off (or /unlock)\n"
-        "- default access: deny-by-default (allowlist required)\n"
-        "- bootstrap: when allowlist is empty, only /lockme|/whoami|/help is accepted\n"
-        "- owner-only: /onlyme locks to current chat and enables private-DM owner gate\n"
-        "- owner gate: /lockme /grant /revoke are owner-only when TELEGRAM_OWNER_CHAT_ID is set\n"
-        "- dispatch only when explicit (--dispatch or --roles)\n"
-        "- auto dispatch: disabled by default (enable with --auto-dispatch)\n"
-        "- force dispatch: --dispatch\n"
-        "- force direct: --direct\n"
-        "- slash-only default: enabled (disable with --no-slash-only)\n"
-        "- verifier gate: on by default (disable with --no-require-verifier)\n"
-        "- task planning: on by default (disable with --no-task-planning)\n"
-        "- planning gate: auto-replan + block on critic issues by default\n"
+    return gateway_text_mod.help_text(
+        ui_lang,
+        default_ui_lang=DEFAULT_UI_LANG,
+        preferred_command_prefix=preferred_command_prefix,
+        normalize_chat_lang_token=normalize_chat_lang_token,
     )
-    if p != "/":
-        # Replace "/cmd" tokens while avoiding URL-like `http://...`.
-        import re as _re
 
-        text = _re.sub(r"(?<!:)/(\\w)", f"{p}\\1", text)
-
-    lang = normalize_chat_lang_token(ui_lang, DEFAULT_UI_LANG) or DEFAULT_UI_LANG
-    if lang != "en":
-        return text
-    return (
-        text
-        .replace("고위험 자동실행 확인", "confirm high-risk auto execution")
-        .replace("서브에이전트 배정", "sub-agent assignment")
-        .replace("오케스트레이터 직접 답변", "orchestrator direct reply")
-        .replace("다음 메시지 1회 모드", "one-shot next-message mode")
-        .replace("대기 모드 해제", "clear pending mode")
-        .replace("3단계 진행확인", "3-stage progress")
-        .replace("lifecycle 상태", "lifecycle status")
-    )
 
 
 def is_bootstrap_allowed_command(text: str) -> bool:

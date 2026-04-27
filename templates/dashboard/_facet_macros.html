@@ -1,0 +1,57 @@
+{% macro audit_focus_facet_row(values, counts, selected, project_filter, chat_filter, query_filter, limit) -%}
+  <p class="muted">
+    filter:
+    {% for value in values %}
+      {% set count = counts.get(value, 0) %}
+      {% if selected == value %}
+      <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+      {% else %}
+      <a class="action-history-badge" href="/control/audit?focus={{ value }}{% if project_filter %}&project={{ project_filter|urlencode }}{% endif %}{% if chat_filter %}&chat={{ chat_filter }}{% endif %}{% if query_filter %}&q={{ query_filter|urlencode }}{% endif %}{% if limit %}&limit={{ limit }}{% endif %}">{{ value }}={{ count }}</a>
+      {% endif %}
+    {% endfor %}
+  </p>
+{%- endmacro %}
+
+{% macro audit_ordered_query_facet_row(title, values, counts, selected, query_base, query_prefix, focus_filter, project_filter, chat_filter, limit, clear_label) -%}
+  {% if counts %}
+  <p class="muted">
+    {{ title }}:
+    {% for value in values %}
+      {% set count = counts.get(value, 0) %}
+      {% if count %}
+        {% set facet_query = (query_prefix ~ ':' ~ value) if not query_base else (query_base ~ ' ' ~ query_prefix ~ ':' ~ value) %}
+        {% if selected == value %}
+        <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+        {% else %}
+        <a class="action-history-badge" href="/control/audit?focus={{ focus_filter }}{% if project_filter %}&project={{ project_filter|urlencode }}{% endif %}{% if chat_filter %}&chat={{ chat_filter }}{% endif %}{% if facet_query %}&q={{ facet_query|urlencode }}{% endif %}{% if limit %}&limit={{ limit }}{% endif %}">{{ value }}={{ count }}</a>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if selected %}
+    <a class="action-history-badge" href="/control/audit?focus={{ focus_filter }}{% if project_filter %}&project={{ project_filter|urlencode }}{% endif %}{% if chat_filter %}&chat={{ chat_filter }}{% endif %}{% if query_base %}&q={{ query_base|urlencode }}{% endif %}{% if limit %}&limit={{ limit }}{% endif %}">{{ clear_label }}</a>
+    {% endif %}
+  </p>
+  {% endif %}
+{%- endmacro %}
+
+{% macro history_ordered_query_facet_row(title, values, counts, selected, query_base, query_prefix, chat_filter, project_filter, since_label, scope, limit, clear_label, compact_mode=false) -%}
+  {% if counts %}
+  <p class="muted">
+    {{ title }}:
+    {% for value in values %}
+      {% set count = counts.get(value, 0) %}
+      {% if count %}
+        {% set facet_query = (query_prefix ~ ':' ~ value) if not query_base else (query_base ~ ' ' ~ query_prefix ~ ':' ~ value) %}
+        {% if selected == value %}
+        <span class="action-history-badge active-focus">{{ value }}={{ count }}</span>
+        {% else %}
+        <a class="action-history-badge" href="/control/history?{% if facet_query %}q={{ facet_query|urlencode }}&{% endif %}{% if chat_filter %}chat={{ chat_filter|urlencode }}&{% endif %}{% if project_filter %}project={{ project_filter|urlencode }}&{% endif %}{% if since_label %}since={{ since_label|urlencode }}&{% endif %}scope={{ scope }}{% if compact_mode %}&compact=1{% endif %}{% if limit %}&limit={{ limit }}{% endif %}">{{ value }}={{ count }}</a>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if selected %}
+    <a class="action-history-badge" href="/control/history?{% if query_base %}q={{ query_base|urlencode }}&{% endif %}{% if chat_filter %}chat={{ chat_filter|urlencode }}&{% endif %}{% if project_filter %}project={{ project_filter|urlencode }}&{% endif %}{% if since_label %}since={{ since_label|urlencode }}&{% endif %}scope={{ scope }}{% if compact_mode %}&compact=1{% endif %}{% if limit %}&limit={{ limit }}{% endif %}">{{ clear_label }}</a>
+    {% endif %}
+  </p>
+  {% endif %}
+{%- endmacro %}

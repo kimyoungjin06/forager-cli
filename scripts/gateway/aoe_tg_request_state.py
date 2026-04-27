@@ -196,7 +196,7 @@ def summarize_cancel_result(
     failed = result.get("failed") or []
     skipped = result.get("skipped") or []
     lines = [
-        f"orch: {project_name}",
+        f"runtime: {project_name}",
         f"task: {label}",
         f"request_id: {request_id}",
         f"cancel: targets={targets} canceled={len(canceled)} failed={len(failed)} skipped={len(skipped)}",

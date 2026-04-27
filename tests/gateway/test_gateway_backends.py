@@ -1252,6 +1252,7 @@ def test_local_run_aoe_orch_stages_review_lanes_after_execution(monkeypatch, tmp
     assert result["phase2_review_triggered"] is True
     assert result["phase2_request_ids"] == {"execution": "REQ-EXEC", "review": "REQ-REVIEW"}
     assert result["linked_request_ids"] == ["REQ-EXEC", "REQ-REVIEW"]
+    assert result["tool_count"] == 2
     assert len(result["replies"]) == 2
     assert {row["role"] for row in result["role_states"]} == {"Codex-Dev", "Codex-Reviewer"}
     assert result["tf_workers"]["execution"]["sessions"][0]["execution_lane_ids"] == ["L1"]
@@ -1349,6 +1350,7 @@ def test_local_run_aoe_orch_fanouts_parallel_execution_and_review_lanes(monkeypa
             },
         },
     )
+    assert result["tool_count"] == 4
 
     execution_ids = result["phase2_request_ids"]["execution"]
     review_ids = result["phase2_request_ids"]["review"]

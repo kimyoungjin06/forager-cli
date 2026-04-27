@@ -8,6 +8,94 @@ from typing import Any, Dict, List, Optional
 from aoe_tg_orch_contract import normalize_tf_phase
 
 
+def _background_scheduler_head_fragment(
+    summary: str,
+    *,
+    preferred_runner: str = "",
+    queue_targets: Optional[Dict[str, int]] = None,
+) -> str:
+    safe_summary = str(summary or "").strip()
+    if not safe_summary or safe_summary == "-":
+        return ""
+    parts = [str(part).strip() for part in safe_summary.split(" | ") if str(part).strip()]
+    if not parts:
+        return ""
+    candidates: List[str] = []
+    safe_runner = str(preferred_runner or "").strip().lower()
+    if safe_runner:
+        candidates.append(safe_runner)
+    if isinstance(queue_targets, dict):
+        candidates.extend(
+            str(key).strip().lower()
+            for key, value in sorted(queue_targets.items())
+            if str(key).strip() and int(value or 0) > 0
+        )
+    seen: set[str] = set()
+    for runner in candidates:
+        if not runner or runner in seen:
+            continue
+        seen.add(runner)
+        prefix = runner + ":"
+        for part in parts:
+            if part.lower().startswith(prefix):
+                return part
+    return parts[0]
+
+
+def external_background_priority_action_snapshot(
+    *,
+    alias: str,
+    task_label: str = "",
+    background_run_runner_target: str = "",
+    background_run_external_phase: str = "",
+    background_run_external_note: str = "",
+    run_lock_mode: str = "",
+) -> Dict[str, str]:
+    project_alias = str(alias or "").strip()
+    runner = str(background_run_runner_target or "").strip().lower()
+    phase = str(background_run_external_phase or "").strip().lower()
+    note = str(background_run_external_note or "").strip()
+    label = str(task_label or "").strip()
+    lock_mode = str(run_lock_mode or "").strip().lower()
+
+    if runner not in {"github_runner", "remote_worker"}:
+        return {"action": "", "reason": ""}
+    if phase == "result_received":
+        return {
+            "action": f"/offdesk review {project_alias}" if project_alias else (f"/task {label}" if label else ""),
+            "reason": note or f"{runner} result received; inspect task state and decide the next operator action",
+        }
+    if phase == "pickup_acknowledged" and lock_mode == "test_only":
+        return {
+            "action": f"/orch bgx-emit-result {project_alias} completed" if project_alias else "",
+            "reason": note or f"{runner} pickup was acknowledged; emit a bounded test-only result sidecar to finish the rehearsal",
+        }
+    if phase in {"handoff_emitted", "awaiting_external_pickup"} and lock_mode == "test_only":
+        return {
+            "action": f"/orch bgx-emit-ack {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} handoff is ready; emit a bounded test-only pickup acknowledgement",
+        }
+    if phase == "pickup_acknowledged":
+        return {
+            "action": f"/orch bgx-status {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} picked up the background run; await result sidecar",
+        }
+    if phase == "handoff_emitted":
+        return {
+            "action": f"/orch bgx-status {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} handoff emitted; awaiting pickup acknowledgement",
+        }
+    if phase == "awaiting_external_pickup":
+        return {
+            "action": f"/orch bgx-status {project_alias}" if project_alias else "",
+            "reason": note or f"{runner} launch handed off; waiting for external pickup",
+        }
+    return {
+        "action": f"/orch status {project_alias}" if project_alias and (phase or note) else "",
+        "reason": note or (f"{runner} external background lifecycle requires operator status review" if runner and (phase or note) else ""),
+    }
+
+
 def task_lane_target_snapshot(task: Dict[str, Any]) -> Dict[str, List[str]]:
     exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
     return {
@@ -100,6 +188,9 @@ def offdesk_priority_action_snapshot(
     alias: str,
     active_task_label: str,
     active_task_tf_phase: str,
+    active_task_execution_brief_status: str = "",
+    active_task_execution_brief_blocked_slice: Optional[List[str]] = None,
+    active_task_execution_brief_operator_decision: str = "",
     active_task_targets: Optional[Dict[str, List[str]]] = None,
     active_task_rate_limit: Optional[Dict[str, Any]] = None,
     syncback_pending: bool,
@@ -114,7 +205,77 @@ def offdesk_priority_action_snapshot(
     canonical_exists: bool,
     include_ok: bool,
     last_sync_mode: str,
+    background_queue_depth: int = 0,
+    background_queue_stale_count: int = 0,
+    background_queue_runner_targets: Optional[Dict[str, int]] = None,
+    background_scheduler_summary: str = "",
+    background_worker_status: str = "",
+    background_worker_summary: str = "",
+    run_lock_mode: str = "",
+    run_lock_note: str = "",
+    background_slot_runner_target: str = "",
+    background_slot_limit: int = 1,
+    background_slot_active: int = 0,
+    active_task_background_run_status: str = "",
+    active_task_background_run_runner_target: str = "",
+    active_task_background_run_external_phase: str = "",
+    active_task_background_run_external_note: str = "",
 ) -> Dict[str, str]:
+    brief_status = str(active_task_execution_brief_status or "").strip().lower()
+    brief_blocked = [str(x).strip() for x in (active_task_execution_brief_blocked_slice or []) if str(x).strip()]
+    brief_decision = str(active_task_execution_brief_operator_decision or "").strip()
+    background_status = str(active_task_background_run_status or "").strip().lower()
+    background_runner = str(active_task_background_run_runner_target or "").strip().lower()
+    background_external_phase = str(active_task_background_run_external_phase or "").strip().lower()
+    background_external_note = str(active_task_background_run_external_note or "").strip()
+    worker_status = str(background_worker_status or "").strip().lower()
+    worker_summary = str(background_worker_summary or "").strip()
+    lock_mode = str(run_lock_mode or "").strip().lower()
+    lock_note = str(run_lock_note or "").strip()
+    slot_runner = str(background_slot_runner_target or "").strip().lower()
+    slot_limit = max(1, int(background_slot_limit or 1))
+    slot_active = max(0, int(background_slot_active or 0))
+    slot_saturated = slot_runner in {"local_tmux", "github_runner", "remote_worker"} and slot_active >= slot_limit
+    queue_targets = background_queue_runner_targets if isinstance(background_queue_runner_targets, dict) else {}
+    local_background_queue_depth = max(0, int(queue_targets.get("local_background", 0) or 0))
+    scheduler_head = _background_scheduler_head_fragment(
+        background_scheduler_summary,
+        preferred_runner=slot_runner,
+        queue_targets=queue_targets,
+    )
+    if brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
+        reason = brief_decision
+        if not reason and brief_blocked:
+            reason = f"execution brief blocked by {', '.join(brief_blocked[:4])}"
+        if not reason:
+            reason = f"execution brief is {brief_status}"
+        return {
+            "action": f"/offdesk review {alias}",
+            "reason": reason,
+        }
+    if background_runner in {"github_runner", "remote_worker"} and background_status in {"queued", "dispatching", "running"}:
+        external_priority = external_background_priority_action_snapshot(
+            alias=alias,
+            task_label=active_task_label,
+            background_run_runner_target=background_runner,
+            background_run_external_phase=background_external_phase,
+            background_run_external_note=background_external_note,
+            run_lock_mode=lock_mode,
+        )
+        if str(external_priority.get("action", "")).strip():
+            return external_priority
+    if worker_status in {"stale", "error"}:
+        reason = worker_summary or f"background worker is {worker_status}"
+        return {
+            "action": f"/orch bgw-status {alias}",
+            "reason": reason,
+        }
+    if int(background_queue_stale_count or 0) > 0:
+        return {
+            "action": f"/offdesk review {alias}",
+            "reason": f"background queue contains stale tickets ({int(background_queue_stale_count or 0)})",
+        }
+
     task_priority = task_priority_action_snapshot(
         label=active_task_label,
         tf_phase=active_task_tf_phase,
@@ -124,8 +285,66 @@ def offdesk_priority_action_snapshot(
         manual_followup_review_lane_ids=list((active_task_targets or {}).get("manual_followup_review_lane_ids") or []),
         rate_limit=active_task_rate_limit if isinstance(active_task_rate_limit, dict) else None,
     )
-    if str(task_priority.get("action", "")).strip():
+    task_action = str(task_priority.get("action", "")).strip()
+    task_requires_launch = task_action.startswith("/retry ")
+    if task_requires_launch and lock_mode == "test_only":
+        return {
+            "action": f"/orch status {alias}",
+            "reason": lock_note or "test_only run lock is active",
+        }
+    if task_requires_launch and slot_saturated:
+        reason = f"background runner slots are saturated ({slot_active}/{slot_limit})"
+        if slot_runner:
+            reason = f"background runner slots are saturated for {slot_runner} ({slot_active}/{slot_limit})"
+        if scheduler_head:
+            reason += f"; scheduler {scheduler_head}"
+        return {
+            "action": f"/orch status {alias}",
+            "reason": reason,
+        }
+    if task_action:
         return task_priority
+    if lock_mode == "test_only":
+        return {
+            "action": f"/orch status {alias}",
+            "reason": lock_note or "test_only run lock is active",
+        }
+    if slot_saturated:
+        reason = f"background runner slots are saturated ({slot_active}/{slot_limit})"
+        if slot_runner:
+            reason = f"background runner slots are saturated for {slot_runner} ({slot_active}/{slot_limit})"
+        if scheduler_head:
+            reason += f"; scheduler {scheduler_head}"
+        return {
+            "action": f"/orch status {alias}",
+            "reason": reason,
+        }
+    if int(background_queue_depth or 0) > 0:
+        target_summary = ",".join(
+            f"{str(key).strip()}={int(value or 0)}"
+            for key, value in sorted(queue_targets.items())
+            if str(key).strip() and int(value or 0) > 0
+        )
+        if local_background_queue_depth > 0 and worker_status in {"", "-", "stopped"}:
+            reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
+            if target_summary:
+                reason += f" ({target_summary})"
+            if scheduler_head:
+                reason += f"; scheduler {scheduler_head}"
+            reason += "; local background worker is stopped"
+            return {
+                "action": f"/orch bgw-start {alias}",
+                "reason": reason,
+            }
+        reason = f"background queue has {int(background_queue_depth or 0)} queued/running tickets"
+        if target_summary:
+            reason += f" ({target_summary})"
+        if scheduler_head:
+            reason += f"; scheduler {scheduler_head}"
+        return {
+            "action": f"/orch status {alias}",
+            "reason": reason,
+        }
     if syncback_pending:
         return {
             "action": f"/todo {alias} syncback preview",

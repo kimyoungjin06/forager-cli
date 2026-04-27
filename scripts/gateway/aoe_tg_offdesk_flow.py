@@ -12,6 +12,28 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aoe_tg_orch_contract import derive_tf_phase, normalize_tf_phase
+from aoe_tg_action_audit import (
+    load_latest_action_audit_for_runtime_kind,
+    load_latest_canonical_mutation_summary_for_runtime,
+    load_latest_canonical_writeback_summary_for_runtime,
+    load_latest_offdesk_judge_decision_summary_for_runtime,
+    load_latest_judge_decision_bridge_summary_for_runtime,
+    load_latest_manual_step_summary_for_runtime,
+    load_latest_replan_auto_routing_policy_for_runtime,
+    load_latest_replan_auto_decision_summary_for_runtime,
+    load_latest_replan_auto_route_status_summary_for_runtime,
+    load_latest_replan_auto_routing_policy_summary_for_runtime,
+)
+from aoe_tg_artifact_backend import artifact_backend
+from aoe_tg_executor_adapter import EXECUTOR_SLOT_RUNNER_TARGETS
+from aoe_tg_background_runs import (
+    background_runs_state_path,
+    summarize_background_runner_scheduling,
+    background_worker_state_path,
+    summarize_background_runs_state,
+    summarize_background_runner_slots,
+    summarize_background_worker_state,
+)
 from aoe_tg_ops_policy import list_ops_projects, summarize_ops_scope
 from aoe_tg_ops_view import (
     blocked_bucket_count,
@@ -21,7 +43,10 @@ from aoe_tg_ops_view import (
     render_project_snapshot_lines,
 )
 from aoe_tg_package_paths import team_tmux_script
+from aoe_tg_run_lock import project_run_lock_mode, project_run_lock_note
+from aoe_tg_runtime_core import provider_capacity_state_path as runtime_provider_capacity_state_path
 from aoe_tg_priority_actions import (
+    external_background_priority_action_snapshot,
     offdesk_priority_action_snapshot,
     task_lane_target_snapshot,
 )
@@ -35,6 +60,10 @@ from aoe_tg_todo_policy import (
     proposal_confidence,
 )
 from aoe_tg_todo_state import preview_syncback_plan, sorted_open_proposals
+import aoe_tg_worker_task_contract as worker_task_contract
+
+
+_SLOT_RUNNER_TARGETS = list(EXECUTOR_SLOT_RUNNER_TARGETS)
 
 
 def cmd_prefix() -> str:
@@ -80,6 +109,23 @@ def compact_reason(raw: Any, limit: int = 120) -> str:
     return text
 
 
+def _manual_step_ready_label(summary: str) -> str:
+    token = str(summary or "").strip()
+    if token.startswith("manual_review=") and "| reused" in token:
+        return "manual_review_progressed"
+    if token.startswith("manual_execute=") and "| reused" in token:
+        return "manual_execute_progressed"
+    if token.startswith("manual_followup=") and "| reused" in token:
+        return "manual_followup_progressed"
+    if token.startswith("manual_review="):
+        return "manual_review_ready"
+    if token.startswith("manual_execute="):
+        return "manual_execute_ready"
+    if token.startswith("manual_followup="):
+        return "manual_followup_ready"
+    return "manual_step_ready"
+
+
 def _preset_operator_hint(phase1_preset: str, phase2_preset: str) -> str:
     preset = str(phase2_preset or phase1_preset or "").strip().lower()
     if preset == "writer":
@@ -97,7 +143,7 @@ def _preset_operator_hint(phase1_preset: str, phase2_preset: str) -> str:
     return ""
 
 
-def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
+def preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
     preset = str(phase2_preset or phase1_preset or "").strip().lower()
     if preset == "writer":
         return "check draft completeness, artifacts, and handoff readiness"
@@ -112,6 +158,10 @@ def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
     if preset == "mixed":
         return "check work lanes first, then review handoff"
     return ""
+
+
+def _preset_next_focus(phase1_preset: str, phase2_preset: str) -> str:
+    return preset_next_focus(phase1_preset, phase2_preset)
 
 
 def _sync_counter_map(raw: Any) -> Dict[str, int]:
@@ -375,6 +425,31 @@ def _latest_task_snapshot(entry: Dict[str, Any]) -> Dict[str, Any]:
         "label": label,
         "status": status,
         "tf_phase": tf_phase,
+        "execution_brief_status": str(best_task.get("execution_brief_status", "")).strip(),
+        "execution_brief_summary": str(best_task.get("execution_brief_summary", "")).strip(),
+        "execution_brief_executable_slice": [str(x).strip() for x in (best_task.get("execution_brief_executable_slice") or []) if str(x).strip()],
+        "execution_brief_blocked_slice": [str(x).strip() for x in (best_task.get("execution_brief_blocked_slice") or []) if str(x).strip()],
+        "execution_brief_operator_decision": str(best_task.get("execution_brief_operator_decision", "")).strip(),
+        "background_run_status": str(best_task.get("background_run_status", "")).strip(),
+        "background_run_runner_target": str(best_task.get("background_run_runner_target", "")).strip(),
+        "background_run_external_phase": str(best_task.get("background_run_external_phase", "")).strip(),
+        "background_run_external_note": str(best_task.get("background_run_external_note", "")).strip(),
+        "background_run_task_contract_summary": str(best_task.get("background_run_task_contract_summary", "")).strip(),
+        "background_run_worker_result_status": str(best_task.get("background_run_worker_result_status", "")).strip(),
+        "background_run_worker_result_summary": str(best_task.get("background_run_worker_result_summary", "")).strip(),
+        "background_run_worker_result_actions": list(best_task.get("background_run_worker_result_actions") or []),
+        "background_run_worker_result_cautions": list(best_task.get("background_run_worker_result_cautions") or []),
+        "background_run_worker_result_evidence_refs": list(best_task.get("background_run_worker_result_evidence_refs") or []),
+        "background_run_worker_update_stub_status": str(best_task.get("background_run_worker_update_stub_status", "")).strip(),
+        "background_run_worker_update_stub_summary": str(best_task.get("background_run_worker_update_stub_summary", "")).strip(),
+        "background_run_worker_update_stub_targets": list(best_task.get("background_run_worker_update_stub_targets") or []),
+        "background_run_worker_update_proposal_summary": str(best_task.get("background_run_worker_update_proposal_summary", "")).strip(),
+        "background_run_worker_update_proposal_ids": list(best_task.get("background_run_worker_update_proposal_ids") or []),
+        "background_run_worker_apply_accept_summary": str(best_task.get("background_run_worker_apply_accept_summary", "")).strip(),
+        "background_run_worker_syncback_summary": str(best_task.get("background_run_worker_syncback_summary", "")).strip(),
+        "background_run_manual_step_execution_summary": str(best_task.get("background_run_manual_step_execution_summary", "")).strip(),
+        "background_run_canonical_writeback_summary": str(best_task.get("background_run_canonical_writeback_summary", "")).strip(),
+        "background_run_canonical_mutation_summary": str(best_task.get("background_run_canonical_mutation_summary", "")).strip(),
         "phase1_role_preset": str(best_task.get("phase1_role_preset", "")).strip(),
         "phase2_team_preset": str(best_task.get("phase2_team_preset", "")).strip(),
         "phase2_execution_roles": _dedupe_role_tokens(execution_groups),
@@ -668,6 +743,143 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
             sync_stale = False
     manual_followup_count = blocked_bucket_count(todos, "manual_followup")
     blocked_head = blocked_head_summary(todos)
+    team_dir_raw = str(entry.get("team_dir", "")).strip()
+    team_dir = Path(team_dir_raw) if team_dir_raw else None
+    queue_snapshot = (
+        summarize_background_runs_state(background_runs_state_path(team_dir))
+        if team_dir is not None
+        else {}
+    )
+    scheduler_snapshot = (
+        summarize_background_runner_scheduling(
+            background_runs_state_path(team_dir),
+            now_iso=lambda: datetime.now(timezone.utc).isoformat(),
+        )
+        if team_dir is not None
+        else {}
+    )
+    worker_snapshot = (
+        summarize_background_worker_state(
+            background_worker_state_path(team_dir),
+            now_iso=lambda: datetime.now(timezone.utc).isoformat(),
+        )
+        if team_dir is not None
+        else {}
+    )
+    run_lock_mode = project_run_lock_mode(entry)
+    run_lock_note = project_run_lock_note(entry)
+    preferred_runner = str(entry.get("background_runner_target", "")).strip().lower()
+    slot_runner_target = preferred_runner if preferred_runner in _SLOT_RUNNER_TARGETS else ""
+    slot_snapshot = (
+        summarize_background_runner_slots(
+            background_runs_state_path(team_dir),
+            entry,
+            selected_runner=slot_runner_target,
+            statuses=["queued", "dispatching", "running"],
+        )
+        if team_dir is not None
+        else {}
+    )
+    background_slot_limit = int(slot_snapshot.get("selected_limit", 1) or 1)
+    background_slot_active = int(slot_snapshot.get("selected_active", 0) or 0)
+    background_slot_pressure = str(slot_snapshot.get("selected_pressure", "")).strip() or "not_applicable"
+    background_slot_summary = str(slot_snapshot.get("summary", "")).strip() or "-"
+    latest_judge_action = (
+        load_latest_action_audit_for_runtime_kind(
+            team_dir,
+            project_alias=alias,
+            outcome_kind="offdesk_judge",
+        )
+        if team_dir is not None
+        else {}
+    )
+    latest_judge_headline = str(latest_judge_action.get("headline", "")).strip() or "-"
+    latest_judge_next_step = str(latest_judge_action.get("next_step", "")).strip() or "-"
+    latest_judge_detail = str(latest_judge_action.get("outcome_detail", "")).strip() or "-"
+    latest_judge_decision_summary = (
+        load_latest_offdesk_judge_decision_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_judge_decision_bridge_summary = (
+        load_latest_judge_decision_bridge_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_replan_auto_decision_summary = (
+        load_latest_replan_auto_decision_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_replan_auto_routing_policy_summary = (
+        load_latest_replan_auto_routing_policy_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_replan_auto_route = (
+        load_latest_action_audit_for_runtime_kind(team_dir, project_alias=alias, outcome_kind="replan_auto_route")
+        if team_dir is not None
+        else {}
+    )
+    latest_replan_auto_route_summary = "-"
+    if latest_replan_auto_route:
+        latest_replan_auto_route_summary = "{headline} | next={next_step} | {detail}".format(
+            headline=str(latest_replan_auto_route.get("headline", "")).strip() or "Replan Auto Route",
+            next_step=str(latest_replan_auto_route.get("next_step", "")).strip() or "-",
+            detail=str(latest_replan_auto_route.get("outcome_detail", "")).strip() or "-",
+        )
+    latest_replan_auto_route_status_summary = (
+        load_latest_replan_auto_route_status_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_manual_step_summary = (
+        load_latest_manual_step_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_canonical_writeback_summary = (
+        load_latest_canonical_writeback_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_canonical_mutation_summary = (
+        load_latest_canonical_mutation_summary_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else "-"
+    )
+    latest_replan_auto_routing_policy = (
+        load_latest_replan_auto_routing_policy_for_runtime(team_dir, project_alias=alias)
+        if team_dir is not None
+        else {}
+    )
+    manual_step_action = ""
+    replan_auto_route_ready_action = ""
+    replan_auto_route_ready_note = ""
+    replan_auto_route_operator_summary = "-"
+    if isinstance(latest_replan_auto_routing_policy, dict):
+        policy_status = str(latest_replan_auto_routing_policy.get("status", "")).strip()
+        suggested_action = str(latest_replan_auto_routing_policy.get("suggested_action", "")).strip()
+        suggested_next_step = str(latest_replan_auto_routing_policy.get("suggested_next_step", "")).strip()
+        if policy_status == "manual_ready" and suggested_next_step.startswith("/"):
+            manual_step_action = suggested_next_step
+        if (
+            policy_status == "ready"
+            and bool(latest_replan_auto_routing_policy.get("can_auto_apply", False))
+            and suggested_action == "retry"
+            and suggested_next_step.startswith("/")
+        ):
+            replan_auto_route_ready_action = suggested_next_step
+            replan_auto_route_ready_note = (
+                f"dashboard=Apply Judge Auto-Route@/control/runtimes/{alias} | api=auto_route_apply=true"
+            )
+    if replan_auto_route_ready_action:
+        base_status = latest_replan_auto_route_status_summary if latest_replan_auto_route_status_summary != "-" else f"ready={replan_auto_route_ready_action} | waiting_for_apply"
+        replan_auto_route_operator_summary = (
+            f"{base_status} | apply=dashboard:Apply Judge Auto-Route | api:auto_route_apply=true"
+        )
+    elif latest_replan_auto_route_status_summary.startswith("manual_"):
+        replan_auto_route_operator_summary = latest_replan_auto_route_status_summary
     notes: List[str] = []
     attention: List[str] = []
     severity_score = 0
@@ -707,6 +919,39 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         notes.append("task already running")
         attention.append("running")
         severity_score += 15
+    queue_stale_count = int(queue_snapshot.get("stale_count", 0) or 0)
+    queue_target_counts = dict(queue_snapshot.get("target_counts", {})) if isinstance(queue_snapshot.get("target_counts"), dict) else {}
+    local_background_queue_depth = max(0, int(queue_target_counts.get("local_background", 0) or 0))
+    if queue_stale_count > 0:
+        status = "warn" if status == "ready" else status
+        notes.append(f"background queue contains stale tickets ({queue_stale_count})")
+        attention.append(f"bgq:stale:{queue_stale_count}")
+        severity_score += 20
+    worker_status = str(worker_snapshot.get("status", "")).strip().lower()
+    worker_summary = str(worker_snapshot.get("summary", "")).strip()
+    queue_depth = int(queue_snapshot.get("depth", 0) or 0)
+    if run_lock_mode == "test_only":
+        status = "warn" if status == "ready" else status
+        notes.append(run_lock_note or "test_only run lock is active")
+        attention.append("run_lock:test_only")
+        severity_score += 20
+    if slot_runner_target and background_slot_active >= background_slot_limit:
+        status = "warn" if status == "ready" else status
+        notes.append(
+            f"background runner slots saturated for {slot_runner_target} ({background_slot_active}/{background_slot_limit})"
+        )
+        attention.append(f"slots:{slot_runner_target}:{background_slot_active}/{background_slot_limit}")
+        severity_score += 25
+    if worker_status in {"stale", "error"}:
+        status = "warn" if status == "ready" else status
+        notes.append(worker_summary or f"background worker is {worker_status}")
+        attention.append(f"bgw:{worker_status}")
+        severity_score += 30
+    elif local_background_queue_depth > 0 and worker_status in {"", "-", "stopped"}:
+        status = "warn" if status == "ready" else status
+        notes.append(f"background worker is stopped while local background queue depth is {local_background_queue_depth}")
+        attention.append("bgw:stopped")
+        severity_score += 25
     if counts["blocked"] > 0:
         status = "warn" if status == "ready" else status
         notes.append(f"blocked backlog present ({counts['blocked']})")
@@ -719,8 +964,34 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         severity_score += 55
     task_tf_phase = str(latest_task.get("tf_phase", "")).strip()
     task_status = str(latest_task.get("status", "")).strip()
+    task_execution_brief_status = str(latest_task.get("execution_brief_status", "")).strip().lower()
+    task_execution_brief_summary = str(latest_task.get("execution_brief_summary", "")).strip()
+    task_execution_brief_blocked = list(latest_task.get("execution_brief_blocked_slice") or [])
+    task_execution_brief_decision = str(latest_task.get("execution_brief_operator_decision", "")).strip()
+    task_background_status = str(latest_task.get("background_run_status", "")).strip().lower()
+    task_background_runner = str(latest_task.get("background_run_runner_target", "")).strip().lower()
+    task_background_external_phase = str(latest_task.get("background_run_external_phase", "")).strip().lower()
+    task_background_external_note = str(latest_task.get("background_run_external_note", "")).strip()
     active_rate_limit = latest_task.get("rate_limit") if isinstance(latest_task.get("rate_limit"), dict) else {}
     capacity_pressure = _capacity_pressure_snapshot(active_rate_limit)
+    if task_execution_brief_status in {"underspecified", "operator_decision_required", "infeasible"}:
+        status = "warn" if status == "ready" else status
+        notes.append(
+            "execution brief blocked ({status})".format(
+                status=task_execution_brief_status,
+            )
+        )
+        if task_execution_brief_decision:
+            notes.append("execution brief decision: " + task_execution_brief_decision[:180])
+        elif task_execution_brief_blocked:
+            notes.append("execution brief blocked slice: " + ",".join(task_execution_brief_blocked[:4]))
+        attention.append(f"brief:{task_execution_brief_status}")
+        severity_score += 50
+    elif task_execution_brief_status == "partially_executable":
+        status = "warn" if status == "ready" else status
+        notes.append("execution brief is partial; operator should confirm the executable slice")
+        attention.append("brief:partial")
+        severity_score += 25
     if task_tf_phase in {"needs_retry", "manual_intervention", "blocked", "critic_review"}:
         status = "warn" if status == "ready" else status
         notes.append(f"active task needs attention ({task_tf_phase})")
@@ -828,8 +1099,15 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         alias=alias,
         active_task_label=str(latest_task.get("label", "")).strip(),
         active_task_tf_phase=task_tf_phase,
+        active_task_execution_brief_status=task_execution_brief_status,
+        active_task_execution_brief_blocked_slice=task_execution_brief_blocked,
+        active_task_execution_brief_operator_decision=task_execution_brief_decision,
         active_task_targets=latest_task.get("lane_targets") if isinstance(latest_task.get("lane_targets"), dict) else None,
         active_task_rate_limit=latest_task.get("rate_limit") if isinstance(latest_task.get("rate_limit"), dict) else None,
+        active_task_background_run_status=task_background_status,
+        active_task_background_run_runner_target=task_background_runner,
+        active_task_background_run_external_phase=task_background_external_phase,
+        active_task_background_run_external_note=task_background_external_note,
         syncback_pending=syncback_pending,
         followup_count=manual_followup_count,
         proposal_count=open_proposals,
@@ -842,16 +1120,37 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         canonical_exists=bool(canonical_exists),
         include_ok=bool(include_ok),
         last_sync_mode=last_sync_mode,
+        background_queue_depth=int(queue_snapshot.get("depth", 0) or 0),
+        background_queue_stale_count=int(queue_snapshot.get("stale_count", 0) or 0),
+        background_queue_runner_targets=(
+            dict(queue_snapshot.get("target_counts", {}))
+            if isinstance(queue_snapshot.get("target_counts"), dict)
+            else {}
+        ),
+        background_scheduler_summary=str(scheduler_snapshot.get("summary", "")).strip() or "-",
+        background_worker_status=worker_status,
+        background_worker_summary=worker_summary,
+        run_lock_mode=run_lock_mode,
+        run_lock_note=run_lock_note,
+        background_slot_runner_target=slot_runner_target,
+        background_slot_limit=background_slot_limit,
+        background_slot_active=background_slot_active,
     )
 
     lines = [
         f"- {alias} {display} [{status}]",
         f"  attention: {attention_summary}",
-        f"  first: {priority_action.get('action', '-')} | {priority_action.get('reason', '-')}",
+        f"  first: {manual_step_action or replan_auto_route_ready_action or priority_action.get('action', '-')} | {priority_action.get('reason', '-')}",
         f"  runtime: {runtime_label}",
         f"  canonical: {canonical_rel if canonical_exists else 'missing TODO.md'}",
         f"  scenario_include: {include_display}",
         f"  queue: open={counts['open']} running={counts['running']} blocked={counts['blocked']} followup={manual_followup_count} pending={'yes' if pending_flag else 'no'} proposals={open_proposals}",
+        f"  background_queue: {str(queue_snapshot.get('summary', '-')).strip() or '-'}",
+        f"  background_scheduler: {str(scheduler_snapshot.get('summary', '-')).strip() or '-'}",
+        f"  run_lock: {run_lock_mode}",
+        f"  run_lock_note: {run_lock_note or '-'}",
+        f"  background_slots: runner={slot_runner_target or '-'} active={background_slot_active} limit={background_slot_limit} | {background_slot_pressure} | {background_slot_summary}",
+        f"  background_worker: {worker_summary or '-'}",
         f"  proposal_triage: priorities={proposal_triage.get('priority_summary', '-')} | kinds={proposal_triage.get('kind_summary', '-')}",
         f"  syncback: done={syncback_counts['done']} reopen={syncback_counts['reopen']} append={syncback_counts['append']} blocked_notes={syncback_counts['blocked']}",
         f"  last_sync: {last_sync_mode} {last_sync_disp}".rstrip(),
@@ -860,6 +1159,10 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         f"classes={sync_quality.get('classes_summary', '-')} "
         f"doc_types={sync_quality.get('doc_types_summary', '-')}".rstrip(),
     ]
+    worker_update_summary = "-"
+    worker_apply_summary = "-"
+    worker_apply_accept_summary = "-"
+    worker_syncback_summary = "-"
     if int(proposal_triage.get("open_count", 0) or 0) > 0:
         lines.append(f"  proposal_top: {proposal_triage.get('top_summary', '-')}")
     if latest_task:
@@ -878,6 +1181,22 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         lines.append(
             f"  active_task: {latest_task.get('label', '-')} | {latest_task.get('status', '-')}/{latest_task.get('tf_phase', '-')}"
         )
+        if task_execution_brief_status:
+            lines.append(
+                "  active_task_execution_brief: {status} | {summary}".format(
+                    status=task_execution_brief_status,
+                    summary=task_execution_brief_summary or "-",
+                )
+            )
+            if task_execution_brief_blocked:
+                lines.append(
+                    "  active_task_execution_brief_blocked: "
+                    + ",".join(task_execution_brief_blocked[:4])
+                )
+            if task_execution_brief_decision:
+                lines.append(
+                    "  active_task_execution_brief_decision: " + task_execution_brief_decision[:240]
+                )
         if phase1_role_preset or phase2_team_preset:
             lines.append(
                 "  active_task_preset: phase1={phase1} phase2={phase2}".format(
@@ -994,6 +1313,99 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
                     review_ids=",".join(manual_review) if manual_review else "-",
                 )
             )
+        worker_update_summary = worker_task_contract.summarize_worker_update_operator_summary(
+            {
+                "status": latest_task.get("background_run_worker_update_stub_status"),
+                "summary_line": latest_task.get("background_run_worker_update_stub_summary"),
+                "target_artifacts": latest_task.get("background_run_worker_update_stub_targets"),
+            },
+            latest_task.get("background_run_worker_update_proposal_ids") or [],
+        )
+        worker_apply_summary = str(latest_task.get("background_run_worker_update_proposal_summary", "")).strip() or "-"
+        worker_apply_accept_summary = str(latest_task.get("background_run_worker_apply_accept_summary", "")).strip() or "-"
+        worker_syncback_summary = str(latest_task.get("background_run_worker_syncback_summary", "")).strip() or "-"
+        if worker_update_summary not in {"", "-"}:
+            lines.append("  worker_update: " + worker_update_summary)
+        if worker_apply_summary not in {"", "-"}:
+            lines.append("  worker_apply: " + worker_apply_summary[:240])
+        if worker_apply_accept_summary not in {"", "-"}:
+            lines.append("  worker_apply_accept: " + worker_apply_accept_summary[:240])
+        if worker_syncback_summary not in {"", "-"}:
+            lines.append("  worker_syncback: " + worker_syncback_summary[:240])
+        manual_step_execution_summary = str(latest_task.get("background_run_manual_step_execution_summary", "")).strip() or "-"
+        if manual_step_execution_summary not in {"", "-"}:
+            lines.append("  manual_step_result: " + manual_step_execution_summary[:240])
+            if latest_manual_step_summary in {"", "-"}:
+                latest_manual_step_summary = manual_step_execution_summary
+        canonical_writeback_task_summary = str(latest_task.get("background_run_canonical_writeback_summary", "")).strip() or "-"
+        if canonical_writeback_task_summary not in {"", "-"}:
+            latest_canonical_writeback_summary = canonical_writeback_task_summary
+        canonical_mutation_task_summary = str(latest_task.get("background_run_canonical_mutation_summary", "")).strip() or "-"
+        if canonical_mutation_task_summary not in {"", "-"}:
+            latest_canonical_mutation_summary = canonical_mutation_task_summary
+        if task_background_runner in {"github_runner", "remote_worker"} and (
+            task_background_external_phase or task_background_external_note
+        ):
+            task_background_external_next = external_background_priority_action_snapshot(
+                alias=alias,
+                task_label=str(latest_task.get("label", "")).strip(),
+                background_run_runner_target=task_background_runner,
+                background_run_external_phase=task_background_external_phase,
+                background_run_external_note=task_background_external_note,
+                run_lock_mode=run_lock_mode,
+            )
+            lines.append(
+                "  active_task_background_external: {runner} | {phase} | {note}".format(
+                    runner=task_background_runner or "-",
+                    phase=task_background_external_phase or "-",
+                    note=task_background_external_note or "-",
+                )
+            )
+            if str(task_background_external_next.get("action", "")).strip():
+                lines.append(
+                    "  active_task_background_external_next: {action} | {reason}".format(
+                        action=str(task_background_external_next.get("action", "")).strip(),
+                        reason=str(task_background_external_next.get("reason", "")).strip() or "-",
+                    )
+                )
+    if latest_judge_headline != "-":
+        lines.append(
+            "  latest_judge: {headline} | next={next_step} | {detail}".format(
+                headline=latest_judge_headline,
+                next_step=latest_judge_next_step,
+                detail=latest_judge_detail,
+            )
+        )
+    if latest_judge_decision_summary != "-":
+        lines.append("  latest_judge_decision: " + latest_judge_decision_summary)
+    if latest_judge_decision_bridge_summary != "-":
+        lines.append("  latest_judge_decision_bridge: " + latest_judge_decision_bridge_summary)
+    if latest_replan_auto_decision_summary != "-":
+        lines.append("  replan_auto_decision: " + latest_replan_auto_decision_summary)
+    if replan_auto_route_operator_summary != "-":
+        lines.append("  auto_route: " + replan_auto_route_operator_summary)
+        if replan_auto_route_operator_summary.startswith("manual_"):
+            lines.append(f"  {_manual_step_ready_label(replan_auto_route_operator_summary)}: " + replan_auto_route_operator_summary)
+    if latest_manual_step_summary not in {"", "-"}:
+        lines.append("  manual_step: " + latest_manual_step_summary)
+    elif latest_replan_auto_route_status_summary != "-":
+        lines.append("  auto_route_status: " + latest_replan_auto_route_status_summary)
+    else:
+        if latest_replan_auto_routing_policy_summary != "-":
+            lines.append("  replan_auto_routing_policy: " + latest_replan_auto_routing_policy_summary)
+        if latest_replan_auto_route_summary != "-":
+            lines.append("  latest_replan_auto_route: " + latest_replan_auto_route_summary)
+    if latest_canonical_writeback_summary not in {"", "-"}:
+        lines.append("  canonical_writeback: " + latest_canonical_writeback_summary)
+    if latest_canonical_mutation_summary not in {"", "-"}:
+        lines.append("  canonical_mutation: " + latest_canonical_mutation_summary)
+    if replan_auto_route_ready_action and replan_auto_route_operator_summary == "-":
+        lines.append(
+            "  replan_auto_route_ready: {action} | {note}".format(
+                action=replan_auto_route_ready_action,
+                note=replan_auto_route_ready_note or "-",
+            )
+        )
     if blocked_head:
         head = f"  blocked_head: {blocked_head.get('id', '-')} x{blocked_head.get('count', 1)}"
         bucket = str(blocked_head.get("bucket", "")).strip()
@@ -1008,10 +1420,12 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         for note in notes[:4]:
             lines.append(f"    - {note}")
     return {
+        "key": str(key),
         "status": status,
         "lines": lines,
         "alias": alias,
         "display": display,
+        "runtime_label": runtime_label,
         "open": counts["open"],
         "running": counts["running"],
         "blocked_count": counts["blocked"],
@@ -1025,8 +1439,22 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "active_task_label": str(latest_task.get("label", "")).strip(),
         "active_task_tf_phase": str(latest_task.get("tf_phase", "")).strip(),
         "active_task_status": str(latest_task.get("status", "")).strip(),
+        "active_task_background_run_status": str(latest_task.get("background_run_status", "")).strip(),
+        "active_task_background_run_runner_target": str(latest_task.get("background_run_runner_target", "")).strip(),
+        "active_task_background_run_external_phase": str(latest_task.get("background_run_external_phase", "")).strip(),
+        "active_task_background_run_external_note": str(latest_task.get("background_run_external_note", "")).strip(),
         "active_task_phase1_role_preset": str(latest_task.get("phase1_role_preset", "")).strip(),
         "active_task_phase2_team_preset": str(latest_task.get("phase2_team_preset", "")).strip(),
+        "active_task_phase2_execution_roles": list(latest_task.get("phase2_execution_roles") or []),
+        "active_task_phase2_review_roles": list(latest_task.get("phase2_review_roles") or []),
+        "active_task_phase2_quality_critic": str(latest_task.get("phase2_critic_role", "")).strip(),
+        "active_task_phase2_quality_integration": str(latest_task.get("phase2_integration_role", "")).strip(),
+        "active_task_phase2_evidence": list(latest_task.get("phase2_evidence_required") or []),
+        "active_task_backend": str(latest_task.get("backend", "")).strip(),
+        "active_task_backend_profile": str(latest_task.get("backend_profile", "")).strip(),
+        "active_task_backend_verdict": str(latest_task.get("backend_verdict", "")).strip(),
+        "active_task_backend_contract": str(latest_task.get("backend_contract", "")).strip(),
+        "active_task_backend_note": str(latest_task.get("backend_contract_note", "")).strip(),
         "active_task_degraded_by": list(degraded_by),
         "active_task_rate_limit": dict(active_rate_limit),
         "bootstrap_recommended": bootstrap_recommended,
@@ -1041,6 +1469,26 @@ def offdesk_prepare_project_report(manager_state: Dict[str, Any], key: str, entr
         "attention_summary": attention_summary,
         "priority_action": str(priority_action.get("action", "")).strip(),
         "priority_reason": str(priority_action.get("reason", "")).strip(),
+        "latest_judge_headline": latest_judge_headline,
+        "latest_judge_next_step": latest_judge_next_step,
+        "latest_judge_detail": latest_judge_detail,
+        "latest_judge_decision_summary": latest_judge_decision_summary,
+        "latest_judge_decision_bridge_summary": latest_judge_decision_bridge_summary,
+        "latest_replan_auto_decision_summary": latest_replan_auto_decision_summary,
+        "latest_replan_auto_routing_policy_summary": latest_replan_auto_routing_policy_summary,
+        "latest_replan_auto_route_summary": latest_replan_auto_route_summary,
+        "latest_replan_auto_route_status_summary": latest_replan_auto_route_status_summary,
+        "latest_manual_step_summary": latest_manual_step_summary,
+        "latest_canonical_writeback_summary": latest_canonical_writeback_summary,
+        "latest_canonical_mutation_summary": latest_canonical_mutation_summary,
+        "manual_step_action": manual_step_action,
+        "replan_auto_route_ready_action": replan_auto_route_ready_action,
+        "replan_auto_route_ready_note": replan_auto_route_ready_note,
+        "replan_auto_route_operator_summary": replan_auto_route_operator_summary,
+        "active_task_worker_update_summary": worker_update_summary,
+        "active_task_worker_apply_summary": worker_apply_summary,
+        "active_task_worker_apply_accept_summary": worker_apply_accept_summary,
+        "active_task_worker_syncback_summary": worker_syncback_summary,
         "notes": list(notes),
     }
 
@@ -1112,6 +1560,12 @@ def offdesk_review_reply_markup(
         primary: List[Dict[str, str]] = []
         secondary: List[Dict[str, str]] = []
         tertiary: List[Dict[str, str]] = []
+        auto_route_action = str(row.get("replan_auto_route_ready_action", "")).strip()
+        manual_step_action = str(row.get("manual_step_action", "")).strip()
+        if manual_step_action:
+            primary.append({"text": manual_step_action})
+        if auto_route_action:
+            primary.append({"text": auto_route_action})
         priority_action = str(row.get("priority_action", "")).strip()
         if priority_action:
             primary.append({"text": priority_action})
@@ -1124,6 +1578,8 @@ def offdesk_review_reply_markup(
             primary.append({"text": f"/todo {alias} proposals"})
         if int(row.get("followup_count", 0) or 0) > 0:
             primary.append({"text": f"/todo {alias} followup"})
+        if str(row.get("active_task_label", "")).strip():
+            primary.append({"text": f"/orch judge {alias}"})
         if primary:
             dedup_primary: List[Dict[str, str]] = []
             seen_primary: set[str] = set()
@@ -1197,6 +1653,9 @@ def offdesk_prepare_reply_markup(
         primary: List[Dict[str, str]] = []
         secondary: List[Dict[str, str]] = []
         tertiary: List[Dict[str, str]] = []
+        manual_step_action = str(row.get("manual_step_action", "")).strip()
+        if manual_step_action:
+            primary.append({"text": manual_step_action})
         priority_action = str(row.get("priority_action", "")).strip()
         if priority_action:
             primary.append({"text": priority_action})
@@ -1238,9 +1697,9 @@ def offdesk_prepare_reply_markup(
     if blocked_count == 0:
         footer.append({"text": "/offdesk on"})
     footer.append({"text": "/offdesk review"})
-    footer.append({"text": "/help"})
+    footer.append({"text": "/auto status"})
     keyboard.append(footer[:3])
-    keyboard.append([{"text": "/map"}, {"text": "/queue"}])
+    keyboard.append([{"text": "/map"}, {"text": "/queue"}, {"text": "/help"}])
     return {
         "keyboard": keyboard,
         "resize_keyboard": True,
@@ -1264,7 +1723,7 @@ def offdesk_state_path(args: Any, *, filename: str) -> Path:
 
 
 def provider_capacity_state_path(args: Any, *, filename: str) -> Path:
-    return Path(str(getattr(args, "team_dir", "."))).expanduser().resolve() / filename
+    return runtime_provider_capacity_state_path(getattr(args, "team_dir", "."), filename=filename)
 
 
 def load_auto_state(path: Path) -> Dict[str, Any]:
@@ -1293,11 +1752,16 @@ def save_offdesk_state(path: Path, state: Dict[str, Any]) -> None:
 
 
 def load_provider_capacity_state(path: Path) -> Dict[str, Any]:
+    payload = artifact_backend(path.parent).load_provider_capacity_state(filename=path.name)
+    if payload or path.exists():
+        return payload if isinstance(payload, dict) else {}
     return load_auto_state(path)
 
 
 def save_provider_capacity_state(path: Path, state: Dict[str, Any]) -> None:
-    save_auto_state(path, state)
+    payload = dict(state)
+    payload["updated_at"] = now_iso()
+    artifact_backend(path.parent).write_provider_capacity_state(payload, filename=path.name)
 
 
 def scheduler_session_name() -> str:

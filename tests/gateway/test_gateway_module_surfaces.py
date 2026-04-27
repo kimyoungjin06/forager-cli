@@ -151,6 +151,36 @@ def test_orch_roles_module_matches_gateway_exports(tmp_path: Path) -> None:
     assert gw.available_worker_roles([]) == orch_roles.available_worker_roles([])
 
 
+def test_gateway_run_phase1_ensemble_planning_forwards_request_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def _fake_run_phase1_ensemble_planning(
+        args,
+        user_prompt,
+        available_roles,
+        *,
+        selected_roles,
+        role_preset,
+        request_contract=None,
+        report_progress,
+        **_,
+    ):
+        captured["request_contract"] = request_contract
+        return {"ok": True}
+
+    monkeypatch.setattr(gw.control_plane_mod, "run_phase1_ensemble_planning", _fake_run_phase1_ensemble_planning)
+
+    result = gw.run_phase1_ensemble_planning(
+        argparse.Namespace(),
+        "normalize the month column",
+        ["DataEngineer"],
+        request_contract={"contract_type": "data", "preset": "data"},
+    )
+
+    assert result == {"ok": True}
+    assert captured["request_contract"] == {"contract_type": "data", "preset": "data"}
+
+
 def test_orch_roles_canonicalize_legacy_local_roles(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     (team_dir / "agents" / "Local-Writer").mkdir(parents=True, exist_ok=True)
@@ -606,7 +636,7 @@ def test_gateway_aux_module_matches_replay_list_path(tmp_path: Path) -> None:
         gw.STATE_FAILED_QUEUE_KEY: [
             {
                 "id": "abc",
-                "at": "2026-03-11T12:00:00+0900",
+                "at": gw.now_iso(),
                 "chat_id": "939062873",
                 "text": "/status",
                 "trace_id": "trace-1",
@@ -717,6 +747,276 @@ def test_message_handler_module_handles_slash_only_hint(tmp_path: Path) -> None:
     assert "입력 형식" in sent[0]["text"]
 
 
+def test_message_handler_logs_intent_trace_with_command_resolution(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    logged = []
+    args = argparse.Namespace(
+        slash_only=False,
+        manager_state_file=tmp_path / "orch_manager_state.json",
+        project_root=tmp_path,
+        team_dir=team_dir,
+        owner_bootstrap_mode="",
+        dry_run=False,
+        default_lang="ko",
+        default_reply_lang="ko",
+        default_report_level="normal",
+        max_text_chars=4000,
+        http_timeout_sec=1,
+        verbose=False,
+    )
+
+    deps = {
+        "mask_sensitive_text": lambda s: s,
+        "ResolvedCommand": gw.ResolvedCommand,
+        "RunTransitionState": gw.RunTransitionState,
+        "load_manager_state": lambda *_a, **_k: _empty_state(),
+        "ensure_default_project_registered": lambda *_a, **_k: None,
+        "is_owner_chat": lambda *_a, **_k: False,
+        "get_default_mode": lambda *_a, **_k: "",
+        "set_default_mode": lambda *_a, **_k: None,
+        "save_manager_state": lambda *_a, **_k: None,
+        "get_manager_project": lambda *_a, **_k: (
+            "default",
+            {"team_dir": str(team_dir), "project_root": str(tmp_path)},
+        ),
+        "make_project_args": lambda base_args, entry, key="": argparse.Namespace(
+            **vars(base_args),
+            team_dir=Path(str(entry["team_dir"])),
+            project_root=Path(str(entry["project_root"])),
+            _aoe_project_key=key or "default",
+        ),
+        "log_gateway_event": lambda **kwargs: logged.append(kwargs),
+        "room_autopublish_event": lambda **_k: None,
+        "int_from_env": gw.int_from_env,
+        "build_quick_reply_keyboard": lambda: {"keyboard": []},
+        "safe_tg_send_text": lambda **_k: True,
+        "ERROR_TELEGRAM": gw.ERROR_TELEGRAM,
+        "resolve_message_command": lambda **_k: gw.ResolvedCommand(
+            cmd="offdesk",
+            rest="review",
+            intent_action="offdesk_review",
+            intent_class="status",
+            intent_trace="selected=offdesk_review; matched=timing:퇴근 전,review:검토; safe_mode=prefer_control_review_over_dispatch",
+        ),
+        "resolve_chat_role": lambda *_a, **_k: "owner",
+        "enforce_command_auth": lambda **_k: True,
+        "ensure_chat_alias": lambda *_a, **_k: "1",
+        "normalize_chat_lang_token": lambda raw, default: raw or default,
+        "get_pending_mode": lambda *_a, **_k: "",
+        "clear_pending_mode": lambda *_a, **_k: None,
+        "get_chat_lang": lambda *_a, **_k: "ko",
+        "get_chat_report_level": lambda *_a, **_k: "normal",
+        "DEFAULT_REPORT_LEVEL": gw.DEFAULT_REPORT_LEVEL,
+        "preferred_command_prefix": lambda: "/",
+        "ERROR_COMMAND": gw.ERROR_COMMAND,
+        "resolve_trace_context": lambda *_a, **_k: {},
+        "resolve_run_transition": lambda *_a, **_k: {},
+        "apply_run_transition": lambda *_a, **_k: None,
+        "safe_send_transition_hint": lambda *_a, **_k: None,
+        "READONLY_ALLOWED_COMMANDS": gw.READONLY_ALLOWED_COMMANDS,
+        "ERROR_AUTH": gw.ERROR_AUTH,
+    }
+
+    message_handler.handle_text_message(
+        args,
+        "token-1",
+        "939062873",
+        "퇴근 전 오늘 밤 할일을 검토하고 실행 후보도 같이 봐줘",
+        deps=deps,
+    )
+
+    event = next(row for row in logged if row.get("event") == "command_resolved")
+    detail = str(event.get("detail", ""))
+    assert "cmd=offdesk" in detail
+    assert "action=offdesk_review" in detail
+    assert "class=status" in detail
+    assert "trace=selected=offdesk_review" in detail
+
+
+def test_message_handler_run_adapter_accepts_task_short_id(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        slash_only=False,
+        manager_state_file=tmp_path / "orch_manager_state.json",
+        project_root=tmp_path,
+        team_dir=tmp_path / ".aoe-team",
+        owner_bootstrap_mode="",
+        dry_run=False,
+        default_lang="ko",
+        default_reply_lang="ko",
+        default_report_level="normal",
+        max_text_chars=4000,
+        http_timeout_sec=1,
+        verbose=False,
+        once=True,
+    )
+    args.team_dir.mkdir(parents=True, exist_ok=True)
+
+    logged: list[dict] = []
+
+    def _handle_run_or_unknown_command(*, ctx, deps) -> bool:
+        deps.core.log_event(
+            event="planning_planner",
+            project="default",
+            request_id="REQ-B1",
+            task_short_id="T-001",
+            stage="planning",
+            status="running",
+            detail="planner started",
+        )
+        return True
+
+    deps = {
+        "mask_sensitive_text": lambda s: s,
+        "ResolvedCommand": gw.ResolvedCommand,
+        "RunTransitionState": gw.RunTransitionState,
+        "load_manager_state": lambda *_a, **_k: _empty_state(),
+        "ensure_default_project_registered": lambda *_a, **_k: None,
+        "is_owner_chat": lambda *_a, **_k: False,
+        "get_default_mode": lambda *_a, **_k: "",
+        "set_default_mode": lambda *_a, **_k: None,
+        "save_manager_state": lambda *_a, **_k: None,
+        "get_manager_project": lambda *_a, **_k: (
+            "default",
+            {"team_dir": str(args.team_dir), "project_root": str(tmp_path)},
+        ),
+        "make_project_args": lambda base_args, entry, key="": argparse.Namespace(
+            **vars(base_args),
+            team_dir=Path(str(entry["team_dir"])),
+            project_root=Path(str(entry["project_root"])),
+            _aoe_project_key=key or "default",
+        ),
+        "log_gateway_event": lambda **kwargs: logged.append(kwargs),
+        "room_autopublish_event": lambda **_k: None,
+        "int_from_env": gw.int_from_env,
+        "build_quick_reply_keyboard": lambda: {"keyboard": []},
+        "safe_tg_send_text": lambda **_k: True,
+        "ERROR_TELEGRAM": gw.ERROR_TELEGRAM,
+        "resolve_message_command": lambda **_k: gw.ResolvedCommand(
+            cmd="run",
+            run_prompt="로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+            run_force_mode="dispatch",
+            run_auto_source="default",
+        ),
+        "resolve_chat_role": lambda *_a, **_k: "owner",
+        "enforce_command_auth": lambda **_k: False,
+        "ensure_chat_alias": lambda *_a, **_k: "1",
+        "normalize_chat_lang_token": lambda raw, default: raw or default,
+        "get_pending_mode": lambda *_a, **_k: "",
+        "clear_pending_mode": lambda *_a, **_k: None,
+        "get_chat_lang": lambda *_a, **_k: "ko",
+        "get_chat_report_level": lambda *_a, **_k: "normal",
+        "get_chat_room": lambda *_a, **_k: "global",
+        "DEFAULT_REPLY_LANG": gw.DEFAULT_REPLY_LANG,
+        "DEFAULT_REPORT_LEVEL": gw.DEFAULT_REPORT_LEVEL,
+        "preferred_command_prefix": lambda: "/",
+        "ERROR_COMMAND": gw.ERROR_COMMAND,
+        "READONLY_ALLOWED_COMMANDS": gw.READONLY_ALLOWED_COMMANDS,
+        "ERROR_AUTH": gw.ERROR_AUTH,
+        "resolve_trace_context": lambda *_a, **_k: {},
+        "resolve_run_transition": lambda *_a, **_k: {},
+        "apply_run_transition": lambda *_a, **_k: None,
+        "safe_send_transition_hint": lambda *_a, **_k: None,
+        "resolve_confirm_run_transition": lambda *_a, **_k: {},
+        "apply_confirm_transition_to_resolved": lambda *_a, **_k: False,
+        "get_confirm_action": lambda *_a, **_k: {},
+        "parse_iso_ts": lambda *_a, **_k: None,
+        "clear_confirm_action": lambda *_a, **_k: None,
+        "build_non_run_context": lambda **_k: argparse.Namespace(),
+        "build_non_run_deps": lambda **_k: argparse.Namespace(),
+        "handle_non_run_command_pipeline": lambda **_k: argparse.Namespace(terminal=False, retry_transition=None),
+        "apply_retry_transition_to_resolved": lambda *_a, **_k: False,
+        "set_chat_lang": lambda *_a, **_k: None,
+        "set_chat_report_level": lambda *_a, **_k: None,
+        "set_chat_room": lambda *_a, **_k: None,
+        "set_pending_mode": lambda *_a, **_k: None,
+        "clear_default_mode": lambda *_a, **_k: None,
+        "clear_chat_report_level": lambda *_a, **_k: None,
+        "ensure_chat_aliases": lambda *_a, **_k: {},
+        "find_chat_alias": lambda *_a, **_k: "",
+        "alias_table_summary": lambda *_a, **_k: "",
+        "resolve_chat_ref": lambda *_a, **_k: "",
+        "sync_acl_env_file": lambda *_a, **_k: None,
+        "summarize_orch_registry": lambda *_a, **_k: "",
+        "backfill_task_aliases": lambda *_a, **_k: None,
+        "latest_task_request_refs": lambda *_a, **_k: [],
+        "set_chat_recent_task_refs": lambda *_a, **_k: None,
+        "get_chat_selected_task_ref": lambda *_a, **_k: "",
+        "summarize_task_monitor": lambda *_a, **_k: "",
+        "summarize_gateway_metrics": lambda *_a, **_k: "",
+        "resolve_project_root": lambda path: Path(path).expanduser().resolve(),
+        "is_path_within": lambda *_a, **_k: True,
+        "register_orch_project": lambda *_a, **_k: None,
+        "run_aoe_init": lambda *_a, **_k: "",
+        "run_aoe_spawn": lambda *_a, **_k: "",
+        "run_aoe_status": lambda *_a, **_k: "",
+        "resolve_chat_task_ref": lambda *_a, **_k: "",
+        "resolve_task_request_id": lambda *_a, **_k: "",
+        "run_request_query": lambda *_a, **_k: {},
+        "get_task_record": lambda *_a, **_k: {},
+        "summarize_request_state": lambda *_a, **_k: "",
+        "summarize_three_stage_request": lambda *_a, **_k: "",
+        "task_display_label": lambda *_a, **_k: "",
+        "cancel_request_assignments": lambda *_a, **_k: {},
+        "summarize_cancel_result": lambda *_a, **_k: "",
+        "dedupe_roles": lambda roles: list(dict.fromkeys(roles)),
+        "run_aoe_add_role": lambda *_a, **_k: "",
+        "summarize_chat_usage": lambda *_a, **_k: (0, 0),
+        "detect_high_risk_prompt": lambda *_a, **_k: "",
+        "set_confirm_action": lambda *_a, **_k: None,
+        "get_context": lambda *_a, **_k: ("default", _empty_state()["projects"]["default"], args),
+        "choose_auto_dispatch_roles": lambda *_a, **_k: ["Codex-Dev"],
+        "resolve_verifier_candidates": lambda *_a, **_k: ["Codex-Reviewer"],
+        "load_orchestrator_roles": lambda *_a, **_k: ["Codex-Dev", "Codex-Reviewer"],
+        "parse_roles_csv": lambda *_a, **_k: [],
+        "ensure_verifier_roles": lambda *_a, **_k: (["Codex-Dev"], ["Codex-Reviewer"], False, []),
+        "available_worker_roles": lambda roles: roles,
+        "normalize_task_plan_payload": lambda *_a, **_k: {},
+        "build_task_execution_plan": lambda *_a, **_k: {},
+        "critique_task_execution_plan": lambda *_a, **_k: {},
+        "critic_has_blockers": lambda *_a, **_k: False,
+        "repair_task_execution_plan": lambda *_a, **_k: {},
+        "plan_roles_from_subtasks": lambda *_a, **_k: [],
+        "build_planned_dispatch_prompt": lambda prompt, *_a, **_k: prompt,
+        "run_phase1_ensemble_planning": lambda *_a, **_k: {},
+        "run_orchestrator_direct": lambda *_a, **_k: "",
+        "run_aoe_orch": lambda *_a, **_k: {},
+        "create_request_id": lambda: "REQ-B1",
+        "ensure_task_record": lambda *_a, **_k: {},
+        "finalize_request_reply_messages": lambda *_a, **_k: {},
+        "touch_chat_recent_task_ref": lambda *_a, **_k: None,
+        "set_chat_selected_task_ref": lambda *_a, **_k: None,
+        "now_iso": lambda: "2026-03-27T00:00:00+0900",
+        "sync_task_lifecycle": lambda *_a, **_k: None,
+        "lifecycle_set_stage": lambda *_a, **_k: None,
+        "summarize_task_lifecycle": lambda *_a, **_k: "",
+        "synthesize_orchestrator_response": lambda *_a, **_k: "",
+        "critique_task_execution_result": lambda *_a, **_k: {},
+        "extract_followup_todo_proposals": lambda *_a, **_k: [],
+        "merge_todo_proposals": lambda *_a, **_k: {},
+        "render_run_response": lambda *_a, **_k: "",
+        "build_run_context": gw.build_run_context,
+        "build_run_deps": gw.build_run_deps,
+        "help_text": lambda *_a, **_k: "help",
+        "handle_run_or_unknown_command": _handle_run_or_unknown_command,
+        "classify_handler_error": lambda exc: ("E_INTERNAL", str(exc), "/help"),
+        "format_error_message": lambda code, user_msg, next_step, detail="": f"{code} {user_msg} {next_step} {detail}",
+        "load_state": lambda *_a, **_k: {},
+        "enqueue_failed_message": lambda *_a, **_k: {"id": "f001"},
+    }
+
+    message_handler.handle_text_message(
+        args,
+        "token-1",
+        "939062873",
+        "로그인 실패 시 세션 만료 처리 누락을 수정하고 회귀 테스트 결과까지 남겨줘.",
+        deps=deps,
+    )
+
+    planning_evt = next(row for row in logged if row.get("event") == "planning_planner")
+    assert planning_evt["task"]["short_id"] == "T-001"
+
+
 def test_room_runtime_module_matches_gateway_route_and_gc_helpers(tmp_path: Path) -> None:
     assert gw.normalize_room_autopublish_route("project_tf") == room_runtime.normalize_room_autopublish_route(
         "project_tf",
@@ -738,6 +1038,98 @@ def test_room_runtime_module_matches_gateway_route_and_gc_helpers(tmp_path: Path
     )
     assert removed == 1
     assert not old_file.exists()
+
+
+def test_message_handler_short_circuits_deprecated_surface_before_latest_intent_save(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        team_dir=tmp_path / ".aoe-team",
+        project_root=tmp_path,
+        manager_state_file=tmp_path / ".aoe-team" / "orch_manager_state.json",
+        dry_run=False,
+        verbose=False,
+        max_text_chars=4000,
+        http_timeout_sec=10,
+        slash_only=False,
+        owner_bootstrap_mode="",
+        default_lang="ko",
+        default_reply_lang="ko",
+        default_report_level="normal",
+        owner_chat_id="",
+    )
+    args.team_dir.mkdir(parents=True, exist_ok=True)
+
+    sent: list[tuple[str, str]] = []
+    logged: list[dict] = []
+    saved_latest: list[dict] = []
+    deps = {
+        "mask_sensitive_text": lambda s: s,
+        "ResolvedCommand": gw.ResolvedCommand,
+        "RunTransitionState": gw.RunTransitionState,
+        "load_manager_state": lambda *_a, **_k: _empty_state(),
+        "ensure_default_project_registered": lambda *_a, **_k: None,
+        "is_owner_chat": lambda *_a, **_k: False,
+        "get_default_mode": lambda *_a, **_k: "",
+        "set_default_mode": lambda *_a, **_k: None,
+        "save_manager_state": lambda *_a, **_k: None,
+        "get_manager_project": lambda *_a, **_k: (
+            "default",
+            {"team_dir": str(args.team_dir), "project_root": str(tmp_path)},
+        ),
+        "make_project_args": lambda base_args, entry, key="": argparse.Namespace(
+            **vars(base_args),
+            team_dir=Path(str(entry["team_dir"])),
+            project_root=Path(str(entry["project_root"])),
+            _aoe_project_key=key or "default",
+        ),
+        "log_gateway_event": lambda **kwargs: logged.append(kwargs),
+        "room_autopublish_event": lambda **_k: None,
+        "int_from_env": gw.int_from_env,
+        "build_quick_reply_keyboard": lambda: {"keyboard": []},
+        "safe_tg_send_text": lambda **kwargs: sent.append((str(kwargs.get("context", "")), str(kwargs.get("text", "")))) or True,
+        "ERROR_TELEGRAM": gw.ERROR_TELEGRAM,
+        "resolve_message_command": lambda **_k: gw.ResolvedCommand(
+            cmd="deprecated",
+            deprecated_code="deprecated_surface.mother_orch",
+            deprecated_surface="/mother-orch status",
+            deprecated_replacement="/auto status",
+            deprecated_note="Mother-Orch terminology is retired.",
+            deprecated_next_step="/offdesk review or /monitor depending on intent",
+        ),
+        "resolve_chat_role": lambda *_a, **_k: "owner",
+        "enforce_command_auth": lambda **_k: False,
+        "ensure_chat_alias": lambda *_a, **_k: "1",
+        "normalize_chat_lang_token": lambda raw, default: raw or default,
+        "get_pending_mode": lambda *_a, **_k: "",
+        "clear_pending_mode": lambda *_a, **_k: None,
+        "get_chat_lang": lambda *_a, **_k: "ko",
+        "get_chat_report_level": lambda *_a, **_k: "normal",
+        "DEFAULT_REPORT_LEVEL": gw.DEFAULT_REPORT_LEVEL,
+        "preferred_command_prefix": lambda: "/",
+        "ERROR_COMMAND": gw.ERROR_COMMAND,
+        "READONLY_ALLOWED_COMMANDS": gw.READONLY_ALLOWED_COMMANDS,
+        "ERROR_AUTH": gw.ERROR_AUTH,
+        "now_iso": lambda: "2026-03-27T00:00:00+0900",
+    }
+
+    original_save_latest = message_handler.save_latest_command_resolution
+    try:
+        message_handler.save_latest_command_resolution = lambda *a, **k: saved_latest.append({"args": a, "kwargs": k})
+        message_handler.handle_text_message(
+            args,
+            "token-1",
+            "939062873",
+            "/mother-orch status",
+            deps=deps,
+        )
+    finally:
+        message_handler.save_latest_command_resolution = original_save_latest
+
+    assert saved_latest == []
+    assert sent
+    assert sent[-1][0] == "deprecated-surface"
+    assert "deprecated surface" in sent[-1][1]
+    event = next(row for row in logged if row.get("event") == "deprecated_surface")
+    assert event["status"] == "redirected"
 
 
 def test_gateway_batch_ops_module_matches_gateway_parse_helpers() -> None:

@@ -1,0 +1,195 @@
+# Review R3 Manual Followup Preview
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `R3-preview`
+- preset:
+  - `review`
+- branch_target:
+  - `manual_followup`
+  - `preview_surface`
+- status:
+  - `executed_done`
+- proof_mode:
+  - `live_rehearsal`
+- promotion_gate:
+  - `preview/execute split and dashboard parity are already proven`
+- live_gate:
+  - `safe under test-only posture because preview is read-only and launches no internal work`
+- executed_at:
+  - `2026-04-08 KST`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `로그인 패치의 보안 리스크는 정리하되, 최종 허용 여부는 내가 판단할 수 있게 후보 근거만 남겨줘.`
+- normalized action:
+  - `dispatch_task`
+- target runtime:
+  - `tmp/r3_preview_live_i7mloegr`
+
+## 3. Expected Contract
+- expected preset:
+  - `review`
+- expected execution brief:
+  - status:
+    - `partially_executable`
+  - executable slice:
+    - `collect bounded evidence and draft a review summary`
+  - blocked slice or operator decision:
+    - `final acceptance threshold remains operator-owned`
+- expected followup brief:
+  - status:
+    - `preview_only`
+  - execution lanes:
+    - `bounded evidence lanes only`
+  - review lanes:
+    - `operator-owned decision review lanes remain visible`
+- expected lane shape:
+  - execution:
+    - reviewer-led readonly evidence lane
+  - review:
+    - reviewer/verifier lane
+- expected completion branch:
+  - `manual_followup`
+- expected reentry rail:
+  - `retry=none | followup=preview_only ... | bg=-`
+- expected evidence:
+  - `FollowupBrief.status=preview_only`
+  - `/followup` preview agrees with dashboard task/runtime detail
+  - operator-owned reason is explicit
+
+## 4. Runtime Evidence
+- request_id:
+  - `REQ-1` (isolated live rehearsal runtime)
+- task_short_id:
+  - `T-001`
+- planning:
+  - `isolated live rehearsal with a seeded runtime; no internal job launched`
+- execution brief:
+  - `underspecified` in dashboard fixture (`retry=blocked:underspecified ...`)
+- followup brief:
+  - `preview_only | execution=L2 | review=R1`
+- reentry rails:
+  - `retry=blocked:underspecified exec=L1 review=R1 | followup=preview_only exec=L2 review=R1 | bg=running/local_background`
+- stage progression:
+  - planning:
+    - `seeded runtime only`
+  - execution:
+    - `not launched`
+  - verification:
+    - `read-only surface parity captured live`
+  - integration:
+    - `-`
+  - close:
+    - `blocked from execute surface`
+- critic/verifier verdict:
+  - `followup preview is available and execute remains absent from visible operator actions`
+- final branch:
+  - `manual_followup preview_only`
+
+## 5. Surface Evidence
+- `/task`:
+  - `dashboard task detail and gateway /task target agree on preview_only, lanes, and operator-owned reason`
+- `/monitor`:
+  - `not required for this read-only rehearsal`
+- `/offdesk review`:
+  - `safe next step remains review/status inspection; no execute hint is surfaced`
+- dashboard `Task Detail`:
+  - `shows preview_only, lane split, reason, and reentry_rails`
+  - visible action label includes `Follow-up Preview`
+  - visible action label does not include `Follow-up Execute`
+- dashboard `Recovery`:
+  - `not required for the first read-only rehearsal`
+- background run ticket / runner:
+  - `none expected`
+- launch spec / evidence bundle:
+  - `none expected`
+
+## 6. Result
+- result:
+  - `pass`
+- mismatch class:
+  - `none`
+- mismatch notes:
+  - `preview surface is explicitly distinct from execute surface`
+  - `/followup` gateway output, `/orch status`, `/offdesk review`, and dashboard task/runtime detail agree on preview-only posture`
+  - dashboard HTML still contains the followup-execute endpoint path in script/form wiring, but no visible `Follow-up Execute` action is rendered`
+- next fix:
+  - `select the next live candidate among launch-bearing rails only after explicit runner-safety approval`
+
+## 7. Raw References
+- runtime state refs:
+  - `tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json`
+- log refs:
+  - `uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_preview_live_i7mloegr --workspace-root tmp/r3_preview_live_i7mloegr --team-dir tmp/r3_preview_live_i7mloegr/.aoe-team --manager-state-file tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O2'`
+  - `uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_preview_live_i7mloegr --workspace-root tmp/r3_preview_live_i7mloegr --team-dir tmp/r3_preview_live_i7mloegr/.aoe-team --manager-state-file tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-001'`
+  - `uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r3_preview_live_i7mloegr --workspace-root tmp/r3_preview_live_i7mloegr --team-dir tmp/r3_preview_live_i7mloegr/.aoe-team --manager-state-file tmp/r3_preview_live_i7mloegr/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O2'`
+- artifact refs:
+  - `dashboard task detail: /control/tasks/by-request/REQ-1`
+  - `dashboard runtime detail: /control/runtimes/O2`
+
+## 8. Live Rehearsal Runbook
+- rehearsal scope:
+  - `read-only preview parity only`
+- safety posture:
+  - keep `run_lock_mode=test_only`
+  - do not invoke:
+    - `/followup-exec`
+    - `/retry`
+    - `/replan`
+    - any background runner action
+- required target state:
+  - a task exists with:
+    - `FollowupBrief.status=preview_only`
+    - explicit execution lane ids
+    - explicit review lane ids
+    - operator-owned followup reason
+- operator surfaces to capture:
+  - `/followup <task>`
+  - `/task <task>`
+  - `/offdesk review <orch>`
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+- preflight:
+  - verify `/orch status <orch>` shows:
+    - `run_lock=test_only`
+    - no required background runner for this rehearsal
+  - verify the chosen task does not advertise:
+    - executable followup
+    - retry as the preferred next step
+- procedure:
+  - open `/followup <task>` and record:
+    - `preview_only`
+    - execution lane ids
+    - review lane ids
+    - operator-owned reason
+  - open `/task <task>` and confirm the same `followup_brief_*` fields
+  - open `/offdesk review <orch>` and confirm the safe next step remains preview/review, not execute
+  - open dashboard `Task Detail` and `Runtime Detail` and confirm the same brief and reentry rail summary
+- pass criteria:
+  - all surfaces agree on:
+    - `FollowupBrief.status=preview_only`
+    - execution lane ids
+    - review lane ids
+    - operator-owned reason
+    - no execute recommendation
+  - no background ticket, launch spec, or runner action is created during the rehearsal
+- fail conditions:
+  - any surface implies `followup-exec` is currently allowed
+  - lane ids drift between `/followup`, `/task`, `/offdesk review`, or dashboard
+  - operator-owned reason is omitted or rewritten inconsistently
+  - any background mutation occurs
+- evidence to retain:
+  - command transcript snippets for:
+    - `/orch status <orch>`
+    - `/followup <task>`
+    - `/task <task>`
+    - `/offdesk review <orch>`
+  - dashboard screenshots or copied field values for:
+    - `Task Detail`
+    - `Runtime Detail`
+  - final outcome note:
+    - `executed_done` if all parity checks hold
+    - `executed_blocked` if any surface drift is found

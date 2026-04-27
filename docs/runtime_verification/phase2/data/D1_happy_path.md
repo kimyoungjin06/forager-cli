@@ -1,0 +1,221 @@
+# Data D1 Happy Path
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `D1`
+- preset:
+  - `data`
+- branch_target:
+  - `done`
+- status:
+  - `executed_done`
+- executed_at:
+  - `2026-03-30T13:54:16+09:00`
+  - `2026-03-30T14:06:24+09:00`
+  - `2026-03-30T14:15:59+09:00`
+  - `2026-03-30T14:23:42+09:00`
+  - `2026-03-30T14:40:01+09:00`
+  - `2026-03-30T15:55:41+09:00`
+  - `2026-03-30T15:57:07+09:00`
+  - `2026-03-30T16:01:04+09:00`
+  - `2026-03-31T01:08:54+09:00`
+  - `2026-03-31T01:21:22+09:00`
+  - `2026-03-31T05:12:05+09:00`
+  - `2026-03-31T05:24:55+09:00`
+  - `2026-03-31T05:39:11+09:00`
+  - `2026-03-31T05:49:16+09:00`
+  - `2026-03-31T05:58:16+09:00`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `월별 집계 CSV를 정규화하고 스키마 체크, null 요약, 샘플 5행을 함께 남겨줘.`
+- normalized action:
+  - `dispatch_task`
+- target runtime:
+  - `O1 default`
+
+## 3. Expected Contract
+- expected preset:
+  - `data`
+- expected lane shape:
+  - execution:
+    - transform/data lane
+  - review:
+    - verifier/reviewer lane
+- expected completion branch:
+  - `done`
+- expected evidence:
+  - schema check
+  - null/outlier summary
+  - sample output
+  - transform note
+
+## 4. Runtime Evidence
+- request_id:
+  - `r_20260330135416_7a8246ca`
+- request_id progression:
+  - `r_20260330135416_7a8246ca`
+    - `T-001`
+    - `plan_gate_reason=S2의 schema_report.json acceptance가 columns 배열을 끝까지 고정하지 못해 orders/revenue/notes의 inferred_type/type_rule/null_count/observed_non_null_count가 비었다.`
+  - `r_20260330140624_0203f1d2`
+    - `T-002`
+    - `plan_gate_reason=입력 바인딩이 없다. 어떤 원본 CSV와 month 컬럼을 대상으로 하는지 명시되지 않아 실행 대상을 고정할 수 없다.`
+  - `r_20260330141559_8fa92577`
+    - `T-003`
+    - `plan_gate_reason=month 정규화 실행 규약이 없다. 허용 패턴, zero-padding, invalid/out-of-range 값 처리 규칙이 없어 핵심 변환을 일관되게 dispatch할 수 없다.`
+  - `r_20260330142342_1148c1a2`
+    - `T-004`
+    - `plan_gate_reason=S1 acceptance가 허용 입력 패턴, zero-pad 규칙, month 범위 판단, parse 불가/범위 외 값 처리 경계를 충분히 고정하지 못했다.`
+  - `r_20260330144001_a758ed72`
+    - `T-005`
+    - `plan_gate_reason=schema_report.json/null_summary.md/sample_5.csv 산출 계약이 비어 있어 S2-S4 acceptance가 동일 복사본으로 남았다.`
+  - `r_20260330155541_14e029db`
+    - `T-006`
+    - `plan_gate_reason=request_contract rollout seam: run_phase1_ensemble_planning wrapper가 request_contract를 받지 못했다.`
+  - `r_20260330155707_6efad77e`
+    - `T-007`
+    - `plan_gate_reason=same wrapper seam reproduced before facade parity fix.`
+  - `r_20260330160104_efad9db1`
+    - `T-008`
+    - `plan_gate_reason=S1가 계약보다 넓은 입력을 정상값으로 처리한다. YYYY/M, YYYY-M, YYYY.M까지 정상 변환해 계약상 비허용 값이 anomaly로 남지 않는다.`
+  - `r_20260331010854_039968a2`
+    - `T-020`
+    - `plan_gate_reason=\`null_count\`와 anomaly 분류 기준이 S1의 transform 설명에만 걸려 있고 S2/S3 acceptance에 명시되지 않아 schema_report.json과 null_summary.md가 같은 집계 규칙을 쓴다고 dispatch 시점에 보장할 수 없다.`
+  - `r_20260331012122_207393a0`
+    - `T-021`
+    - `plan_gate_reason=S1이 month 분류 규칙을 실행 가능한 수준으로 닫지 못했다. out-of-range의 범위, whitespace/empty, literal null/NaN 같은 입력 bucket이 비어 있어 S2/S3의 공통 기준이 남지 않았다.`
+  - `r_20260331051205_32ce46c8`
+    - `T-031`
+    - `plan_gate_reason=sample_5.csv의 source row order 보존과 shortfall rule이 고정되지 않아 sample artifact가 deterministic하지 않았다.`
+  - `r_20260331052455_22f88f81`
+    - `T-035`
+    - `plan_gate_reason=sample_5.csv shortfall 표현이 note row / extra column / sentinel row 중 무엇인지 결정되지 않아 Phase2 artifact contract가 모호했다.`
+  - `r_20260331053911_604b6293`
+    - `T-036`
+    - `plan_gate_reason=S2/S3 acceptance가 서로의 산출물을 중복 요구해 schema_report/null_summary 책임 경계가 무너졌다.`
+  - `r_20260331054916_749337aa`
+    - `T-037`
+    - `plan_gate_reason=S3 acceptance가 S2 복사본으로 남아 null_summary.md 자체의 완료 조건이 비었다.`
+  - `r_20260331055816_433edbd1`
+    - `T-038`
+    - `planning_ready -> dispatch_completed`
+- task_short_id:
+  - `T-001`
+  - `T-002`
+  - `T-003`
+  - `T-004`
+  - `T-005`
+  - `T-006`
+  - `T-007`
+  - `T-008`
+  - `T-020`
+  - `T-021`
+- planning:
+  - `T-001` to `T-005` used `phase1 ensemble rounds=3 providers=codex`
+  - `T-008`, `T-020`, and `T-021` used `phase1 ensemble rounds=3 providers=codex,claude`
+  - all substantive runs selected `phase1=data phase2=data`
+- stage progression:
+  - planning:
+    - `T-001` blocked after critic 3/3 on schema acceptance completeness
+    - `T-002` blocked after critic 3/3 on input binding
+    - `T-003` blocked after critic 3/3 on month normalization policy
+    - `T-004` blocked after critic 3/3 on transform policy propagation into S1 acceptance
+    - `T-005` blocked after critic 3/3 on artifact-specific output contracts
+    - `T-006` and `T-007` failed immediately on request-contract wrapper parity
+    - `T-008` blocked after critic 3/3 because the transform acceptance was still too permissive about allowed month formats
+    - `T-020` blocked after critic 3/3 because schema/null artifact acceptance still lacked a shared null/anomaly classification rule
+    - `T-021` blocked after critic 3/3 because S1 still did not define bucket boundaries for whitespace, empty string, literal `null`/`NaN`, and out-of-range values
+    - `T-031` blocked after critic 3/3 because normalized output row/header order and sample determinism were not typed in contract policy
+    - `T-035` blocked after critic 3/3 because `sample_5.csv` shortfall encoding was not typed and planners had to invent CSV-internal notation
+    - `T-036` blocked after critic 3/3 because schema/null evidence ownership bled across artifact boundaries
+    - `T-037` blocked after critic 3/3 because null-summary acceptance still fell back to schema-report wording
+    - `T-038` passed planning after title-intent evidence routing, typed sample shortfall policy, and typed month/null/schema policies converged
+  - execution:
+    - `T-038` dispatch completed and generated the expected output/evidence set
+  - verification:
+    - `T-038` verified 10-row preservation, `month` normalization to `YYYY-MM`, `sample_5.csv` head-5 consistency, and schema/null report consistency
+  - integration:
+    - `T-038` reached integration with success summary
+  - close:
+    - `T-038` closed as `completed`
+- critic/verifier verdict:
+  - `T-001`: schema evidence acceptance truncated at column coverage
+  - `T-002`: prompt did not bind source file and target month column
+  - `T-003`: prompt still omitted normalization policy for invalid/unparseable month values
+  - `T-004`: explicit policy text still did not fully bind accepted formats and invalid handling into S1 acceptance
+  - `T-005`: output artifacts were named but not split into file-specific contracts
+  - `T-006`/`T-007`: request-contract plumbing hit a live facade seam before planner execution
+  - `T-008`: artifact contracts now exist, but accepted input formats remain too broad and allow non-contract month variants to normalize instead of becoming anomalies
+  - `T-020`: schema/null artifact floors exist, but they still do not explicitly force the same null/anomaly classification across `schema_report.json` and `null_summary.md`
+  - `T-021`: transform acceptance now carries the artifact sync rule, but month bucket definitions are still underspecified for whitespace, empty string, literal `null`/`NaN`, and out-of-range handling
+  - `T-031`: row-order and header-order preservation had to move from planner guesswork into typed `normalized_output_policy`
+  - `T-035`: sample shortfall handling had to move from prose into typed `sample_output_policy`
+  - `T-036`: schema/null evidence tasks required artifact-intent separation rather than generic combined-evidence fallback
+  - `T-037`: null-summary tasks required title-dominant artifact routing so `goal` references to `schema_report.json` would not overwrite the main artifact contract
+- final branch:
+  - `done`
+
+## 5. Surface Evidence
+- `/task`:
+  - `T-001`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-002`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-003`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-008`: `team_preset: phase1=data phase2=data`, `plan_gate: blocked`
+  - `T-038`: `team_preset: phase1=data phase2=data`, `plan_convergence_status=ready`, final status `completed`
+- `/monitor`:
+  - latest monitor row showed `T-038` at the top with `completed/integration/completed`
+  - row summary:
+    - `lanes E1/R2 [shape E:DataEngineer R:Codex-Reviewer,Claude-Reviewer | reqs E1/R2 linked=3 | backend local]`
+    - `observatory: stale=0 bottleneck=E1/pending idle=17m5s`
+- `/offdesk review`:
+  - not separately captured yet
+- dashboard `Task Detail`:
+  - request route `/control/tasks/by-request/r_20260331055816_433edbd1` returns `200`
+  - detail page shows:
+    - `status=completed/completed`
+    - `preset=phase1=data phase2=data`
+    - `phase2_quality=critic=Codex-Reviewer | integration=DataEngineer`
+    - `Task Team Observatory`
+    - lifecycle lines through `integration: done`
+    - planning history line with `convergence=ready`
+- dashboard `Recovery`:
+  - not yet captured for this temp runtime
+
+## 6. Result
+- result:
+  - `done`
+- mismatch class:
+  - `schema_acceptance_truncation`
+  - `prompt_input_binding_gap`
+  - `prompt_transform_policy_gap`
+  - `artifact_contract_gap`
+  - `request_contract_facade_seam`
+  - `accepted_format_boundary_gap`
+  - `shared_null_classification_gap`
+  - `month_bucket_definition_gap`
+  - `sample_shortfall_encoding_gap`
+  - `evidence_task_overlap_gap`
+  - `artifact_title_intent_gap`
+- mismatch notes:
+  - first real D1 run proved the data preset path works, but `schema_report.json` acceptance could still be truncated into partial column coverage
+  - `scripts/gateway/aoe_tg_schema.py` now adds a data-specific acceptance floor and reserves slots for floor items so full-column schema evidence survives normalization
+  - after that code fix, the next blockers moved in order: explicit input binding, month normalization policy, propagation of that policy into S1 acceptance, and artifact-specific contract splitting
+  - `Request Contract` rollout exposed a live facade mismatch at `T-006`/`T-007`, which is now fixed
+  - `T-008` proved the artifact-specific contract floor was working, then the blocker narrowed again into exact transform policy
+  - `T-020` showed that artifact ownership alone was not enough: `schema_report.json` and `null_summary.md` also needed an explicit shared null/anomaly classification rule
+  - `T-021` showed the remaining contract gap had moved back into S1: the transform lane still needed concrete bucket definitions for whitespace, empty string, literal `null`/`NaN`, and out-of-range handling
+  - `T-038` proved the generic fixes were enough: typed month bucket policy, typed schema/null evidence policies, typed sample shortfall policy, and title-dominant artifact routing produced a plan that both passed planning convergence and completed dispatch/integration
+- next fix:
+  - capture `/monitor`, `/offdesk review`, and dashboard task/recovery evidence for the same success path
+  - then move to `D2` rerun-path verification
+
+## 7. Raw References
+- runtime state refs:
+  - `/tmp/aoe_lv_d1b_HQO9SX/demo-monthly-data/.aoe-team/orch_manager_state.json`
+- log refs:
+  - `/tmp/aoe_lv_d1b_HQO9SX/demo-monthly-data/.aoe-team/logs/gateway_events.jsonl`
+- artifact refs:
+  - `scripts/gateway/aoe_tg_schema.py`
+  - `tests/gateway/test_phase1_planning.py`

@@ -1,0 +1,239 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+<section class="panel detail-hero">
+  <div class="detail-hero-header">
+    <div class="detail-hero-copy">
+      <p class="card-kicker">Task Detail</p>
+      <h2>{{ detail.label }}</h2>
+      <p class="runtime-attention">{{ detail.project_alias }} {{ detail.project_label }} | {{ detail.status }}/{{ detail.tf_phase }} | {{ detail.request_id }}</p>
+    </div>
+    <span class="status-pill">{{ detail.status }}</span>
+  </div>
+  <ul class="kv-list">
+    <li><span>runtime</span><strong>{{ detail.project_alias }} {{ detail.project_label }}</strong></li>
+    <li><span>request_id</span><strong>{{ detail.request_id }}</strong></li>
+    <li><span>chat_console</span><strong><a href="{{ detail.chat_console_path }}">{{ detail.chat_console_label }}</a></strong></li>
+    <li><span>status</span><strong>{{ detail.status }}/{{ detail.tf_phase }}</strong></li>
+    <li><span>mode</span><strong>{{ detail.mode }}</strong></li>
+    <li><span>phase1</span><strong>{{ detail.phase1_summary }}</strong></li>
+    <li><span>phase1_progress</span><strong>{{ detail.phase1_progress }}</strong></li>
+    <li><span>planning_compact</span><strong>{{ detail.planning_compact_summary }}</strong></li>
+    <li><span>planning_lanes</span><strong>{{ detail.planning_lanes_summary }}</strong></li>
+    <li><span>approved_plan_gate</span><strong>{{ detail.approved_plan_gate_summary }}</strong></li>
+    <li><span>preset</span><strong>phase1={{ detail.phase1_role_preset or '-' }} phase2={{ detail.phase2_team_preset or '-' }}</strong></li>
+    <li><span>phase2_shape</span><strong>{{ detail.phase2_shape }}</strong></li>
+    <li><span>phase2_quality</span><strong>{{ detail.phase2_quality }}</strong></li>
+    <li><span>completion_focus</span><strong>{{ detail.completion_focus }}</strong></li>
+    <li><span>done_when</span><strong>{{ detail.completion_done_when }}</strong></li>
+    <li><span>rerun_when</span><strong>{{ detail.completion_rerun_when }}</strong></li>
+    <li><span>manual_followup_when</span><strong>{{ detail.completion_followup_when }}</strong></li>
+    <li><span>execution_brief</span><strong>{{ detail.execution_brief_status }}</strong></li>
+    <li><span>brief_summary</span><strong>{{ detail.execution_brief_summary }}</strong></li>
+    <li><span>brief_do</span><strong>{{ detail.execution_brief_executable_slice }}</strong></li>
+    <li><span>brief_blocked</span><strong>{{ detail.execution_brief_blocked_slice }}</strong></li>
+    <li><span>brief_decision</span><strong>{{ detail.execution_brief_operator_decision }}</strong></li>
+    <li><span>job_contract</span><strong>{{ detail.job_contract_summary }}</strong></li>
+    <li><span>job_goal</span><strong>{{ detail.job_contract_goal }}</strong></li>
+    <li><span>job_scope</span><strong>{{ detail.job_contract_scope }}</strong></li>
+    <li><span>job_non_goals</span><strong>{{ detail.job_contract_non_goals }}</strong></li>
+    <li><span>job_acceptance</span><strong>{{ detail.job_contract_acceptance_checks }}</strong></li>
+    <li><span>job_artifacts</span><strong>{{ detail.job_contract_artifacts_to_touch }}</strong></li>
+    <li><span>job_rollback</span><strong>{{ detail.job_contract_rollback_hint }}</strong></li>
+    <li><span>planner_lane</span><strong>{{ detail.planner_lane_summary }}</strong></li>
+    <li><span>critic_lane</span><strong>{{ detail.critic_lane_summary }}</strong></li>
+    <li><span>critic_review</span><strong>{{ detail.critic_review_summary }}</strong></li>
+    <li><span>critic_review_issues</span><strong>{{ detail.critic_review_blocking_issues }}</strong></li>
+    <li><span>critic_review_fixes</span><strong>{{ detail.critic_review_required_fixes }}</strong></li>
+    <li><span>approved_plan</span><strong>{{ detail.approved_plan_summary }}</strong></li>
+    <li><span>approved_plan_artifact</span><strong>{{ detail.approved_plan_artifact_rows }}</strong></li>
+    <li><span>debug_packet</span><strong>{{ detail.debug_packet_summary }}</strong></li>
+    <li><span>debug_symptom</span><strong>{{ detail.debug_packet_symptom }}</strong></li>
+    <li><span>debug_root</span><strong>{{ detail.debug_packet_root_cause }}</strong></li>
+    <li><span>debug_evidence</span><strong>{{ detail.debug_packet_evidence }}</strong></li>
+    <li><span>debug_attempt</span><strong>{{ detail.debug_packet_failed_attempt }}</strong></li>
+    <li><span>debug_next</span><strong>{{ detail.debug_packet_next_step }}</strong></li>
+    <li><span>phase_checkpoint</span><strong>{{ detail.phase_checkpoint_summary }}</strong></li>
+    <li><span>checkpoint_current</span><strong>{{ detail.phase_checkpoint_current_phase }}</strong></li>
+    <li><span>checkpoint_rows</span><strong>{{ detail.phase_checkpoint_rows }}</strong></li>
+    <li><span>followup_brief</span><strong>{{ detail.followup_brief_status }}</strong></li>
+    <li><span>followup_summary</span><strong>{{ detail.followup_brief_summary }}</strong></li>
+    <li><span>followup_exec_lanes</span><strong>{{ detail.followup_brief_execution_lanes }}</strong></li>
+    <li><span>followup_review_lanes</span><strong>{{ detail.followup_brief_review_lanes }}</strong></li>
+    <li><span>followup_reason</span><strong>{{ detail.followup_brief_reason }}</strong></li>
+    <li><span>context_pack</span><strong>{{ detail.context_pack_profile }}</strong></li>
+    <li><span>context_pack_summary</span><strong>{{ detail.context_pack_summary }}</strong></li>
+    <li><span>context_pack_docs</span><strong>{{ detail.context_pack_docs }}</strong></li>
+    <li><span>context_pack_excluded</span><strong>{{ detail.context_pack_excluded }}</strong></li>
+    <li><span>subagent_contract</span><strong>{{ detail.general_subagent_summary }}</strong></li>
+    <li><span>subagent_evidence</span><strong>{{ detail.general_subagent_artifact_summary }}</strong></li>
+    <li><span>subagent_artifact</span><strong>{{ detail.general_subagent_artifact_path }}</strong></li>
+    <li><span>judge_binding</span><strong>{{ detail.judge_binding_summary }}</strong></li>
+    <li><span>judge_probe</span><strong>{{ detail.judge_probe_summary }}</strong></li>
+  </ul>
+  <details class="info-fold" open>
+    <summary>Decision Signals</summary>
+    <div class="fold-kv">
+      <ul class="kv-list">
+        <li><span>auto_route</span><strong>{{ detail.latest_replan_auto_operator_summary }}</strong></li>
+        <li><span>planning_handoff</span><strong>{{ detail.latest_planning_handoff_summary }}</strong></li>
+        <li><span>latest_replan_auto_route</span><strong>{{ detail.latest_replan_auto_route_summary }}</strong></li>
+        <li><span>auto_route_status</span><strong>{{ detail.latest_replan_auto_route_status_summary }}</strong></li>
+      </ul>
+    </div>
+  </details>
+  <details class="info-fold">
+    <summary>Execution Rails</summary>
+    <div class="fold-kv">
+      <ul class="kv-list">
+    <li><span>reentry_rails</span><strong>{{ detail.reentry_rails_summary }}</strong></li>
+    <li><span>run_lock</span><strong>{{ detail.run_lock_mode }}</strong></li>
+    <li><span>run_lock_note</span><strong>{{ detail.run_lock_note }}</strong></li>
+    <li><span>background_slots</span><strong>active={{ detail.background_slot_active }} limit={{ detail.background_slot_limit }}</strong></li>
+    <li><span>background_slot_pressure</span><strong>{{ detail.background_slot_pressure }}</strong></li>
+    <li><span>background_run</span><strong>{{ detail.background_run_status }}</strong></li>
+    <li><span>runner_target</span><strong>{{ detail.background_run_runner_target }}</strong></li>
+    <li><span>background_ticket</span><strong>{{ detail.background_run_ticket_id }}</strong></li>
+    <li><span>launch_mode</span><strong>{{ detail.background_run_launch_mode }}</strong></li>
+    <li><span>runtime_handle</span><strong>{{ detail.background_run_runtime_handle }}</strong></li>
+    <li><span>runtime_summary</span><strong>{{ detail.background_run_runtime_summary }}</strong></li>
+    <li><span>background_external</span><strong>{{ detail.background_run_external_phase }}</strong></li>
+    <li><span>background_external_note</span><strong>{{ detail.background_run_external_note }}</strong></li>
+    <li><span>launch_spec</span><strong>{{ detail.background_run_launch_spec_summary }}</strong></li>
+    <li><span>background_task_contract</span><strong>{{ detail.background_run_task_contract_summary }}</strong></li>
+    <li><span>background_worker_module</span><strong>{{ detail.background_run_task_contract_module_summary }}</strong></li>
+    <li><span>background_worker_policy</span><strong>{{ detail.background_run_task_contract_policy_summary }}</strong></li>
+    <li><span>background_worker_gate</span><strong>{{ detail.background_run_worker_gate_summary }}</strong></li>
+    <li><span>background_worker_profile</span><strong>{{ detail.background_run_worker_profile_summary }}</strong></li>
+    <li><span>background_worker_checklist</span><strong>{{ detail.background_run_worker_checklist_summary }}</strong></li>
+    <li><span>background_worker_items</span><strong>{{ detail.background_run_worker_items_summary }}</strong></li>
+    <li><span>background_worker_item_tokens</span><strong>{{ detail.background_run_worker_items }}</strong></li>
+    <li><span>background_worker_item_classes</span><strong>{{ detail.background_run_worker_item_classes_summary }}</strong></li>
+    <li><span>background_worker_item_class_tokens</span><strong>{{ detail.background_run_worker_item_classes }}</strong></li>
+    <li><span>background_worker_records</span><strong>{{ detail.background_run_worker_records_summary }}</strong></li>
+    <li><span>background_worker_record_tokens</span><strong>{{ detail.background_run_worker_records }}</strong></li>
+    <li><span>background_worker_record_rows</span><strong>{{ detail.background_run_worker_record_rows_summary }}</strong></li>
+    <li><span>background_worker_record_row_tokens</span><strong>{{ detail.background_run_worker_record_rows }}</strong></li>
+    <li><span>background_worker_record_set</span><strong>{{ detail.background_run_worker_record_set_summary }}</strong></li>
+    <li><span>background_worker_record_set_tokens</span><strong>{{ detail.background_run_worker_record_set }}</strong></li>
+    <li><span>background_worker_preflight</span><strong>{{ detail.background_run_worker_preflight_summary }}</strong></li>
+    <li><span>background_worker_preflight_rows</span><strong>{{ detail.background_run_worker_preflight_rows_summary }}</strong></li>
+    <li><span>background_worker_preflight_row_tokens</span><strong>{{ detail.background_run_worker_preflight_rows }}</strong></li>
+    <li><span>background_worker_result</span><strong>{{ detail.background_run_worker_result_summary }}</strong></li>
+    <li><span>background_worker_actions</span><strong>{{ detail.background_run_worker_result_actions }}</strong></li>
+    <li><span>background_worker_cautions</span><strong>{{ detail.background_run_worker_result_cautions }}</strong></li>
+    <li><span>background_worker_refs</span><strong>{{ detail.background_run_worker_result_evidence_refs }}</strong></li>
+    <li><span>background_worker_update</span><strong>{{ detail.background_run_worker_update_operator_summary }}</strong></li>
+    <li><span>background_preference_artifact</span><strong>{{ detail.background_run_operator_preference_artifact_kind }}</strong></li>
+    <li><span>background_preference_preflight</span><strong>{{ detail.background_run_operator_preference_preflight_summary }}</strong></li>
+    <li><span>background_preference_applied</span><strong>{{ detail.background_run_operator_preference_applied_summary }}</strong></li>
+    <li><span>background_preference_candidates</span><strong>{{ detail.background_run_operator_preference_candidate_summary }}</strong></li>
+    <li><span>background_preference_confirm</span><strong>{{ detail.background_run_operator_preference_confirm_summary }}</strong></li>
+    <li><span>background_preference_manual</span><strong>{{ detail.background_run_operator_preference_manual_summary }}</strong></li>
+    <li><span>background_preference_disabled</span><strong>{{ detail.background_run_operator_preference_disabled_summary }}</strong></li>
+    <li><span>background_preference_decisions</span><strong>{{ detail.background_run_operator_preference_decision_summary }}</strong></li>
+    <li><span>background_worker_apply</span><strong>{{ detail.background_run_worker_update_proposal_summary }}</strong></li>
+    <li><span>background_worker_apply_accept</span><strong>{{ detail.background_run_worker_apply_accept_summary }}</strong></li>
+    <li><span>background_worker_syncback</span><strong>{{ detail.background_run_worker_syncback_summary }}</strong></li>
+    <li><span>manual_step_execution</span><strong>{{ detail.background_run_manual_step_execution_summary }}</strong></li>
+    <li><span>canonical_mutation</span><strong>{{ detail.background_run_canonical_mutation_summary }}</strong></li>
+    <li><span>canonical_writeback</span><strong>{{ detail.background_run_canonical_writeback_summary }}</strong></li>
+    <li><span>background_worker_update_stub</span><strong>{{ detail.background_run_worker_update_stub_summary }}</strong></li>
+    <li><span>background_worker_targets</span><strong>{{ detail.background_run_worker_update_stub_targets }}</strong></li>
+    <li><span>background_worker_proposals</span><strong>{{ detail.background_run_worker_update_proposal_summary }}</strong></li>
+    <li><span>background_model_plan</span><strong>{{ detail.background_run_model_plan_summary }}</strong></li>
+    <li><span>background_judge_binding</span><strong>{{ detail.background_run_model_judge_binding_summary }}</strong></li>
+    <li><span>background_judge_probe</span><strong>{{ detail.background_run_model_judge_probe_summary }}</strong></li>
+    <li><span>background_escalation_binding</span><strong>{{ detail.background_run_model_escalation_binding_summary }}</strong></li>
+    <li><span>background_escalation_probe</span><strong>{{ detail.background_run_model_escalation_probe_summary }}</strong></li>
+    <li><span>evidence_bundle</span><strong>{{ detail.background_run_evidence_bundle }}</strong></li>
+    <li><span>evidence_artifacts</span><strong>{{ detail.background_run_evidence_artifacts }}</strong></li>
+    <li><span>control_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
+    <li><span>first_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }}</strong></li>
+    <li><span>lane_summary</span><strong>{{ detail.lane_summary }}</strong></li>
+    <li><span>rerun</span><strong>{{ detail.rerun_summary }}</strong></li>
+    <li><span>followup</span><strong>{{ detail.followup_summary }}</strong></li>
+    <li><span>backend</span><strong>{{ detail.backend_summary }}</strong></li>
+    {% if detail.backend_note %}<li><span>backend_note</span><strong>{{ detail.backend_note }}</strong></li>{% endif %}
+    <li><span>rate_limit</span><strong>{{ detail.rate_limit_summary }}</strong></li>
+    <li><span>updated_at</span><strong>{{ detail.updated_at }}</strong></li>
+      </ul>
+    </div>
+  </details>
+  <p><strong>prompt</strong></p>
+  <pre class="code-block">{{ detail.prompt }}</pre>
+  <p><strong>roles</strong> {{ detail.roles | join(', ') if detail.roles else '-' }}</p>
+  <p><strong>verifier_roles</strong> {{ detail.verifier_roles | join(', ') if detail.verifier_roles else '-' }}</p>
+  <p><strong>phase1_candidate_roles</strong> {{ detail.phase1_candidate_roles | join(', ') if detail.phase1_candidate_roles else '-' }}</p>
+  {% if detail.command_hints %}
+  <p><strong>operator_hints</strong></p>
+  <ul class="command-list">
+    {% for hint in detail.command_hints %}
+    <li><code>{{ hint }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% with
+    section_title='operator_actions',
+    safe_hints=detail.command_hints,
+    safe_buttons=detail.safe_action_buttons,
+    phase2_hints=detail.phase2_action_hints,
+    phase2_buttons=detail.phase2_action_buttons
+  %}
+  {% include 'dashboard/_action_section.html' %}
+  {% endwith %}
+</section>
+
+<section class="panel">
+  <h2>Task Team Observatory</h2>
+  <ul class="kv-list">
+    <li><span>headline</span><strong>{{ detail.observatory_headline }}</strong></li>
+    <li><span>first_focus</span><strong>{{ detail.observatory_first_focus }}</strong></li>
+    <li><span>freshness_scope</span><strong>{% if detail.observatory_freshness_scope == 'task' %}task-scoped freshness fallback{% elif detail.observatory_freshness_scope == 'lane' %}lane-scoped freshness{% else %}mixed lane/task freshness{% endif %}</strong></li>
+    <li><span>stale_lane_count</span><strong>{{ detail.observatory_stale_lane_count }}</strong></li>
+    <li><span>bottleneck_lane</span><strong>{{ detail.observatory_bottleneck_lane }}</strong></li>
+    <li><span>bottleneck_reason</span><strong>{{ detail.observatory_bottleneck_reason }}</strong></li>
+    <li><span>conflict_file_count</span><strong>{{ detail.observatory_conflict_file_count }}</strong></li>
+    <li><span>touched_file_count</span><strong>{{ detail.observatory_touched_file_count }}</strong></li>
+  </ul>
+  {% if detail.observatory_lanes %}
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th>Lane</th>
+        <th>Phase</th>
+        <th>Role</th>
+        <th>Status</th>
+        <th>Age</th>
+        <th>Idle</th>
+        <th>Last Event</th>
+        <th>Artifacts</th>
+        <th>Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lane in detail.observatory_lanes %}
+      <tr>
+        <td>{{ lane.lane_id }}{% if lane.is_stale %}<br><span class="muted">stale</span>{% endif %}</td>
+        <td>{{ lane.phase }}</td>
+        <td>{{ lane.role }}</td>
+        <td>{{ lane.status }}</td>
+        <td>{{ lane.age_text }}</td>
+        <td>{{ lane.idle_text }}<br><span class="muted">{{ lane.freshness_scope }}-scoped</span></td>
+        <td>{{ lane.last_event_kind }}<br><span class="muted">{{ lane.backend }}</span>{% if lane.tool_count %}<br><span class="muted">tools={{ lane.tool_count }}</span>{% endif %}</td>
+        <td>
+          {% if lane.touched_file_count %}files={{ lane.touched_file_count }}<br><span class="muted">{{ lane.touched_file_summary }}</span>{% else %}-{% endif %}
+          {% if lane.conflict_file_count %}<br><span class="muted">conflicts={{ lane.conflict_file_count }} {{ lane.conflict_summary }}</span>{% endif %}
+        </td>
+        <td>{{ lane.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Telegram Parity Snapshot</h2>
+  <pre class="code-block">{{ detail.reference_lines | join('\n') }}</pre>
+</section>
+{% endblock %}

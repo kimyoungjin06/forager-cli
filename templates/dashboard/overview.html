@@ -1,0 +1,267 @@
+{% extends 'dashboard/base.html' %}
+{% block content %}
+{% set planning_card = snapshot.attention_runtime_cards[0] if snapshot.attention_runtime_cards else (snapshot.runtime_cards[0] if snapshot.runtime_cards else none) %}
+<section class="grid two">
+  <article class="panel">
+    <h2>Control Summary</h2>
+    <p class="muted">control mode, retry posture, and current orchestration pressure</p>
+    <ul class="kv-list">
+      <li><span>auto_mode</span><strong>{{ snapshot.control_summary.auto_mode }}</strong></li>
+      <li><span>offdesk_mode</span><strong>{{ snapshot.control_summary.offdesk_mode }}</strong></li>
+      <li><span>state_root_mode</span><strong>{{ snapshot.control_summary.state_root_mode }}</strong></li>
+      <li><span>state_root_path</span><strong>{{ snapshot.control_summary.state_root_path }}</strong></li>
+      <li><span>provider_capacity</span><strong>{{ snapshot.control_summary.provider_capacity_summary }}</strong></li>
+      <li><span>next_retry_at</span><strong>{{ snapshot.control_summary.next_retry_at }}</strong></li>
+      <li><span>next_retry_target</span><strong>{{ snapshot.control_summary.next_retry_target }}</strong></li>
+      <li><span>repeat_memory</span><strong>{{ snapshot.control_summary.repeat_memory_summary }}</strong></li>
+      <li><span>execution_brief_summary</span><strong>{{ snapshot.control_summary.execution_brief_summary }}</strong></li>
+      <li><span>background_run_summary</span><strong>{{ snapshot.control_summary.background_run_summary }}</strong></li>
+      <li><span>background_worker_summary</span><strong>{{ snapshot.control_summary.background_worker_summary }}</strong></li>
+      <li><span>latest_intent_command</span><strong>{{ snapshot.control_summary.latest_intent_command }}</strong></li>
+      <li><span>latest_intent_action</span><strong>{{ snapshot.control_summary.latest_intent_action }}</strong></li>
+      <li><span>latest_intent_trace</span><strong>{{ snapshot.control_summary.latest_intent_trace }}</strong></li>
+      <li><span>first_focus</span><strong>{{ snapshot.control_summary.latest_intent_focus }}</strong></li>
+      <li><span>server_guard</span><strong>{{ snapshot.control_summary.server_guard.summary }}</strong></li>
+      <li><span>server_guard_reasons</span><strong>{{ snapshot.control_summary.server_guard.reason_summary }}</strong></li>
+      <li><span>server_guard_note</span><strong>{{ snapshot.control_summary.server_guard.note }}</strong></li>
+      <li><span>server_guard_next</span><strong>{{ snapshot.control_summary.server_guard.next_step }}</strong></li>
+      <li><span>server_guard_snapshot</span><strong>{{ snapshot.control_summary.server_guard.snapshot_path }}</strong></li>
+      <li><span>active_runtimes</span><strong>{{ snapshot.control_summary.active_runtime_count }}</strong></li>
+      <li><span>attention_runtimes</span><strong>{{ snapshot.control_summary.attention_runtime_count }}</strong></li>
+      {% if planning_card and planning_card.active_task_label %}
+      <li><span>planning_compact</span><strong>{{ planning_card.latest_planning_compact_summary }}</strong></li>
+      <li><span>planning_lanes</span><strong>{{ planning_card.active_task_planning_lanes_summary }}</strong></li>
+      <li><span>approved_plan_gate</span><strong>{{ planning_card.active_task_approved_plan_gate_summary }}</strong></li>
+      {% endif %}
+    </ul>
+    {% with title='Server Guard Health Card', include_actions=true, label_prefix='server_guard' %}
+      {% include 'dashboard/_server_guard_health_card.html' %}
+    {% endwith %}
+  </article>
+  <article class="panel">
+    <h2>Attention Runtimes</h2>
+    <p class="muted">runtimes that need the next operator decision first</p>
+      {% if snapshot.attention_runtime_cards %}
+      {% for card in snapshot.attention_runtime_cards %}
+      <div class="runtime-card {{ card.status }}">
+        <div class="runtime-card-header">
+          <div class="runtime-card-copy">
+            <p class="card-kicker">Runtime {{ card.readiness }}</p>
+            <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
+            <p class="runtime-attention">{{ card.attention_summary }}</p>
+          </div>
+          <span class="status-pill {{ card.status }}">{{ card.status }}</span>
+        </div>
+        <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
+        {% if card.active_task_label %}
+        <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
+        <p><strong>chat_console</strong> <a href="{{ card.chat_console_path }}">{{ card.chat_console_label }}</a></p>
+        <p><strong>preset</strong> {{ card.active_task_preset }}</p>
+        <p><strong>shape</strong> {{ card.active_task_phase2_shape }}</p>
+        <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
+        <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
+        <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
+        <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
+        <p><strong>planning_compact</strong> {{ card.latest_planning_compact_summary }}</p>
+        <p><strong>planning_lanes</strong> {{ card.active_task_planning_lanes_summary }}</p>
+        <p><strong>approved_plan_gate</strong> {{ card.active_task_approved_plan_gate_summary }}</p>
+        <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
+        <details class="info-fold" open>
+          <summary>Decision Signals</summary>
+          <div class="fold-stack">
+            <p><strong>latest_judge</strong> {{ card.latest_judge_summary }}</p>
+            <p><strong>latest_judge_decision</strong> {{ card.latest_judge_decision_summary }}</p>
+            <p><strong>latest_judge_decision_bridge</strong> {{ card.latest_judge_decision_bridge_summary }}</p>
+            <p><strong>replan_auto_decision</strong> {{ card.latest_replan_auto_decision_summary }}</p>
+            <p><strong>auto_route</strong> {{ card.latest_replan_auto_operator_summary }}</p>
+            <p><strong>replan_auto_routing_policy</strong> {{ card.latest_replan_auto_routing_policy_summary }}</p>
+            <p><strong>latest_replan_auto_route</strong> {{ card.latest_replan_auto_route_summary }}</p>
+            <p><strong>auto_route_status</strong> {{ card.latest_replan_auto_route_status_summary }}</p>
+            <p><strong>manual_step</strong> {{ card.latest_manual_step_summary }}</p>
+            <p><strong>canonical_mutation</strong> {{ card.latest_canonical_mutation_summary }}</p>
+            <p><strong>canonical_writeback</strong> {{ card.latest_canonical_writeback_summary }}</p>
+          </div>
+        </details>
+        <details class="info-fold">
+          <summary>Execution Rails</summary>
+          <div class="fold-stack">
+            <p><strong>reentry_rails</strong> {{ card.active_task_reentry_rails_summary }}</p>
+            <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+            <p><strong>worker_update</strong> {{ card.active_task_background_run_worker_update_operator_summary }}</p>
+            <p><strong>preference_preflight</strong> {{ card.active_task_background_run_operator_preference_preflight_summary }}</p>
+            <p><strong>preference_applied</strong> {{ card.active_task_background_run_operator_preference_applied_summary }}</p>
+            <p><strong>preference_candidates</strong> {{ card.active_task_background_run_operator_preference_candidate_summary }}</p>
+            <p><strong>worker_apply</strong> {{ card.active_task_background_run_worker_update_proposal_summary }}</p>
+            <p><strong>worker_apply_accept</strong> {{ card.active_task_background_run_worker_apply_accept_summary }}</p>
+            <p><strong>worker_syncback</strong> {{ card.active_task_background_run_worker_syncback_summary }}</p>
+            <p><strong>background_external</strong> {{ card.active_task_background_run_external_phase }} | {{ card.active_task_background_run_external_note }}</p>
+            <p><strong>run_lock</strong> {{ card.run_lock_mode }}</p>
+            <p><strong>run_lock_note</strong> {{ card.run_lock_note }}</p>
+            <p><strong>background_slots</strong> active={{ card.background_slot_active }} limit={{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</p>
+            <p><strong>runtime_handle</strong> {{ card.active_task_background_run_runtime_handle }}</p>
+            <p><strong>runtime_summary</strong> {{ card.active_task_background_run_runtime_summary }}</p>
+            <p><strong>evidence_artifacts</strong> {{ card.active_task_background_run_evidence_artifacts }}</p>
+            <p><strong>background_worker</strong> {{ card.background_worker_summary }}</p>
+            <p><strong>background_queue</strong> {{ card.background_queue_summary }}</p>
+            <p><strong>background_scheduler</strong> {{ card.background_scheduler_summary }}</p>
+            <p><strong>workspace</strong> {{ card.workspace_summary }}</p>
+            <p><strong>document_registry</strong> {{ card.document_registry_summary }}</p>
+            <p><strong>model_routing</strong> {{ card.model_routing_summary }}</p>
+            <p><strong>model_registry</strong> {{ card.model_registry_summary }}</p>
+          </div>
+        </details>
+        {% with title='Runtime Actions', buttons=card.runtime_safe_action_buttons %}
+          {% include 'dashboard/_action_buttons.html' %}
+        {% endwith %}
+        {% with title='Phase2 Actions', buttons=card.runtime_phase2_action_buttons %}
+          {% include 'dashboard/_action_buttons.html' %}
+        {% endwith %}
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">no attention runtimes</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <h2>Runtime Board</h2>
+  <p class="muted">compact runtime scan with decision signals first and execution rails second</p>
+  <div class="runtime-list">
+    {% for card in snapshot.runtime_cards[:12] %}
+    <div class="runtime-card {{ card.status }}">
+      <div class="runtime-card-header">
+        <div class="runtime-card-copy">
+          <p class="card-kicker">Runtime {{ card.readiness }}</p>
+          <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }} {{ card.project_label }}</a></h3>
+          <p class="runtime-attention">{{ card.attention_summary }}</p>
+        </div>
+        <span class="status-pill {{ card.status }}">{{ card.status }}</span>
+      </div>
+      <p><strong>first_focus</strong> {{ snapshot.control_summary.latest_intent_focus }} | next={{ card.priority_action }}</p>
+      {% if card.active_task_label %}
+      <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_phase }}</p>
+      <p><strong>chat_console</strong> <a href="{{ card.chat_console_path }}">{{ card.chat_console_label }}</a></p>
+      <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }}</p>
+      <p><strong>brief_summary</strong> {{ card.active_task_execution_brief_summary }}</p>
+      <p><strong>context_pack</strong> {{ card.active_task_context_pack_summary }}</p>
+      <p><strong>model_plan</strong> {{ card.active_task_model_plan_summary }}</p>
+      <p><strong>planning_compact</strong> {{ card.latest_planning_compact_summary }}</p>
+      <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
+      <details class="info-fold" open>
+        <summary>Decision Signals</summary>
+        <div class="fold-stack">
+          <p><strong>latest_judge</strong> {{ card.latest_judge_summary }}</p>
+          <p><strong>latest_judge_decision</strong> {{ card.latest_judge_decision_summary }}</p>
+          <p><strong>latest_judge_decision_bridge</strong> {{ card.latest_judge_decision_bridge_summary }}</p>
+          <p><strong>replan_auto_decision</strong> {{ card.latest_replan_auto_decision_summary }}</p>
+          <p><strong>auto_route</strong> {{ card.latest_replan_auto_operator_summary }}</p>
+          <p><strong>replan_auto_routing_policy</strong> {{ card.latest_replan_auto_routing_policy_summary }}</p>
+          <p><strong>latest_replan_auto_route</strong> {{ card.latest_replan_auto_route_summary }}</p>
+          <p><strong>auto_route_status</strong> {{ card.latest_replan_auto_route_status_summary }}</p>
+          <p><strong>manual_step</strong> {{ card.latest_manual_step_summary }}</p>
+          <p><strong>canonical_mutation</strong> {{ card.latest_canonical_mutation_summary }}</p>
+          <p><strong>canonical_writeback</strong> {{ card.latest_canonical_writeback_summary }}</p>
+        </div>
+      </details>
+      <details class="info-fold">
+        <summary>Execution Rails</summary>
+        <div class="fold-stack">
+          <p><strong>reentry_rails</strong> {{ card.active_task_reentry_rails_summary }}</p>
+          <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }}</p>
+          <p><strong>worker_update</strong> {{ card.active_task_background_run_worker_update_operator_summary }}</p>
+          <p><strong>preference_preflight</strong> {{ card.active_task_background_run_operator_preference_preflight_summary }}</p>
+          <p><strong>preference_applied</strong> {{ card.active_task_background_run_operator_preference_applied_summary }}</p>
+          <p><strong>preference_candidates</strong> {{ card.active_task_background_run_operator_preference_candidate_summary }}</p>
+          <p><strong>worker_apply</strong> {{ card.active_task_background_run_worker_update_proposal_summary }}</p>
+          <p><strong>worker_apply_accept</strong> {{ card.active_task_background_run_worker_apply_accept_summary }}</p>
+          <p><strong>worker_syncback</strong> {{ card.active_task_background_run_worker_syncback_summary }}</p>
+          <p><strong>background_external</strong> {{ card.active_task_background_run_external_phase }} | {{ card.active_task_background_run_external_note }}</p>
+          <p><strong>run_lock</strong> {{ card.run_lock_mode }}</p>
+          <p><strong>run_lock_note</strong> {{ card.run_lock_note }}</p>
+          <p><strong>background_slots</strong> active={{ card.background_slot_active }} limit={{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</p>
+          <p><strong>runtime_handle</strong> {{ card.active_task_background_run_runtime_handle }}</p>
+          <p><strong>runtime_summary</strong> {{ card.active_task_background_run_runtime_summary }}</p>
+          <p><strong>evidence_artifacts</strong> {{ card.active_task_background_run_evidence_artifacts }}</p>
+          <p><strong>background_worker</strong> {{ card.background_worker_summary }}</p>
+          <p><strong>background_queue</strong> {{ card.background_queue_summary }}</p>
+          <p><strong>background_scheduler</strong> {{ card.background_scheduler_summary }}</p>
+          <p><strong>workspace</strong> {{ card.workspace_summary }}</p>
+          <p><strong>document_registry</strong> {{ card.document_registry_summary }}</p>
+          <p><strong>model_routing</strong> {{ card.model_routing_summary }}</p>
+          <p><strong>model_registry</strong> {{ card.model_registry_summary }}</p>
+        </div>
+      </details>
+      {% with title='Runtime Actions', buttons=card.runtime_safe_action_buttons %}
+        {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
+      {% with title='Phase2 Actions', buttons=card.runtime_phase2_action_buttons %}
+        {% include 'dashboard/_action_buttons.html' %}
+      {% endwith %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Project Progress Board</h2>
+  <p class="muted">task-level matrix for brief, background run, queue, and operator decision</p>
+  <table class="task-table progress-board">
+    <thead>
+      <tr>
+        <th>Runtime</th>
+        <th>Task</th>
+        <th>Execution Brief</th>
+        <th>Background Run</th>
+        <th>Background Queue</th>
+        <th>Do</th>
+        <th>Blocked</th>
+        <th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for card in snapshot.runtime_cards %}
+      {% if card.active_task_label %}
+      <tr>
+        <td><a href="{{ card.runtime_path }}">{{ card.project_alias }}</a><br><span class="muted">{{ card.project_label }}</span></td>
+        <td><a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a><br><span class="muted">{{ card.active_task_status }}/{{ card.active_task_phase }}</span><br><span class="muted">{{ card.latest_planning_compact_summary }}</span></td>
+        <td>{{ card.active_task_execution_brief_status }}<br><span class="muted">{{ card.active_task_execution_brief_summary }}</span><br><span class="muted">{{ card.active_task_reentry_rails_summary }}</span></td>
+        <td>{{ card.active_task_background_run_status }}<br><span class="muted">{{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</span><br><span class="muted">{{ card.active_task_background_run_external_phase }} | {{ card.active_task_background_run_external_note }}</span><br><span class="muted">{{ card.active_task_background_run_runtime_handle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_bundle }}</span><br><span class="muted">{{ card.active_task_background_run_evidence_artifacts }}</span></td>
+        <td>{{ card.background_worker_summary }}<br><span class="muted">{{ card.background_queue_summary }}</span><br><span class="muted">{{ card.background_scheduler_summary }}</span><br><span class="muted">{{ card.latest_judge_summary }}</span><br><span class="muted">{{ card.latest_judge_decision_summary }}</span><br><span class="muted">{{ card.latest_judge_decision_bridge_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_decision_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_operator_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_routing_policy_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_route_summary }}</span><br><span class="muted">{{ card.latest_replan_auto_route_status_summary }}</span><br><span class="muted">{{ card.active_task_background_run_worker_update_operator_summary }}</span><br><span class="muted">{{ card.active_task_context_pack_summary }}</span><br><span class="muted">{{ card.active_task_model_plan_summary }}</span><br><span class="muted">{{ card.workspace_summary }}</span><br><span class="muted">{{ card.document_registry_summary }}</span><br><span class="muted">{{ card.model_routing_summary }}</span><br><span class="muted">{{ card.model_registry_summary }}</span><br><span class="muted">run_lock={{ card.run_lock_mode }}</span><br><span class="muted">slots {{ card.background_slot_active }}/{{ card.background_slot_limit }} | {{ card.background_slot_pressure }}</span></td>
+        <td>{{ card.active_task_execution_brief_executable_slice }}</td>
+        <td>{{ card.active_task_execution_brief_blocked_slice }}</td>
+        <td>{{ card.active_task_execution_brief_operator_decision }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="progress-mobile-cards">
+    {% for card in snapshot.runtime_cards %}
+    {% if card.active_task_label %}
+    <article class="progress-mobile-card">
+      <div class="progress-mobile-head">
+        <div>
+          <h3><a href="{{ card.runtime_path }}">{{ card.project_alias }}</a></h3>
+          <p class="muted">{{ card.project_label }}</p>
+        </div>
+        <span class="status-pill {{ card.status }}">{{ card.status }}</span>
+      </div>
+      <p><strong>task</strong> <a href="/control/tasks/by-request/{{ card.active_task_request_id }}">{{ card.active_task_label }}</a> | {{ card.active_task_status }}/{{ card.active_task_phase }}</p>
+      <p><strong>chat_console</strong> <a href="{{ card.chat_console_path }}">{{ card.chat_console_label }}</a></p>
+      <p><strong>execution_brief</strong> {{ card.active_task_execution_brief_status }} | {{ card.active_task_execution_brief_summary }}</p>
+      <p><strong>planning_compact</strong> {{ card.latest_planning_compact_summary }}</p>
+      <p><strong>approved_plan</strong> {{ card.active_task_approved_plan_summary }}</p>
+      <p><strong>background_run</strong> {{ card.active_task_background_run_status }} | {{ card.active_task_background_run_runner_target }} | {{ card.active_task_background_run_ticket_id }}</p>
+      <p><strong>background_queue</strong> {{ card.background_queue_summary }} | {{ card.background_scheduler_summary }}</p>
+      <p><strong>decision</strong> {{ card.active_task_execution_brief_operator_decision }}</p>
+      <p><strong>blocked</strong> {{ card.active_task_execution_brief_blocked_slice }}</p>
+      <p><strong>do</strong> {{ card.active_task_execution_brief_executable_slice }}</p>
+    </article>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,255 @@
+# Review R2 Rerun Path
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `R2`
+- preset:
+  - `review`
+- branch_target:
+  - `rerun`
+- status:
+  - `executed_done`
+- proof_mode:
+  - `live_rehearsal`
+- promotion_gate:
+  - `surface parity, runner metadata parity, and starvation-aware retry scheduling are already proven`
+- live_gate:
+  - `satisfied in an isolated local_tmux rehearsal with run_lock=open and slot limit 1`
+- executed_at:
+  - `2026-04-08 KST`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `최근 로그인 패치에 대한 회귀 리스크 리뷰를 수행해줘. canonical diff range, 변경 파일, severity findings, test gaps, uncertainties를 review_report.md에 남겨라. 범위 근거나 필수 섹션이 부족하면 done으로 닫지 말고 rerun으로 남겨라.`
+- normalized action:
+  - `retry`
+- target runtime:
+  - `tmp/r2_live_mpvkkb31`
+
+## 3. Expected Contract
+- expected preset:
+  - `review`
+- expected execution brief:
+  - status:
+    - `executable`
+  - executable slice:
+    - `review evidence collection and rerun over declared retry lanes`
+  - blocked slice or operator decision:
+    - `-`
+- expected followup brief:
+  - status:
+    - `none`
+  - execution lanes:
+    - `-`
+  - review lanes:
+    - `-`
+- expected lane shape:
+  - execution:
+    - reviewer-led readonly evidence lane
+  - review:
+    - reviewer/verifier lane
+- expected completion branch:
+  - `rerun`
+- expected reentry rail:
+  - `retry=<lane-scoped rerun> | followup=none | bg=<runner or ->`
+- expected evidence:
+  - review-only routing remains `review`
+  - retry transition preserves selected execution/review lanes
+  - invalid lane selection is rejected
+  - background retry rail can use:
+    - foreground bridge
+    - `local_tmux`
+    - `github_runner`
+  - non-local retry rails expose:
+    - `handoff_emitted`
+    - `pickup_acknowledged`
+    - `result_received`
+    - `awaiting_external_pickup`
+    through `/orch status` and `/orch bgx-status`
+  - run lock and slot saturation can block retry cleanly
+  - queue claim ordering prefers bounded retry work while still allowing older queued work to escape starvation
+
+## 4. Runtime Evidence
+- request_id:
+  - `REQ-R2-001`
+- task_short_id:
+  - `T-201`
+- planning:
+  - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py`
+- execution brief:
+  - `executable | do=review_evidence/*,review_report.md | blocked=-`
+- followup brief:
+  - `none`
+- reentry rails:
+  - `retry=ready exec=L1 review=R1 | followup=none | bg=completed/local_tmux`
+- stage progression:
+  - planning:
+    - `seeded retry candidate in isolated review runtime`
+  - execution:
+    - `dashboard retry action launched one local_tmux rerun ticket for lane L1`
+  - verification:
+    - `ticket completed with exit_code=0 and lane-scoped retry posture remained intact`
+  - integration:
+    - `not separately exercised`
+  - close:
+    - `background ticket closed as completed while the task stayed rerun-oriented`
+- critic/verifier verdict:
+  - `retry remained lane-scoped and bounded`
+- final branch:
+  - `rerun`
+
+## 5. Surface Evidence
+- `/task`:
+  - `shows retry=ready exec=L1 review=R1 | followup=none | bg=completed/local_tmux`
+  - `shows background ticket, runtime handle, evidence bundle, and artifacts`
+- `/monitor`:
+  - `not used in bounded replay`
+- `/offdesk review`:
+  - `first action stayed on retry and did not drift into manual followup`
+- `/orch status`:
+  - `before launch: pref=local_tmux | effective=local_background while no task-specific externalizable launch spec existed`
+  - `after launch: queue showed completed local_tmux ticket with no external runner dependency`
+- dashboard `Task Detail`:
+  - `reentry_rails shows retry=ready exec=L1 review=R1`
+  - `background ticket/runtime handle fields agree with gateway output`
+- dashboard `Recovery`:
+  - `not required for the first isolated launch-bearing rehearsal`
+- background run ticket / runner:
+  - `local_tmux ticket: BGT-REQ-R2-001-20260408160031.4488010900`
+  - `runtime_handle: aoe_bg_bgt-req-r2-001-20260408160031-4488010900`
+- launch spec / evidence bundle:
+  - `background_dispatch | mode=tmux_session_json | entry=aoe-background-worker | externalizable=yes`
+  - `status=completed | outcome=tmux_exit_code | exit_code=0`
+
+## 6. Result
+- result:
+  - `pass`
+- mismatch class:
+  - `none`
+- mismatch notes:
+  - `review-only routing stayed in review preset for the live rehearsal`
+  - `retry rail preserved the selected execution lane and rerun branch`
+  - `prelaunch /orch status still reports pref=local_tmux | effective=local_background until a task-specific externalizable launch spec exists`
+  - `seeded offdesk view still carries bootstrap/no-backlog noise, but it did not redirect the operator into manual followup`
+- next fix:
+  - `promote the next launch-bearing candidate on the same local rail: R3 execute`
+
+## 7. Raw References
+- runtime state refs:
+  - `tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json`
+  - `tests/gateway/test_gateway_state_helpers.py::test_choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_retry_replan_transition_preserves_selected_lane_targets`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_resolve_retry_replan_transition_rejects_invalid_lane_selector`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_executes_retry_bridge`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_uses_local_tmux_background_when_preferred`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_emits_github_runner_handoff_when_preferred`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_blocks_when_run_lock_is_test_only`
+  - `tests/gateway/test_control_dashboard.py::test_control_dashboard_post_retry_route_blocks_when_background_slots_are_exhausted`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_status_surfaces_external_background_phase`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_orch_bgx_status_surfaces_external_artifacts_and_audit`
+  - `tests/gateway/test_gateway_operator_workflows.py::test_background_run_queue_claims_starved_ticket_before_newer_high_priority_work`
+- log refs:
+  - `live rehearsal trigger: dashboard POST /control/actions/task/retry body={\"task_ref\":\"T-201\",\"lane_ids\":[\"L1\"]}`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r2_live_mpvkkb31 --workspace-root tmp/r2_live_mpvkkb31 --team-dir tmp/r2_live_mpvkkb31/.aoe-team --manager-state-file tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O2'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r2_live_mpvkkb31 --workspace-root tmp/r2_live_mpvkkb31 --team-dir tmp/r2_live_mpvkkb31/.aoe-team --manager-state-file tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-201'`
+  - `live rehearsal command: uv run python3 scripts/gateway/aoe-telegram-gateway.py --project-root tmp/r2_live_mpvkkb31 --workspace-root tmp/r2_live_mpvkkb31 --team-dir tmp/r2_live_mpvkkb31/.aoe-team --manager-state-file tmp/r2_live_mpvkkb31/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O2'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_state_helpers.py -k 'choose_auto_dispatch_roles_keeps_review_report_rerun_prompt_in_review_only or apply_exec_critic_lifecycle_uses_phase2_quality_roles_for_retry_targets'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'resolve_retry_replan_transition_preserves_selected_lane_targets or resolve_retry_replan_transition_rejects_invalid_lane_selector'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_control_dashboard.py -k 'post_retry_route_executes_retry_bridge or post_retry_route_uses_local_tmux_background_when_preferred or post_retry_route_emits_github_runner_handoff_when_preferred or post_retry_route_blocks_when_run_lock_is_test_only or post_retry_route_blocks_when_background_slots_are_exhausted'`
+  - `bounded replay command: uv run --with pytest pytest -q tests/gateway/test_gateway_operator_workflows.py -k 'orch_status_surfaces_external_background_phase or orch_bgx_status_surfaces_external_artifacts_and_audit or background_run_queue_claims_starved_ticket_before_newer_high_priority_work'`
+- artifact refs:
+  - `background_run_logs/bgt-req-r2-001-20260408160031-4488010900.log`
+  - `background_run_results/bgt-req-r2-001-20260408160031-4488010900.json`
+
+## 8. Legacy Reference
+- previous live artifact:
+  - `2026-03-31`
+  - `T-030`
+  - blocked before execution because the then-current review_report acceptance contract was still incomplete
+- interpretation:
+  - this remains a useful history note for the old planning stack
+  - it is no longer the current canonical R2 proof under the new `ExecutionBrief + FollowupBrief + reentry rail` model
+
+## 9. Live Rehearsal Runbook
+- rehearsal scope:
+  - `single lane-scoped retry over local_tmux only`
+- safety posture:
+  - use an isolated runtime
+  - seed it with:
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario r2 --control-root tmp/r2_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - temporarily set:
+    - `run_lock_mode=open`
+    - `background_runner_target=local_tmux`
+    - `background_runner_slot_limits.local_tmux=1`
+  - keep:
+    - `github_runner=0/disabled for this rehearsal`
+    - `remote_worker=0/disabled for this rehearsal`
+- required target state:
+  - a review task exists with:
+    - `ExecutionBrief.status=executable`
+    - explicit retry lane targets
+    - no followup promotion for the same slice
+  - `/task` and dashboard already agree on the retry branch before launch
+  - `/offdesk review` must not contradict the retry branch by drifting into manual followup or external-runner remediation
+- preflight:
+  - verify `/orch status <orch>` shows:
+    - `run_lock=open`
+    - `background_slots` with `local_tmux=0/1`
+    - no active external runner target
+  - verify `/orch status <orch>` at least shows:
+    - `background_runner: pref=local_tmux`
+  - note:
+    - before launch, `/orch status` may still report `effective=local_background`
+    - actual `local_tmux` selection is confirmed from the retry trigger response and resulting background ticket
+  - verify `/task <task>` shows:
+    - retry lane scope
+    - `followup=none` or no executable followup for the same slice
+  - verify `/offdesk review <orch>` remains conservative but does not suggest:
+    - manual followup
+    - external runner remediation
+  - note:
+    - in seeded runtimes, `/offdesk review` may still carry bootstrap/no-backlog notes unrelated to the retry branch itself
+- trigger:
+  - launch exactly one bounded retry through one operator surface:
+    - `/retry <task> lane <L#>`
+    - or dashboard retry action for the same lane scope
+  - do not launch multiple retries in parallel
+- capture during rehearsal:
+  - `/orch status <orch>` before launch
+  - `/task <task>` before launch
+  - `/offdesk review <orch>` before launch
+  - the retry trigger response
+  - `/orch status <orch>` after launch
+  - dashboard `Task Detail`
+  - dashboard `Runtime Detail`
+- pass criteria:
+  - retry stays lane-scoped
+  - runner target is `local_tmux`
+  - a background ticket is created with a `local_tmux` runtime handle
+  - `reentry_rails_summary` still points to rerun rather than followup
+  - no external phase or `/orch bgx-status` dependency appears
+  - slot usage remains bounded at `local_tmux=1/1`
+  - `/offdesk review` never redirects the operator into manual followup for the same slice
+- fail conditions:
+  - retry collapses into manual followup
+  - runner target drifts to `github_runner` or `remote_worker`
+  - background launch exceeds the declared lane scope
+  - slot pressure allows a second concurrent local_tmux launch
+  - operator surfaces disagree on retry branch or next step
+- evidence to retain:
+  - command transcript snippets for:
+    - `/orch status <orch>`
+    - `/task <task>`
+    - `/offdesk review <orch>`
+    - retry trigger
+  - task/runtime screenshots or copied field values for:
+    - `background_ticket`
+    - `runner_target`
+    - `runtime_handle`
+    - `reentry_rails`
+    - `background_slots`
+  - final outcome note:
+    - `executed_done` if the bounded local_tmux retry remains lane-scoped and inspectable
+    - `executed_blocked` if any launch drift or slot drift occurs

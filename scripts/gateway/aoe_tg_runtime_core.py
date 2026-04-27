@@ -4,16 +4,206 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 
+def _normalize_slot_limit(raw: Any, default: int = 1) -> int:
+    try:
+        value = int(raw or default)
+    except Exception:
+        value = int(default)
+    return max(1, min(value, 32))
+
+
+def _normalize_slot_limits_map(raw: Any, default: int = 1) -> Dict[str, int]:
+    source = raw if isinstance(raw, dict) else {}
+    normalized: Dict[str, int] = {}
+    for key in ("local_tmux", "github_runner", "remote_worker"):
+        normalized[key] = _normalize_slot_limit(source.get(key), default)
+    return normalized
+
+
 def resolve_project_root(raw: str) -> Path:
     return Path(raw).expanduser().resolve()
+
+
+def _legacy_team_dir(project_root: Path) -> Path:
+    return project_root / ".aoe-team"
+
+
+def _state_root_dir() -> Optional[Path]:
+    raw = str(os.environ.get("AOE_STATE_DIR", "")).strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser().resolve()
+
+
+def _slugify_project_name(name: str) -> str:
+    slug = []
+    last_dash = False
+    for char in str(name or "").strip().lower():
+        if char.isalnum():
+            slug.append(char)
+            last_dash = False
+            continue
+        if not last_dash:
+            slug.append("-")
+            last_dash = True
+    text = "".join(slug).strip("-")
+    return text or "project"
+
+
+def _normalize_git_remote_url(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if text.endswith(".git"):
+        text = text[:-4]
+    if text.startswith("git@") and ":" in text:
+        host_path = text.split("@", 1)[1]
+        host, path = host_path.split(":", 1)
+        text = f"ssh://{host}/{path}"
+    return text.rstrip("/")
+
+
+@lru_cache(maxsize=256)
+def _git_origin_url(project_root_raw: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", project_root_raw, "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=1.5,
+        )
+    except Exception:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return _normalize_git_remote_url(proc.stdout)
+
+
+def stable_project_id(project_root: Path) -> str:
+    root = Path(project_root).expanduser().resolve()
+    remote = _git_origin_url(str(root))
+    identity = f"git:{remote}" if remote else f"path:{root}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"{_slugify_project_name(root.name)}-{digest}"
+
+
+def resolve_centralized_team_dir(project_root: Path, state_root_dir: Path) -> Path:
+    return Path(state_root_dir).expanduser().resolve() / stable_project_id(project_root)
+
+
+def provider_capacity_state_path(team_dir: Path | str, filename: str = "provider_capacity.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "provider_capacity.json").strip()
+
+
+def model_endpoint_registry_path(team_dir: Path | str, filename: str = "model_endpoints.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "model_endpoints.json").strip()
+
+
+def model_routing_policy_path(team_dir: Path | str, filename: str = "model_routing.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "model_routing.json").strip()
+
+
+def workspace_brief_path(team_dir: Path | str, filename: str = "workspace_brief.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "workspace_brief.json").strip()
+
+
+def document_registry_path(team_dir: Path | str, filename: str = "document_registry.json") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(filename or "document_registry.json").strip()
+
+
+def context_pack_dir(team_dir: Path | str, dirname: str = "context_packs") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(dirname or "context_packs").strip()
+
+
+def context_pack_path(team_dir: Path | str, *, request_id: str, profile: str) -> Path:
+    safe_request = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(request_id or "").strip()).strip("._-")
+    safe_profile = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(profile or "").strip()).strip("._-")
+    return context_pack_dir(team_dir) / (safe_request or "runtime") / f"{safe_profile or 'default'}.json"
+
+
+def harness_authoring_dir(team_dir: Path | str, dirname: str = "harness_authoring") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(dirname or "harness_authoring").strip()
+
+
+def harness_authoring_plan_path(
+    team_dir: Path | str,
+    *,
+    request_id: str = "",
+    task_ref: str = "",
+    filename: str = "",
+) -> Path:
+    token = "".join(
+        ch if ch.isalnum() or ch in "._-" else "_"
+        for ch in str(filename or request_id or task_ref or "runtime").strip()
+    ).strip("._-")
+    return harness_authoring_dir(team_dir) / f"{token or 'runtime'}.json"
+
+
+def latest_intent_snapshot_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "control" / "latest-intent.json"
+
+
+def operator_preferences_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "control" / "operator_preferences.json"
+
+
+def operator_preference_candidates_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "control" / "operator_preference_candidates.json"
+
+
+def action_audit_path(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "dashboard" / "action-history.jsonl"
+
+
+def recovery_summary_dir(team_dir: Path | str) -> Path:
+    return Path(team_dir).expanduser().resolve() / "recovery" / "nightly-session-summary"
+
+
+def recovery_summary_latest_path(team_dir: Path | str) -> Path:
+    return recovery_summary_dir(team_dir) / "latest.json"
+
+
+def describe_resolved_team_dir(team_dir: Path | str) -> Dict[str, str]:
+    resolved = Path(team_dir).expanduser().resolve()
+    explicit_env = str(os.environ.get("AOE_TEAM_DIR", "")).strip()
+    explicit_path = Path(explicit_env).expanduser().resolve() if explicit_env else None
+    state_root = _state_root_dir()
+    if explicit_path is not None and resolved == explicit_path:
+        mode = "explicit-env"
+    elif state_root is not None and (resolved == state_root or state_root in resolved.parents):
+        mode = "centralized"
+    elif resolved.name == ".aoe-team":
+        mode = "legacy"
+    else:
+        mode = "explicit"
+    return {"mode": mode, "path": str(resolved)}
+
+
+def resolve_default_team_dir(project_root: Path) -> Path:
+    root = Path(project_root).expanduser().resolve()
+    state_root = _state_root_dir()
+    legacy_dir = _legacy_team_dir(root)
+    if not state_root:
+        return legacy_dir
+    centralized_dir = resolve_centralized_team_dir(root, state_root)
+    if centralized_dir.exists():
+        return centralized_dir
+    if legacy_dir.exists():
+        return legacy_dir
+    return centralized_dir
 
 
 def resolve_team_dir(project_root: Path, explicit_team_dir: Optional[str]) -> Path:
@@ -22,13 +212,13 @@ def resolve_team_dir(project_root: Path, explicit_team_dir: Optional[str]) -> Pa
     env_dir = os.environ.get("AOE_TEAM_DIR")
     if env_dir:
         return Path(env_dir).expanduser().resolve()
-    return project_root / ".aoe-team"
+    return resolve_default_team_dir(project_root)
 
 
 def resolve_state_file(project_root: Path, explicit_state_file: Optional[str]) -> Path:
     if explicit_state_file:
         return Path(explicit_state_file).expanduser().resolve()
-    return project_root / ".aoe-team" / "telegram_gateway_state.json"
+    return resolve_team_dir(project_root, None) / "telegram_gateway_state.json"
 
 
 def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callable[[], str]) -> Dict[str, Any]:
@@ -44,6 +234,12 @@ def default_manager_state(project_root: Path, team_dir: Path, *, now_iso: Callab
                 "name": "default",
                 "display_name": "default",
                 "project_alias": "O1",
+                "background_runner_target": "local_background",
+                "background_runner_slot_limit": 1,
+                "background_runner_slot_limits": {},
+                "model_routing_profile": "default",
+                "model_endpoint_overrides": {},
+                "run_lock_mode": "open",
                 "project_root": str(project_root),
                 "team_dir": str(team_dir),
                 "overview": "",
@@ -115,17 +311,17 @@ def load_manager_state(
         root = str(raw_entry.get("project_root", "")).strip()
         if not root:
             continue
+        root_path = Path(root).expanduser().resolve()
         td = str(raw_entry.get("team_dir", "")).strip()
         if not td:
-            td = str(Path(root).expanduser().resolve() / ".aoe-team")
+            td = str(resolve_default_team_dir(root_path))
         else:
             try:
                 gw_team = Path(team_dir).expanduser().resolve()
                 gw_root = Path(project_root).expanduser().resolve()
-                root_path = Path(root).expanduser().resolve()
                 td_path = Path(td).expanduser().resolve()
                 if td_path == gw_team and root_path != gw_root:
-                    td = str(root_path / ".aoe-team")
+                    td = str(resolve_default_team_dir(root_path))
             except Exception:
                 pass
         raw_tasks = raw_entry.get("tasks")
@@ -347,7 +543,15 @@ def load_manager_state(
             "name": key,
             "display_name": str(raw_entry.get("display_name", key)).strip() or key,
             "project_alias": normalize_project_alias(str(raw_entry.get("project_alias", ""))),
-            "project_root": str(Path(root).expanduser().resolve()),
+            "background_runner_target": str(raw_entry.get("background_runner_target", "local_background")).strip().lower()
+            or "local_background",
+            "background_runner_slot_limit": _normalize_slot_limit(raw_entry.get("background_runner_slot_limit"), 1),
+            "background_runner_slot_limits": _normalize_slot_limits_map(
+                raw_entry.get("background_runner_slot_limits"),
+                _normalize_slot_limit(raw_entry.get("background_runner_slot_limit"), 1),
+            ),
+            "run_lock_mode": str(raw_entry.get("run_lock_mode", "open")).strip().lower() or "open",
+            "project_root": str(root_path),
             "team_dir": str(Path(td).expanduser().resolve()),
             "overview": str(raw_entry.get("overview", "")).strip(),
             "last_request_id": str(raw_entry.get("last_request_id", "")).strip(),
@@ -447,6 +651,10 @@ def ensure_default_project_registered(
             "name": "default",
             "display_name": "default",
             "project_alias": "O1",
+            "background_runner_target": "local_background",
+            "background_runner_slot_limit": 1,
+            "background_runner_slot_limits": {},
+            "run_lock_mode": "open",
             "project_root": str(project_root),
             "team_dir": str(team_dir),
             "overview": "",
@@ -472,6 +680,13 @@ def ensure_default_project_registered(
             if "todos" not in entry or not isinstance(entry.get("todos"), list):
                 entry["todos"] = []
             entry["project_alias"] = normalize_project_alias(str(entry.get("project_alias", "")))
+            entry["background_runner_target"] = str(entry.get("background_runner_target", "local_background")).strip().lower() or "local_background"
+            entry["background_runner_slot_limit"] = _normalize_slot_limit(entry.get("background_runner_slot_limit"), 1)
+            entry["background_runner_slot_limits"] = _normalize_slot_limits_map(
+                entry.get("background_runner_slot_limits"),
+                entry["background_runner_slot_limit"],
+            )
+            entry["run_lock_mode"] = str(entry.get("run_lock_mode", "open")).strip().lower() or "open"
             entry["system_project"] = bool_from_json(entry.get("system_project"), str(entry.get("name", "")).strip().lower() == "default")
             entry["ops_hidden"] = bool_from_json(entry.get("ops_hidden"), bool(entry.get("system_project")))
             entry["ops_hidden_reason"] = str(entry.get("ops_hidden_reason", "")).strip()[:400]

@@ -41,6 +41,10 @@ BUILD_SIGNAL_KEYS = (
     "implement", "implementation", "build", "code", "fix", "patch", "refactor", "develop",
     "개발", "구현", "수정", "패치", "리팩토링", "코드",
 )
+BUILD_ACTION_SIGNAL_KEYS = (
+    "implement", "implementation", "build", "fix", "refactor", "develop",
+    "개발", "구현", "수정", "리팩토링",
+)
 DOC_SIGNAL_KEYS = (
     "document", "documentation", "docs", "summary", "report", "writeup", "guide", "readme", "tutorial", "handoff",
     "문서", "요약", "보고", "보고서", "가이드", "튜토리얼", "인수인계", "작성",
@@ -54,6 +58,15 @@ MULTI_SIGNAL_KEYS = (
     "tf", "team", "sub-task", "subtask", "역할별",
 )
 SINGLE_ROLE_ONLY_KEYS = (" only ", " solo ", " single ", "단독", "혼자", "하나만")
+
+REVIEW_OUTPUT_ARTIFACT_KEYS = (
+    "review_report",
+    "review_report.md",
+    "review report",
+    "review-only output",
+    "review-only artifact",
+    "review 결과물",
+)
 
 ROLE_ORDER = {
     "DataEngineer": 10,
@@ -216,6 +229,18 @@ def _role_name_aliases(role: str) -> List[str]:
     return [alias for alias in aliases if alias]
 
 
+def _explicit_role_name_mentions(prompt_lower: str, role: str) -> List[str]:
+    token = str(role or "").strip()
+    if not token:
+        return []
+    variants = [
+        token.lower(),
+        token.replace("-", " ").lower(),
+        re.sub(r"(?<!^)([A-Z])", r" \1", token).strip().lower(),
+    ]
+    return [variant for variant in variants if variant and variant in prompt_lower]
+
+
 def _ordered_roles(rows: List[str]) -> List[str]:
     return dedupe_roles(
         sorted(
@@ -235,6 +260,10 @@ def _has_any(prompt_lower: str, keys: tuple[str, ...]) -> bool:
 
 def _single_role_only_requested(prompt_lower: str) -> bool:
     return _has_any(prompt_lower, SINGLE_ROLE_ONLY_KEYS)
+
+
+def _explicit_multi_review_requested(prompt_lower: str) -> bool:
+    return _has_any(prompt_lower, REVIEW_SIGNAL_KEYS) and _has_any(prompt_lower, MULTI_SIGNAL_KEYS)
 
 
 def _add_companion_roles(
@@ -307,6 +336,45 @@ def _role_score_from_text(prompt_lower: str, role: str, mission: str) -> int:
     return score
 
 
+def _prefer_review_over_build(
+    *,
+    prompt_lower: str,
+    has_review_signal: bool,
+    has_build_signal: bool,
+    has_data_signal: bool,
+    has_doc_signal: bool,
+    has_analysis_signal: bool,
+) -> bool:
+    if not has_review_signal or not has_build_signal:
+        return False
+    if any((has_data_signal, has_doc_signal, has_analysis_signal)):
+        return False
+    return not _has_any(prompt_lower, BUILD_ACTION_SIGNAL_KEYS)
+
+
+def _review_output_doc_signal_only(*, prompt_lower: str, has_review_signal: bool, has_doc_signal: bool) -> bool:
+    if not has_review_signal or not has_doc_signal:
+        return False
+    if not _has_any(prompt_lower, REVIEW_OUTPUT_ARTIFACT_KEYS):
+        return False
+    return not _has_any(
+        prompt_lower,
+        (
+            "handoff",
+            "documentation",
+            "docs ",
+            "docs/",
+            "docs\\",
+            "guide",
+            "readme",
+            "tutorial",
+            "인수인계",
+            "가이드",
+            "튜토리얼",
+        ),
+    )
+
+
 def _build_prompt_role_preset(
     *,
     prompt_lower: str,
@@ -316,13 +384,15 @@ def _build_prompt_role_preset(
     has_build_signal: bool,
     has_doc_signal: bool,
     has_analysis_signal: bool,
+    prefer_review_over_build: bool = False,
 ) -> List[str]:
     available_set = {str(role).strip() for role in available_roles if str(role).strip()}
     roles: List[str] = []
+    review_only_requested = has_review_signal and not any((has_data_signal, has_build_signal, has_doc_signal, has_analysis_signal))
 
     if has_data_signal and "DataEngineer" in available_set:
         roles.append("DataEngineer")
-    if has_build_signal and "Codex-Dev" in available_set:
+    if has_build_signal and not prefer_review_over_build and "Codex-Dev" in available_set:
         roles.append("Codex-Dev")
     if has_doc_signal and "Codex-Writer" in available_set:
         roles.append("Codex-Writer")
@@ -336,6 +406,9 @@ def _build_prompt_role_preset(
             roles.append("Claude-Reviewer")
         else:
             return []
+
+    if review_only_requested and not _explicit_multi_review_requested(prompt_lower):
+        return _ordered_roles(roles)
 
     roles = _add_companion_roles(
         roles,
@@ -393,13 +466,26 @@ def classify_dispatch_role_preset(
     has_doc_signal = _has_any(prompt_lower, DOC_SIGNAL_KEYS)
     has_analysis_signal = _has_any(prompt_lower, ANALYSIS_SIGNAL_KEYS)
     has_review_signal = _has_any(prompt_lower, REVIEW_SIGNAL_KEYS)
+    effective_doc_signal = has_doc_signal and not _review_output_doc_signal_only(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_doc_signal=has_doc_signal,
+    )
+    prefer_review_over_build = _prefer_review_over_build(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_build_signal=has_build_signal,
+        has_data_signal=has_data_signal,
+        has_doc_signal=effective_doc_signal,
+        has_analysis_signal=has_analysis_signal,
+    )
 
     work_hits = [
         label
         for label, enabled in (
             ("data", has_data_signal),
-            ("build", has_build_signal),
-            ("writer", has_doc_signal),
+            ("build", has_build_signal and not prefer_review_over_build),
+            ("writer", effective_doc_signal),
             ("analysis", has_analysis_signal),
         )
         if enabled
@@ -436,29 +522,72 @@ def choose_auto_dispatch_roles(
     has_build_signal = _has_any(prompt_lower, BUILD_SIGNAL_KEYS)
     has_doc_signal = _has_any(prompt_lower, DOC_SIGNAL_KEYS)
     has_analysis_signal = _has_any(prompt_lower, ANALYSIS_SIGNAL_KEYS)
+    effective_doc_signal = has_doc_signal and not _review_output_doc_signal_only(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_doc_signal=has_doc_signal,
+    )
+    prefer_review_over_build = _prefer_review_over_build(
+        prompt_lower=prompt_lower,
+        has_review_signal=has_review_signal,
+        has_build_signal=has_build_signal,
+        has_data_signal=has_data_signal,
+        has_doc_signal=effective_doc_signal,
+        has_analysis_signal=has_analysis_signal,
+    )
+    effective_build_signal = has_build_signal and not prefer_review_over_build
+    review_only_requested = has_review_signal and not any(
+        (has_data_signal, effective_build_signal, effective_doc_signal, has_analysis_signal)
+    )
 
     wants_multi = _has_any(prompt_lower, MULTI_SIGNAL_KEYS)
-    category_hits = sum(1 for flag in (has_review_signal, has_data_signal, has_build_signal, has_doc_signal, has_analysis_signal) if flag)
+    category_hits = sum(
+        1
+        for flag in (has_review_signal, has_data_signal, effective_build_signal, has_doc_signal, has_analysis_signal)
+        if flag
+    )
     if category_hits >= 2:
         wants_multi = True
 
+    exact_explicit: List[str] = []
     explicit: List[str] = []
     for profile in profiles:
         role = str(profile.get("role", "")).strip()
         if not role or role.lower() == "orchestrator":
             continue
+        if _explicit_role_name_mentions(prompt_lower, role):
+            exact_explicit.append(role)
+            continue
         for alias in _role_name_aliases(role):
             if alias in prompt_lower:
                 explicit.append(role)
                 break
-    explicit = dedupe_roles(explicit)
+    explicit = dedupe_roles(exact_explicit or explicit)
     if explicit:
         chosen = _ordered_roles(explicit)
-        chosen = _add_companion_roles(
-            chosen,
-            available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
-            prompt_lower=prompt_lower,
+        explicit_review_only = bool(chosen) and all(
+            any(key in str(role).lower() for key in ("review", "critic", "verif", "qa"))
+            for role in chosen
         )
+        if explicit_review_only and any((has_data_signal, effective_build_signal, has_doc_signal, has_analysis_signal)):
+            prompt_roles = _build_prompt_role_preset(
+                prompt_lower=prompt_lower,
+                available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
+                has_review_signal=has_review_signal,
+                has_data_signal=has_data_signal,
+                has_build_signal=effective_build_signal,
+                has_doc_signal=effective_doc_signal,
+                has_analysis_signal=has_analysis_signal,
+                prefer_review_over_build=prefer_review_over_build,
+            )
+            if prompt_roles:
+                chosen = _ordered_roles(prompt_roles + chosen)
+        if not (review_only_requested and not _explicit_multi_review_requested(prompt_lower)):
+            chosen = _add_companion_roles(
+                chosen,
+                available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
+                prompt_lower=prompt_lower,
+            )
         if wants_multi or any(flag for flag in (has_build_signal, has_doc_signal, has_analysis_signal)):
             chosen = _add_default_review_pair(
                 chosen,
@@ -472,9 +601,10 @@ def choose_auto_dispatch_roles(
         available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
         has_review_signal=has_review_signal,
         has_data_signal=has_data_signal,
-        has_build_signal=has_build_signal,
-        has_doc_signal=has_doc_signal,
+        has_build_signal=effective_build_signal,
+        has_doc_signal=effective_doc_signal,
         has_analysis_signal=has_analysis_signal,
+        prefer_review_over_build=prefer_review_over_build,
     )
     if preset_roles:
         return preset_roles
@@ -498,7 +628,7 @@ def choose_auto_dispatch_roles(
             roles.append("Codex-Reviewer")
             if "Claude-Reviewer" in available_set:
                 roles.append("Claude-Reviewer")
-        if _has_any(prompt_lower, BUILD_SIGNAL_KEYS):
+        if effective_build_signal:
             roles.append("Codex-Dev")
         if _has_any(prompt_lower, DOC_SIGNAL_KEYS):
             roles.append("Codex-Writer")
@@ -517,7 +647,7 @@ def choose_auto_dispatch_roles(
             available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
             prompt_lower=prompt_lower,
         )
-        if wants_multi or any(flag for flag in (has_build_signal, has_doc_signal, has_analysis_signal, has_data_signal)):
+        if wants_multi or any(flag for flag in (effective_build_signal, has_doc_signal, has_analysis_signal, has_data_signal)):
             roles = _add_default_review_pair(
                 roles,
                 available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
@@ -537,7 +667,7 @@ def choose_auto_dispatch_roles(
         available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
         prompt_lower=prompt_lower,
     )
-    if wants_multi or any(flag for flag in (has_build_signal, has_doc_signal, has_analysis_signal)):
+    if wants_multi or any(flag for flag in (effective_build_signal, has_doc_signal, has_analysis_signal)):
         selected = _add_default_review_pair(
             selected,
             available_roles=[str(profile.get("role", "")).strip() for profile in profiles],
