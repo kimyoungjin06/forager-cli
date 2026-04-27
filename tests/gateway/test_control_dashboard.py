@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 import json
 import subprocess
 import sys
@@ -42,6 +43,79 @@ from _dashboard_planning_compat import (  # noqa: E402
     legacy_planning_review_payload,
     rewrite_latest_nightly_runtime_with_legacy_planning_review_key,
 )
+
+
+class _DashboardActionFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[dict[str, object]] = []
+        self._current: dict[str, object] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {str(key): str(value or "") for key, value in attrs}
+        if tag == "form":
+            self._current = {
+                "action": attr_map.get("action", ""),
+                "method": attr_map.get("method", ""),
+                "attrs": attr_map,
+                "inputs": {},
+            }
+            return
+        if tag != "input" or self._current is None:
+            return
+        name = attr_map.get("name", "")
+        if not name:
+            return
+        inputs = self._current.setdefault("inputs", {})
+        if not isinstance(inputs, dict):
+            return
+        value = attr_map.get("value", "")
+        current = inputs.get(name)
+        if current is None:
+            inputs[name] = value
+        elif isinstance(current, list):
+            current.append(value)
+        else:
+            inputs[name] = [current, value]
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+
+
+def _dashboard_action_forms(html: str) -> list[dict[str, object]]:
+    parser = _DashboardActionFormParser()
+    parser.feed(html)
+    return [
+        form
+        for form in parser.forms
+        if isinstance(form.get("attrs"), dict) and "data-dashboard-action" in form["attrs"]
+    ]
+
+
+def _dashboard_action_form(html: str, *, command: str, action: str) -> dict[str, object]:
+    matches = []
+    for form in _dashboard_action_forms(html):
+        attrs = form.get("attrs") if isinstance(form.get("attrs"), dict) else {}
+        if attrs.get("data-action-command") == command and form.get("action") == action:
+            matches.append(form)
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _submit_dashboard_action_form(
+    form: dict[str, object],
+    *,
+    config: dashboard_app.DashboardAppConfig,
+) -> tuple[int, dict[str, str], bytes]:
+    inputs = form.get("inputs") if isinstance(form.get("inputs"), dict) else {}
+    return dashboard_app.build_dashboard_action_response(
+        str(form.get("action", "")),
+        body=json.dumps(inputs).encode("utf-8"),
+        content_type="application/json",
+        config=config,
+    )
 
 
 def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
@@ -9293,6 +9367,185 @@ def test_control_dashboard_preferences_page_filters_to_selected_memory_scope(tmp
     assert artifact_scope_preferences.candidates[0].expected_scope_ref == "chart"
     artifact_scope_rows = {row.scope: row for row in artifact_scope_preferences.memory_scope_rows}
     assert artifact_scope_rows["artifact_kind"].candidate_count == 1
+
+
+def test_control_dashboard_preferences_page_rule_form_submit_updates_registry(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "confirm",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/preferences?project=O2&artifact=chart&scope=artifact_kind",
+        config,
+    )
+    text = body.decode("utf-8")
+    form = _dashboard_action_form(
+        text,
+        command="pref-rule:legend_position:auto",
+        action="/control/actions/control/operator-preference-rule",
+    )
+    inputs = form["inputs"]
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert inputs == {
+        "runtime_ref": "O2",
+        "return_path": "/control/preferences?project=O2&artifact=chart&scope=artifact_kind",
+        "artifact_kind": "chart",
+        "key": "legend_position",
+        "scope": "artifact_kind",
+        "scope_ref": "chart",
+        "value_json": "\"bottom\"",
+        "description": "Keep the legend below the chart.",
+        "mode": "auto",
+    }
+
+    action_status, action_headers, action_body = _submit_dashboard_action_form(form, config=config)
+    payload = json.loads(action_body.decode("utf-8"))
+
+    assert action_status == 200
+    assert action_headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/prefs rule chart:legend_position auto"
+    assert payload["next_step"] == "/control/preferences?project=O2&artifact=chart&scope=artifact_kind"
+    assert payload["preference_memory_scope_summary"] == "preference_memory_scope=artifact_kind:chart"
+    assert payload["preference_refresh_diff_summary"] == (
+        "preference_refresh_diff=applied_added=legend_position=bottom | on | auto | artifact_kind:chart"
+    )
+
+    _snapshot, audit = dashboard_state.load_dashboard_action_audit_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        focus="preferences",
+        query="memory_scope:artifact_kind applied_added",
+        limit=20,
+    )
+    assert audit.total_rows == 1
+    assert audit.rows[0].preference_memory_scope_summary == "preference_memory_scope=artifact_kind:chart"
+    assert "applied_added=legend_position=bottom" in audit.rows[0].preference_refresh_diff_summary
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    matching = [row for row in registry["rules"] if row["key"] == "legend_position" and row["artifact_kind"] == "chart"]
+    assert matching
+    assert matching[0]["prompt_mode"] == "auto"
+
+
+def test_control_dashboard_preferences_page_candidate_form_submit_promotes_candidate(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-2",
+        now_iso="2026-04-22T10:05:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/preferences?project=O2&artifact=chart&scope=project",
+        config,
+    )
+    text = body.decode("utf-8")
+    form = _dashboard_action_form(
+        text,
+        command="pref-candidate:show_source_note:auto",
+        action="/control/actions/control/operator-preference-candidate",
+    )
+    inputs = form["inputs"]
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert inputs == {
+        "runtime_ref": "O2",
+        "return_path": "/control/preferences?project=O2&artifact=chart&scope=project",
+        "artifact_kind": "chart",
+        "key": "show_source_note",
+        "project_ref": "O2",
+        "value_json": "true",
+        "description": "source note was missing in repeated chart revisions",
+        "mode": "auto",
+    }
+
+    action_status, action_headers, action_body = _submit_dashboard_action_form(form, config=config)
+    payload = json.loads(action_body.decode("utf-8"))
+
+    assert action_status == 200
+    assert action_headers["Content-Type"].startswith("application/json")
+    assert payload["status"] == "executed"
+    assert payload["source_command"] == "/prefs candidate chart:show_source_note auto"
+    assert payload["next_step"] == "/control/preferences?project=O2&artifact=chart&scope=project"
+    assert payload["preference_candidate_scope_summary"] == "preference_candidate_scopes=show_source_note:project:O2"
+    assert payload["preference_memory_scope_summary"] == "preference_memory_scope=project:O2"
+    assert payload["preference_refresh_diff_summary"] == (
+        "preference_refresh_diff="
+        "applied_added=show_source_note=true | on | auto | project:O2 ; "
+        "candidates_removed=show_source_note=true | hits=2 | issue=source note was missing in repeated chart revisions"
+    )
+
+    _snapshot, history = dashboard_state.load_dashboard_history_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        query="memory_scope:project candidates_removed",
+        scope="dashboard",
+        limit=20,
+    )
+    assert history.total_rows == 1
+    assert "preference_refresh_diff=" in history.rows[0].detail
+
+    registry = operator_preferences.load_operator_preferences(project_team_dir)
+    matching = [row for row in registry["rules"] if row["key"] == "show_source_note" and row["artifact_kind"] == "chart"]
+    assert matching
+    assert matching[0]["scope"] == "project"
+    assert matching[0]["scope_ref"] == "O2"
+    assert matching[0]["prompt_mode"] == "auto"
+    candidates = operator_preferences.load_operator_preference_candidates(project_team_dir)
+    assert candidates["candidates"] == []
 
 
 def test_control_dashboard_operator_preference_rule_action_updates_registry(tmp_path: Path) -> None:
