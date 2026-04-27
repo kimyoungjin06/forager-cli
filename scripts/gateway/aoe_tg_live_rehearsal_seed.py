@@ -88,6 +88,32 @@ def _prepare_project_layout(control_root: Path, *, overview: str) -> tuple[Path,
     return team_dir, project_root, project_team_dir
 
 
+def _approved_planning_fields() -> Dict[str, Any]:
+    return {
+        "phase1_current_provider": "codex",
+        "phase1_current_planner": "codex",
+        "phase1_current_critic": "claude",
+        "plan_critic": {"approved": True, "issues": [], "recommendations": []},
+        "plan_review_count": 3,
+        "plan_convergence_status": "ready",
+        "plan_gate_passed": True,
+    }
+
+
+def _manual_followup_ready_checkpoint(reason: str) -> Dict[str, Any]:
+    return {
+        "phase_checkpoint_status": "active",
+        "phase_checkpoint_current_phase": "verify",
+        "phase_checkpoint_summary": "status=active | current=verify | plan=done | implement=done | verify=active | handoff=ready",
+        "phase_checkpoint_rows": [
+            "plan=done|note=approved followup plan",
+            "implement=done|note=execution slice is available for followup",
+            f"verify=active|note={reason[:120]}",
+            "handoff=ready|note=manual remainder remains operator-owned",
+        ],
+    }
+
+
 def _r2_task(now: str) -> Dict[str, Any]:
     return {
         "request_id": "REQ-R2-001",
@@ -116,6 +142,7 @@ def _r2_task(now: str) -> Dict[str, Any]:
         "phase1_current_total_rounds": 3,
         "phase1_role_preset": "review",
         "phase2_team_preset": "review",
+        **_approved_planning_fields(),
         "execution_brief_status": "executable",
         "execution_brief_summary": "executable | do=review_evidence/*,review_report.md | blocked=-",
         "execution_brief_executable_slice": [
@@ -128,12 +155,20 @@ def _r2_task(now: str) -> Dict[str, Any]:
         "reentry_rails_summary": "retry=executable exec=L1 review=R1 | followup=none | bg=-",
         "plan": {
             "summary": "review | auth/session scope -> canonical diff+severity -> test gaps+uncertainties | review lane validates review_report",
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "owner_role": "Codex-Reviewer",
+                    "title": "Review evidence rerun",
+                    "goal": "refresh canonical diff, severity rationale, test gaps, and uncertainties",
+                },
+            ],
             "meta": {
                 "phase1_role_preset": "review",
                 "phase2_team_preset": "review",
                 "phase2_team_spec": {
                     "execution_groups": [
-                        {"group_id": "L1", "role": "Codex-Reviewer", "kind": "review_execution"},
+                        {"group_id": "L1", "role": "Codex-Reviewer", "kind": "review_execution", "subtask_ids": ["S1"]},
                     ],
                     "review_groups": [
                         {"group_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"]},
@@ -143,7 +178,7 @@ def _r2_task(now: str) -> Dict[str, Any]:
                 },
                 "phase2_execution_plan": {
                     "execution_lanes": [
-                        {"lane_id": "L1", "role": "Codex-Reviewer", "kind": "review_execution", "outputs": ["review_report"]},
+                        {"lane_id": "L1", "role": "Codex-Reviewer", "kind": "review_execution", "subtask_ids": ["S1"], "outputs": ["review_report"]},
                     ],
                     "review_lanes": [
                         {"lane_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"], "outputs": ["review_report"]},
@@ -232,6 +267,7 @@ def _b2_task(now: str) -> Dict[str, Any]:
         "phase1_current_total_rounds": 3,
         "phase1_role_preset": "build",
         "phase2_team_preset": "build",
+        **_approved_planning_fields(),
         "execution_brief_status": "executable",
         "execution_brief_summary": "executable | do=src/session.js,tests/session.test.js,report.md | blocked=-",
         "execution_brief_executable_slice": [
@@ -245,12 +281,20 @@ def _b2_task(now: str) -> Dict[str, Any]:
         "reentry_rails_summary": "retry=ready exec=L1 review=R1 | followup=none | bg=-",
         "plan": {
             "summary": "build | session expiry fix -> regression test -> report evidence | review lane validates session cleanup and test proof",
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "owner_role": "Codex-Dev",
+                    "title": "Build evidence rerun",
+                    "goal": "refresh session expiry fix, regression test, and report evidence",
+                },
+            ],
             "meta": {
                 "phase1_role_preset": "build",
                 "phase2_team_preset": "build",
                 "phase2_team_spec": {
                     "execution_groups": [
-                        {"group_id": "L1", "role": "Codex-Dev", "kind": "implementation"},
+                        {"group_id": "L1", "role": "Codex-Dev", "kind": "implementation", "subtask_ids": ["S1"]},
                     ],
                     "review_groups": [
                         {"group_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"]},
@@ -260,7 +304,7 @@ def _b2_task(now: str) -> Dict[str, Any]:
                 },
                 "phase2_execution_plan": {
                     "execution_lanes": [
-                        {"lane_id": "L1", "role": "Codex-Dev", "kind": "implementation", "outputs": ["work_result", "handoff_doc"]},
+                        {"lane_id": "L1", "role": "Codex-Dev", "kind": "implementation", "subtask_ids": ["S1"], "outputs": ["work_result", "handoff_doc"]},
                     ],
                     "review_lanes": [
                         {"lane_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"], "outputs": ["reviewer_note"]},
@@ -349,6 +393,7 @@ def _b3_task(now: str) -> Dict[str, Any]:
         "phase1_current_total_rounds": 3,
         "phase1_role_preset": "build",
         "phase2_team_preset": "build",
+        **_approved_planning_fields(),
         "execution_brief_status": "partially_executable",
         "execution_brief_summary": (
             "partially_executable | do=tests/session.test.js,report.md | "
@@ -370,18 +415,29 @@ def _b3_task(now: str) -> Dict[str, Any]:
         "followup_brief_reason": (
             "operator owns release acceptance; build follow-up may rerun the evidence lane only"
         ),
+        **_manual_followup_ready_checkpoint(
+            "operator owns release acceptance; build follow-up may rerun the evidence lane only"
+        ),
         "reentry_rails_summary": "retry=none | followup=partially_executable exec=L2 review=R1",
         "plan": {
             "summary": (
                 "build | session regression evidence lane L2 may run while release acceptance "
                 "and wording remain manual in R1"
             ),
+            "subtasks": [
+                {
+                    "id": "S2",
+                    "owner_role": "Codex-Dev",
+                    "title": "Build manual followup evidence",
+                    "goal": "refresh session regression evidence while release acceptance remains manual",
+                },
+            ],
             "meta": {
                 "phase1_role_preset": "build",
                 "phase2_team_preset": "build",
                 "phase2_team_spec": {
                     "execution_groups": [
-                        {"group_id": "L2", "role": "Codex-Dev", "kind": "implementation_followup"},
+                        {"group_id": "L2", "role": "Codex-Dev", "kind": "implementation_followup", "subtask_ids": ["S2"]},
                     ],
                     "review_groups": [
                         {"group_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L2"]},
@@ -395,6 +451,7 @@ def _b3_task(now: str) -> Dict[str, Any]:
                             "lane_id": "L2",
                             "role": "Codex-Dev",
                             "kind": "implementation_followup",
+                            "subtask_ids": ["S2"],
                             "outputs": ["session_regression_evidence", "handoff_report"],
                         },
                     ],
@@ -491,6 +548,7 @@ def _r3_execute_task(now: str) -> Dict[str, Any]:
         "phase1_current_total_rounds": 3,
         "phase1_role_preset": "review",
         "phase2_team_preset": "review",
+        **_approved_planning_fields(),
         "execution_brief_status": "partially_executable",
         "execution_brief_summary": "partially_executable | do=review_evidence/followup_scope.md | blocked=operator-owned review wording",
         "execution_brief_executable_slice": [
@@ -505,15 +563,26 @@ def _r3_execute_task(now: str) -> Dict[str, Any]:
         "followup_brief_execution_lane_ids": ["L2"],
         "followup_brief_review_lane_ids": ["R1"],
         "followup_brief_reason": "operator keeps the review slice while execution-only followup may proceed",
+        **_manual_followup_ready_checkpoint(
+            "operator keeps the review slice while execution-only followup may proceed"
+        ),
         "reentry_rails_summary": "retry=none | followup=partially_executable exec=L2 review=R1",
         "plan": {
             "summary": "review | followup execute evidence lane L2 remains runnable while review wording stays manual in R1",
+            "subtasks": [
+                {
+                    "id": "S2",
+                    "owner_role": "Codex-Reviewer",
+                    "title": "Review followup evidence",
+                    "goal": "refresh followup scope evidence while review wording remains manual",
+                },
+            ],
             "meta": {
                 "phase1_role_preset": "review",
                 "phase2_team_preset": "review",
                 "phase2_team_spec": {
                     "execution_groups": [
-                        {"group_id": "L2", "role": "Codex-Reviewer", "kind": "review_execution"},
+                        {"group_id": "L2", "role": "Codex-Reviewer", "kind": "review_execution", "subtask_ids": ["S2"]},
                     ],
                     "review_groups": [
                         {"group_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L2"]},
@@ -523,7 +592,7 @@ def _r3_execute_task(now: str) -> Dict[str, Any]:
                 },
                 "phase2_execution_plan": {
                     "execution_lanes": [
-                        {"lane_id": "L2", "role": "Codex-Reviewer", "kind": "review_execution", "outputs": ["review_report"]},
+                        {"lane_id": "L2", "role": "Codex-Reviewer", "kind": "review_execution", "subtask_ids": ["S2"], "outputs": ["review_report"]},
                     ],
                     "review_lanes": [
                         {"lane_id": "R1", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L2"], "outputs": ["review_report"]},

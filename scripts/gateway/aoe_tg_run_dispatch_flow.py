@@ -317,6 +317,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
         dispatch_roles_effective = str(policy.dispatch_roles or dispatch_roles).strip()
         selected_roles = list(policy.selected_roles or selected_roles)
         verifier_roles = list(policy.verifier_roles or [])
+        dispatch_require_verifier = bool(args.require_verifier)
 
         rerun_scope: Dict[str, Any] = {}
         if isinstance(plan_data, dict):
@@ -337,7 +338,11 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
             if rerun_scope:
                 selected_roles = list(rerun_scope.get("planned_roles") or selected_roles)
                 plan_roles = list(rerun_scope.get("planned_roles") or plan_roles)
-                verifier_roles = list(rerun_scope.get("review_roles") or verifier_roles)
+                if "review_roles" in rerun_scope:
+                    verifier_roles = list(rerun_scope.get("review_roles") or [])
+                    dispatch_require_verifier = bool(verifier_roles)
+                else:
+                    verifier_roles = list(verifier_roles)
                 if selected_roles:
                     dispatch_roles_effective = ",".join(selected_roles)
                 log_event(
@@ -435,7 +440,7 @@ def execute_dispatch_flow(*, ctx: RunDispatchFlowContext, deps: RunDispatchFlowD
                 prompt=source_prompt,
                 selected_roles=selected_roles,
                 verifier_roles=verifier_roles,
-                require_verifier=bool(args.require_verifier),
+                require_verifier=dispatch_require_verifier,
                 verifier_candidates=verifier_candidates,
                 run_aoe_orch=deps.run_aoe_orch,
                 touch_chat_recent_task_ref=deps.touch_chat_recent_task_ref,

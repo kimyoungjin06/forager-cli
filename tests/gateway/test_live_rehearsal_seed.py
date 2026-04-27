@@ -12,6 +12,7 @@ if str(GW_DIR) not in sys.path:
     sys.path.insert(0, str(GW_DIR))
 
 import aoe_tg_runtime_read as runtime_read  # noqa: E402
+import aoe_tg_task_state as task_state  # noqa: E402
 from aoe_tg_live_rehearsal_seed import (  # noqa: E402
     seed_b2_build_rerun_runtime,
     seed_b3_build_manual_followup_runtime,
@@ -43,7 +44,11 @@ def test_seed_b2_build_rerun_runtime_creates_isolated_retry_candidate(tmp_path: 
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
     assert task["phase1_role_preset"] == "build"
     assert task["phase2_team_preset"] == "build"
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
     assert task["execution_brief_status"] == "executable"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["lane_id"] == "L1"
     assert task["exec_critic"]["rerun_execution_lane_ids"] == ["L1"]
     assert task["exec_critic"]["rerun_review_lane_ids"] == ["R1"]
     assert task["reentry_rails_summary"] == "retry=ready exec=L1 review=R1 | followup=none"
@@ -73,7 +78,14 @@ def test_seed_b3_build_manual_followup_runtime_creates_canonical_followup_candid
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
     assert task["phase1_role_preset"] == "build"
     assert task["phase2_team_preset"] == "build"
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task["phase_checkpoint_status"] == "active"
+    assert task["phase_checkpoint_current_phase"] == "verify"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
+    assert task_state.derive_task_manual_gate(task)["status"] == "ready"
     assert task["execution_brief_status"] == "partially_executable"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["lane_id"] == "L2"
     assert task["followup_brief_status"] == "partially_executable"
     assert task["followup_brief_execution_lane_ids"] == ["L2"]
     assert task["followup_brief_review_lane_ids"] == ["R1"]
@@ -107,7 +119,11 @@ def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path:
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
     assert task["phase1_role_preset"] == "review"
     assert task["phase2_team_preset"] == "review"
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
     assert task["execution_brief_status"] == "executable"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["lane_id"] == "L1"
     assert task["exec_critic"]["rerun_execution_lane_ids"] == ["L1"]
     assert task["exec_critic"]["rerun_review_lane_ids"] == ["R1"]
     assert task["reentry_rails_summary"] == "retry=ready exec=L1 review=R1 | followup=none"
@@ -135,7 +151,14 @@ def test_seed_r3_manual_followup_execute_runtime_creates_isolated_followup_candi
     assert project["run_lock_mode"] == "test_only"
     assert project["background_runner_target"] == "local_tmux"
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task["phase_checkpoint_status"] == "active"
+    assert task["phase_checkpoint_current_phase"] == "verify"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
+    assert task_state.derive_task_manual_gate(task)["status"] == "ready"
     assert task["execution_brief_status"] == "partially_executable"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["lane_id"] == "L2"
     assert task["followup_brief_status"] == "partially_executable"
     assert task["followup_brief_execution_lane_ids"] == ["L2"]
     assert task["followup_brief_review_lane_ids"] == ["R1"]
