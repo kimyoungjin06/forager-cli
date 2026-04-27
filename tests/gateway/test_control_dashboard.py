@@ -9759,6 +9759,10 @@ def test_control_dashboard_preferences_browser_submit_updates_action_result(tmp_
               const panel = document.querySelector("#action-result");
               const summary = document.querySelector("#action-result-summary")?.textContent || "";
               const rows = document.querySelector("#action-result-rows")?.textContent || "";
+              const links = Array.from(document.querySelectorAll("#action-result-links a")).map((anchor) => ({
+                text: anchor.textContent || "",
+                href: anchor.getAttribute("href") || ""
+              }));
               const body = document.querySelector("#action-result-body")?.textContent || "";
               if (!body.includes('"status": "executed"') || !body.includes("show_source_note")) {
                 return false;
@@ -9767,6 +9771,7 @@ def test_control_dashboard_preferences_browser_submit_updates_action_result(tmp_
                 hidden: panel ? panel.classList.contains("hidden") : true,
                 summary,
                 rows,
+                links,
                 body,
                 fetches: window.__dashboardFetches || []
               };
@@ -9780,6 +9785,9 @@ def test_control_dashboard_preferences_browser_submit_updates_action_result(tmp_
         assert "status=executed" in str(result["summary"])
         assert "preference_memory_scope" in str(result["rows"])
         assert "preference_refresh_diff" in str(result["rows"])
+        links = result.get("links")
+        assert isinstance(links, list)
+        assert {"text": "refresh preferences", "href": "/control/preferences?project=O2&artifact=chart"} in links
         fetches = result.get("fetches")
         assert isinstance(fetches, list)
         assert len(fetches) == 1

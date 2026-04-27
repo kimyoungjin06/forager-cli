@@ -2012,9 +2012,16 @@
             ["auto_state", payload?.auto_state ? `${asText(payload.auto_state.command)} | grace=${asText(payload.auto_state.recovery_grace_until)}` : "-"],
             ["contexts", contexts.join(", ") || "-"],
           ];
+          const previewDetailPath = asText(payload?.preview?.detail_path);
+          const taskDetailPath = asText(payload?.task?.detail_path);
+          const runtimeDetailPath = asText(payload?.preview?.runtime_path);
+          const primaryDetailPath = taskDetailPath !== "-" ? taskDetailPath : previewDetailPath;
+          const primaryDetailLabel = primaryDetailPath.startsWith("/control/preferences")
+            ? "refresh preferences"
+            : (taskDetailPath !== "-" ? "task detail" : "detail");
           const linkRows = [
-            ["task detail", payload?.task?.detail_path || payload?.preview?.detail_path || "-"],
-            ["runtime detail", payload?.preview?.runtime_path || "-"],
+            [primaryDetailLabel, primaryDetailPath],
+            ["runtime detail", runtimeDetailPath],
           ];
           return {
             headline,
@@ -2099,10 +2106,14 @@
             currentResultPayload = payload;
           }
           if (recordHistory) {
-            const primaryTaskLink = payload?.task?.detail_path || payload?.preview?.detail_path || "-";
-            const primaryRuntimeLink = payload?.preview?.runtime_path || "-";
-            const linkHref = primaryTaskLink !== "-" ? primaryTaskLink : primaryRuntimeLink;
-            const linkLabel = primaryTaskLink !== "-" ? "task detail" : (primaryRuntimeLink !== "-" ? "runtime detail" : "-");
+            const previewDetailPath = asText(payload?.preview?.detail_path);
+            const taskDetailPath = asText(payload?.task?.detail_path);
+            const runtimeDetailPath = asText(payload?.preview?.runtime_path);
+            const primaryDetailPath = taskDetailPath !== "-" ? taskDetailPath : previewDetailPath;
+            const linkHref = primaryDetailPath !== "-" ? primaryDetailPath : runtimeDetailPath;
+            const linkLabel = primaryDetailPath.startsWith("/control/preferences")
+              ? "refresh preferences"
+              : (taskDetailPath !== "-" ? "task detail" : (runtimeDetailPath !== "-" ? "runtime detail" : "-"));
             pushHistory(
               headline,
               planningCompact,
