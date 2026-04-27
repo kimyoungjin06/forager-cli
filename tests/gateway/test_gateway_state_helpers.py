@@ -2124,6 +2124,27 @@ def test_build_followup_brief_snapshot_marks_execution_only_slice_executable() -
     assert brief["reason"] == "rerun the packaging lane only"
 
 
+def test_build_followup_brief_snapshot_prefers_existing_followup_brief_fields() -> None:
+    task = {
+        "followup_brief_status": "partially_executable",
+        "followup_brief_execution_lane_ids": ["L2"],
+        "followup_brief_review_lane_ids": ["R1"],
+        "followup_brief_reason": "canonical follow-up reason",
+        "exec_critic": {
+            "manual_followup_execution_lane_ids": ["L9"],
+            "manual_followup_review_lane_ids": ["R9"],
+            "reason": "stale critic reason",
+        },
+    }
+
+    brief = task_state.build_followup_brief_snapshot(task)
+
+    assert brief["status"] == "partially_executable"
+    assert brief["execution_lane_ids"] == ["L2"]
+    assert brief["review_lane_ids"] == ["R1"]
+    assert brief["reason"] == "canonical follow-up reason"
+
+
 def test_blocked_state_helpers_render_manual_followup_summary() -> None:
     rows = [
         {"id": "TODO-1", "status": "blocked", "blocked_bucket": "manual_followup", "blocked_reason": "need review", "blocked_count": 2, "updated_at": "2026-03-10T10:00:00+0900"},

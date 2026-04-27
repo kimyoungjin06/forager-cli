@@ -1500,6 +1500,15 @@ def summarize_task_lifecycle(project_name: str, task: Dict[str, Any]) -> str:
     followup_brief_status = str(task.get("followup_brief_status", "")).strip()
     if followup_brief_status:
         lines.append("followup_brief: " + followup_brief_status[:64])
+        followup_brief_exec = [str(x).strip() for x in (task.get("followup_brief_execution_lane_ids") or []) if str(x).strip()]
+        followup_brief_review = [str(x).strip() for x in (task.get("followup_brief_review_lane_ids") or []) if str(x).strip()]
+        if followup_brief_exec or followup_brief_review:
+            lines.append(
+                "followup_brief_targets: execution={exec} review={review}".format(
+                    exec=", ".join(followup_brief_exec) if followup_brief_exec else "-",
+                    review=", ".join(followup_brief_review) if followup_brief_review else "-",
+                )
+            )
         followup_brief_summary = str(task.get("followup_brief_summary", "")).strip()
         if followup_brief_summary:
             lines.append("followup_brief_summary: " + followup_brief_summary[:240])

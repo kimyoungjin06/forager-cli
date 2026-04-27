@@ -9568,10 +9568,7 @@ def test_resolve_followup_execute_transition_uses_execution_slice_only() -> None
                 "followup_brief_status": "partially_executable",
                 "followup_brief_execution_lane_ids": ["L2"],
                 "followup_brief_review_lane_ids": ["R2"],
-                "exec_critic": {
-                    "manual_followup_execution_lane_ids": ["L2"],
-                    "manual_followup_review_lane_ids": ["R2"],
-                },
+                "exec_critic": {"reason": "legacy critic reason"},
             }
         },
     }
@@ -9625,10 +9622,7 @@ def test_resolve_followup_execute_transition_rejects_review_lane_selection() -> 
                 "followup_brief_status": "partially_executable",
                 "followup_brief_execution_lane_ids": ["L2"],
                 "followup_brief_review_lane_ids": ["R2"],
-                "exec_critic": {
-                    "manual_followup_execution_lane_ids": ["L2"],
-                    "manual_followup_review_lane_ids": ["R2"],
-                },
+                "exec_critic": {"reason": "legacy critic reason"},
             }
         },
     }
@@ -9678,12 +9672,14 @@ def test_orch_followup_rejects_invalid_lane_selector() -> None:
                 "status": "failed",
                 "prompt": "followup target",
                 "context": {"task_short_id": "T-123"},
+                "followup_brief_status": "preview_only",
+                "followup_brief_execution_lane_ids": ["L2"],
+                "followup_brief_review_lane_ids": ["R2"],
+                "followup_brief_reason": "Need operator review",
                 "exec_critic": {
                     "verdict": "intervention",
                     "action": "manual_followup",
                     "reason": "Need operator review",
-                    "manual_followup_execution_lane_ids": ["L2"],
-                    "manual_followup_review_lane_ids": ["R2"],
                 },
             }
         },
@@ -9765,12 +9761,14 @@ def test_orch_followup_summarizes_allowed_lane_targets() -> None:
                 "status": "failed",
                 "prompt": "followup target",
                 "context": {"task_short_id": "T-123"},
+                "followup_brief_status": "preview_only",
+                "followup_brief_execution_lane_ids": ["L2"],
+                "followup_brief_review_lane_ids": ["R2"],
+                "followup_brief_reason": "Canonical operator review",
                 "exec_critic": {
                     "verdict": "intervention",
                     "action": "manual_followup",
-                    "reason": "Need operator review",
-                    "manual_followup_execution_lane_ids": ["L2"],
-                    "manual_followup_review_lane_ids": ["R2"],
+                    "reason": "Legacy operator review",
                     "rerun_execution_lane_ids": ["L2"],
                 },
             }
@@ -9839,7 +9837,7 @@ def test_orch_followup_summarizes_allowed_lane_targets() -> None:
     assert "manual follow-up" in text
     assert "execution lanes: L2" in text
     assert "review lanes: R2" in text
-    assert "Need operator review" in text
+    assert "Canonical operator review" in text
     buttons = [btn["text"] for row in (reply_markup or {}).get("keyboard", []) for btn in row]
     assert "/followup T-123" in buttons
     assert "/followup T-123 lane L2" in buttons
@@ -9873,8 +9871,6 @@ def test_orch_followup_execute_blocks_preview_only_followup_brief(tmp_path: Path
                     "verdict": "intervention",
                     "action": "manual_followup",
                     "reason": "Need operator review",
-                    "manual_followup_execution_lane_ids": ["L2"],
-                    "manual_followup_review_lane_ids": ["R2"],
                 },
             }
         },

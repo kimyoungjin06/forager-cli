@@ -142,7 +142,20 @@ def normalize_followup_brief_snapshot(raw: Any) -> Dict[str, Any]:
     }
 
 
-def build_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+def _existing_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    return normalize_followup_brief_snapshot(
+        {
+            "version": task.get("followup_brief_version"),
+            "status": task.get("followup_brief_status"),
+            "summary": task.get("followup_brief_summary"),
+            "execution_lane_ids": task.get("followup_brief_execution_lane_ids"),
+            "review_lane_ids": task.get("followup_brief_review_lane_ids"),
+            "reason": task.get("followup_brief_reason"),
+        }
+    )
+
+
+def _build_followup_brief_snapshot_from_exec_critic(task: Dict[str, Any]) -> Dict[str, Any]:
     exec_critic = task.get("exec_critic") if isinstance(task.get("exec_critic"), dict) else {}
     execution_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_execution_lane_ids"))
     review_lane_ids = _normalize_followup_lane_ids(exec_critic.get("manual_followup_review_lane_ids"))
@@ -162,6 +175,13 @@ def build_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
             "reason": str(exec_critic.get("reason", exec_critic.get("note", "")) or "").strip(),
         }
     )
+
+
+def build_followup_brief_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    explicit = _existing_followup_brief_snapshot(task)
+    if explicit:
+        return explicit
+    return _build_followup_brief_snapshot_from_exec_critic(task)
 
 
 def apply_followup_brief_snapshot(target: Dict[str, Any], brief: Dict[str, Any]) -> Dict[str, Any]:
@@ -2174,7 +2194,7 @@ def apply_exec_critic_lifecycle(
         lifecycle_set_stage(task=task, stage="close", status="failed", note=reason or verdict)
 
     apply_review_lane_verdicts(task, critic)
-    followup_brief = build_followup_brief_snapshot(task)
+    followup_brief = _build_followup_brief_snapshot_from_exec_critic(task)
     if followup_brief:
         apply_followup_brief_snapshot(task, followup_brief)
     else:
@@ -2359,16 +2379,7 @@ def sanitize_task_record(
         ):
             task.pop(key, None)
 
-    followup_brief_snapshot = normalize_followup_brief_snapshot(
-        {
-            "version": task.get("followup_brief_version"),
-            "status": task.get("followup_brief_status"),
-            "summary": task.get("followup_brief_summary"),
-            "execution_lane_ids": task.get("followup_brief_execution_lane_ids"),
-            "review_lane_ids": task.get("followup_brief_review_lane_ids"),
-            "reason": task.get("followup_brief_reason"),
-        }
-    )
+    followup_brief_snapshot = _existing_followup_brief_snapshot(task)
     if not followup_brief_snapshot:
         followup_brief_snapshot = build_followup_brief_snapshot(task)
     if followup_brief_snapshot:
