@@ -16,6 +16,7 @@ import aoe_tg_task_state as task_state  # noqa: E402
 from aoe_tg_live_rehearsal_seed import (  # noqa: E402
     seed_b2_build_rerun_runtime,
     seed_b3_build_manual_followup_runtime,
+    seed_d2_data_rerun_runtime,
     seed_r2_review_rerun_runtime,
     seed_r3_manual_followup_execute_runtime,
     seed_r4_external_background_runtime,
@@ -94,6 +95,61 @@ def test_seed_b3_build_manual_followup_runtime_creates_canonical_followup_candid
     assert task["reentry_rails_summary"] == "retry=none | followup=partially_executable exec=L2 review=R1"
     assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
     assert payload["trigger_command"] == "/followup-exec T-601 lane L2"
+
+
+def test_seed_d2_data_rerun_runtime_creates_isolated_null_heavy_candidate(tmp_path: Path) -> None:
+    payload = seed_d2_data_rerun_runtime(
+        tmp_path / "control",
+        run_lock_mode="test_only",
+        runner_target="local_tmux",
+        local_tmux_slot_limit=1,
+    )
+
+    control_root = Path(payload["control_root"])
+    team_dir = Path(payload["team_dir"])
+    project_root = Path(payload["project_root"])
+    manager_state_file = Path(payload["manager_state_file"])
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    project = state["projects"]["alpha"]
+    task = project["tasks"]["REQ-D2-001"]
+
+    assert project["project_alias"] == "O7"
+    assert project["overview"] == "isolated data rerun live rehearsal"
+    assert project["run_lock_mode"] == "test_only"
+    assert project["background_runner_target"] == "local_tmux"
+    assert task["phase1_role_preset"] == "data"
+    assert task["phase2_team_preset"] == "data"
+    assert task["request_contract_type"] == "data"
+    assert task["request_contract_status"] == "complete"
+    assert task["request_contract_fields"]["quality_gate_policy"]["null_heavy_min_rows_per_column"] == "2"
+    assert task["request_contract_artifact_contracts"]["null_summary"]["required_fields"][:5] == [
+        "affected_columns",
+        "null_or_invalid_count",
+        "null_heavy",
+        "rerun_required",
+        "reason",
+    ]
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
+    assert task["execution_brief_status"] == "executable"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["lane_id"] == "L1"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["role"] == "DataEngineer"
+    assert task["exec_critic"]["rerun_execution_lane_ids"] == ["L1"]
+    assert task["exec_critic"]["rerun_review_lane_ids"] == ["R1"]
+    assert task["reentry_rails_summary"] == "retry=ready exec=L1 review=R1 | followup=none"
+    assert payload["trigger_command"] == "/retry T-701 lane L1"
+
+    for artifact in payload["artifact_paths"]:
+        assert (project_root / artifact).exists()
+    null_summary = (project_root / "null_summary.md").read_text(encoding="utf-8")
+    assert "affected_columns: orders, revenue" in null_summary
+    assert "null_or_invalid_count:" in null_summary
+    assert "- orders: 2" in null_summary
+    assert "- revenue: 2" in null_summary
+    assert "null_heavy: true" in null_summary
+    assert "rerun_required: true" in null_summary
+    assert "close as rerun, not done" in null_summary
 
 
 def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path: Path) -> None:

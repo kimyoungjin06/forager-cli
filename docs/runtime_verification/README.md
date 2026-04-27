@@ -53,10 +53,11 @@
       - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, request-contract plumbing, typed month/schema/null/sample policies, and artifact-intent routing
       - final successful run (`T-038`) reached `planning_ready` and `dispatch_completed` with all four expected artifacts and verifier success evidence
   - `data/D2_rerun_path.md`
-    - `executed_blocked`
+    - `live_rehearsal_ready`
     - finding:
       - live rerun-path work surfaced reusable contracts for `quality_gate_policy`, `schema_column_expectations`, numeric `null-heavy` thresholds, and `schema_value_quality_policy`
-      - after those generic promotions, the remaining blocker stayed scenario-specific: `null_summary.md` evidence formatting for rerun review remained too custom to justify more core growth
+      - isolated D2 seed proof now materializes concrete `schema_report.json`, `null_summary.md`, and `sample_5.csv` evidence with `affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, and `reason`
+      - the remaining gate is launch-bearing verification: `/retry T-701 lane L1` must close cleanly while preserving the source task on `rerun`
   - `review/R1_happy_path.md`
     - `executed_done`
     - finding:
@@ -136,9 +137,9 @@
 - next live candidate:
   - `data/D2_rerun_path.md`
 - candidate reason:
-  - `data rerun remains the largest unresolved non-happy-path gap after B3's launch-bearing manual-followup proof`
+  - `D2 is now seed-backed and surface-visible; it is the next launch-bearing rerun proof`
 - remaining gate:
-  - `rerun D2 after the scenario-specific null_summary evidence format is bounded-tested`
+  - `launch /retry T-701 lane L1 from the isolated D2 runtime and verify the background ticket closes while source branch remains rerun`
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
 

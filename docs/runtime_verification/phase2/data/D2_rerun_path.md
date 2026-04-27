@@ -8,11 +8,11 @@
 - branch_target:
   - `rerun`
 - status:
-  - `executed_blocked`
+  - `live_rehearsal_ready`
 - current_fix_branch:
-  - `task/data-d2-rerun-evidence-1`
+  - `task/data-d2-isolated-rerun-1`
 - executed_at:
-  - `2026-03-31T07:46:09+09:00`
+  - `2026-04-28T01:03:16+09:00`
 - operator:
   - `Codex`
 
@@ -22,7 +22,7 @@
 - normalized action:
   - `dispatch_task`
 - target runtime:
-  - `O1 default (temp D2 runtime)`
+  - `O7 isolated data rerun seed runtime`
 
 ## 3. Expected Contract
 - expected preset:
@@ -44,63 +44,81 @@
 
 ## 4. Runtime Evidence
 - request_id:
-  - `r_20260331074609_bff08ec1`
+  - `REQ-D2-001`
 - task_short_id:
-  - `T-044`
+  - `T-701`
 - planning:
   - `phase1 ensemble rounds=3 providers=codex, claude`
 - stage progression:
   - planning:
-    - `blocked after 3 review passes`
+    - `done`
   - execution:
-    - `-`
+    - `done`
   - verification:
-    - `-`
+    - `failed`
   - integration:
-    - `-`
+    - `failed`
   - close:
-    - `-`
+    - `failed`
 - critic/verifier verdict:
-  - `planning_blocked`
+  - `retry`
 - final branch:
-  - `not reached`
+  - `needs_retry`
+- runtime proof:
+  - `seeded isolated rehearsal reaches dispatch-ready state with reentry_rails=retry=ready exec=L1 review=R1 | followup=none`
+  - `task contract remains data preset with DataEngineer execution lane and Codex/Claude verifier lanes`
+  - `null_summary.md contains affected_columns, null_or_invalid_count, null_heavy, rerun_required, and reason`
 
 ## 5. Surface Evidence
 - `/task`:
-  - `pending`
+  - `T-701` shows `team_phase: needs_retry`, `phase2_execution: single lanes=1`, `phase2_review: parallel lanes=2`, and `execution_brief: executable`
 - `/monitor`:
-  - `pending`
+  - `covered by /orch status O7 runtime surface for this read-only seed`
 - `/offdesk review`:
-  - `pending`
+  - `flags runtime conservatively under test_only/no backlog, but exposes /task T-701 as the active needs_retry item`
 - dashboard `Task Detail`:
-  - `pending`
+  - `/control/tasks/by-request/REQ-D2-001`
 - dashboard `Recovery`:
-  - `pending`
+  - `/control/runtimes/O7`
 
 ## 6. Result
 - result:
-  - `executed_blocked`
+  - `live_rehearsal_ready`
 - mismatch class:
-  - `scenario_policy_gap`
+  - `launch_pending`
 - mismatch notes:
   - `T-039` blocked because rerun evidence was not lowered into contract-owned artifacts.
   - `T-041` blocked because `null-heavy` still lacked an explicit threshold and per-column rationale format.
   - `T-043` blocked because `null_or_invalid_count` arithmetic and non-numeric classification for `orders`/`revenue` were still not explicit enough for reviewer-owned rerun evidence.
   - `T-044` blocked even after `quality_gate_policy`, `schema_column_expectations`, numeric threshold extraction, and `schema_value_quality_policy` landed.
   - The remaining gap is not a reusable core abstraction; it is scenario-specific evidence formatting for `null_summary.md` and should be handled by stricter prompt discipline or operator-authored validator policy, not additional core expansion.
+  - `2026-04-28 isolated seed proof now materializes concrete D2 artifacts and operator surfaces, but does not claim a launched provider/background execution.`
 - follow-up fix attempt:
   - `2026-04-28 KST`: request-contract extraction now preserves explicit operator-authored artifact fields from `schema_report.json에는 ...` and `null_summary.md에는 ...`
   - `null_summary.md` required fields are ordered as `affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, `reason` when the prompt declares that shape
   - data acceptance floor now repeats the explicit null-heavy evidence fields together with `orders,revenue >= 2` and `null-or-invalid-row-count`
+  - `2026-04-28 KST`: `aoe_tg_live_rehearsal_seed.py --scenario d2` creates a dispatch-ready D2 rerun candidate with concrete `data/monthly_raw.csv`, `normalized.csv`, `schema_report.json`, `null_summary.md`, and `sample_5.csv`
 - next fix:
-  - `rerun D2 in an isolated runtime and promote to executed_done only if planning reaches dispatch and the final branch remains rerun with concrete null_summary evidence`
+  - `launch /retry T-701 lane L1 from the isolated D2 runtime and promote to executed_done only if the background ticket closes cleanly while the source task remains rerun with the same concrete null_summary evidence`
 
 ## 7. Raw References
 - runtime state refs:
-  - `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/.aoe-team/orch_manager_state.json`
+  - `/tmp/aoe_d2_seed_check/.aoe-team/orch_manager_state.json`
+  - prior blocked run: `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/.aoe-team/orch_manager_state.json`
 - log refs:
-  - `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/.aoe-team/logs/gateway_events.jsonl`
+  - `/tmp/aoe_d2_seed_check/.aoe-team/logs/gateway_events.jsonl`
+  - prior blocked run: `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/.aoe-team/logs/gateway_events.jsonl`
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario d2 --control-root /tmp/aoe_d2_seed_check --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d2_seed_check/Alpha --workspace-root /tmp/aoe_d2_seed_check --team-dir /tmp/aoe_d2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-701'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d2_seed_check/Alpha --workspace-root /tmp/aoe_d2_seed_check --team-dir /tmp/aoe_d2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O7'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d2_seed_check/Alpha --workspace-root /tmp/aoe_d2_seed_check --team-dir /tmp/aoe_d2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O7'`
   - `bounded regression command: bash scripts/gateway_pytest.sh tests/gateway/test_phase1_planning.py -q`
   - `bounded regression command: bash scripts/gateway_pytest.sh tests/gateway/test_gateway_state_helpers.py -k 'request_contract or execution_brief' -q`
+  - `bounded regression command: bash scripts/gateway_pytest.sh tests/gateway/test_live_rehearsal_seed.py -q`
 - artifact refs:
-  - `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/data/monthly_raw.csv`
+  - `/tmp/aoe_d2_seed_check/Alpha/data/monthly_raw.csv`
+  - `/tmp/aoe_d2_seed_check/Alpha/normalized.csv`
+  - `/tmp/aoe_d2_seed_check/Alpha/schema_report.json`
+  - `/tmp/aoe_d2_seed_check/Alpha/null_summary.md`
+  - `/tmp/aoe_d2_seed_check/Alpha/sample_5.csv`
+  - prior blocked run: `/tmp/aoe_lv_d2_BP7psW/demo-monthly-rerun/data/monthly_raw.csv`
