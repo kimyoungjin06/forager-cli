@@ -308,6 +308,9 @@ def _execute_operator_preference_rule_action(
             },
             status=400,
         )
+    before_registry_state = operator_preferences.load_operator_preferences(operator_team_dir)
+    before_candidate_state = operator_preferences.load_operator_preference_candidates(operator_team_dir)
+    before_preference_state = {"rules": list(before_registry_state.get("rules") or [])}
     if mode == "delete":
         removed = operator_preferences.delete_operator_preference_rule(
             operator_team_dir,
@@ -344,6 +347,19 @@ def _execute_operator_preference_rule_action(
                 status=404,
             )
         detail = operator_preferences.summarize_preference_rule(removed)
+        removed_scope = _preference_text(removed.get("scope"), 32).lower() or scope
+        removed_scope_ref = _preference_text(removed.get("scope_ref"), 64)
+        after_registry_state = operator_preferences.load_operator_preferences(operator_team_dir)
+        after_candidate_state = operator_preferences.load_operator_preference_candidates(operator_team_dir)
+        preference_refresh_diff_summary = _build_preference_refresh_diff_summary(
+            before_preference_state=before_preference_state,
+            after_preference_state={"rules": list(after_registry_state.get("rules") or [])},
+            before_candidate_state=before_candidate_state,
+            after_candidate_state=after_candidate_state,
+            artifact_kind=artifact_kind,
+            project_ref=project_alias or (removed_scope_ref if removed_scope == "project" else ""),
+        )
+        preference_memory_scope_summary = _preference_memory_scope_summary(removed_scope, removed_scope_ref)
         return _json_with_dashboard_audit(
             {
                 "ok": True,
@@ -367,8 +383,11 @@ def _execute_operator_preference_rule_action(
                     "detail": detail or "-",
                 },
                 "preference_decision_summary": "preference_decisions=registry rule removed",
+                "preference_memory_scope_summary": preference_memory_scope_summary,
+                "preference_refresh_diff_summary": preference_refresh_diff_summary,
                 "preview": {"detail_path": return_path},
             },
+            config=config,
             status=200,
         )
     if mode not in {"auto", "confirm", "manual_only", "disable"}:
@@ -398,11 +417,10 @@ def _execute_operator_preference_rule_action(
             },
             status=400,
         )
-    existing_rules = operator_preferences.load_operator_preferences(operator_team_dir)
     existing = next(
         (
             operator_preferences.normalize_preference_rule(item)
-            for item in list(existing_rules.get("rules") or [])
+            for item in list(before_registry_state.get("rules") or [])
             if operator_preferences.normalize_preference_rule(item)
             and _preference_text(item.get("key"), 96).lower() == key
             and _preference_text(item.get("artifact_kind"), 64).lower() == artifact_kind
@@ -439,7 +457,20 @@ def _execute_operator_preference_rule_action(
         now_iso=_now_iso(),
     )
     detail = operator_preferences.summarize_preference_rule(updated)
-    return _json(
+    updated_scope = _preference_text(updated.get("scope"), 32).lower() or scope
+    updated_scope_ref = _preference_text(updated.get("scope_ref"), 64)
+    after_registry_state = operator_preferences.load_operator_preferences(operator_team_dir)
+    after_candidate_state = operator_preferences.load_operator_preference_candidates(operator_team_dir)
+    preference_refresh_diff_summary = _build_preference_refresh_diff_summary(
+        before_preference_state=before_preference_state,
+        after_preference_state={"rules": list(after_registry_state.get("rules") or [])},
+        before_candidate_state=before_candidate_state,
+        after_candidate_state=after_candidate_state,
+        artifact_kind=artifact_kind,
+        project_ref=project_alias or (updated_scope_ref if updated_scope == "project" else ""),
+    )
+    preference_memory_scope_summary = _preference_memory_scope_summary(updated_scope, updated_scope_ref)
+    return _json_with_dashboard_audit(
         {
             "ok": True,
             "implemented": True,
@@ -462,8 +493,12 @@ def _execute_operator_preference_rule_action(
                 "detail": detail or "-",
             },
             "applied_preferences_summary": f"applied_preferences={detail}" if detail and detail != "-" else "-",
+            "preference_decision_summary": "preference_decisions=registry rule updated",
+            "preference_memory_scope_summary": preference_memory_scope_summary,
+            "preference_refresh_diff_summary": preference_refresh_diff_summary,
             "preview": {"detail_path": return_path},
         },
+        config=config,
         status=200,
     )
 
