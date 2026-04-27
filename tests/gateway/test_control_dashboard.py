@@ -9369,6 +9369,80 @@ def test_control_dashboard_preferences_page_filters_to_selected_memory_scope(tmp
     assert artifact_scope_rows["artifact_kind"].candidate_count == 1
 
 
+def test_control_dashboard_preferences_page_destructive_forms_require_confirmation(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    project_team_dir = project_root / ".aoe-team"
+    operator_preferences.save_operator_preferences(
+        project_team_dir,
+        {
+            "rules": [
+                {
+                    "artifact_kind": "chart",
+                    "key": "legend_position",
+                    "value": "bottom",
+                    "description": "Keep the legend below the chart.",
+                    "scope": "artifact_kind",
+                    "prompt_mode": "auto",
+                    "enabled": True,
+                }
+            ]
+        },
+    )
+    operator_preferences.record_preference_candidate(
+        project_team_dir,
+        artifact_kind="chart",
+        key="show_source_note",
+        suggested_value=True,
+        issue="source note was missing in repeated chart revisions",
+        project_ref="O2",
+        source_ref="REQ-1",
+        now_iso="2026-04-22T10:00:00+09:00",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    status, headers, body = dashboard_app.build_dashboard_response(
+        "/control/preferences?project=O2&artifact=chart",
+        config,
+    )
+    text = body.decode("utf-8")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+
+    def attrs_for(command: str, action: str) -> dict[str, str]:
+        form = _dashboard_action_form(text, command=command, action=action)
+        attrs = form.get("attrs") if isinstance(form.get("attrs"), dict) else {}
+        return {str(key): str(value) for key, value in attrs.items()}
+
+    rule_auto = attrs_for("pref-rule:legend_position:auto", "/control/actions/control/operator-preference-rule")
+    rule_disable = attrs_for("pref-rule:legend_position:disable", "/control/actions/control/operator-preference-rule")
+    rule_delete = attrs_for("pref-rule:legend_position:delete", "/control/actions/control/operator-preference-rule")
+    candidate_auto = attrs_for("pref-candidate:show_source_note:auto", "/control/actions/control/operator-preference-candidate")
+    candidate_confirm = attrs_for("pref-candidate:show_source_note:confirm", "/control/actions/control/operator-preference-candidate")
+    candidate_disable = attrs_for("pref-candidate:show_source_note:disable", "/control/actions/control/operator-preference-candidate")
+    candidate_dismiss = attrs_for("pref-candidate:show_source_note:dismiss", "/control/actions/control/operator-preference-candidate")
+
+    assert "data-action-confirm" not in rule_auto
+    assert rule_disable["data-action-confirm"] == "true"
+    assert rule_disable["data-action-confirm-message"] == "Turn off preference rule legend_position for chart?"
+    assert rule_delete["data-action-confirm"] == "true"
+    assert rule_delete["data-action-confirm-message"] == "Delete preference rule legend_position for chart?"
+
+    assert "data-action-confirm" not in candidate_auto
+    assert "data-action-confirm" not in candidate_confirm
+    assert candidate_disable["data-action-confirm"] == "true"
+    assert candidate_disable["data-action-confirm-message"] == "Mute preference candidate show_source_note for chart?"
+    assert candidate_dismiss["data-action-confirm"] == "true"
+    assert candidate_dismiss["data-action-confirm-message"] == "Dismiss preference candidate show_source_note for chart?"
+
+
 def test_control_dashboard_preferences_page_rule_form_submit_updates_registry(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, project_root = _build_runtime(control_root)

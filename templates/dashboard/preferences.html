@@ -242,7 +242,13 @@
         <td>
           <div class="preference-action-stack">
             {% for mode, label in [('auto', 'auto'), ('confirm', 'confirm'), ('manual_only', 'manual'), ('disable', 'off'), ('delete', 'delete')] %}
-            <form class="action-form preference-inline-form" data-dashboard-action data-action-label="Rule {{ row.key }} -> {{ label }}" data-action-command="pref-rule:{{ row.key }}:{{ mode }}" data-action-mode="safe" method="post" action="{{ preferences.rule_action_path }}">
+            {% set rule_confirm_message = '' %}
+            {% if mode == 'disable' %}
+            {% set rule_confirm_message = 'Turn off preference rule ' ~ row.key ~ ' for ' ~ row.artifact_kind ~ '?' %}
+            {% elif mode == 'delete' %}
+            {% set rule_confirm_message = 'Delete preference rule ' ~ row.key ~ ' for ' ~ row.artifact_kind ~ '?' %}
+            {% endif %}
+            <form class="action-form preference-inline-form" data-dashboard-action data-action-label="Rule {{ row.key }} -> {{ label }}" data-action-command="pref-rule:{{ row.key }}:{{ mode }}" data-action-mode="safe" {% if rule_confirm_message %}data-action-confirm="true" data-action-confirm-message="{{ rule_confirm_message }}"{% endif %} method="post" action="{{ preferences.rule_action_path }}">
               <input type="hidden" name="runtime_ref" value="{{ row.runtime_ref if row.runtime_ref != '-' else '' }}">
               <input type="hidden" name="return_path" value="{{ preferences.return_path }}">
               <input type="hidden" name="artifact_kind" value="{{ row.artifact_kind }}">
@@ -315,7 +321,13 @@
         <td>
           <div class="preference-action-stack">
             {% for mode, label in [('auto', 'promote auto'), ('confirm', 'promote confirm'), ('disable', 'mute'), ('dismiss', 'dismiss')] %}
-            <form class="action-form preference-inline-form" data-dashboard-action data-action-label="Candidate {{ row.key }} -> {{ label }}" data-action-command="pref-candidate:{{ row.key }}:{{ mode }}" data-action-mode="safe" method="post" action="{{ preferences.candidate_action_path }}">
+            {% set candidate_confirm_message = '' %}
+            {% if mode == 'disable' %}
+            {% set candidate_confirm_message = 'Mute preference candidate ' ~ row.key ~ ' for ' ~ row.artifact_kind ~ '?' %}
+            {% elif mode == 'dismiss' %}
+            {% set candidate_confirm_message = 'Dismiss preference candidate ' ~ row.key ~ ' for ' ~ row.artifact_kind ~ '?' %}
+            {% endif %}
+            <form class="action-form preference-inline-form" data-dashboard-action data-action-label="Candidate {{ row.key }} -> {{ label }}" data-action-command="pref-candidate:{{ row.key }}:{{ mode }}" data-action-mode="safe" {% if candidate_confirm_message %}data-action-confirm="true" data-action-confirm-message="{{ candidate_confirm_message }}"{% endif %} method="post" action="{{ preferences.candidate_action_path }}">
               <input type="hidden" name="runtime_ref" value="{{ row.runtime_ref if row.runtime_ref != '-' else '' }}">
               <input type="hidden" name="return_path" value="{{ preferences.return_path }}">
               <input type="hidden" name="artifact_kind" value="{{ row.artifact_kind }}">
