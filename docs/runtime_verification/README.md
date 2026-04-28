@@ -98,11 +98,12 @@
         - typed auth/session scope inventory and boundary policy
       - final successful run (`T-038`) reached `planning_ready`, completed execution/review/integration, and closed as `done` with `/task`, `/monitor`, and dashboard task detail evidence
   - `mixed/M2_rerun_path.md`
-    - `live_rehearsal_ready`
+    - `executed_done`
     - finding:
-      - isolated seed proof creates a mixed rerun candidate with implementation lane `L1`, writer/handoff lane `L2`, and verifier lane `R1`
-      - concrete artifacts show the implementation/test files exist while `operator_handoff.md` and `reviewer_note.md` identify handoff evidence drift
-      - `/task` surfaces `exec_rerun_targets: execution=L2 review=R1`, keeping completed implementation lane `L1` out of rerun scope
+      - isolated `local_tmux` live rehearsal launched exactly one mixed writer/handoff retry and closed the background ticket with `exit_code=0`
+      - source task `T-801` stayed on `needs_retry` with `exec_rerun_targets: execution=L2 review=R1`, keeping completed implementation lane `L1` out of rerun scope
+      - child retry task `T-802` completed after `operator_handoff.md`, `reviewer_note.md`, `auth_scope_inventory.md`, `tests/session.test.js`, and `work_result` converged
+      - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime evidence kept the branch on rerun while proving the selected L2/R1 path can complete
 
 ## Rule
 - Do not replace these artifacts with summaries detached from runtime evidence.
@@ -130,19 +131,19 @@
 
 ## Current Promotion Decision
 - latest launch-bearing live rehearsal completed:
-  - `data/D2_rerun_path.md`
+  - `mixed/M2_rerun_path.md`
 - result:
   - isolated `local_tmux` retry completed with `exit_code=0`
-  - source task `T-701` stayed on the rerun branch with concrete null-heavy evidence
-  - child retry task `T-702` completed without auto-closing the source task
+  - source task `T-801` stayed on the rerun branch with `execution=L2 review=R1`
+  - child retry task `T-802` completed without auto-closing the source task
 - still bounded replay only:
-  - `none in the review/build first wave rerun or manual-followup rails`
+  - `data/D3 and mixed/M3 do not yet have first-class scenario artifacts`
 - next live candidate:
-  - `mixed/M2_rerun_path.md`
+  - `data/D3_manual_followup_path.md` (planned artifact)
 - candidate reason:
-  - `M2` is now seed-backed and surface-visible; it is the next launch-bearing mixed rerun proof
+  - `B3` and `R3` manual-followup execute proofs are already documented; `D3` is the next recommended-order manual-followup gap before `M3`
 - next selection gate:
-  - launch `/retry T-801 lane L2` from an isolated M2 runtime and verify the background ticket closes while source branch remains rerun with `L2/R1` scope
+  - create a first-class D3 manual-followup artifact, seed an isolated runtime, and prove preview/execute surfaces without collapsing business-rule ambiguity into done or generic retry
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`
