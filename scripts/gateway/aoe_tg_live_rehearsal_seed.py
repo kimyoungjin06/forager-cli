@@ -11,8 +11,11 @@ from typing import Any, Dict
 
 from aoe_tg_external_background_worker import emit_external_background_handoff
 from aoe_tg_request_contract import (
+    build_execution_brief,
     build_background_run_ticket,
     build_external_runner_gateway_command_launch_spec,
+    build_request_contract,
+    request_contract_metadata,
 )
 from aoe_tg_background_runs import upsert_background_run_ticket
 import aoe_tg_runtime_read as runtime_read
@@ -40,6 +43,17 @@ R3_EXECUTE_REQUEST_TEXT = (
 
 R4_REQUEST_TEXT = (
     "review rerun work is handed to a non-local background runner and must remain operator-visible through handoff, pickup acknowledgement, and result."
+)
+
+D2_REQUEST_TEXT = (
+    "입력 CSV는 data/monthly_raw.csv이고 정규화 대상 컬럼은 month다. "
+    "허용 입력 패턴은 YYYY/MM, YYYY-MM, YYYY.MM이고 모두 YYYY-MM으로 zero-pad 정규화한다. "
+    "orders는 integer, revenue는 number 스키마를 유지해야 한다. "
+    "orders 또는 revenue에서 null 또는 비수치 값이 2행 이상이면 null-heavy=true로 판정하고 done으로 닫지 말고 rerun으로 남겨라. "
+    "parse 불가하거나 범위를 벗어난 month 값은 원본 행을 유지하고 month 원값을 그대로 두며 anomaly로 기록한다. "
+    "schema_report.json에는 orders/revenue의 expected_type, observed_inferred_type, schema_drift, rerun_required, violations를 남기고, "
+    "null_summary.md에는 affected_columns, null_or_invalid_count, null_heavy, rerun_required, reason을 남겨라. "
+    "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
 )
 
 
@@ -80,12 +94,176 @@ def _prepare_project_layout(control_root: Path, *, overview: str) -> tuple[Path,
             },
             "agents": [
                 {"role": "Codex-Dev", "provider": "codex", "launch": "codex", "session": ""},
+                {"role": "DataEngineer", "provider": "codex", "launch": "codex", "session": ""},
                 {"role": "Codex-Reviewer", "provider": "codex", "launch": "codex", "session": ""},
                 {"role": "Claude-Reviewer", "provider": "claude", "launch": "claude", "session": ""},
             ],
         },
     )
     return team_dir, project_root, project_team_dir
+
+
+def _d2_request_contract() -> Dict[str, Any]:
+    return build_request_contract(
+        source_prompt=D2_REQUEST_TEXT,
+        selected_roles=["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
+        explicit_preset="data",
+        project_key="alpha",
+    )
+
+
+def _write_d2_artifacts(project_root: Path) -> None:
+    (project_root / "data").mkdir(parents=True, exist_ok=True)
+    (project_root / "data" / "monthly_raw.csv").write_text(
+        "\n".join(
+            [
+                "month,region,orders,revenue,notes",
+                "2026/01,NA,10,1250.50,ok",
+                "2026-02,EU,,980.00,missing orders",
+                "2026.03,APAC,7,NaN,null-like revenue",
+                "2026/13,NA,abc,1500.00,bad month and bad orders",
+                "bad-month,EU,14,bad,bad month and bad revenue",
+                "2026-04,APAC,12,1100.00,ok",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "normalized.csv").write_text(
+        "\n".join(
+            [
+                "month,region,orders,revenue,notes",
+                "2026-01,NA,10,1250.50,ok",
+                "2026-02,EU,,980.00,missing orders",
+                "2026-03,APAC,7,NaN,null-like revenue",
+                "2026/13,NA,abc,1500.00,bad month and bad orders",
+                "bad-month,EU,14,bad,bad month and bad revenue",
+                "2026-04,APAC,12,1100.00,ok",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_json(
+        project_root / "schema_report.json",
+        {
+            "source_path": "data/monthly_raw.csv",
+            "normalized_output": "normalized.csv",
+            "schema_drift": {
+                "status": True,
+                "rerun_required": True,
+                "violations": [
+                    {"column": "orders", "expected_type": "integer", "null_or_invalid_count": 2},
+                    {"column": "revenue", "expected_type": "number", "null_or_invalid_count": 2},
+                ],
+            },
+            "columns": [
+                {
+                    "name": "month",
+                    "expected_type": "string",
+                    "observed_inferred_type": "string",
+                    "inferred_type": "string",
+                    "type_rule": "valid month values normalized to YYYY-MM; invalid values preserved",
+                    "null_count": 0,
+                    "observed_non_null_count": 6,
+                    "schema_drift": False,
+                    "rerun_required": False,
+                    "violations": [],
+                },
+                {
+                    "name": "region",
+                    "expected_type": "string",
+                    "observed_inferred_type": "string",
+                    "inferred_type": "string",
+                    "type_rule": "string",
+                    "null_count": 0,
+                    "observed_non_null_count": 6,
+                    "schema_drift": False,
+                    "rerun_required": False,
+                    "violations": [],
+                },
+                {
+                    "name": "orders",
+                    "expected_type": "integer",
+                    "observed_inferred_type": "string",
+                    "inferred_type": "string",
+                    "type_rule": "integer expected; empty and non-numeric values count as invalid",
+                    "null_count": 1,
+                    "observed_non_null_count": 5,
+                    "schema_drift": True,
+                    "rerun_required": True,
+                    "violations": [
+                        {"row": 2, "value": "", "kind": "empty-string"},
+                        {"row": 4, "value": "abc", "kind": "non-numeric"},
+                    ],
+                },
+                {
+                    "name": "revenue",
+                    "expected_type": "number",
+                    "observed_inferred_type": "string",
+                    "inferred_type": "string",
+                    "type_rule": "number expected; null-like and non-numeric values count as invalid",
+                    "null_count": 1,
+                    "observed_non_null_count": 5,
+                    "schema_drift": True,
+                    "rerun_required": True,
+                    "violations": [
+                        {"row": 3, "value": "NaN", "kind": "literal-nan"},
+                        {"row": 5, "value": "bad", "kind": "non-numeric"},
+                    ],
+                },
+                {
+                    "name": "notes",
+                    "expected_type": "string",
+                    "observed_inferred_type": "string",
+                    "inferred_type": "string",
+                    "type_rule": "string",
+                    "null_count": 0,
+                    "observed_non_null_count": 6,
+                    "schema_drift": False,
+                    "rerun_required": False,
+                    "violations": [],
+                },
+            ],
+            "month_anomalies": [
+                {"bucket": "out-of-range-month", "count": 1, "examples": ["2026/13"]},
+                {"bucket": "malformed-value", "count": 1, "examples": ["bad-month"]},
+            ],
+        },
+    )
+    (project_root / "null_summary.md").write_text(
+        "\n".join(
+            [
+                "# Null Summary",
+                "",
+                "affected_columns: orders, revenue",
+                "",
+                "null_or_invalid_count:",
+                "- orders: 2",
+                "- revenue: 2",
+                "",
+                "null_heavy: true",
+                "rerun_required: true",
+                "reason: orders and revenue each meet the D2 null-heavy threshold (>= 2 rows by null-or-invalid-row-count); close as rerun, not done.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "sample_5.csv").write_text(
+        "\n".join(
+            [
+                "month,region,orders,revenue,notes",
+                "2026-01,NA,10,1250.50,ok",
+                "2026-02,EU,,980.00,missing orders",
+                "2026-03,APAC,7,NaN,null-like revenue",
+                "2026/13,NA,abc,1500.00,bad month and bad orders",
+                "bad-month,EU,14,bad,bad month and bad revenue",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _approved_planning_fields() -> Dict[str, Any]:
@@ -520,6 +698,197 @@ def _b3_task(now: str) -> Dict[str, Any]:
     }
 
 
+def _d2_task(now: str) -> Dict[str, Any]:
+    contract = _d2_request_contract()
+    brief = build_execution_brief(contract)
+    return {
+        "request_id": "REQ-D2-001",
+        "short_id": "T-701",
+        "alias": "data-rerun",
+        "prompt": D2_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "failed",
+        "stage": "verification",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "done",
+            "verification": "failed",
+            "integration": "failed",
+            "close": "failed",
+        },
+        "roles": ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
+        "verifier_roles": ["Codex-Reviewer", "Claude-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "verification",
+        "phase1_current_round": 3,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "data",
+        "phase2_team_preset": "data",
+        **_approved_planning_fields(),
+        **request_contract_metadata(contract),
+        "execution_brief_status": brief.get("status", "executable"),
+        "execution_brief_summary": brief.get(
+            "summary",
+            "executable | do=normalized.csv,schema_report.json,null_summary.md,sample_5.csv",
+        ),
+        "execution_brief_executable_slice": list(
+            brief.get("executable_slice")
+            or ["normalized.csv", "schema_report.json", "null_summary.md", "sample_5.csv"]
+        ),
+        "execution_brief_blocked_slice": list(brief.get("blocked_slice") or []),
+        "execution_brief_operator_decision": "",
+        "followup_brief_status": "none",
+        "reentry_rails_summary": "retry=ready exec=L1 review=R1 | followup=none | bg=-",
+        "plan": {
+            "summary": "data | normalize monthly csv -> schema/null evidence -> rerun branch on null-heavy threshold",
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "owner_role": "DataEngineer",
+                    "title": "Normalize monthly CSV",
+                    "goal": "write normalized.csv from data/monthly_raw.csv while preserving invalid month rows",
+                    "acceptance": ["normalized.csv exists"],
+                },
+                {
+                    "id": "S2",
+                    "owner_role": "DataEngineer",
+                    "title": "Write schema_report.json",
+                    "goal": "capture orders/revenue schema expectations, drift, rerun flags, and violations",
+                    "acceptance": ["schema_report.json exists"],
+                },
+                {
+                    "id": "S3",
+                    "owner_role": "DataEngineer",
+                    "title": "Write null_summary.md",
+                    "goal": "summarize null_summary.md for orders/revenue null-heavy rerun evidence",
+                    "acceptance": ["null_summary.md exists"],
+                },
+                {
+                    "id": "S4",
+                    "owner_role": "DataEngineer",
+                    "title": "Export sample_5.csv",
+                    "goal": "write the first five transformed data rows for review",
+                    "acceptance": ["sample_5.csv exists"],
+                },
+            ],
+            "meta": {
+                "worker_roles": ["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
+                "phase1_role_preset": "data",
+                "phase2_team_preset": "data",
+                "request_contract": contract,
+                "phase2_team_spec": {
+                    "execution_groups": [
+                        {"group_id": "L1", "role": "DataEngineer", "kind": "data_transform", "subtask_ids": ["S1", "S2", "S3", "S4"]},
+                    ],
+                    "review_groups": [
+                        {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L1"]},
+                        {"group_id": "R2", "role": "Claude-Reviewer", "kind": "verifier", "depends_on": ["L1"]},
+                    ],
+                    "critic_role": "Claude-Reviewer",
+                    "integration_role": "DataEngineer",
+                },
+                "phase2_execution_plan": {
+                    "execution_lanes": [
+                        {
+                            "lane_id": "L1",
+                            "role": "DataEngineer",
+                            "kind": "data_transform",
+                            "subtask_ids": ["S1", "S2", "S3", "S4"],
+                            "outputs": ["normalized.csv", "schema_report.json", "null_summary.md", "sample_5.csv"],
+                        },
+                    ],
+                    "review_lanes": [
+                        {
+                            "lane_id": "R1",
+                            "role": "Codex-Reviewer",
+                            "kind": "verifier",
+                            "depends_on": ["L1"],
+                            "outputs": ["null_summary.md", "schema_report.json"],
+                        },
+                        {
+                            "lane_id": "R2",
+                            "role": "Claude-Reviewer",
+                            "kind": "verifier",
+                            "depends_on": ["L1"],
+                            "outputs": ["rerun_branch_decision"],
+                        },
+                    ],
+                },
+            },
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L1",
+                    "role": "DataEngineer",
+                    "status": "done",
+                    "subtask_ids": ["S1", "S2", "S3", "S4"],
+                    "touched_files": [
+                        "normalized.csv",
+                        "schema_report.json",
+                        "null_summary.md",
+                        "sample_5.csv",
+                    ],
+                }
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "verifier",
+                    "status": "failed",
+                    "depends_on": ["L1"],
+                    "reason": "null_summary.md declares orders/revenue null-heavy threshold >=2; branch must remain rerun",
+                    "verdict": "retry",
+                    "action": "retry",
+                    "touched_files": ["null_summary.md", "schema_report.json"],
+                },
+                {
+                    "lane_id": "R2",
+                    "role": "Claude-Reviewer",
+                    "kind": "verifier",
+                    "status": "failed",
+                    "depends_on": ["L1"],
+                    "reason": "quality gate forbids done when null-heavy evidence is true",
+                    "verdict": "retry",
+                    "action": "retry",
+                    "touched_files": ["null_summary.md"],
+                },
+            ],
+            "summary": {
+                "execution": {"done": 1},
+                "review": {"failed": 2},
+                "review_verdicts": {"retry": 2},
+            },
+        },
+        "exec_critic": {
+            "verdict": "retry",
+            "action": "retry",
+            "reason": "D2 null-heavy evidence is concrete for orders/revenue; rerun the data lane instead of closing done",
+            "rerun_execution_lane_ids": ["L1"],
+            "rerun_review_lane_ids": ["R1"],
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "retry",
+            "backend_contract": "data_rerun",
+            "backend_contract_note": "null_summary.md carries affected_columns/null_or_invalid_count/null_heavy/rerun_required/reason for the rerun branch",
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O7",
+            "task_short_id": "T-701",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def _r3_execute_task(now: str) -> Dict[str, Any]:
     return {
         "request_id": "REQ-R3-001",
@@ -942,6 +1311,79 @@ def seed_b3_build_manual_followup_runtime(
     }
 
 
+def seed_d2_data_rerun_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "local_tmux",
+    local_tmux_slot_limit: int = 1,
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated data rerun live rehearsal",
+    )
+    _write_d2_artifacts(project_root)
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_d2_task(now), "REQ-D2-001")
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O7",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated data rerun live rehearsal",
+        "last_request_id": "REQ-D2-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": local_tmux_slot_limit,
+        "background_runner_slot_limits": {
+            "local_tmux": local_tmux_slot_limit,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-D2-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "D2",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O7",
+        "request_id": "REQ-D2-001",
+        "task_ref": "T-701",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "artifact_paths": [
+            "data/monthly_raw.csv",
+            "normalized.csv",
+            "schema_report.json",
+            "null_summary.md",
+            "sample_5.csv",
+        ],
+        "preflight_commands": [
+            "/orch status O7",
+            "/task T-701",
+            "/offdesk review O7",
+        ],
+        "trigger_command": "/retry T-701 lane L1",
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-D2-001",
+            "runtime_detail": "/control/runtimes/O7",
+        },
+    }
+
+
 def seed_r3_manual_followup_execute_runtime(
     control_root: Path,
     *,
@@ -1129,7 +1571,7 @@ def seed_r4_external_background_runtime(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["b2", "b3", "r2", "r3-execute", "r4"], default="r2")
+    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
     parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
@@ -1152,6 +1594,13 @@ def main() -> int:
         )
     elif args.scenario == "r2":
         payload = seed_r2_review_rerun_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target,
+            local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "d2":
+        payload = seed_d2_data_rerun_runtime(
             Path(args.control_root),
             run_lock_mode=args.run_lock_mode,
             runner_target=args.runner_target,
