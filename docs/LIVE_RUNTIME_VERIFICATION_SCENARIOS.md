@@ -79,6 +79,13 @@
 #### B3. Manual Followup Path
 - intent:
   - code change is plausible but blocked on environment, secret, deploy, or risky mutation approval
+- current status:
+  - `executed_done`
+- current finding:
+  - isolated `local_tmux` live rehearsal launched exactly one build evidence followup lane and closed the background ticket with `exit_code=0`
+  - child task ran execution-only as `Codex-Dev` with no verifier roles while the source task stayed on `manual_followup`
+  - `/task`, `/followup`, `/orch status`, and dashboard followup-execute evidence agree on `followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
+  - release acceptance decision and release wording remain operator-owned on review lane `R1`
 - expected branch:
   - `manual followup`
 - must prove:

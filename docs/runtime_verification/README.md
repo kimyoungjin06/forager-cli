@@ -10,19 +10,23 @@
 - `phase2/TEMPLATE.md`
   - common capture template
 - `phase2/build/`
+  - `build/B1_happy_path.md`
   - `build/B2_rerun_path.md`
   - `build/B3_manual_followup_path.md`
 - `phase2/data/`
+  - `data/D1_happy_path.md`
+  - `data/D2_rerun_path.md`
   - `data/D3_manual_followup_path.md`
 - `phase2/review/`
-- `phase2/mixed/`
-  - `mixed/M2_rerun_path.md`
-  - `mixed/M3_manual_followup_path.md`
-- review-specific non-happy-path split now includes:
+  - `review/R1_happy_path.md`
   - `review/R2_rerun_path.md`
   - `review/R3_manual_followup_preview.md`
   - `review/R3_manual_followup_execute.md`
   - `review/R4_external_background_rail.md`
+- `phase2/mixed/`
+  - `mixed/M1_happy_path.md`
+  - `mixed/M2_rerun_path.md`
+  - `mixed/M3_manual_followup_path.md`
 
 ## Current First Wave
 - happy-path scenario stubs are prepared for:
