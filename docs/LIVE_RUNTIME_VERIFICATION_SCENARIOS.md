@@ -291,12 +291,13 @@
 - intent:
   - work artifact and review/handoff artifact conflict or require packaging/scope arbitration
 - current status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - current finding:
-  - isolated seed proof creates a mixed package-scope arbitration candidate with implementation lane `L1` closed and writer lane `L2` available for follow-up
+  - isolated `local_tmux` live rehearsal launched the mixed package-scope followup path and completed with `exit_code=0`
   - `package_scope_matrix.md`, `operator_handoff.md`, and `reviewer_note.md` keep the package boundary and release scope operator-owned
-  - `/task`, `/followup`, and `/offdesk review` agree on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
-  - `debug_packet_next_step=/followup T-1001`, so the branch does not collapse into generic retry before launch
+  - source task `T-1001` stayed on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
+  - child task `T-1002` completed after selected L2/R1 evidence converged, without auto-selecting the operator-owned package boundary
+  - the seed now emits runnable `node:test` coverage for session_expired token clear and non-session_expired no-clear behavior
 - expected branch:
   - `manual followup`
 - must prove:
@@ -308,7 +309,7 @@
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
 - current next non-review candidate:
-  - `M3`
+  - background-run status persistence hardening
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.

@@ -115,12 +115,12 @@
       - child retry task `T-802` completed after `operator_handoff.md`, `reviewer_note.md`, `auth_scope_inventory.md`, `tests/session.test.js`, and `work_result` converged
       - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime evidence kept the branch on rerun while proving the selected L2/R1 path can complete
   - `mixed/M3_manual_followup_path.md`
-    - `live_rehearsal_ready`
+    - `executed_done`
     - finding:
-      - isolated seed proof creates a mixed manual-followup candidate with completed implementation lane `L1` and runnable writer/scope lane `L2`
+      - isolated `local_tmux` live rehearsal launched exactly one mixed writer/scope followup and closed the background ticket with `exit_code=0`
       - `package_scope_matrix.md`, `operator_handoff.md`, and `reviewer_note.md` preserve the operator-owned auth/session versus dashboard/session-banner package boundary
-      - `/task`, `/followup`, and `/offdesk review` agree on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
-      - `debug_packet_next_step` points to `/followup T-1001`, avoiding a generic retry collapse before launch
+      - source task `T-1001` stayed on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`, while child task `T-1002` completed the selected L2/R1 proof
+      - the launch exposed a seed test-harness gap; M3 now emits `node:test`/`node:assert` coverage for both session_expired token clear and non-session_expired no-clear behavior
 
 ## Rule
 - Do not replace these artifacts with summaries detached from runtime evidence.
@@ -148,19 +148,19 @@
 
 ## Current Promotion Decision
 - latest launch-bearing live rehearsal completed:
-  - `data/D3_manual_followup_path.md`
+  - `mixed/M3_manual_followup_path.md`
 - result:
   - isolated `local_tmux` followup-execute completed with `exit_code=0`
-  - source task `T-901` stayed on the manual-followup branch with `execution=L2 review=R1`
-  - child followup task `T-902` completed execution-only without auto-closing the operator-owned `R1` remainder
+  - source task `T-1001` stayed on the manual-followup branch with `execution=L2 review=R1`
+  - child task `T-1002` completed after writer/scope evidence and R1 review converged
 - still bounded replay only:
-  - `mixed/M3_manual_followup_path.md`
-- next live candidate:
-  - `mixed/M3_manual_followup_path.md`
+  - `-`
+- next hardening candidate:
+  - persisted background-run status sync after tmux result detection
 - candidate reason:
-  - `M3` is now seed-backed and surface-visible; it is the next launch-bearing mixed manual-followup proof
+  - M3 surfaces computed `completed` correctly, but the raw `background_runs.json` ticket status field remained stale as `running`
 - next selection gate:
-  - launch `/followup-exec T-1001 lane L2` from an isolated M3 runtime and verify the background ticket closes while source branch remains manual_followup with `L2/R1` scope
+  - make `background_runs.json` persist the observed tmux result status without changing source-task manual-followup semantics
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`
