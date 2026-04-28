@@ -325,10 +325,23 @@ def test_seed_m3_mixed_manual_followup_runtime_creates_scope_arbitration_candida
     package_matrix = (project_root / "docs" / "analysis" / "package_scope_matrix.md").read_text(encoding="utf-8")
     handoff = (project_root / "docs" / "handoff" / "operator_handoff.md").read_text(encoding="utf-8")
     reviewer_note = (project_root / "docs" / "reviews" / "reviewer_note.md").read_text(encoding="utf-8")
+    session_test = (project_root / "tests" / "session.test.js").read_text(encoding="utf-8")
+    scope_inventory = (project_root / "docs" / "analysis" / "auth_scope_inventory.md").read_text(encoding="utf-8")
+    work_result = (project_root / "work_result").read_text(encoding="utf-8")
+    assert "import test from 'node:test';" in session_test
+    assert "import assert from 'node:assert/strict';" in session_test
+    assert "does not clear persisted token for other login failures" in session_test
+    assert "assert.deepEqual(calls, []);" in session_test
+    assert "node --test tests/session.test.js" in scope_inventory
     assert "auth/session + dashboard/session-banner" in package_matrix
+    assert "primary_package: auth/session" in package_matrix
+    assert "conflicting_package: dashboard/session-banner" in package_matrix
     assert "branch: manual_followup" in package_matrix
+    assert "`node --test tests/session.test.js` passes" in handoff
     assert "manual_followup: required before done" in handoff
-    assert "verdict: manual_followup, not retry" in reviewer_note
+    assert "release outcome: manual_followup remains required" in reviewer_note
+    assert "status=manual_followup" in work_result
+    assert "validation=node --test tests/session.test.js pass: tests=2 pass=2 fail=0" in work_result
 
 
 def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path: Path) -> None:

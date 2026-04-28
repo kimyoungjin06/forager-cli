@@ -9,17 +9,17 @@
   - `manual_followup`
   - `preview_surface`
 - status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - seed_gate:
   - `isolated mixed manual-followup seed creates implementation evidence plus operator-owned package-scope arbitration`
 - live_gate:
-  - `pending launch-bearing local_tmux followup-execute rehearsal`
+  - `satisfied: launch-bearing local_tmux followup-execute rehearsal completed with source manual-followup preserved`
 - current_fix_branch:
-  - `task/mixed-m3-manual-followup-seed-1`
+  - `task/mixed-m3-launch-followup-1`
 - executed_at:
-  - `2026-04-28T12:18:13+09:00`
+  - `2026-04-28T12:37:06+09:00`
 - operator:
   - `Codex`
 
@@ -27,9 +27,9 @@
 - request text:
   - `session_expired 로그인 실패 시 토큰을 비우는 구현과 회귀 테스트는 유지하되, auth/session 패키지와 dashboard/session-banner 패키지 중 어디까지 이번 변경에 포함할지는 내가 결정해야 한다. 구현 증거는 src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md에 남기고, writer lane은 docs/handoff/operator_handoff.md, docs/analysis/package_scope_matrix.md, docs/reviews/reviewer_note.md에 패키징/스코프 선택지를 정리해라. 패키지 경계나 릴리즈 포함 범위는 operator arbitration이 필요하므로 done으로 닫지 말고 manual follow-up으로 남겨라.`
 - normalized action:
-  - `dispatch_task`
+  - `followup_execute`
 - target runtime:
-  - `/tmp/aoe_m3_seed_check`
+  - `/tmp/m3_live_followup_20260428_launch`
 
 ## 3. Expected Contract
 - expected preset:
@@ -72,6 +72,14 @@
   - `REQ-M3-001`
 - task_short_id:
   - `T-1001`
+- child_task_short_id:
+  - `T-1002`
+- child_request_id:
+  - `r_20260428123009_b39bcd67`
+- background_ticket:
+  - `BGT-REQ-M3-001-20260428123009.4875780900`
+- runner:
+  - `local_tmux`
 - planning:
   - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m3`
 - execution brief:
@@ -79,20 +87,23 @@
 - followup brief:
   - `partially_executable | execution=L2 | review=R1`
 - reentry rails:
-  - `retry=none | followup=partially_executable exec=L2 review=R1`
+  - `retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
 - stage progression:
   - planning:
     - `seeded mixed manual-followup candidate in isolated runtime`
   - execution:
-    - `L1 implementation artifacts are present: src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md, work_result`
-    - `L2 writer artifacts are present: docs/handoff/operator_handoff.md, docs/analysis/package_scope_matrix.md, docs/reviews/reviewer_note.md`
+    - `dashboard followup-execute action launched one local_tmux background ticket for writer/scope lane L2`
+    - `L1 implementation artifacts stayed present: src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md, work_result`
+    - `selected L2 pass refreshed docs/handoff/operator_handoff.md, docs/analysis/package_scope_matrix.md, docs/reviews/reviewer_note.md, docs/analysis/auth_scope_inventory.md, tests/session.test.js, and work_result`
+    - `runtime worker converted tests/session.test.js to Node built-in test syntax and added the non-session_expired no-clear negative path`
   - verification:
     - `debug_packet next step is /followup T-1001`
     - `package_scope_matrix.md keeps auth/session-only versus auth+dashboard selection operator-owned`
+    - `child R1 review found no blocker/high/medium findings after node --test passed`
   - integration:
-    - `not launched`
+    - `child T-1002 integration closed done after execution and review success`
   - close:
-    - `not launched`
+    - `background ticket completed with exit_code=0`
 - critic/verifier verdict:
   - `manual_followup`
 - final branch:
@@ -104,6 +115,12 @@
   - `followup_brief_execution_lane_ids=["L2"] and followup_brief_review_lane_ids=["R1"]`
   - `exec_critic.manual_followup_execution_lane_ids=["L2"] and manual_followup_review_lane_ids=["R1"]`
   - `debug_packet_next_step=/followup T-1001`
+  - `dashboard followup-execute route created local_tmux ticket BGT-REQ-M3-001-20260428123009.4875780900`
+  - `background result completed with exit_code=0`
+  - `child task T-1002 completed with phase2_lane_state exec done=1 and review done=1`
+  - `child exec_critic=success action=none`
+  - `source task T-1001 remained status=failed, team_phase=manual_intervention, followup_brief=partially_executable`
+  - `source reentry rails after queue sync: retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
 
 ## 5. Surface Evidence
 - `/task`:
@@ -117,7 +134,18 @@
   - `phase_checkpoint: status=active | current=verify`
   - `exec_manual_followup_targets: execution=L2 review=R1`
   - `followup_brief: partially_executable`
-  - `reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1`
+  - `background_run: completed`
+  - `background_run_evidence: status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-req-m3-001-20260428123009-4875780900.log`
+  - `reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
+- `/task T-1002`:
+  - `status completed and team_phase completed`
+  - `context_lineage: retry <- r_20260428123009_b39bcd67`
+  - `roles: Codex-Dev, Codex-Reviewer`
+  - `verifier_roles: Codex-Reviewer`
+  - `execution_brief: executable`
+  - `phase_checkpoint: status=done | current=done | plan=done | implement=done | verify=done | handoff=done`
+  - `exec_critic: success (action=none)`
+  - `phase2_requests: execution=r_20260428123009_b39bcd67 review=r_20260428123530_d8dc32ce`
 - `/followup`:
   - `manual follow-up task T-1001`
   - `execution lanes: L2`
@@ -125,12 +153,13 @@
   - `reason: writer packet can refresh package-scope evidence, but final package boundary remains operator-owned`
 - `/offdesk review`:
   - `first action is /followup T-1001 | mixed-manual-followup lane L2,R1`
-  - `attention includes run_lock:test_only and brief:partial`
+  - `attention includes brief:partial and task:manual_intervention`
+  - `proposal_top includes operator auth/session-only versus dashboard/session-banner decision and customer-facing copy ownership decision`
   - `does not redirect into done or generic retry`
 - `/orch status`:
-  - `run_lock=test_only`
+  - `run_lock=open`
   - `background_slots local_tmux=0/1`
-  - `background_queue depth=0`
+  - `background_queue depth=0 | status completed=1 | target local_tmux=1`
   - `background_runner pref=local_tmux | effective=local_background until an externalizable launch spec exists`
 - dashboard `Task Detail`:
   - `/control/tasks/by-request/REQ-M3-001`
@@ -139,35 +168,42 @@
 
 ## 6. Result
 - result:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - mismatch class:
-  - `launch_pending`
+  - `none`
 - mismatch notes:
-  - `M3 now has a concrete seed proving mixed manual-followup lane separation and operator-owned package arbitration`
-  - `the current proof is seed-bound under run_lock=test_only`
-  - `no launch-bearing background followup-exec ticket has been created yet`
+  - `launch-bearing M3 proof completed the pending local_tmux gate without changing the source task away from manual_followup`
+  - `source T-1001 remains manual_intervention by design while child T-1002 proves the selected L2/R1 followup can complete`
+  - `the live run exposed a seed test-harness gap: tests/session.test.js was Jest-style while the executable validation used node --test`
+  - `the seed is now updated to emit node:test/node:assert coverage for both session_expired token clear and non-session_expired no-clear behavior`
+  - `residual hardening: the computed surfaces showed completed after result sync, while the raw background_runs.json status field still remained stale as running`
 - next fix:
-  - `launch /followup-exec T-1001 lane L2 from an isolated M3 runtime with run_lock=open and verify the background ticket closes while source task remains manual_followup with R1 visible`
+  - `harden persisted background_runs.json status updates after tmux result files are observed`
 
 ## 7. Raw References
 - runtime state refs:
-  - `/tmp/aoe_m3_seed_check/.aoe-team/orch_manager_state.json`
+  - `/tmp/m3_live_followup_20260428_launch/.aoe-team/orch_manager_state.json`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/.aoe-team/background_runs.json`
 - log refs:
-  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m3 --control-root /tmp/aoe_m3_seed_check --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m3 --control-root /tmp/m3_live_followup_20260428_launch --run-lock-mode open --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `trigger: dashboard followup-execute action with {"task_ref":"T-1001","lane_ids":["L2"]}`
+  - `background result: /tmp/m3_live_followup_20260428_launch/Alpha/.aoe-team/background_run_results/bgt-req-m3-001-20260428123009-4875780900.json`
+  - `background log: /tmp/m3_live_followup_20260428_launch/Alpha/.aoe-team/background_run_logs/bgt-req-m3-001-20260428123009-4875780900.log`
   - `surface command: /orch status O10`
   - `surface command: /task T-1001`
+  - `surface command: /task T-1002`
   - `surface command: /followup T-1001`
   - `surface command: /offdesk review O10`
 - regression refs:
   - `tests/gateway/test_live_rehearsal_seed.py::test_seed_m3_mixed_manual_followup_runtime_creates_scope_arbitration_candidate`
 - artifact refs:
-  - `/tmp/aoe_m3_seed_check/Alpha/src/session.js`
-  - `/tmp/aoe_m3_seed_check/Alpha/tests/session.test.js`
-  - `/tmp/aoe_m3_seed_check/Alpha/docs/analysis/auth_scope_inventory.md`
-  - `/tmp/aoe_m3_seed_check/Alpha/docs/analysis/package_scope_matrix.md`
-  - `/tmp/aoe_m3_seed_check/Alpha/docs/handoff/operator_handoff.md`
-  - `/tmp/aoe_m3_seed_check/Alpha/docs/reviews/reviewer_note.md`
-  - `/tmp/aoe_m3_seed_check/Alpha/work_result`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/src/session.js`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/tests/session.test.js`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/docs/analysis/auth_scope_inventory.md`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/docs/analysis/package_scope_matrix.md`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/docs/handoff/operator_handoff.md`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/docs/reviews/reviewer_note.md`
+  - `/tmp/m3_live_followup_20260428_launch/Alpha/work_result`
 
 ## 8. Live Rehearsal Runbook
 - rehearsal scope:
