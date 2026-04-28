@@ -152,6 +152,28 @@
       <p><strong>queue</strong> {{ runtime.queue_summary }}</p>
       <p><strong>provider_pressure</strong> {{ runtime.provider_pressure_summary }}</p>
       <p><strong>repeat</strong> {{ runtime.repeat_summary }}</p>
+      {% if runtime.document_flow.summary and runtime.document_flow.summary != '-' %}
+      <details class="info-fold" {% if runtime.document_flow.drift_level and runtime.document_flow.drift_level != 'none' %}open{% endif %}>
+        <summary>Document Flow{% if runtime.document_flow.drift_level and runtime.document_flow.drift_level != 'none' %} | {{ runtime.document_flow.drift_level }}{% endif %}</summary>
+        <div class="fold-stack">
+          <p><strong>doc_flow</strong> {{ runtime.document_flow.summary }}</p>
+          <p><strong>doc_flow_drift</strong> {{ runtime.document_flow.drift_level }}{% if runtime.document_flow.drift_reasons %} | {{ runtime.document_flow.drift_reasons | join(' | ') }}{% endif %}</p>
+          <p><strong>doc_flow_objective</strong> {{ runtime.document_flow.objective }}</p>
+          <p><strong>doc_flow_next</strong> {{ runtime.document_flow.next_steps | join(' | ') if runtime.document_flow.next_steps else '-' }}</p>
+          <p><strong>doc_flow_runtime</strong> {{ runtime.document_flow.runtime_status }}{% if runtime.document_flow.latest_runtime_phase and runtime.document_flow.latest_runtime_phase != '-' %} | phase={{ runtime.document_flow.latest_runtime_phase }}{% endif %}{% if runtime.document_flow.active_requests %} | active={{ runtime.document_flow.active_requests | join(', ') }}{% endif %}</p>
+          <p><strong>doc_flow_tf</strong> open={{ runtime.document_flow.open_tf_ids | join(', ') if runtime.document_flow.open_tf_ids else '-' }} | closed={{ runtime.document_flow.recent_closed_tf_ids | join(', ') if runtime.document_flow.recent_closed_tf_ids else '-' }}</p>
+          <p><strong>doc_flow_latest_tf</strong> {{ runtime.document_flow.latest_tf_report_path or '-' }}</p>
+          <p><strong>doc_flow_docs</strong> ongoing={{ runtime.document_flow.ongoing_doc_path or '-' }} | note={{ runtime.document_flow.note_doc_path or '-' }}</p>
+          <p><strong>doc_flow_stale_refs</strong> {{ runtime.document_flow.stale_doc_refs | join(' | ') if runtime.document_flow.stale_doc_refs else '-' }}</p>
+          <p><strong>doc_flow_artifact</strong> {{ runtime.document_flow.artifact_path or '-' }}</p>
+          {% if runtime.document_flow.open_decisions or runtime.document_flow.blockers or runtime.document_flow.evidence_refs %}
+          <p><strong>doc_flow_decisions</strong> {{ runtime.document_flow.open_decisions | join(' | ') if runtime.document_flow.open_decisions else '-' }}</p>
+          <p><strong>doc_flow_blockers</strong> {{ runtime.document_flow.blockers | join(' | ') if runtime.document_flow.blockers else '-' }}</p>
+          <p><strong>doc_flow_evidence</strong> {{ runtime.document_flow.evidence_refs | join(' | ') if runtime.document_flow.evidence_refs else '-' }}</p>
+          {% endif %}
+        </div>
+      </details>
+      {% endif %}
       {% with
         section_title='runtime_actions',
         safe_hints=runtime.runtime_command_hints,

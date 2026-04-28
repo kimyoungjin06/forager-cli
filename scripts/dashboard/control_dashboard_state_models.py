@@ -761,6 +761,7 @@ class RecoveryRuntimeDTO(_LatestPlanningCompactSummaryCompatMixin):
     active_task_backend: str
     active_task_backend_note: str
     active_task_rate_limit: str
+    document_flow: DocumentFlowDTO = field(default_factory=DocumentFlowDTO)
     runtime_command_hints: List[str] = field(default_factory=list)
     runtime_phase2_action_hints: List[str] = field(default_factory=list)
     active_task_command_hints: List[str] = field(default_factory=list)

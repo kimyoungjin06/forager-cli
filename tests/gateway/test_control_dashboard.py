@@ -4631,6 +4631,58 @@ def test_control_dashboard_runtime_detail_renders_document_flow_card(tmp_path: P
     assert "docs/investigations_mo/projects/O2/tfs/TF-002/report.md" in text
 
 
+def test_control_dashboard_recovery_renders_document_flow_drift(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    _write_project_flow_fixture(project_root)
+    stale_doc = project_root / "docs" / "investigations_mo" / "projects" / "O2" / "ongoing.md"
+    stale_doc.unlink()
+    summary = nightly_summary.build_nightly_session_summary(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    runtime = next(row for row in summary["runtimes"] if row["project_alias"] == "O2")
+    rendered = nightly_summary.render_nightly_session_summary(summary)
+    flow = runtime["document_flow"]
+    assert flow["drift_level"] == "warning"
+    assert "document_objective_missing" in flow["drift_reasons"]
+    assert "runtime_without_doc_signal" in flow["drift_reasons"]
+    assert "docs/investigations_mo/projects/O2/ongoing.md" in flow["stale_doc_refs"]
+    assert "- doc_flow_drift: warning" in rendered
+    assert "runtime_without_doc_signal" in rendered
+    nightly_summary.write_nightly_session_summary(
+        summary=summary,
+        output_dir=team_dir / "recovery" / "nightly-session-summary",
+        write_timestamped_copy=False,
+    )
+    _snapshot, recovery = dashboard_state.load_dashboard_recovery_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    recovery_runtime = next(row for row in recovery.runtimes if row.project_alias == "O2")
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+    status, headers, body = dashboard_app.build_dashboard_response("/control/recovery", config)
+    text = body.decode("utf-8")
+
+    assert recovery_runtime.document_flow.drift_level == "warning"
+    assert "runtime_without_doc_signal" in recovery_runtime.document_flow.drift_reasons
+    assert "docs/investigations_mo/projects/O2/ongoing.md" in recovery_runtime.document_flow.stale_doc_refs
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Document Flow" in text
+    assert "doc_flow_drift" in text
+    assert "runtime_without_doc_signal" in text
+    assert "docs/investigations_mo/projects/O2/ongoing.md" in text
+
+
 def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_path: Path) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, project_root = _build_runtime(control_root)
