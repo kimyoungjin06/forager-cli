@@ -1,0 +1,124 @@
+name: External Background Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_target:
+        description: "External runner target"
+        required: true
+        default: "github_runner"
+        type: choice
+        options:
+          - github_runner
+      team_dir:
+        description: "Team dir inside the checkout"
+        required: true
+        default: ".aoe-team"
+        type: string
+      ticket_id:
+        description: "Background ticket id to process; blank processes the next eligible handoff"
+        required: false
+        default: ""
+        type: string
+      bundle_b64:
+        description: "Optional base64 bundle from aoe-github-runner-bridge.py export-bundle"
+        required: false
+        default: ""
+        type: string
+      timeout_sec:
+        description: "Command timeout in seconds"
+        required: true
+        default: "900"
+        type: string
+      max_items:
+        description: "Maximum handoffs to process"
+        required: true
+        default: "1"
+        type: string
+      commit_results:
+        description: "Force-commit result sidecars back to the branch"
+        required: true
+        default: false
+        type: boolean
+  repository_dispatch:
+    types:
+      - aoe-external-background-worker
+
+permissions:
+  contents: write
+
+jobs:
+  worker-run:
+    name: github-runner-worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    concurrency:
+      group: external-background-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ticket_id || inputs.ticket_id || github.run_id }}
+      cancel-in-progress: false
+    env:
+      AOE_RUNNER_TARGET: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.runner_target || inputs.runner_target || 'github_runner' }}
+      AOE_TEAM_DIR: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.team_dir || inputs.team_dir || '.aoe-team' }}
+      AOE_TICKET_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ticket_id || inputs.ticket_id || '' }}
+      AOE_TIMEOUT_SEC: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.timeout_sec || inputs.timeout_sec || '900' }}
+      AOE_MAX_ITEMS: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.max_items || inputs.max_items || '1' }}
+      AOE_BUNDLE_B64: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.bundle_b64 || inputs.bundle_b64 || '' }}
+      AOE_COMMIT_RESULTS: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.commit_results || inputs.commit_results || false }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Materialize handoff bundle
+        if: env.AOE_BUNDLE_B64 != ''
+        run: |
+          printf '%s' "$AOE_BUNDLE_B64" > "$RUNNER_TEMP/aoe-external-worker.b64"
+          python3 scripts/gateway/aoe-github-runner-bridge.py materialize-bundle \
+            --bundle-file "$RUNNER_TEMP/aoe-external-worker.b64" \
+            --output-root "$GITHUB_WORKSPACE" \
+            --team-dir "$AOE_TEAM_DIR"
+
+      - name: Run external background worker
+        run: |
+          python3 scripts/gateway/aoe-background-worker.py worker-run \
+            --runner "$AOE_RUNNER_TARGET" \
+            --team-dir "$AOE_TEAM_DIR" \
+            --ticket-id "$AOE_TICKET_ID" \
+            --timeout-sec "$AOE_TIMEOUT_SEC" \
+            --max-items "$AOE_MAX_ITEMS"
+
+      - name: Upload worker sidecars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aoe-external-background-${{ env.AOE_RUNNER_TARGET }}-${{ env.AOE_TICKET_ID || github.run_id }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.AOE_TEAM_DIR }}/background_run_acks/**
+            ${{ env.AOE_TEAM_DIR }}/background_run_results/**
+            ${{ env.AOE_TEAM_DIR }}/background_run_logs/**
+
+      - name: Commit result sidecars
+        if: always() && env.AOE_COMMIT_RESULTS == 'true'
+        run: |
+          if [[ "$AOE_TEAM_DIR" = /* ]]; then
+            echo "Skipping commit_results for absolute team_dir=$AOE_TEAM_DIR"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for path in "$AOE_TEAM_DIR/background_run_acks" "$AOE_TEAM_DIR/background_run_results" "$AOE_TEAM_DIR/background_run_logs"; do
+            if [ -e "$path" ]; then
+              git add -f "$path"
+            fi
+          done
+          if git diff --cached --quiet; then
+            echo "No worker sidecars to commit."
+            exit 0
+          fi
+          git commit -m "Record external background worker result ${AOE_TICKET_ID:-batch}"
+          git push

@@ -166,6 +166,7 @@ bash scripts/gateway_full_test.sh
 
 - CI workflow:
   - `.github/workflows/gateway-tests.yml`
+  - `.github/workflows/external-background-worker.yml` for manual/repository-dispatch `github_runner` handoff pickup
 
 ## Experimental Task Team Backends
 Current production path:
