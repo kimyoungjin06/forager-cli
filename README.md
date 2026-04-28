@@ -167,6 +167,8 @@ bash scripts/gateway_full_test.sh
 - CI workflow:
   - `.github/workflows/gateway-tests.yml`
   - `.github/workflows/external-background-worker.yml` for manual/repository-dispatch `github_runner` handoff pickup
+- External sidecar import:
+  - `scripts/gateway/aoe-external-sidecar-sync.py import-artifact --team-dir <team_dir> --artifact-root <artifact-dir-or-zip> --ticket-id <ticket> --runner github_runner --poll`
 
 ## Experimental Task Team Backends
 Current production path:

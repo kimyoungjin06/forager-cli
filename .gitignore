@@ -35,6 +35,7 @@
 .aoe-team/background_run_handoffs/
 .aoe-team/background_run_results/
 .aoe-team/background_run_acks/
+.aoe-team/background_run_logs/
 .aoe-team/setup_sudo_nopasswd.sh
 
 # Runtime queues/logs
