@@ -429,6 +429,19 @@
 - Constraints:
   - brief must still exist first
   - remote launch still writes the same ticket/evidence objects
+- Baseline GitHub Actions bridge:
+  - `.github/workflows/external-background-worker.yml`
+  - manual `workflow_dispatch`
+  - `repository_dispatch` type: `aoe-external-background-worker`
+  - accepts a base64 bundle exported by:
+    - `scripts/gateway/aoe-github-runner-bridge.py export-bundle --team-dir <team_dir> --ticket-id <ticket>`
+  - materializes the bundle into the checkout, rewrites launch-spec paths to the runner workspace, then calls:
+    - `scripts/gateway/aoe-background-worker.py worker-run --runner github_runner`
+  - uploads ack/result/log sidecars as a workflow artifact
+  - can force-commit result sidecars when `commit_results=true`, but default is artifact-only
+- Remaining sync boundary:
+  - local control-plane polling still needs the resulting sidecars copied or committed back into the project `team_dir`
+  - non-shared remote artifact synchronization remains a separate policy decision
 
 ## 9. Operator Surfaces
 - Dashboard must expose:
@@ -479,7 +492,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is the SCM/GitHub workflow trigger bridge, credentials/transport policy, and remote artifact synchronization outside a shared filesystem.
+- Remaining external runner productization work is credential/transport policy, issue/PR comment ergonomics, and remote artifact synchronization outside a shared filesystem.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

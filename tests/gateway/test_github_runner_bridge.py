@@ -1,0 +1,177 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GW_DIR = ROOT / "scripts" / "gateway"
+if str(GW_DIR) not in sys.path:
+    sys.path.insert(0, str(GW_DIR))
+
+from aoe_tg_background_runs import background_runs_state_path, upsert_background_run_ticket
+from aoe_tg_external_background_worker import emit_external_background_handoff, external_background_result_path
+from aoe_tg_external_worker_runtime import run_external_background_worker_once
+from aoe_tg_github_runner_bridge import (
+    build_github_runner_worker_bundle,
+    decode_github_runner_worker_bundle,
+    encode_github_runner_worker_bundle,
+    materialize_github_runner_worker_bundle,
+)
+from aoe_tg_request_contract import build_background_run_ticket, build_runner_background_launch_spec
+
+
+def _fixed_now() -> str:
+    return "2026-04-28T10:00:00+0900"
+
+
+def _seed_github_handoff(team_dir: Path, *, ticket_id: str = "BGT-GHA-BRIDGE-001") -> Path:
+    queue_path = background_runs_state_path(team_dir)
+    ticket = build_background_run_ticket(
+        ticket_id=ticket_id,
+        request_id=f"REQ-{ticket_id}",
+        project_key="twinpaper",
+        execution_brief_status="executable",
+        runner_target="github_runner",
+        launch_mode="dashboard_retry",
+        created_at="2026-04-28T09:59:00+0900",
+        created_by="pytest",
+        source_surface="test_github_runner_bridge",
+        status="queued",
+        launch_spec=build_runner_background_launch_spec(
+            runner_target="github_runner",
+            request_id=f"REQ-{ticket_id}",
+            project_key="twinpaper",
+            project_root=str(team_dir.parent),
+            team_dir=str(team_dir),
+            manager_state_file=str(team_dir / "orch_manager_state.json"),
+            launch_mode="dashboard_retry",
+            source_surface="test_github_runner_bridge",
+            created_by="pytest",
+            command_argv=[
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path('bridge-output.txt').write_text('ok', encoding='utf-8')",
+            ],
+            command_cwd=str(team_dir.parent),
+        ),
+    )
+    upsert_background_run_ticket(queue_path, ticket, now_iso=_fixed_now)
+    launched = emit_external_background_handoff(
+        queue_path=queue_path,
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+        now_iso=_fixed_now,
+        claimed_by="pytest",
+        source_surface="test_github_runner_bridge",
+        launch_mode="dashboard_retry",
+    )
+    assert launched["status"] == "running"
+    return queue_path
+
+
+def test_github_runner_bridge_bundle_round_trips_and_worker_run_consumes_materialized_handoff(tmp_path: Path) -> None:
+    source_team_dir = tmp_path / "source" / ".aoe-team"
+    source_team_dir.mkdir(parents=True)
+    _seed_github_handoff(source_team_dir)
+
+    bundle = build_github_runner_worker_bundle(
+        team_dir=source_team_dir,
+        ticket_id="BGT-GHA-BRIDGE-001",
+    )
+    assert bundle["runner_target"] == "github_runner"
+    assert bundle["background_runs"]["runs"][0]["status"] == "running"
+    assert bundle["handoff"]["ticket_id"] == "BGT-GHA-BRIDGE-001"
+
+    encoded = encode_github_runner_worker_bundle(bundle)
+    decoded = decode_github_runner_worker_bundle(encoded)
+    checkout_root = tmp_path / "checkout"
+    materialized = materialize_github_runner_worker_bundle(
+        bundle=decoded,
+        output_root=checkout_root,
+        team_dir=".aoe-team",
+    )
+
+    worker_team_dir = checkout_root / ".aoe-team"
+    assert materialized["background_runs_path"] == "background_runs.json"
+    assert materialized["handoff_path"] == "background_run_handoffs/github-runner-bgt-gha-bridge-001.json"
+    assert (worker_team_dir / "background_runs.json").exists()
+    handoff_path = worker_team_dir / "background_run_handoffs" / "github-runner-bgt-gha-bridge-001.json"
+    assert handoff_path.exists()
+    handoff_payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    assert handoff_payload["launch_spec"]["command_cwd"] == str(checkout_root.resolve())
+    assert handoff_payload["launch_spec"]["project_root"] == str(checkout_root.resolve())
+    assert handoff_payload["launch_spec"]["team_dir"] == str(worker_team_dir.resolve())
+
+    result = run_external_background_worker_once(
+        team_dir=worker_team_dir,
+        runner_target="github_runner",
+        ticket_id="BGT-GHA-BRIDGE-001",
+        worker_id="pytest-github-action",
+        timeout_sec=30,
+        now_iso=_fixed_now,
+    )
+    assert result["status"] == "completed"
+    assert (checkout_root / "bridge-output.txt").read_text(encoding="utf-8") == "ok"
+    assert external_background_result_path(worker_team_dir, "BGT-GHA-BRIDGE-001", "github_runner").exists()
+
+
+def test_github_runner_bridge_cli_exports_and_materializes_bundle(tmp_path: Path) -> None:
+    source_team_dir = tmp_path / "source" / ".aoe-team"
+    source_team_dir.mkdir(parents=True)
+    _seed_github_handoff(source_team_dir, ticket_id="BGT-GHA-CLI-001")
+
+    export_proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-github-runner-bridge.py"),
+            "export-bundle",
+            "--team-dir",
+            str(source_team_dir),
+            "--ticket-id",
+            "BGT-GHA-CLI-001",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert export_proc.returncode == 0
+    assert decode_github_runner_worker_bundle(export_proc.stdout.strip())["ticket_id"] == "BGT-GHA-CLI-001"
+
+    checkout_root = tmp_path / "checkout-cli"
+    materialize_proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-github-runner-bridge.py"),
+            "materialize-bundle",
+            "--bundle-b64",
+            export_proc.stdout.strip(),
+            "--output-root",
+            str(checkout_root),
+            "--team-dir",
+            ".aoe-team",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert materialize_proc.returncode == 0
+    payload = json.loads(materialize_proc.stdout)
+    assert payload["ticket_id"] == "BGT-GHA-CLI-001"
+    assert (checkout_root / ".aoe-team" / "background_runs.json").exists()
+
+
+def test_external_background_worker_workflow_contract_is_stable() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "external-background-worker.yml").read_text(encoding="utf-8")
+    gateway_tests = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "repository_dispatch:" in workflow
+    assert "aoe-external-background-worker" in workflow
+    assert "aoe-github-runner-bridge.py materialize-bundle" in workflow
+    assert "aoe-background-worker.py worker-run" in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "if: always() && env.AOE_COMMIT_RESULTS == 'true'" in workflow
+    assert "background_run_acks" in workflow
+    assert "background_run_results" in workflow
+    assert "background_run_logs" in workflow
+    assert ".github/workflows/*.yml" in gateway_tests

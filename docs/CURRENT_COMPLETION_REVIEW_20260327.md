@@ -212,9 +212,10 @@
   - `pickup_acknowledged`
   - `result_received`
 - remaining productization:
-  - SCM/GitHub workflow trigger bridge
+  - baseline SCM/GitHub workflow trigger bridge implemented
   - credentials / transport policy
   - remote artifact synchronization outside a shared filesystem
+  - issue/PR comment ergonomics
 
 ### 6.4 Fourth Block: Operational Hygiene
 4. `Retention And Disk Hygiene`
