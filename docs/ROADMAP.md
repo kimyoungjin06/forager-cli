@@ -599,11 +599,11 @@
     - [x] `Project Flow Compiler` implementation baseline
     - [x] per-project compiled flow artifact
     - [x] conservative doc/runtime drift detection
-    - dashboard `Project Runtime Detail` `Document Flow` card
+    - [x] dashboard `Project Runtime Detail` `Document Flow` card
     - recovery/nightly doc drift excerpt
   - 실행 순서:
     1. [x] minimal `Project Flow Compiler` artifact 추가
-    2. dashboard read-only `Document Flow` card 연결
+    2. [x] dashboard read-only `Document Flow` card 연결
     3. recovery/nightly drift excerpt 연결
     4. drift detection 강화
 - [x] `Project Flow Compiler` spec

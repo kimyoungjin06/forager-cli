@@ -162,10 +162,12 @@
 ## 5. What Is Not Done
 - project flow dashboard/recovery integration:
   - minimal `.aoe-team/project-flow/<project_alias>/latest.json` artifact exists
-  - dashboard/recovery consumption is still not wired
+  - dashboard `Project Runtime Detail` consumption is wired
+  - recovery/nightly consumption is still not wired
 - document registry + dashboard convergence:
   - baseline summaries exist
-  - first-class `Document Flow` dashboard card and doc/runtime drift excerpts are not done
+  - first-class `Document Flow` dashboard card is done
+  - doc/runtime drift excerpts are not done
 - external runner productionization:
   - `github_runner` / `remote_worker` lifecycle is proven by test-only support proof
   - actual pickup worker and production acknowledgement loop remain open
@@ -198,8 +200,9 @@
 - compile per-project flow artifacts from registry + project docs + runtime state
   - baseline implemented
 - add `Document Flow` card to dashboard runtime detail
+  - implemented
 - add doc/runtime drift excerpts to recovery
-- dashboard/recovery wiring is now the next primary implementation block
+- recovery/nightly drift excerpt wiring is now the next primary implementation block
 
 ### 6.3 Third Block: External Execution Productization
 3. `External Runner Pickup / Ack`
@@ -240,6 +243,7 @@
    - `.aoe-team/project-flow/<project_alias>/latest.json`
    - status: done
 2. wire dashboard runtime detail to a read-only `Document Flow` card
+   - status: done
 3. surface conservative doc/runtime drift in recovery/nightly summary
 4. then move to production external runner pickup/ack
 

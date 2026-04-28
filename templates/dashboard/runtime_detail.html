@@ -50,6 +50,48 @@
   {% endwith %}
 </section>
 
+<section class="panel">
+  <h2>Document Flow</h2>
+  <ul class="kv-list">
+    <li><span>summary</span><strong>{{ detail.document_flow.summary }}</strong></li>
+    <li><span>drift</span><strong>{{ detail.document_flow.drift_level }}{% if detail.document_flow.drift_reasons %} | {{ detail.document_flow.drift_reasons | join(' | ') }}{% endif %}</strong></li>
+    <li><span>objective</span><strong>{{ detail.document_flow.objective }}</strong></li>
+    <li><span>runtime</span><strong>{{ detail.document_flow.runtime_status }}{% if detail.document_flow.latest_runtime_phase and detail.document_flow.latest_runtime_phase != '-' %} | phase={{ detail.document_flow.latest_runtime_phase }}{% endif %}{% if detail.document_flow.active_requests %} | active={{ detail.document_flow.active_requests | join(', ') }}{% endif %}</strong></li>
+    <li><span>latest_tf</span><strong>{{ detail.document_flow.latest_tf_report_path or '-' }}</strong></li>
+    <li><span>open_tf</span><strong>{{ detail.document_flow.open_tf_ids | join(', ') if detail.document_flow.open_tf_ids else '-' }}</strong></li>
+    <li><span>closed_tf</span><strong>{{ detail.document_flow.recent_closed_tf_ids | join(', ') if detail.document_flow.recent_closed_tf_ids else '-' }}</strong></li>
+    <li><span>ongoing_doc</span><strong>{{ detail.document_flow.ongoing_doc_path or '-' }}</strong></li>
+    <li><span>note_doc</span><strong>{{ detail.document_flow.note_doc_path or '-' }}</strong></li>
+    <li><span>artifact</span><strong>{{ detail.document_flow.artifact_path or '-' }}</strong></li>
+    {% if detail.document_flow.compiled_at %}<li><span>compiled_at</span><strong>{{ detail.document_flow.compiled_at }}</strong></li>{% endif %}
+  </ul>
+  <details class="info-fold" open>
+    <summary>Next Steps</summary>
+    <div class="fold-kv">
+      {% if detail.document_flow.next_steps %}
+      <ul class="notes">
+        {% for item in detail.document_flow.next_steps %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">-</p>
+      {% endif %}
+    </div>
+  </details>
+  <details class="info-fold">
+    <summary>Decisions And Blockers</summary>
+    <div class="fold-kv">
+      <ul class="kv-list">
+        <li><span>decisions</span><strong>{{ detail.document_flow.open_decisions | join(' | ') if detail.document_flow.open_decisions else '-' }}</strong></li>
+        <li><span>blockers</span><strong>{{ detail.document_flow.blockers | join(' | ') if detail.document_flow.blockers else '-' }}</strong></li>
+        <li><span>stale_refs</span><strong>{{ detail.document_flow.stale_doc_refs | join(' | ') if detail.document_flow.stale_doc_refs else '-' }}</strong></li>
+        <li><span>evidence_refs</span><strong>{{ detail.document_flow.evidence_refs | join(' | ') if detail.document_flow.evidence_refs else '-' }}</strong></li>
+      </ul>
+    </div>
+  </details>
+</section>
+
 {% if detail.active_task_label %}
 <section class="panel detail-hero">
   <div class="detail-hero-header">

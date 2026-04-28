@@ -20,6 +20,7 @@ import aoe_tg_context_pack as context_pack
 import aoe_tg_model_endpoint_adapter as model_endpoint_adapter
 import aoe_tg_document_registry as document_registry
 import aoe_tg_harness_authoring_adapter as harness_authoring_adapter
+import aoe_tg_project_flow as project_flow
 import aoe_tg_run_lock as run_lock
 import aoe_tg_runtime_read as runtime_read
 import aoe_tg_task_state as task_state
@@ -62,7 +63,91 @@ from control_dashboard_state_common import (
     _worker_update_proposal_accept_button,
     _worker_update_preview_button,
 )
-from control_dashboard_state_models import RuntimeCardDTO, RuntimeDetailDTO
+from control_dashboard_state_models import DocumentFlowDTO, RuntimeCardDTO, RuntimeDetailDTO
+
+
+def _flow_string_list(raw: Any, *, limit: int = 8, item_limit: int = 180) -> List[str]:
+    source = raw if isinstance(raw, list) else []
+    rows: List[str] = []
+    seen: set[str] = set()
+    for item in source:
+        token = str(item or "").strip()[: max(1, int(item_limit or 1))]
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        rows.append(token)
+        if len(rows) >= max(1, int(limit or 1)):
+            break
+    return rows
+
+
+def _flow_evidence_refs(raw: Any) -> List[str]:
+    source = raw if isinstance(raw, list) else []
+    rows: List[str] = []
+    for item in source:
+        if isinstance(item, dict):
+            kind = str(item.get("kind", "")).strip()
+            target = (
+                str(item.get("path", "")).strip()
+                or str(item.get("request_id", "")).strip()
+                or str(item.get("task_id", "")).strip()
+            )
+            token = f"{kind}: {target}" if kind and target else kind or target
+        else:
+            token = str(item or "").strip()
+        if token:
+            rows.append(token)
+    return _flow_string_list(rows, limit=12, item_limit=220)
+
+
+def _build_document_flow_surface(
+    manager_state: Dict[str, Any],
+    *,
+    team_dir: Optional[Path],
+    entry: Dict[str, Any],
+    project_key: str,
+    project_alias: str,
+) -> DocumentFlowDTO:
+    if team_dir is None:
+        return DocumentFlowDTO(summary="unavailable | team_dir=-", drift_level="notice", drift_reasons=["team_dir_missing"])
+    try:
+        payload = project_flow.build_project_flow(
+            team_dir,
+            project_root=entry.get("project_root"),
+            manager_state=manager_state,
+            entry=entry,
+            project_key=project_key,
+            project_alias=project_alias,
+        )
+    except Exception:
+        return DocumentFlowDTO(
+            summary="unavailable | compile_failed",
+            drift_level="notice",
+            drift_reasons=["project_flow_compile_failed"],
+        )
+    alias = str(payload.get("project_alias", "")).strip() or str(project_alias or "").strip() or "project"
+    artifact_path = str(payload.get("artifact_path", "")).strip() or f"project-flow/{alias}/latest.json"
+    return DocumentFlowDTO(
+        summary=str(payload.get("summary", "")).strip() or "-",
+        artifact_path=artifact_path,
+        compiled_at=str(payload.get("compiled_at", "")).strip(),
+        drift_level=str(payload.get("drift_level", "")).strip() or "none",
+        drift_reasons=_flow_string_list(payload.get("drift_reasons"), limit=12, item_limit=220),
+        runtime_status=str(payload.get("runtime_status", "")).strip() or "-",
+        active_requests=_flow_string_list(payload.get("active_request_ids"), limit=12, item_limit=120),
+        latest_runtime_phase=str(payload.get("latest_runtime_phase", "")).strip() or "-",
+        objective=str(payload.get("document_objective", "")).strip() or "-",
+        next_steps=_flow_string_list(payload.get("document_next_steps"), limit=8, item_limit=220),
+        open_decisions=_flow_string_list(payload.get("document_open_decisions"), limit=8, item_limit=220),
+        blockers=_flow_string_list(payload.get("document_blockers"), limit=8, item_limit=220),
+        ongoing_doc_path=str(payload.get("ongoing_doc_path", "")).strip(),
+        note_doc_path=str(payload.get("note_doc_path", "")).strip(),
+        latest_tf_report_path=str(payload.get("latest_tf_report_path", "")).strip(),
+        open_tf_ids=_flow_string_list(payload.get("open_tf_ids"), limit=12, item_limit=80),
+        recent_closed_tf_ids=_flow_string_list(payload.get("recent_closed_tf_ids"), limit=8, item_limit=80),
+        stale_doc_refs=_flow_string_list(payload.get("stale_doc_refs"), limit=12, item_limit=220),
+        evidence_refs=_flow_evidence_refs(payload.get("evidence_refs")),
+    )
 
 
 def _general_subagent_surface(
@@ -1922,6 +2007,13 @@ def _build_runtime_detail(
         request_id=active_request_id,
     )
     active_task_planning_bundle = task_view.planning_operator_bundle(active_task or {})
+    document_flow_surface = _build_document_flow_surface(
+        manager_state,
+        team_dir=team_dir if str(entry.get("team_dir", "")).strip() else None,
+        entry=entry,
+        project_key=key,
+        project_alias=target_alias,
+    )
     return RuntimeDetailDTO(
         project_key=key,
         project_alias=target_alias,
@@ -2306,6 +2398,7 @@ def _build_runtime_detail(
         ),
         active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
         active_task_rate_limit=active_rate_limit_summary,
+        document_flow=document_flow_surface,
         runtime_command_hints=list(runtime_action_contract.get("safe") or []),
         runtime_phase2_action_hints=list(runtime_action_contract.get("phase2") or []),
         active_task_command_hints=list(active_task_action_contract.get("safe") or []),
