@@ -20,8 +20,14 @@ from aoe_tg_external_background_worker import (
 )
 from aoe_tg_external_sidecar_sync import (
     default_github_actions_artifact_name,
+    discover_github_external_worker_run,
+    discover_schedule_and_import_github_external_sidecars,
     download_and_import_github_external_sidecars,
+    drain_scheduled_github_external_sidecar_imports,
+    github_external_imports_path,
     import_external_background_sidecars,
+    load_github_external_imports_state,
+    schedule_github_external_sidecar_import,
     watch_and_import_github_external_sidecars,
 )
 from aoe_tg_external_worker_runtime import external_background_log_path
@@ -508,4 +514,240 @@ def test_external_sidecar_sync_cli_watches_github_artifact_with_fake_gh(tmp_path
     assert payload["github_watch"]["conclusion"] == "success"
     assert payload["copied_count"] == 3
     assert payload["poll_result"]["completed_count"] == 1
+    assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"
+
+
+def test_discover_schedule_and_import_github_external_sidecars_persists_completed_record(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    artifact_dir = tmp_path / "downloaded-artifact"
+    ticket_id = "BGT-GHA-AUTO-001"
+    queue_path = _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="github_runner")
+    _write_remote_sidecars(artifact_team_dir=artifact_dir, ticket_id=ticket_id, runner_target="github_runner")
+    commands: list[list[str]] = []
+
+    def _fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        if command[:3] == ["gh", "run", "list"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "databaseId": 24681357,
+                            "status": "completed",
+                            "conclusion": "success",
+                            "url": "https://github.com/acme/aoe/actions/runs/24681357",
+                            "displayTitle": f"external-background-github_runner-{ticket_id}",
+                            "createdAt": "2026-04-28T11:10:00Z",
+                            "event": "workflow_dispatch",
+                        }
+                    ]
+                ),
+                stderr="",
+            )
+        if command[:3] == ["gh", "run", "view"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "status": "completed",
+                        "conclusion": "success",
+                        "url": "https://github.com/acme/aoe/actions/runs/24681357",
+                        "databaseId": 24681357,
+                    }
+                ),
+                stderr="",
+            )
+        if command[:3] == ["gh", "run", "download"]:
+            download_dir = Path(command[command.index("--dir") + 1])
+            download_dir.mkdir(parents=True, exist_ok=True)
+            for child in artifact_dir.iterdir():
+                target = download_dir / child.name
+                if child.is_dir():
+                    shutil.copytree(child, target)
+                else:
+                    shutil.copy2(child, target)
+            return subprocess.CompletedProcess(command, 0, stdout="downloaded\n", stderr="")
+        return subprocess.CompletedProcess(command, 2, stdout="", stderr="unexpected command")
+
+    result = discover_schedule_and_import_github_external_sidecars(
+        team_dir=team_dir,
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+        repo="acme/aoe",
+        poll_after_import=True,
+        now_iso=_fixed_now,
+        timeout_sec=30,
+        interval_sec=0,
+        command_runner=_fake_runner,
+        sleeper=lambda _: None,
+    )
+
+    assert result["ok"] is True
+    assert result["discover"]["run_id"] == "24681357"
+    assert result["schedule"]["scheduled"] is True
+    assert result["drain"]["completed_count"] == 1
+    assert commands[0][:3] == ["gh", "run", "list"]
+    assert commands[-1][:4] == ["gh", "run", "download", "24681357"]
+    state = load_github_external_imports_state(github_external_imports_path(team_dir))
+    assert state["imports"][0]["status"] == "completed"
+    assert state["imports"][0]["run_id"] == "24681357"
+    assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"
+
+
+def test_discover_github_external_worker_run_requires_ticket_run_name_match() -> None:
+    result = discover_github_external_worker_run(
+        ticket_id="BGT-GHA-NOT-FOUND-001",
+        runner_target="github_runner",
+        command_runner=lambda command: subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                [
+                    {
+                        "databaseId": 100,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "displayTitle": "external-background-github_runner-BGT-OTHER-001",
+                    }
+                ]
+            ),
+            stderr="",
+        ),
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "github_run_not_found"
+    assert result["expected_display_title"] == "external-background-github_runner-BGT-GHA-NOT-FOUND-001"
+
+
+def test_drain_scheduled_github_imports_keeps_in_progress_run_pending(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    ticket_id = "BGT-GHA-SCHEDULE-PENDING-001"
+    _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="github_runner")
+    scheduled = schedule_github_external_sidecar_import(
+        team_dir=team_dir,
+        run_id="111222333",
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+        repo="acme/aoe",
+        now_iso=_fixed_now,
+    )
+    assert scheduled["ok"] is True
+
+    result = drain_scheduled_github_external_sidecar_imports(
+        team_dir=team_dir,
+        max_items=1,
+        timeout_sec=0,
+        interval_sec=0,
+        now_iso=_fixed_now,
+        command_runner=lambda command: subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "status": "in_progress",
+                    "conclusion": None,
+                    "url": "https://github.com/acme/aoe/actions/runs/111222333",
+                    "databaseId": 111222333,
+                }
+            ),
+            stderr="",
+        ),
+        sleeper=lambda _: None,
+    )
+
+    assert result["ok"] is True
+    assert result["processed_count"] == 1
+    assert result["pending_count"] == 1
+    state = load_github_external_imports_state(github_external_imports_path(team_dir))
+    assert state["imports"][0]["status"] == "pending"
+    assert state["imports"][0]["attempts"] == 1
+    assert state["imports"][0]["last_reason"] == "github_run_timeout"
+
+
+def test_external_sidecar_sync_cli_auto_imports_github_artifact_with_fake_gh(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    artifact_dir = tmp_path / "downloaded-artifact"
+    ticket_id = "BGT-REMOTE-GH-AUTO-001"
+    queue_path = _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="remote_worker")
+    _write_remote_sidecars(artifact_team_dir=artifact_dir, ticket_id=ticket_id, runner_target="remote_worker")
+    fake_gh = tmp_path / "fake-gh-auto"
+    fake_gh.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, os, pathlib, shutil, sys",
+                "args = sys.argv[1:]",
+                "if args[:2] == ['run', 'list']:",
+                "    print(json.dumps([{",
+                "        'databaseId': 13579,",
+                "        'status': 'completed',",
+                "        'conclusion': 'success',",
+                "        'url': 'https://github.com/acme/aoe/actions/runs/13579',",
+                f"        'displayTitle': 'external-background-remote_worker-{ticket_id}',",
+                "        'createdAt': '2026-04-28T11:10:00Z',",
+                "        'event': 'workflow_dispatch',",
+                "    }]))",
+                "    raise SystemExit(0)",
+                "if args[:2] == ['run', 'view']:",
+                "    print(json.dumps({",
+                "        'status': 'completed',",
+                "        'conclusion': 'success',",
+                "        'url': 'https://github.com/acme/aoe/actions/runs/13579',",
+                "        'databaseId': 13579,",
+                "    }))",
+                "    raise SystemExit(0)",
+                "if args[:2] != ['run', 'download']:",
+                "    raise SystemExit(2)",
+                "download_dir = pathlib.Path(args[args.index('--dir') + 1])",
+                "download_dir.mkdir(parents=True, exist_ok=True)",
+                "source = pathlib.Path(os.environ['AOE_FAKE_ARTIFACT_SOURCE'])",
+                "for child in source.iterdir():",
+                "    target = download_dir / child.name",
+                "    if child.is_dir():",
+                "        shutil.copytree(child, target)",
+                "    else:",
+                "        shutil.copy2(child, target)",
+                "print('fake download')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-external-sidecar-sync.py"),
+            "auto-import-github-artifact",
+            "--team-dir",
+            str(team_dir),
+            "--ticket-id",
+            ticket_id,
+            "--runner",
+            "remote_worker",
+            "--gh-bin",
+            str(fake_gh),
+            "--poll",
+            "--interval-sec",
+            "0",
+            "--timeout-sec",
+            "30",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "AOE_FAKE_ARTIFACT_SOURCE": str(artifact_dir)},
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["discover"]["run_id"] == "13579"
+    assert payload["drain"]["completed_count"] == 1
+    state = load_github_external_imports_state(github_external_imports_path(team_dir))
+    assert state["imports"][0]["status"] == "completed"
     assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"

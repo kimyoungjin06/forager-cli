@@ -103,6 +103,10 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py download-github-artifact --team-dir <team_dir> --run-id <run-id> --ticket-id <ticket> --runner github_runner --poll`
 - wait for GitHub run completion, then download + import + poll:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py watch-github-artifact --team-dir <team_dir> --run-id <run-id> --ticket-id <ticket> --runner github_runner --poll`
+- discover the ticket-named GitHub run, schedule it locally, then import + poll:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py auto-import-github-artifact --team-dir <team_dir> --ticket-id <ticket> --runner github_runner --repo <owner/repo> --poll`
+- drain previously scheduled GitHub imports:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py drain-github-imports --team-dir <team_dir> --poll`
 - `--poll` moves the local background ticket forward after the sidecars are imported.
 
 ## 2.1 Systemd User Mode (recommended)

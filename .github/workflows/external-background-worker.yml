@@ -1,4 +1,5 @@
 name: External Background Worker
+run-name: external-background-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.runner_target || inputs.runner_target || 'github_runner' }}-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ticket_id || inputs.ticket_id || github.run_id }}
 
 on:
   workflow_dispatch:
