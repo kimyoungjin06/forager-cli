@@ -61,11 +61,12 @@
       - launch-bearing `local_tmux` rehearsal closed the retry ticket with `exit_code=0`
       - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime evidence kept source task `T-701` on the `rerun` branch while the child retry task completed
   - `data/D3_manual_followup_path.md`
-    - `live_rehearsal_ready`
+    - `executed_done`
     - finding:
-      - isolated seed proof creates a data manual-followup candidate with `L2 DataEngineer` execution and `R1 Codex-Reviewer` business-rule remainder
-      - concrete artifacts apply confirmed `KR`/`US` mappings while isolating `EU`/`APAC` ambiguity in `business_rule_questions.md` and `sample_ambiguous_rows.csv`
-      - `/task`, `/followup`, and `/offdesk review` all keep the branch on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
+      - isolated `local_tmux` live rehearsal launched exactly one data manual-followup execution lane and closed the background ticket with `exit_code=0`
+      - child task `T-902` completed execution-only as `DataEngineer` while source task `T-901` stayed on `manual_intervention`
+      - confirmed `KR`/`US` mappings were applied while `EU`/`APAC` remained operator-owned in `business_rule_questions.md` and `sample_ambiguous_rows.csv`
+      - `/task`, `/followup`, `/offdesk review`, `/orch status`, and queue evidence agree on `followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
   - `review/R1_happy_path.md`
     - `executed_done`
     - finding:
@@ -138,22 +139,23 @@
 
 ## Current Promotion Decision
 - latest launch-bearing live rehearsal completed:
-  - `mixed/M2_rerun_path.md`
+  - `data/D3_manual_followup_path.md`
 - result:
-  - isolated `local_tmux` retry completed with `exit_code=0`
-  - source task `T-801` stayed on the rerun branch with `execution=L2 review=R1`
-  - child retry task `T-802` completed without auto-closing the source task
+  - isolated `local_tmux` followup-execute completed with `exit_code=0`
+  - source task `T-901` stayed on the manual-followup branch with `execution=L2 review=R1`
+  - child followup task `T-902` completed execution-only without auto-closing the operator-owned `R1` remainder
 - still bounded replay only:
   - `mixed/M3 does not yet have a first-class scenario artifact`
 - next live candidate:
-  - `data/D3_manual_followup_path.md`
+  - `mixed/M3_manual_followup_path.md`
 - candidate reason:
-  - `D3` is now seed-backed and surface-visible; it is the next launch-bearing data manual-followup proof before `M3`
+  - `M3` is now the remaining non-review manual-followup branch without a first-class scenario artifact
 - next selection gate:
-  - launch `/followup-exec T-901 lane L2` from an isolated D3 runtime and verify the background ticket closes while source branch remains manual_followup with `L2/R1` scope
+  - create a first-class mixed manual-followup artifact and seed before attempting a launch-bearing proof
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`
+  - `D3` runbook is now embedded in `data/D3_manual_followup_path.md`
   - `M2` runbook is now embedded in `mixed/M2_rerun_path.md`
 
 ## Manual Followup Rule

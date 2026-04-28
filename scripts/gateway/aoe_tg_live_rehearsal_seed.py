@@ -136,6 +136,62 @@ def _m2_request_contract() -> Dict[str, Any]:
     )
 
 
+def _d3_request_contract() -> Dict[str, Any]:
+    return {
+        "version": "2026-03-30.v1",
+        "contract_type": "data",
+        "preset": "data",
+        "status": "complete",
+        "objective": D3_REQUEST_TEXT,
+        "source_prompt": D3_REQUEST_TEXT,
+        "summary": (
+            "data | manual_followup | source=data/customer_events.csv | "
+            "target=reporting_region | outputs=normalized_customers.csv,"
+            "data_profile.md,business_rule_questions.md,sample_ambiguous_rows.csv"
+        ),
+        "required_outputs": [
+            "normalized_customers.csv",
+            "data_profile.md",
+            "business_rule_questions.md",
+            "sample_ambiguous_rows.csv",
+        ],
+        "required_evidence": [
+            "confirmed KR/US mapping applied",
+            "EU/APAC rows isolated for operator decision",
+        ],
+        "missing_fields": [],
+        "fields": {
+            "source_path": "data/customer_events.csv",
+            "source_key_column": "region_code",
+            "target_column": "reporting_region",
+            "accepted_input_formats": ["KR", "US", "EU", "APAC"],
+            "normalize_to": "confirmed-region-mapping",
+            "confirmed_region_mappings": {"KR": "Korea", "US": "United States"},
+            "operator_owned_region_codes": ["EU", "APAC"],
+            "manual_followup_reason": "reporting_region mapping requires business-rule judgment",
+            "invalid_value_policy": {
+                "preserve_row": True,
+                "preserve_original_value": True,
+                "record_anomaly": True,
+                "drop_row": False,
+            },
+            "normalized_output_policy": {
+                "row_order_policy": "preserve-source-data-row-order",
+                "header_policy": "append-reporting-region-and-mapping-status",
+            },
+        },
+        "artifact_contracts": {
+            "normalized_csv": {"path": "normalized_customers.csv", "format": "csv"},
+            "data_profile": {"path": "data_profile.md", "format": "markdown"},
+            "business_rule_questions": {
+                "path": "business_rule_questions.md",
+                "format": "markdown",
+            },
+            "sample_ambiguous_rows": {"path": "sample_ambiguous_rows.csv", "format": "csv"},
+        },
+    }
+
+
 def _write_m2_artifacts(project_root: Path) -> None:
     (project_root / "src").mkdir(parents=True, exist_ok=True)
     (project_root / "tests").mkdir(parents=True, exist_ok=True)
@@ -1082,35 +1138,7 @@ def _d2_task(now: str) -> Dict[str, Any]:
 
 
 def _d3_task(now: str) -> Dict[str, Any]:
-    contract = {
-        "type": "data",
-        "status": "complete",
-        "summary": (
-            "data | manual_followup | outputs=normalized_customers.csv,"
-            "data_profile.md,business_rule_questions.md,sample_ambiguous_rows.csv"
-        ),
-        "required_outputs": [
-            "normalized_customers.csv",
-            "data_profile.md",
-            "business_rule_questions.md",
-            "sample_ambiguous_rows.csv",
-        ],
-        "fields": {
-            "source_path": "data/customer_events.csv",
-            "confirmed_region_mappings": {"KR": "Korea", "US": "United States"},
-            "operator_owned_region_codes": ["EU", "APAC"],
-            "manual_followup_reason": "reporting_region mapping requires business-rule judgment",
-        },
-        "artifact_contracts": {
-            "normalized_customers": {"path": "normalized_customers.csv", "format": "csv"},
-            "data_profile": {"path": "data_profile.md", "format": "markdown"},
-            "business_rule_questions": {
-                "path": "business_rule_questions.md",
-                "format": "markdown",
-            },
-            "sample_ambiguous_rows": {"path": "sample_ambiguous_rows.csv", "format": "csv"},
-        },
-    }
+    contract = _d3_request_contract()
     return {
         "request_id": "REQ-D3-001",
         "short_id": "T-901",
@@ -1139,6 +1167,7 @@ def _d3_task(now: str) -> Dict[str, Any]:
         "phase1_role_preset": "data",
         "phase2_team_preset": "data",
         **_approved_planning_fields(),
+        **request_contract_metadata(contract),
         "execution_brief_status": "partially_executable",
         "execution_brief_summary": (
             "partially_executable | do=normalized_customers.csv,data_profile.md,"
@@ -2005,6 +2034,42 @@ def seed_d3_data_manual_followup_runtime(
     state["active"] = "alpha"
     state.pop("project_lock", None)
     task = runtime_read.sanitize_task_record(_d3_task(now), "REQ-D3-001")
+    task.update(
+        {
+            "execution_brief_status": "partially_executable",
+            "execution_brief_summary": (
+                "partially_executable | do=normalized_customers.csv,data_profile.md,"
+                "business_rule_questions.md,sample_ambiguous_rows.csv | "
+                "blocked=operator-owned reporting_region mapping for EU/APAC"
+            ),
+            "execution_brief_executable_slice": [
+                "normalized_customers.csv",
+                "data_profile.md",
+                "business_rule_questions.md",
+                "sample_ambiguous_rows.csv",
+            ],
+            "execution_brief_blocked_slice": [
+                "operator-owned reporting_region mapping for EU",
+                "operator-owned reporting_region mapping for APAC",
+            ],
+            "execution_brief_operator_decision": (
+                "operator must decide EU/APAC reporting_region mapping before final done"
+            ),
+            "followup_brief_status": "partially_executable",
+            "followup_brief_summary": "partially_executable | execution=L2 | review=R1",
+            "followup_brief_execution_lane_ids": ["L2"],
+            "followup_brief_review_lane_ids": ["R1"],
+            "followup_brief_reason": (
+                "data profiling can rerun, but EU/APAC reporting_region mapping remains operator-owned"
+            ),
+            "updated_at": now,
+        }
+    )
+    task.update(
+        _manual_followup_ready_checkpoint(
+            "data profiling can rerun, but EU/APAC reporting_region mapping remains operator-owned"
+        )
+    )
     state["projects"]["alpha"] = {
         "name": "alpha",
         "display_name": "Alpha",

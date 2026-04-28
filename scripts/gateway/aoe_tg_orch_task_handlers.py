@@ -53,7 +53,7 @@ from aoe_tg_external_background_worker import (
     read_external_background_handoff,
     read_external_background_result,
 )
-from aoe_tg_task_state import derive_background_run_external_snapshot
+from aoe_tg_task_state import build_reentry_rails_summary, derive_background_run_external_snapshot
 from aoe_tg_todo_state import ensure_todo_proposal_store, merge_todo_proposals
 
 from aoe_tg_project_runtime import project_hidden_from_ops, project_runtime_issue
@@ -821,8 +821,14 @@ def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path:
             str(task.get("background_run_evidence_bundle", "")).strip(),
             str(task.get("background_run_runtime_handle", "")).strip(),
             str(task.get("background_run_worker_update_proposal_summary", "")).strip(),
+            str(task.get("reentry_rails_summary", "")).strip(),
         )
         apply_background_run_ticket_snapshot(task, ticket)
+        reentry_rails_summary = build_reentry_rails_summary(task)
+        if reentry_rails_summary:
+            task["reentry_rails_summary"] = reentry_rails_summary
+        else:
+            task.pop("reentry_rails_summary", None)
         external_snapshot = derive_background_run_external_snapshot(task)
         if external_snapshot:
             task["background_run_external_phase"] = str(external_snapshot.get("phase", "")).strip()
@@ -885,6 +891,7 @@ def _sync_background_run_snapshots_from_queue(entry: Dict[str, Any], queue_path:
             str(task.get("background_run_evidence_bundle", "")).strip(),
             str(task.get("background_run_runtime_handle", "")).strip(),
             str(task.get("background_run_worker_update_proposal_summary", "")).strip(),
+            str(task.get("reentry_rails_summary", "")).strip(),
         )
         if after != before:
             changed = True
@@ -1383,9 +1390,9 @@ def handle_orch_task_command(
                 adapter_poll = poll_background_tickets_via_adapters(queue_path=queue_path, now_iso=now_iso)
                 tmux_poll = adapter_poll.get("local_tmux") if isinstance(adapter_poll.get("local_tmux"), dict) else {}
                 external_poll = adapter_poll.get("external") if isinstance(adapter_poll.get("external"), dict) else {}
-                if (bool(tmux_poll.get("changed")) or bool(external_poll.get("changed"))) and (not args.dry_run):
-                    if _sync_background_run_snapshots_from_queue(entry, queue_path):
-                        entry["updated_at"] = now_iso()
+                if _sync_background_run_snapshots_from_queue(entry, queue_path):
+                    entry["updated_at"] = now_iso()
+                    if not args.dry_run:
                         save_manager_state(args.manager_state_file, manager_state)
                 queue_snapshot = background_runs.summarize_background_runs_state(queue_path)
                 scheduler_snapshot = background_runs.summarize_background_runner_scheduling(
@@ -3507,6 +3514,14 @@ def handle_orch_task_command(
 
     if cmd == "orch-task":
         key, entry, p_args = get_context(orch_target)
+        team_dir_raw = str(entry.get("team_dir", "") or "").strip()
+        if team_dir_raw:
+            queue_path = background_runs.background_runs_state_path(Path(team_dir_raw).expanduser())
+            poll_background_tickets_via_adapters(queue_path=queue_path, now_iso=now_iso)
+            if _sync_background_run_snapshots_from_queue(entry, queue_path):
+                entry["updated_at"] = now_iso()
+                if not args.dry_run:
+                    save_manager_state(args.manager_state_file, manager_state)
         req_ref = (
             orch_task_request_id
             or get_chat_selected_task_ref(manager_state, chat_id, key)

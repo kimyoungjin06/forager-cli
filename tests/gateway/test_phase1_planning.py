@@ -1137,6 +1137,54 @@ def test_data_request_contract_extracts_structured_fields() -> None:
     assert "shortfall_note_when_needed" in contract["artifact_contracts"]["sample_output"]["required_fields"]
 
 
+def test_followup_request_contract_reuses_complete_source_contract() -> None:
+    source_task = {
+        "prompt": (
+            "입력 CSV는 data/customer_events.csv이고 region_code 매핑에는 KR=Korea, US=United States만 확정되어 있다. "
+            "EU/APAC 매핑 결정은 manual follow-up으로 남겨라."
+        ),
+        "request_contract_version": "2026-03-30.v1",
+        "request_contract_type": "data",
+        "request_contract_preset": "data",
+        "request_contract_status": "complete",
+        "request_contract_summary": "data | manual_followup | target=reporting_region",
+        "request_contract_required_outputs": ["normalized_customers.csv"],
+        "request_contract_fields": {
+            "source_path": "data/customer_events.csv",
+            "source_key_column": "region_code",
+            "target_column": "reporting_region",
+            "accepted_input_formats": ["KR", "US", "EU", "APAC"],
+            "normalize_to": "confirmed-region-mapping",
+            "invalid_value_policy": {
+                "preserve_row": True,
+                "preserve_original_value": True,
+                "record_anomaly": True,
+                "drop_row": False,
+            },
+        },
+        "request_contract_artifact_contracts": {
+            "normalized_csv": {"path": "normalized_customers.csv", "format": "csv"}
+        },
+    }
+
+    contract = request_contract_mod.build_request_contract(
+        source_prompt=source_task["prompt"],
+        selected_roles=["DataEngineer", "Codex-Reviewer"],
+        run_control_mode="followup",
+        run_source_task=source_task,
+        project_key="alpha",
+    )
+
+    assert contract["contract_type"] == "data"
+    assert contract["preset"] == "data"
+    assert contract["status"] == "complete"
+    assert contract.get("missing_fields", []) == []
+    assert contract["fields"]["target_column"] == "reporting_region"
+    assert contract["fields"]["accepted_input_formats"] == ["KR", "US", "EU", "APAC"]
+    assert contract["fields"]["normalize_to"] == "confirmed-region-mapping"
+    assert contract["artifact_contracts"]["normalized_csv"]["path"] == "normalized_customers.csv"
+
+
 def test_data_request_contract_extracts_quality_gate_policy_for_rerun_requests() -> None:
     contract = request_contract_mod.build_request_contract(
         source_prompt=(

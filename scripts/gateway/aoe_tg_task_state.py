@@ -955,6 +955,8 @@ def refresh_task_planning_primitives(
     *,
     request_contract: Optional[Dict[str, Any]] = None,
     execution_brief: Optional[Dict[str, Any]] = None,
+    preserve_debug_packet: bool = True,
+    preserve_phase_checkpoint: bool = True,
 ) -> Dict[str, Any]:
     if not isinstance(task, dict):
         return {}
@@ -1118,7 +1120,7 @@ def refresh_task_planning_primitives(
             task.pop(key, None)
 
     debug_packet_snapshot: Dict[str, Any] = {}
-    if not (explicit_request_contract or explicit_execution_brief):
+    if preserve_debug_packet:
         debug_packet_snapshot = normalize_debug_packet_snapshot(
             {
                 "version": task.get("debug_packet_version"),
@@ -1149,7 +1151,7 @@ def refresh_task_planning_primitives(
             task.pop(key, None)
 
     phase_checkpoint_snapshot: Dict[str, Any] = {}
-    if not (explicit_request_contract or explicit_execution_brief):
+    if preserve_phase_checkpoint:
         phase_checkpoint_snapshot = normalize_phase_checkpoint_snapshot(
             {
                 "version": task.get("phase_checkpoint_version"),
@@ -2697,7 +2699,22 @@ def sanitize_task_record(
         if str(task.get("execution_brief_summary", "")).strip():
             result["execution_brief_summary"] = str(task.get("execution_brief_summary", "")).strip()
 
-    refresh_task_planning_primitives(task, request_contract=request_contract_snapshot)
+    existing_execution_brief_snapshot = normalize_execution_brief_snapshot(
+        {
+            "version": task.get("execution_brief_version"),
+            "status": task.get("execution_brief_status"),
+            "summary": task.get("execution_brief_summary"),
+            "executable_slice": task.get("execution_brief_executable_slice"),
+            "blocked_slice": task.get("execution_brief_blocked_slice"),
+            "operator_decision": task.get("execution_brief_operator_decision"),
+            "offdesk_allowed": task.get("execution_brief_offdesk_allowed"),
+        }
+    )
+    refresh_task_planning_primitives(
+        task,
+        request_contract=request_contract_snapshot,
+        execution_brief=existing_execution_brief_snapshot or None,
+    )
 
     refresh_task_tf_state(task)
 
@@ -3771,7 +3788,12 @@ def sync_task_lifecycle(
         apply_review_lane_verdicts(task)
     else:
         task.pop("lane_states", None)
-    refresh_task_planning_primitives(task, request_contract=request_contract_snapshot)
+    refresh_task_planning_primitives(
+        task,
+        request_contract=request_contract_snapshot,
+        preserve_debug_packet=not bool(request_contract_snapshot),
+        preserve_phase_checkpoint=not bool(request_contract_snapshot),
+    )
     refresh_task_tf_state(task)
     sync_task_exec_context(entry, task)
     return task

@@ -177,6 +177,13 @@ def test_seed_d3_data_manual_followup_runtime_creates_business_rule_candidate(tm
     assert project["background_runner_slot_limits"]["local_tmux"] == 1
     assert task["phase1_role_preset"] == "data"
     assert task["phase2_team_preset"] == "data"
+    assert task["request_contract_type"] == "data"
+    assert task["request_contract_status"] == "complete"
+    assert task["request_contract_fields"]["source_path"] == "data/customer_events.csv"
+    assert task["request_contract_fields"]["target_column"] == "reporting_region"
+    assert task["request_contract_fields"]["accepted_input_formats"] == ["KR", "US", "EU", "APAC"]
+    assert task["request_contract_fields"]["normalize_to"] == "confirmed-region-mapping"
+    assert task["request_contract_artifact_contracts"]["normalized_csv"]["path"] == "normalized_customers.csv"
     assert task["approved_plan_status"] == "approved"
     assert task["critic_review_status"] == "approved"
     assert task["phase_checkpoint_status"] == "active"
