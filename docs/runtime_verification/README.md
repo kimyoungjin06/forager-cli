@@ -16,6 +16,8 @@
   - `data/D3_manual_followup_path.md`
 - `phase2/review/`
 - `phase2/mixed/`
+  - `mixed/M2_rerun_path.md`
+  - `mixed/M3_manual_followup_path.md`
 - review-specific non-happy-path split now includes:
   - `review/R2_rerun_path.md`
   - `review/R3_manual_followup_preview.md`
@@ -112,6 +114,13 @@
       - source task `T-801` stayed on `needs_retry` with `exec_rerun_targets: execution=L2 review=R1`, keeping completed implementation lane `L1` out of rerun scope
       - child retry task `T-802` completed after `operator_handoff.md`, `reviewer_note.md`, `auth_scope_inventory.md`, `tests/session.test.js`, and `work_result` converged
       - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime evidence kept the branch on rerun while proving the selected L2/R1 path can complete
+  - `mixed/M3_manual_followup_path.md`
+    - `live_rehearsal_ready`
+    - finding:
+      - isolated seed proof creates a mixed manual-followup candidate with completed implementation lane `L1` and runnable writer/scope lane `L2`
+      - `package_scope_matrix.md`, `operator_handoff.md`, and `reviewer_note.md` preserve the operator-owned auth/session versus dashboard/session-banner package boundary
+      - `/task`, `/followup`, and `/offdesk review` agree on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
+      - `debug_packet_next_step` points to `/followup T-1001`, avoiding a generic retry collapse before launch
 
 ## Rule
 - Do not replace these artifacts with summaries detached from runtime evidence.
@@ -145,18 +154,19 @@
   - source task `T-901` stayed on the manual-followup branch with `execution=L2 review=R1`
   - child followup task `T-902` completed execution-only without auto-closing the operator-owned `R1` remainder
 - still bounded replay only:
-  - `mixed/M3 does not yet have a first-class scenario artifact`
+  - `mixed/M3_manual_followup_path.md`
 - next live candidate:
   - `mixed/M3_manual_followup_path.md`
 - candidate reason:
-  - `M3` is now the remaining non-review manual-followup branch without a first-class scenario artifact
+  - `M3` is now seed-backed and surface-visible; it is the next launch-bearing mixed manual-followup proof
 - next selection gate:
-  - create a first-class mixed manual-followup artifact and seed before attempting a launch-bearing proof
+  - launch `/followup-exec T-1001 lane L2` from an isolated M3 runtime and verify the background ticket closes while source branch remains manual_followup with `L2/R1` scope
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`
   - `D3` runbook is now embedded in `data/D3_manual_followup_path.md`
   - `M2` runbook is now embedded in `mixed/M2_rerun_path.md`
+  - `M3` runbook is now embedded in `mixed/M3_manual_followup_path.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:

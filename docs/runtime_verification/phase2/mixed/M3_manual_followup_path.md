@@ -1,0 +1,201 @@
+# Mixed M3 Manual Followup Path
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `M3`
+- preset:
+  - `mixed`
+- branch_target:
+  - `manual_followup`
+  - `preview_surface`
+- status:
+  - `live_rehearsal_ready`
+- proof_mode:
+  - `bounded_replay`
+- seed_gate:
+  - `isolated mixed manual-followup seed creates implementation evidence plus operator-owned package-scope arbitration`
+- live_gate:
+  - `pending launch-bearing local_tmux followup-execute rehearsal`
+- current_fix_branch:
+  - `task/mixed-m3-manual-followup-seed-1`
+- executed_at:
+  - `2026-04-28T12:18:13+09:00`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `session_expired 로그인 실패 시 토큰을 비우는 구현과 회귀 테스트는 유지하되, auth/session 패키지와 dashboard/session-banner 패키지 중 어디까지 이번 변경에 포함할지는 내가 결정해야 한다. 구현 증거는 src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md에 남기고, writer lane은 docs/handoff/operator_handoff.md, docs/analysis/package_scope_matrix.md, docs/reviews/reviewer_note.md에 패키징/스코프 선택지를 정리해라. 패키지 경계나 릴리즈 포함 범위는 operator arbitration이 필요하므로 done으로 닫지 말고 manual follow-up으로 남겨라.`
+- normalized action:
+  - `dispatch_task`
+- target runtime:
+  - `/tmp/aoe_m3_seed_check`
+
+## 3. Expected Contract
+- expected preset:
+  - `mixed`
+- expected execution brief:
+  - status:
+    - `partially_executable`
+  - executable slice:
+    - `docs/handoff/operator_handoff.md`
+    - `docs/analysis/package_scope_matrix.md`
+    - `docs/reviews/reviewer_note.md`
+  - blocked slice or operator decision:
+    - `operator-owned package boundary decision`
+    - `operator-owned release scope decision`
+- expected followup brief:
+  - status:
+    - `partially_executable`
+  - execution lanes:
+    - `L2`
+  - review lanes:
+    - `R1`
+- expected lane shape:
+  - execution:
+    - `L1 Codex-Dev implementation lane already done`
+    - `L2 Codex-Writer scope/handoff packet lane`
+  - review:
+    - `R1 Codex-Reviewer scope arbitration remainder`
+- expected completion branch:
+  - `manual_followup`
+- expected reentry rail:
+  - `retry=none | followup=partially_executable exec=L2 review=R1 | bg=<runner or ->`
+- expected evidence:
+  - implementation evidence remains present and closed in `L1`
+  - writer lane can refresh the operator handoff, reviewer note, and package scope matrix
+  - package boundary choice is surfaced as operator-owned arbitration
+  - `/followup` is the preferred next surface, not generic `/retry`
+
+## 4. Runtime Evidence
+- request_id:
+  - `REQ-M3-001`
+- task_short_id:
+  - `T-1001`
+- planning:
+  - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m3`
+- execution brief:
+  - `partially_executable | do=docs/handoff/operator_handoff.md,docs/analysis/package_scope_matrix.md,docs/reviews/reviewer_note.md | blocked=operator-owned package boundary and release scope`
+- followup brief:
+  - `partially_executable | execution=L2 | review=R1`
+- reentry rails:
+  - `retry=none | followup=partially_executable exec=L2 review=R1`
+- stage progression:
+  - planning:
+    - `seeded mixed manual-followup candidate in isolated runtime`
+  - execution:
+    - `L1 implementation artifacts are present: src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md, work_result`
+    - `L2 writer artifacts are present: docs/handoff/operator_handoff.md, docs/analysis/package_scope_matrix.md, docs/reviews/reviewer_note.md`
+  - verification:
+    - `debug_packet next step is /followup T-1001`
+    - `package_scope_matrix.md keeps auth/session-only versus auth+dashboard selection operator-owned`
+  - integration:
+    - `not launched`
+  - close:
+    - `not launched`
+- critic/verifier verdict:
+  - `manual_followup`
+- final branch:
+  - `manual_intervention`
+- runtime proof:
+  - `request contract resolves to mixed with package_scope_matrix artifact contract`
+  - `phase2 execution plan has L1 Codex-Dev and L2 Codex-Writer`
+  - `phase2 review plan has R1 Codex-Reviewer`
+  - `followup_brief_execution_lane_ids=["L2"] and followup_brief_review_lane_ids=["R1"]`
+  - `exec_critic.manual_followup_execution_lane_ids=["L2"] and manual_followup_review_lane_ids=["R1"]`
+  - `debug_packet_next_step=/followup T-1001`
+
+## 5. Surface Evidence
+- `/task`:
+  - `T-1001 shows status failed and team_phase manual_intervention`
+  - `team_preset: phase1=mixed phase2=mixed`
+  - `phase2_execution: parallel lanes=2 with L1 Codex-Dev and L2 Codex-Writer`
+  - `phase2_review: single lanes=1 with R1 Codex-Reviewer/verifier`
+  - `execution_brief: partially_executable`
+  - `execution_brief_blocked: operator-owned package boundary decision, operator-owned release scope decision`
+  - `debug_packet: state=active | symptom=manual_followup_ready | next=/followup T-1001`
+  - `phase_checkpoint: status=active | current=verify`
+  - `exec_manual_followup_targets: execution=L2 review=R1`
+  - `followup_brief: partially_executable`
+  - `reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1`
+- `/followup`:
+  - `manual follow-up task T-1001`
+  - `execution lanes: L2`
+  - `review lanes: R1`
+  - `reason: writer packet can refresh package-scope evidence, but final package boundary remains operator-owned`
+- `/offdesk review`:
+  - `first action is /followup T-1001 | mixed-manual-followup lane L2,R1`
+  - `attention includes run_lock:test_only and brief:partial`
+  - `does not redirect into done or generic retry`
+- `/orch status`:
+  - `run_lock=test_only`
+  - `background_slots local_tmux=0/1`
+  - `background_queue depth=0`
+  - `background_runner pref=local_tmux | effective=local_background until an externalizable launch spec exists`
+- dashboard `Task Detail`:
+  - `/control/tasks/by-request/REQ-M3-001`
+- dashboard `Runtime Detail`:
+  - `/control/runtimes/O10`
+
+## 6. Result
+- result:
+  - `live_rehearsal_ready`
+- mismatch class:
+  - `launch_pending`
+- mismatch notes:
+  - `M3 now has a concrete seed proving mixed manual-followup lane separation and operator-owned package arbitration`
+  - `the current proof is seed-bound under run_lock=test_only`
+  - `no launch-bearing background followup-exec ticket has been created yet`
+- next fix:
+  - `launch /followup-exec T-1001 lane L2 from an isolated M3 runtime with run_lock=open and verify the background ticket closes while source task remains manual_followup with R1 visible`
+
+## 7. Raw References
+- runtime state refs:
+  - `/tmp/aoe_m3_seed_check/.aoe-team/orch_manager_state.json`
+- log refs:
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m3 --control-root /tmp/aoe_m3_seed_check --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `surface command: /orch status O10`
+  - `surface command: /task T-1001`
+  - `surface command: /followup T-1001`
+  - `surface command: /offdesk review O10`
+- regression refs:
+  - `tests/gateway/test_live_rehearsal_seed.py::test_seed_m3_mixed_manual_followup_runtime_creates_scope_arbitration_candidate`
+- artifact refs:
+  - `/tmp/aoe_m3_seed_check/Alpha/src/session.js`
+  - `/tmp/aoe_m3_seed_check/Alpha/tests/session.test.js`
+  - `/tmp/aoe_m3_seed_check/Alpha/docs/analysis/auth_scope_inventory.md`
+  - `/tmp/aoe_m3_seed_check/Alpha/docs/analysis/package_scope_matrix.md`
+  - `/tmp/aoe_m3_seed_check/Alpha/docs/handoff/operator_handoff.md`
+  - `/tmp/aoe_m3_seed_check/Alpha/docs/reviews/reviewer_note.md`
+  - `/tmp/aoe_m3_seed_check/Alpha/work_result`
+
+## 8. Live Rehearsal Runbook
+- rehearsal scope:
+  - `single mixed writer-lane followup over local_tmux only`
+- safety posture:
+  - use an isolated runtime
+  - seed it with:
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m3 --control-root tmp/m3_rehearsal --run-lock-mode open --runner-target local_tmux --local-tmux-slot-limit 1`
+- preflight:
+  - verify `/orch status O10` shows:
+    - `run_lock=open`
+    - `background_slots local_tmux=0/1`
+  - verify `/task T-1001` shows:
+    - `phase2=mixed`
+    - `execution=L2 review=R1`
+    - `debug_next_step=/followup T-1001`
+    - `implementation lane L1 remains done`
+  - verify `/followup T-1001` shows execution lane `L2`, review lane `R1`, and operator-owned package-scope reason
+  - verify `/offdesk review O10` points first to `/followup T-1001`
+- trigger:
+  - launch exactly one bounded followup execute:
+    - `dashboard followup-execute action for T-1001 lane L2`
+    - or `/followup-exec T-1001 lane L2`
+- pass criteria:
+  - runner target is `local_tmux`
+  - background ticket completes with `exit_code=0`
+  - source task remains `manual_intervention`
+  - `reentry_rails_summary` remains on `followup=partially_executable exec=L2 review=R1`
+  - implementation lane `L1` is not selected for rerun
+  - review/manual remainder `R1` remains visible after launch
+  - no generic retry branch replaces manual followup

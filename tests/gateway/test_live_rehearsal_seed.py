@@ -19,6 +19,7 @@ from aoe_tg_live_rehearsal_seed import (  # noqa: E402
     seed_d2_data_rerun_runtime,
     seed_d3_data_manual_followup_runtime,
     seed_m2_mixed_rerun_runtime,
+    seed_m3_mixed_manual_followup_runtime,
     seed_r2_review_rerun_runtime,
     seed_r3_manual_followup_execute_runtime,
     seed_r4_external_background_runtime,
@@ -267,6 +268,67 @@ def test_seed_m2_mixed_rerun_runtime_creates_handoff_retry_candidate(tmp_path: P
     assert "missing changed files: tests/session.test.js" in handoff
     assert "retry writer/handoff lane L2" in reviewer_note
     assert "do not rerun implementation lane L1" in reviewer_note
+
+
+def test_seed_m3_mixed_manual_followup_runtime_creates_scope_arbitration_candidate(tmp_path: Path) -> None:
+    payload = seed_m3_mixed_manual_followup_runtime(
+        tmp_path / "control",
+        run_lock_mode="test_only",
+        runner_target="local_tmux",
+        local_tmux_slot_limit=1,
+    )
+
+    control_root = Path(payload["control_root"])
+    team_dir = Path(payload["team_dir"])
+    project_root = Path(payload["project_root"])
+    manager_state_file = Path(payload["manager_state_file"])
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    project = state["projects"]["alpha"]
+    task = project["tasks"]["REQ-M3-001"]
+
+    assert project["project_alias"] == "O10"
+    assert project["overview"] == "isolated mixed manual followup live rehearsal"
+    assert project["run_lock_mode"] == "test_only"
+    assert project["background_runner_target"] == "local_tmux"
+    assert project["background_runner_slot_limits"]["local_tmux"] == 1
+    assert task["phase1_role_preset"] == "mixed"
+    assert task["phase2_team_preset"] == "mixed"
+    assert task["request_contract_type"] == "mixed"
+    assert task["request_contract_status"] == "complete"
+    assert task["request_contract_fields"]["primary_package"] == "auth/session"
+    assert task["request_contract_fields"]["conflicting_package"] == "dashboard/session-banner"
+    assert task["request_contract_artifact_contracts"]["package_scope_matrix"]["path"] == "docs/analysis/package_scope_matrix.md"
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task["phase_checkpoint_status"] == "active"
+    assert task["phase_checkpoint_current_phase"] == "verify"
+    assert task["debug_packet_symptom"] == "manual_followup_ready"
+    assert task["debug_packet_next_step"] == "/followup T-1001"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
+    assert task_state.derive_task_manual_gate(task)["status"] == "ready"
+    assert task["execution_brief_status"] == "partially_executable"
+    assert "operator-owned package boundary" in task["execution_brief_summary"]
+    execution_lanes = task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"]
+    assert [lane["lane_id"] for lane in execution_lanes] == ["L1", "L2"]
+    assert [lane["role"] for lane in execution_lanes] == ["Codex-Dev", "Codex-Writer"]
+    assert task["followup_brief_status"] == "partially_executable"
+    assert task["followup_brief_execution_lane_ids"] == ["L2"]
+    assert task["followup_brief_review_lane_ids"] == ["R1"]
+    assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L2"]
+    assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
+    assert task["reentry_rails_summary"] == "retry=none | followup=partially_executable exec=L2 review=R1"
+    assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
+    assert payload["trigger_command"] == "/followup-exec T-1001 lane L2"
+
+    for artifact in payload["artifact_paths"]:
+        assert (project_root / artifact).exists()
+    package_matrix = (project_root / "docs" / "analysis" / "package_scope_matrix.md").read_text(encoding="utf-8")
+    handoff = (project_root / "docs" / "handoff" / "operator_handoff.md").read_text(encoding="utf-8")
+    reviewer_note = (project_root / "docs" / "reviews" / "reviewer_note.md").read_text(encoding="utf-8")
+    assert "auth/session + dashboard/session-banner" in package_matrix
+    assert "branch: manual_followup" in package_matrix
+    assert "manual_followup: required before done" in handoff
+    assert "verdict: manual_followup, not retry" in reviewer_note
 
 
 def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path: Path) -> None:

@@ -290,6 +290,13 @@
 #### M3. Manual Followup Path
 - intent:
   - work artifact and review/handoff artifact conflict or require packaging/scope arbitration
+- current status:
+  - `live_rehearsal_ready`
+- current finding:
+  - isolated seed proof creates a mixed package-scope arbitration candidate with implementation lane `L1` closed and writer lane `L2` available for follow-up
+  - `package_scope_matrix.md`, `operator_handoff.md`, and `reviewer_note.md` keep the package boundary and release scope operator-owned
+  - `/task`, `/followup`, and `/offdesk review` agree on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
+  - `debug_packet_next_step=/followup T-1001`, so the branch does not collapse into generic retry before launch
 - expected branch:
   - `manual followup`
 - must prove:
