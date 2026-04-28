@@ -207,6 +207,7 @@ jobs:
       actions: read
       contents: read
       issues: write
+      pull-requests: write
     env:
       AOE_RUNNER_TARGET: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.runner_target || inputs.runner_target || 'github_runner' }}
       AOE_TEAM_DIR: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.team_dir || inputs.team_dir || '.aoe-team' }}
@@ -239,8 +240,10 @@ jobs:
             --response-file "$RUNNER_TEMP/aoe-worker-completion.md"
 
       - name: Comment worker result
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cat "$RUNNER_TEMP/aoe-worker-completion.md" >> "$GITHUB_STEP_SUMMARY"
           gh issue comment "$AOE_COMMENT_ISSUE_NUMBER" \
             --body-file "$RUNNER_TEMP/aoe-worker-completion.md"

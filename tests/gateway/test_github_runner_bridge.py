@@ -558,12 +558,18 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
     assert "needs.worker-run.result" in workflow
     assert "aoe-github-runner-bridge.py completion-comment" in workflow
     assert '--repo "$GITHUB_REPOSITORY"' in workflow
+    assert "pull-requests: write" in workflow
+    assert "continue-on-error: true" in workflow
+    assert "$GITHUB_STEP_SUMMARY" in workflow
     assert "background_run_acks" in workflow
     assert "background_run_results" in workflow
     assert "background_run_logs" in workflow
     assert "issue_comment:" in comment_workflow
     assert "actions: write" in comment_workflow
     assert "issues: write" in comment_workflow
+    assert "pull-requests: write" in comment_workflow
+    assert "continue-on-error: true" in comment_workflow
+    assert "$GITHUB_STEP_SUMMARY" in comment_workflow
     assert "aoe-github-runner-bridge.py comment-dispatch" in comment_workflow
     assert "gh workflow run" in comment_workflow
     assert "external-background-worker.yml" in comment_workflow
