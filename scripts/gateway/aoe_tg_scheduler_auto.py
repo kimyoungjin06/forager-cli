@@ -25,6 +25,14 @@ from aoe_tg_scheduler_capacity import (
     _recovery_repeat_snapshot,
 )
 
+
+def _int_or_zero(raw: Any) -> int:
+    try:
+        return int(raw or 0)
+    except Exception:
+        return 0
+
+
 def _handle_auto_command(
     *,
     args: Any,
@@ -177,6 +185,12 @@ def _handle_auto_command(
         last_prefetch_at = str(current.get("last_prefetch_at", "")).strip()
         last_prefetch_reason = str(current.get("last_prefetch_reason", "")).strip()
         last_prefetch_mode = str(current.get("last_prefetch_mode", "")).strip()
+        last_github_import_drain_at = str(current.get("last_github_import_drain_at", "")).strip()
+        last_github_import_drain_reason = str(current.get("last_github_import_drain_reason", "")).strip()
+        last_github_import_processed_count = _int_or_zero(current.get("last_github_import_processed_count"))
+        last_github_import_completed_count = _int_or_zero(current.get("last_github_import_completed_count"))
+        last_github_import_pending_count = _int_or_zero(current.get("last_github_import_pending_count"))
+        last_github_import_failed_count = _int_or_zero(current.get("last_github_import_failed_count"))
         next_retry_at = str(current.get("next_retry_at", "")).strip()
         recovery_grace_until = str(current.get("recovery_grace_until", "")).strip()
         next_retry_target = _next_rate_limited_task_snapshot(manager_state)
@@ -272,6 +286,17 @@ def _handle_auto_command(
             lines.append(f"- last_prefetch_mode: {last_prefetch_mode}")
         if last_prefetch_reason:
             lines.append(f"- last_prefetch_reason: {compact_reason(last_prefetch_reason, 120)}")
+        if last_github_import_drain_at:
+            lines.append(f"- github_import_drain_at: {last_github_import_drain_at}")
+            lines.append(
+                "- github_import_drain: processed={processed} completed={completed} pending={pending} failed={failed} reason={reason}".format(
+                    processed=last_github_import_processed_count,
+                    completed=last_github_import_completed_count,
+                    pending=last_github_import_pending_count,
+                    failed=last_github_import_failed_count,
+                    reason=last_github_import_drain_reason or "-",
+                )
+            )
         snapshot_lines = focused_project_snapshot_lines(manager_state)
         if status_level == "long" and snapshot_lines:
             lines.extend([""] + snapshot_lines)
@@ -530,4 +555,3 @@ def _handle_auto_command(
     body += "next:\n- /queue\n- /auto status"
     send(body, context="auto-on", with_menu=True)
     return True
-

@@ -108,6 +108,9 @@ provider capacity override 후 재개:
 - drain previously scheduled GitHub imports:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py drain-github-imports --team-dir <team_dir> --poll`
 - `--poll` moves the local background ticket forward after the sidecars are imported.
+- When `aoe-team-stack` is running, the auto scheduler session also drains `.aoe-team/github_external_imports.json` by default. It checks pending/retry imports every 15 seconds and imports one item per tick.
+- Disable the automatic drain with `AOE_AUTO_GITHUB_IMPORT_DRAIN=0`. Tune with `AOE_AUTO_GITHUB_IMPORT_DRAIN_INTERVAL_SEC`, `AOE_AUTO_GITHUB_IMPORT_DRAIN_MAX_ITEMS`, `AOE_AUTO_GITHUB_IMPORT_DRAIN_TIMEOUT_SEC`, and `AOE_AUTO_GITHUB_IMPORT_DRAIN_WATCH_INTERVAL_SEC`.
+- `/auto status` shows the last GitHub import drain timestamp and processed/completed/pending/failed counts.
 
 ## 2.1 Systemd User Mode (recommended)
 1. Install:
