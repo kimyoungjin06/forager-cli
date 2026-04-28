@@ -9,7 +9,7 @@ permissions:
   actions: write
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   comment-bridge:
@@ -51,8 +51,10 @@ jobs:
 
       - name: Comment response
         if: steps.plan.outputs.should_comment == 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cat "$RUNNER_TEMP/aoe-comment-response.md" >> "$GITHUB_STEP_SUMMARY"
           gh issue comment "${{ github.event.issue.number }}" \
             --body-file "$RUNNER_TEMP/aoe-comment-response.md"
