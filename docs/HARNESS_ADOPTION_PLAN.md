@@ -449,7 +449,12 @@ without grepping raw logs manually.
     - systemd install
     - local dashboard launch
     - doctor rerun
-  - broader upgrade envelopes remain open
+  - upgrade guidance now covers:
+    - doctor baseline
+    - state-root migration
+    - critical setup readiness
+    - GitHub workflow helper action runtime majors
+    - full gateway suite command
 
 ## 8. Package E: Compatibility / Deprecation Envelopes
 
