@@ -169,8 +169,8 @@
   - first-class `Document Flow` dashboard card is done
   - doc/runtime drift excerpts are present in nightly summary and recovery
 - external runner productionization:
-  - `github_runner` / `remote_worker` lifecycle is proven by test-only support proof
-  - actual pickup worker and production acknowledgement loop remain open
+  - `github_runner` / `remote_worker` lifecycle is now backed by worker-run pickup, ack/result/log sidecars, and artifact import
+  - issue/PR comment ergonomics remain open
 - governance / permissions / usage:
   - owner-only safety baseline exists
   - usage reporting, budget boundaries, and secret-redaction surfaces remain open
@@ -215,7 +215,7 @@
   - baseline SCM/GitHub workflow trigger bridge implemented
   - sidecar artifact import + local poll bridge implemented
   - `gh run download` artifact retrieval + import bridge implemented
-  - credentials / transport policy
+  - baseline credentials / transport policy implemented
   - issue/PR comment ergonomics
 
 ### 6.4 Fourth Block: Operational Hygiene

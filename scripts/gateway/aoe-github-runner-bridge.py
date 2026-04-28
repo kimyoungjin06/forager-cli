@@ -14,6 +14,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from aoe_tg_github_runner_bridge import (  # noqa: E402
+    build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
     decode_github_runner_worker_bundle,
     encode_github_runner_worker_bundle,
@@ -36,6 +37,15 @@ def _build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--bundle-file", default="")
     materialize.add_argument("--output-root", default=".")
     materialize.add_argument("--team-dir", default="")
+
+    policy = subparsers.add_parser("policy-check", help="validate github_runner workflow transport policy")
+    policy.add_argument("--runner", default="github_runner")
+    policy.add_argument("--team-dir", required=True)
+    policy.add_argument("--event-name", default="")
+    policy.add_argument("--commit-results", default="false")
+    policy.add_argument("--bundle-present", default="false")
+    policy.add_argument("--timeout-sec", default="900")
+    policy.add_argument("--max-items", default="1")
     return parser
 
 
@@ -71,6 +81,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
+        if args.command == "policy-check":
+            result = build_github_runner_transport_policy(
+                runner_target=args.runner,
+                team_dir=args.team_dir,
+                event_name=args.event_name,
+                commit_results=args.commit_results,
+                bundle_present=args.bundle_present,
+                timeout_sec=args.timeout_sec,
+                max_items=args.max_items,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("ok") else 1
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

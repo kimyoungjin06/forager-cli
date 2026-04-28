@@ -439,6 +439,12 @@
     - `scripts/gateway/aoe-background-worker.py worker-run --runner github_runner`
   - uploads ack/result/log sidecars as a workflow artifact
   - can force-commit result sidecars when `commit_results=true`, but default is artifact-only
+- Credential / transport policy:
+  - the worker job runs `aoe-github-runner-bridge.py policy-check` before materializing a bundle or consuming a handoff
+  - default sidecar transport is the Actions artifact path with `contents:read`
+  - `commit_results=true` is an explicit repository-write mode and is isolated to the `commit-result-sidecars` job with `contents:write`
+  - the GitHub runner workflow rejects `team_dir` values that are absolute or contain parent-directory traversal
+  - `bundle_b64` and `repository_dispatch` payloads are privileged operator-triggered inputs, not untrusted issue/PR comment text
 - Remaining sync boundary:
   - local control-plane polling needs the resulting sidecars imported or committed back into the project `team_dir`
   - artifact import path:
@@ -498,7 +504,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is credential/transport policy and issue/PR comment ergonomics.
+- Remaining external runner productization work is issue/PR comment ergonomics.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

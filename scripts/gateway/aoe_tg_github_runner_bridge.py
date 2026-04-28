@@ -20,10 +20,24 @@ from aoe_tg_external_background_worker import external_background_handoff_path
 
 GITHUB_RUNNER_BUNDLE_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_BUNDLE_KIND = "github_runner_worker_bundle"
+GITHUB_RUNNER_TRANSPORT_POLICY_VERSION = "2026-04-28.v1"
+GITHUB_RUNNER_TRANSPORT_POLICY_KIND = "github_runner_transport_policy"
 
 
 def _trim(raw: Any, limit: int) -> str:
     return str(raw or "").strip()[: max(0, int(limit))]
+
+
+def _boolish(raw: Any) -> bool:
+    token = _trim(raw, 32).lower()
+    return token in {"1", "true", "yes", "y", "on"}
+
+
+def _intish(raw: Any, default: int) -> int:
+    try:
+        return int(str(raw).strip())
+    except Exception:
+        return default
 
 
 def _resolve_team_dir(raw: Path | str) -> Path:
@@ -32,6 +46,112 @@ def _resolve_team_dir(raw: Path | str) -> Path:
 
 def _relative_artifact_path(team_dir: Path, path: Path) -> str:
     return artifact_backend(team_dir).relative_artifact_path(path)
+
+
+def build_github_runner_transport_policy(
+    *,
+    runner_target: str = "github_runner",
+    team_dir: Path | str = ".aoe-team",
+    event_name: str = "",
+    commit_results: Any = False,
+    bundle_present: Any = False,
+    timeout_sec: Any = 900,
+    max_items: Any = 1,
+) -> Dict[str, Any]:
+    raw_target = _trim(runner_target, 64).lower()
+    target = normalize_executor_runner_target(raw_target, "")
+    raw_team_dir = _trim(team_dir, 240) or ".aoe-team"
+    team_path = Path(raw_team_dir).expanduser()
+    event = _trim(event_name, 80).lower()
+    commit_mode = _boolish(commit_results)
+    has_bundle = _boolish(bundle_present)
+    timeout_value = _intish(timeout_sec, -1)
+    max_items_value = _intish(max_items, -1)
+    violations = []
+    warnings = []
+
+    if target != "github_runner":
+        violations.append(
+            {
+                "code": "unsupported_runner_target",
+                "detail": f"github_runner workflow supports only runner_target=github_runner, got {raw_target or '-'}",
+            }
+        )
+    if not raw_team_dir or raw_team_dir == ".":
+        violations.append(
+            {
+                "code": "unsafe_team_dir",
+                "detail": "team_dir must name a relative runtime directory inside the checkout",
+            }
+        )
+    if team_path.is_absolute() or ".." in team_path.parts:
+        violations.append(
+            {
+                "code": "unsafe_team_dir",
+                "detail": "team_dir must be relative and must not contain parent-directory traversal",
+            }
+        )
+    if event and event not in {"workflow_dispatch", "repository_dispatch"}:
+        warnings.append(
+            {
+                "code": "unknown_event_name",
+                "detail": f"event_name={event} is not a standard external worker trigger",
+            }
+        )
+    if timeout_value < 1 or timeout_value > 21600:
+        violations.append(
+            {
+                "code": "timeout_out_of_range",
+                "detail": "timeout_sec must be between 1 and 21600 seconds",
+            }
+        )
+    if max_items_value < 1 or max_items_value > 50:
+        violations.append(
+            {
+                "code": "max_items_out_of_range",
+                "detail": "max_items must be between 1 and 50",
+            }
+        )
+    if commit_mode:
+        warnings.append(
+            {
+                "code": "commit_results_write_mode",
+                "detail": "commit_results writes sidecars back with contents:write; prefer artifact import for routine pickup",
+            }
+        )
+    if not has_bundle:
+        warnings.append(
+            {
+                "code": "bundle_absent",
+                "detail": "no handoff bundle was provided; worker will rely on sidecars already present in the checkout",
+            }
+        )
+
+    result_transport = "actions_artifact+optional_git_commit" if commit_mode else "actions_artifact"
+    credential_scope = "contents:write" if commit_mode else "contents:read"
+    ok = not violations
+    return {
+        "version": GITHUB_RUNNER_TRANSPORT_POLICY_VERSION,
+        "kind": GITHUB_RUNNER_TRANSPORT_POLICY_KIND,
+        "ok": ok,
+        "runner_target": target or raw_target,
+        "team_dir": raw_team_dir,
+        "event_name": event,
+        "commit_results": commit_mode,
+        "bundle_present": has_bundle,
+        "timeout_sec": timeout_value,
+        "max_items": max_items_value,
+        "result_transport": result_transport,
+        "credential_scope": credential_scope,
+        "trust_boundary": "operator_triggered_github_actions",
+        "violations": violations,
+        "warnings": warnings,
+        "summary": (
+            f"github_runner_policy | ok={'yes' if ok else 'no'} | "
+            f"transport={result_transport} | credential={credential_scope} | "
+            f"team_dir={raw_team_dir}"
+        ),
+    }
 
 
 def build_github_runner_worker_bundle(

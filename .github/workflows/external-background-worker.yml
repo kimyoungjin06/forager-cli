@@ -45,7 +45,7 @@ on:
       - aoe-external-background-worker
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   worker-run:
@@ -72,6 +72,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Preflight transport policy
+        run: |
+          python3 scripts/gateway/aoe-github-runner-bridge.py policy-check \
+            --runner "$AOE_RUNNER_TARGET" \
+            --team-dir "$AOE_TEAM_DIR" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --commit-results "$AOE_COMMIT_RESULTS" \
+            --bundle-present "$([ -n "$AOE_BUNDLE_B64" ] && echo true || echo false)" \
+            --timeout-sec "$AOE_TIMEOUT_SEC" \
+            --max-items "$AOE_MAX_ITEMS"
 
       - name: Materialize handoff bundle
         if: env.AOE_BUNDLE_B64 != ''
@@ -102,11 +113,68 @@ jobs:
             ${{ env.AOE_TEAM_DIR }}/background_run_results/**
             ${{ env.AOE_TEAM_DIR }}/background_run_logs/**
 
-      - name: Commit result sidecars
-        if: always() && env.AOE_COMMIT_RESULTS == 'true'
+  commit-result-sidecars:
+    name: commit-worker-sidecars
+    needs: worker-run
+    if: ${{ always() && ((github.event_name == 'repository_dispatch' && (github.event.client_payload.commit_results == true || github.event.client_payload.commit_results == 'true')) || (github.event_name == 'workflow_dispatch' && (inputs.commit_results == true || inputs.commit_results == 'true'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    env:
+      AOE_RUNNER_TARGET: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.runner_target || inputs.runner_target || 'github_runner' }}
+      AOE_TEAM_DIR: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.team_dir || inputs.team_dir || '.aoe-team' }}
+      AOE_TICKET_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ticket_id || inputs.ticket_id || '' }}
+      AOE_TIMEOUT_SEC: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.timeout_sec || inputs.timeout_sec || '900' }}
+      AOE_MAX_ITEMS: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.max_items || inputs.max_items || '1' }}
+      AOE_COMMIT_RESULTS: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Preflight transport policy
         run: |
-          if [[ "$AOE_TEAM_DIR" = /* ]]; then
-            echo "Skipping commit_results for absolute team_dir=$AOE_TEAM_DIR"
+          python3 scripts/gateway/aoe-github-runner-bridge.py policy-check \
+            --runner "$AOE_RUNNER_TARGET" \
+            --team-dir "$AOE_TEAM_DIR" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --commit-results "$AOE_COMMIT_RESULTS" \
+            --bundle-present false \
+            --timeout-sec "$AOE_TIMEOUT_SEC" \
+            --max-items "$AOE_MAX_ITEMS"
+
+      - name: Download worker sidecars
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: aoe-external-background-${{ env.AOE_RUNNER_TARGET }}-${{ env.AOE_TICKET_ID || github.run_id }}
+          path: ${{ runner.temp }}/aoe-worker-sidecars
+
+      - name: Commit result sidecars
+        run: |
+          download_root="$RUNNER_TEMP/aoe-worker-sidecars"
+          if [ ! -d "$download_root" ]; then
+            echo "No worker sidecar artifact was downloaded."
+            exit 0
+          fi
+          mkdir -p "$AOE_TEAM_DIR"
+          staged=0
+          for dirname in background_run_acks background_run_results background_run_logs; do
+            while IFS= read -r -d '' source_dir; do
+              mkdir -p "$AOE_TEAM_DIR/$dirname"
+              cp -R "$source_dir"/. "$AOE_TEAM_DIR/$dirname"/
+              staged=1
+            done < <(find "$download_root" -type d -name "$dirname" -print0)
+          done
+          if [ "$staged" -eq 0 ]; then
+            echo "No worker sidecars to stage."
             exit 0
           fi
           git config user.name "github-actions[bot]"
