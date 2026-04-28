@@ -82,6 +82,10 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_error_test.sh`
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_dashboard_test.sh`
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway_full_test.sh`
+8.1 Upgrade guide:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_upgrade_guide.py --project-root /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control`
+- use before/after dependency, workflow, state-root, setup, or migration changes.
+- the guide combines doctor status, state-root migration guidance, setup readiness, GitHub helper action runtime checks, and the required full gateway suite command.
 9. CI workflow definition:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.github/workflows/gateway-tests.yml`
 - job shape: `gateway-smoke`, `gateway-error`, `gateway-dashboard`, `gateway-full` (matrix parallel run)

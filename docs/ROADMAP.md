@@ -630,13 +630,13 @@
     - resolved state root surface visibility 반영
     - artifact path helper 정렬 반영
     - copy-first migration helper 추가
-- [ ] `doctor / setup / migration` discipline
+- [x] `doctor / setup / migration` discipline
   - bootstrap, health, upgrade, state-root migration guidance
   - note:
     - standalone `doctor` script added for state-root, artifact, runtime-config, and binary health
     - standalone `setup guide` script added for bootstrap/env/migration/systemd/dashboard/doctor next-steps
     - state-root migration helper is already added
-    - broader upgrade/migration workflow remains open
+    - standalone `upgrade guide` script added for doctor/setup/migration/workflow-runtime/full-suite post-upgrade checks
 - [ ] compatibility / deprecation envelope
   - legacy surface retirements에 deterministic response envelope 추가
   - note:
