@@ -36,6 +36,31 @@
   - write callback bodies to `$GITHUB_STEP_SUMMARY`
   - make callback comment steps `continue-on-error`
 
+## Hardened Rerun
+- Trigger comment: PR `#112`, issue comment `4335511135`.
+- Comment bridge run: `25054585964`.
+- Worker run: `25054592355`.
+- Comment bridge result: success.
+- Worker workflow result: success.
+- GitHub callback comments:
+  - dispatch accepted comment: `4335512441`
+  - worker completion comment: `4335514800`
+- Fresh local import result from `/tmp/aoe-comment-smoke-second`:
+  - `run_id=25054592355`
+  - `run.conclusion=success`
+  - `copied_count=3`
+  - `ack_imported=true`
+  - `result_status=completed`
+  - `poll_result.completed_ticket_ids=["BGT-GHA-LIVE-20260428-001"]`
+
+## Final Outcome
+- Trusted PR comment dispatch worked.
+- GitHub Actions worker pickup worked.
+- Ack/result/log artifact upload worked.
+- Ticket-named run discovery worked.
+- Local scheduled import + drain + poll worked.
+- Completion callback now posts successfully for this PR-thread path.
+
 ## Cleanup
 - Remove `.aoe-team/background_runs.json`.
 - Remove `.aoe-team/background_run_handoffs/github-runner-bgt-gha-live-20260428-001.json`.
