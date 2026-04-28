@@ -53,11 +53,12 @@
       - live progression moved from schema acceptance truncation to prompt binding, transform policy propagation, artifact-specific output contracts, request-contract plumbing, typed month/schema/null/sample policies, and artifact-intent routing
       - final successful run (`T-038`) reached `planning_ready` and `dispatch_completed` with all four expected artifacts and verifier success evidence
   - `data/D2_rerun_path.md`
-    - `live_rehearsal_ready`
+    - `executed_done`
     - finding:
       - live rerun-path work surfaced reusable contracts for `quality_gate_policy`, `schema_column_expectations`, numeric `null-heavy` thresholds, and `schema_value_quality_policy`
-      - isolated D2 seed proof now materializes concrete `schema_report.json`, `null_summary.md`, and `sample_5.csv` evidence with `affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, and `reason`
-      - the remaining gate is launch-bearing verification: `/retry T-701 lane L1` must close cleanly while preserving the source task on `rerun`
+      - isolated D2 seed proof materialized concrete `schema_report.json`, `null_summary.md`, and `sample_5.csv` evidence with `affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, and `reason`
+      - launch-bearing `local_tmux` rehearsal closed the retry ticket with `exit_code=0`
+      - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime evidence kept source task `T-701` on the `rerun` branch while the child retry task completed
   - `review/R1_happy_path.md`
     - `executed_done`
     - finding:
@@ -122,26 +123,23 @@
 - do not skip directly from `planned` to `executed_done` for new non-happy-path rails
 
 ## Current Promotion Decision
-- first live rehearsal completed:
-  - `review/R3_manual_followup_preview.md`
-- launch-bearing live rehearsal completed:
-  - `review/R2_rerun_path.md`
-- reason:
-  - isolated `local_tmux` retry remained lane-scoped
-  - no external pickup dependency
-  - background ticket, runtime handle, and reentry rail all stayed coherent
-- runbook:
-  - embedded in `review/R2_rerun_path.md`
+- latest launch-bearing live rehearsal completed:
+  - `data/D2_rerun_path.md`
+- result:
+  - isolated `local_tmux` retry completed with `exit_code=0`
+  - source task `T-701` stayed on the rerun branch with concrete null-heavy evidence
+  - child retry task `T-702` completed without auto-closing the source task
 - still bounded replay only:
   - `none in the review/build first wave rerun or manual-followup rails`
 - next live candidate:
-  - `data/D2_rerun_path.md`
+  - `none selected after current launch-bearing queue closure`
 - candidate reason:
-  - `D2 is now seed-backed and surface-visible; it is the next launch-bearing rerun proof`
-- remaining gate:
-  - `launch /retry T-701 lane L1 from the isolated D2 runtime and verify the background ticket closes while source branch remains rerun`
+  - `B2`, `B3`, `D2`, `R2`, `R3 preview`, `R3 execute`, and `R4` now have documented non-happy-path proof artifacts; `M2` needs planning before a live candidate is selected
+- next selection gate:
+  - run a critical review pass before opening the next wave, with `mixed/M2_rerun_path.md` as the most obvious missing rerun artifact
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
+  - `D2` runbook is now embedded in `data/D2_rerun_path.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
