@@ -128,6 +128,12 @@
 #### D3. Manual Followup Path
 - intent:
   - transform requires operator business-rule judgment or source data interpretation
+- current status:
+  - `live_rehearsal_ready`
+- current finding:
+  - isolated seed proof creates a data manual-followup candidate with `L2 DataEngineer` execution and `R1 Codex-Reviewer` business-rule remainder
+  - `normalized_customers.csv` applies confirmed `KR`/`US` mappings while `business_rule_questions.md` and `sample_ambiguous_rows.csv` preserve `EU`/`APAC` ambiguity
+  - `/task`, `/followup`, and `/offdesk review` agree on `manual_intervention` and `followup=partially_executable exec=L2 review=R1`
 - expected branch:
   - `manual followup`
 - must prove:
