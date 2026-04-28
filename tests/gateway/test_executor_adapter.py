@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,7 +20,15 @@ from aoe_tg_executor_adapter import (
 )
 import aoe_tg_executor_dispatch as executor_dispatch
 import aoe_tg_executor_runtime as executor_runtime
-from aoe_tg_request_contract import build_local_background_provider_invoke_launch_spec
+from aoe_tg_background_runs import (
+    load_background_runs_state,
+    upsert_background_run_ticket,
+)
+from aoe_tg_request_contract import (
+    build_background_run_ticket,
+    build_local_background_provider_invoke_launch_spec,
+)
+from aoe_tg_tmux_background_worker import local_tmux_log_path, local_tmux_result_path
 
 
 def test_executor_adapter_inventory_is_stable() -> None:
@@ -259,3 +268,51 @@ def test_executor_runtime_polls_via_adapter_handlers(monkeypatch, tmp_path: Path
     assert result["failed_count"] == 1
     assert result["acknowledged_count"] == 2
     assert result["local_background"]["changed"] is False
+
+
+def test_executor_runtime_adapter_poll_persists_local_tmux_result_status(tmp_path: Path) -> None:
+    queue_path = tmp_path / "background_runs.json"
+    ticket_id = "BGT-TMUX-ADAPTER-001"
+    upsert_background_run_ticket(
+        queue_path,
+        build_background_run_ticket(
+            ticket_id=ticket_id,
+            request_id="REQ-TMUX-ADAPTER-001",
+            project_key="alpha",
+            execution_brief_status="partially_executable",
+            runner_target="local_tmux",
+            launch_mode="dashboard_followup_execute",
+            created_at="2026-04-28T12:30:09+09:00",
+            created_by="dashboard:dashboard-http",
+            source_surface="dashboard_followup_execute",
+            status="running",
+            runtime_handle="aoe_bg_bgt_tmux_adapter_001",
+            runtime_summary="tmux_session=aoe_bg_bgt_tmux_adapter_001",
+            evidence_bundle="status=running | outcome=tmux_session_started",
+        ),
+        now_iso=lambda: "2026-04-28T12:30:10+09:00",
+    )
+    result_path = local_tmux_result_path(tmp_path, ticket_id)
+    log_path = local_tmux_log_path(tmp_path, ticket_id)
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps({"ticket_id": ticket_id, "exit_code": 0}) + "\n", encoding="utf-8")
+    log_path.write_text("tmux run completed\n", encoding="utf-8")
+
+    result = executor_runtime.poll_background_tickets_via_adapters(
+        queue_path=queue_path,
+        now_iso=lambda: "2026-04-28T12:38:03+09:00",
+    )
+
+    assert result["changed"] is True
+    assert result["completed_count"] == 1
+    assert result["local_tmux"]["completed_ticket_ids"] == [ticket_id]
+    row = (load_background_runs_state(queue_path).get("runs") or [])[0]
+    assert row["status"] == "completed"
+    assert row["touched_at"] == "2026-04-28T12:38:03+09:00"
+    assert row["evidence_bundle"] == (
+        "status=completed | outcome=tmux_exit_code | exit_code=0 | "
+        "log=background_run_logs/bgt-tmux-adapter-001.log"
+    )
+    assert "background_run_results/bgt-tmux-adapter-001.json" in row["evidence_artifacts"]
+    assert "background_run_logs/bgt-tmux-adapter-001.log" in row["evidence_artifacts"]

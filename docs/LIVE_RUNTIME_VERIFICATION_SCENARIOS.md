@@ -309,7 +309,7 @@
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
 - current next non-review candidate:
-  - background-run status persistence hardening
+  - next incomplete scenario or cross-surface consistency review
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.

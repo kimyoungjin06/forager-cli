@@ -176,9 +176,9 @@
   - `source T-1001 remains manual_intervention by design while child T-1002 proves the selected L2/R1 followup can complete`
   - `the live run exposed a seed test-harness gap: tests/session.test.js was Jest-style while the executable validation used node --test`
   - `the seed is now updated to emit node:test/node:assert coverage for both session_expired token clear and non-session_expired no-clear behavior`
-  - `residual hardening: the computed surfaces showed completed after result sync, while the raw background_runs.json status field still remained stale as running`
+  - `follow-up verification confirmed poll_background_tickets_via_adapters persists the observed tmux result back to background_runs.json as completed`
 - next fix:
-  - `harden persisted background_runs.json status updates after tmux result files are observed`
+  - `none for the M3 launch gate; continue with the next incomplete scenario or cross-surface consistency review`
 
 ## 7. Raw References
 - runtime state refs:
