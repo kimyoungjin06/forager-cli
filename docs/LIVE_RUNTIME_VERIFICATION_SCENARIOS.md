@@ -269,11 +269,11 @@
 - intent:
   - primary work is incomplete or handoff/review evidence drifts
 - current status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - current finding:
-  - isolated seed proof now creates a mixed rerun candidate with implementation lane `L1`, writer/handoff lane `L2`, and verifier lane `R1`
-  - concrete handoff/reviewer artifacts expose drift between implementation evidence and operator-facing handoff evidence
-  - `/task` keeps rerun scope on `execution=L2 review=R1`, so the completed implementation lane is not treated as recovery work
+  - isolated `local_tmux` live rehearsal now proves the selected writer/handoff retry can complete with `exit_code=0`
+  - source task `T-801` kept rerun scope on `execution=L2 review=R1`, so the completed implementation lane was not treated as recovery work
+  - child retry task `T-802` completed after handoff, reviewer note, scope inventory, test, and `work_result` evidence converged
 - expected branch:
   - `rerun`
 - must prove:
@@ -294,7 +294,7 @@
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
 - current next non-review candidate:
-  - `M2`
+  - `D3`
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.

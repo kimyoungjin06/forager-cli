@@ -8,17 +8,19 @@
 - branch_target:
   - `rerun`
 - status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - seed_gate:
   - `isolated mixed rerun seed creates concrete implementation, handoff, and reviewer-note artifacts`
+- promotion_gate:
+  - `mixed writer-lane retry, verifier replay, source rerun preservation, and local_tmux background closure were proven`
 - live_gate:
-  - `pending launch-bearing local_tmux rehearsal`
+  - `satisfied in an isolated local_tmux rehearsal with run_lock=open and slot limit 1`
 - current_fix_branch:
-  - `task/mixed-m2-rerun-seed-1`
+  - `task/mixed-m2-launch-rerun-1`
 - executed_at:
-  - `2026-04-28T10:13:21+09:00`
+  - `2026-04-28T10:54:26+09:00`
 - operator:
   - `Codex`
 
@@ -26,9 +28,9 @@
 - request text:
   - `session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘. 구현 결과는 src/session.js와 tests/session.test.js에 남기고, handoff 문서는 변경 파일 목록과 테스트 증거를 포함해야 한다. handoff 문서나 reviewer note가 구현 증거와 불일치하면 done으로 닫지 말고 writer/handoff lane만 rerun으로 남겨라.`
 - normalized action:
-  - `dispatch_task`
+  - `retry`
 - target runtime:
-  - `/tmp/aoe_m2_seed_check`
+  - `/tmp/m2_live_rerun_20260428_launch`
 
 ## 3. Expected Contract
 - expected preset:
@@ -60,13 +62,15 @@
   - implementation lane `L1` remains closed as done
   - writer/handoff lane `L2` is the rerun target
   - review lane `R1` verifies handoff parity and is not treated as implementation recovery
-  - concrete `operator_handoff.md` and `reviewer_note.md` explain the drift
+  - concrete `operator_handoff.md`, `reviewer_note.md`, and `work_result` converge before the child retry task closes
 
 ## 4. Runtime Evidence
 - request_id:
   - `REQ-M2-001`
 - task_short_id:
   - `T-801`
+- child_retry_task:
+  - `T-802`
 - planning:
   - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m2`
 - execution brief:
@@ -74,28 +78,34 @@
 - followup brief:
   - `none`
 - reentry rails:
-  - `retry=ready exec=L2 review=R1 | followup=none`
+  - `retry=ready exec=L2 review=R1 | followup=none | bg=completed/local_tmux`
 - stage progression:
   - planning:
-    - `seeded mixed rerun candidate in isolated runtime`
+    - `seeded mixed rerun candidate in isolated runtime with run_lock=open`
   - execution:
-    - `implementation lane L1 is done`
-    - `writer/handoff lane L2 is failed because operator_handoff.md omits tests/session.test.js and validation evidence`
+    - `dashboard retry action launched one local_tmux background ticket for writer/handoff lane L2`
+    - `completed implementation lane L1 was not selected for rerun`
+    - `first L2/R1 pass stayed needs_retry because reviewer note, scope inventory, and work_result evidence were still incomplete`
+    - `second L2/R1 attempt repaired operator_handoff.md, reviewer_note.md, auth_scope_inventory.md, tests/session.test.js, and work_result`
   - verification:
-    - `review lane R1 failed with retry verdict over handoff/reviewer evidence drift`
+    - `review lane R1 first returned retry, then returned success after the repaired writer evidence`
   - integration:
-    - `not launched`
+    - `child retry task T-802 completed`
   - close:
-    - `not launched`
+    - `background ticket closed with exit_code=0`
 - critic/verifier verdict:
-  - `retry`
+  - `source task remains retry-scoped; child retry verifier succeeded`
 - final branch:
   - `needs_retry`
 - runtime proof:
   - `request contract resolves to mixed with required outputs work_result, scope_inventory, handoff_doc, reviewer_note`
   - `phase2 execution plan has L1 Codex-Dev and L2 Codex-Writer`
   - `exec_critic.rerun_execution_lane_ids=["L2"] and rerun_review_lane_ids=["R1"]`
-  - `seeded artifacts include src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md, docs/handoff/operator_handoff.md, and docs/reviews/reviewer_note.md`
+  - `dashboard retry route created local_tmux ticket BGT-REQ-M2-001-20260428104315.8517190900`
+  - `background result completed with exit_code=0`
+  - `T-802 completed with phase2_lane_state exec done=1 and review done=1`
+  - `final artifacts include src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md, docs/handoff/operator_handoff.md, docs/reviews/reviewer_note.md, and work_result`
+  - `node --test tests/session.test.js passed with three session failure-code tests`
 
 ## 5. Surface Evidence
 - `/task`:
@@ -105,38 +115,54 @@
   - `phase2_review: single lanes=1 with R1 Codex-Reviewer/verifier`
   - `phase2_lane_state: exec done=1, failed=1 | review failed=1 | review_verdict retry=1`
   - `exec_rerun_targets: execution=L2 review=R1`
-  - `reentry_rails: retry=ready exec=L2 review=R1 | followup=none`
+  - `background_run: completed with runner=local_tmux, ticket=BGT-REQ-M2-001-20260428104315.8517190900, and exit_code=0`
+  - `reentry_rails: retry=ready exec=L2 review=R1 | followup=none | bg=completed/local_tmux`
+  - `T-802 child retry task completed with L2 writer done and R1 reviewer success`
 - `/monitor`:
-  - `covered by /task and /orch status for this seed-only proof`
+  - `covered by /task and /orch status for this launch-bearing rehearsal`
 - `/offdesk review`:
-  - `flags task:needs_retry but remains conservative under run_lock=test_only and bootstrap/no-backlog conditions`
-  - `do list includes /task T-801 | mixed-rerun rather than closing the task`
+  - `keeps first action on /retry T-801 lane L2,R1 and does not redirect to done or manual followup`
+  - `surfaces follow-up proposals for upstream failure-code mapping and package-level test wiring`
 - `/orch status`:
-  - `run_lock=test_only`
-  - `background_slots local_tmux=0/1`
-  - `background_queue depth=0`
+  - `before launch: run_lock=open and background_slots local_tmux=0/1`
+  - `during launch: background_slots local_tmux=1/1 and background_queue status running=1`
+  - `after completion: active_team_count=0, background_slots local_tmux=0/1, and background_queue status completed=1`
   - `background_runner pref=local_tmux | effective=local_background until an externalizable launch spec exists`
 - dashboard `Task Detail`:
   - `/control/tasks/by-request/REQ-M2-001`
 - dashboard `Runtime Detail`:
   - `/control/runtimes/O8`
+- background run ticket / runner:
+  - `local_tmux ticket: BGT-REQ-M2-001-20260428104315.8517190900`
+  - `runtime_handle: aoe_bg_bgt-req-m2-001-20260428104315-8517190900`
+- launch spec / evidence bundle:
+  - `background_dispatch | mode=tmux_session_json | entry=aoe-background-worker | externalizable=yes`
+  - `status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-req-m2-001-20260428104315-8517190900.log`
 
 ## 6. Result
 - result:
-  - `live_rehearsal_ready`
+  - `pass`
 - mismatch class:
-  - `launch_pending`
+  - `none`
 - mismatch notes:
-  - `M2 now has a concrete seed showing mixed lane separation and writer-owned rerun targeting`
-  - `offdesk remains conservative while run_lock=test_only is active, matching the bounded replay posture`
-  - `no launch-bearing background ticket has been created yet`
+  - `M2 has a concrete seed showing mixed lane separation and writer-owned rerun targeting`
+  - `2026-04-28 launch-bearing local_tmux proof completed the pending launch gate without changing the source task away from rerun`
+  - `source T-801 remains needs_retry by design while child T-802 proves the selected L2/R1 rerun can complete`
 - next fix:
-  - `launch /retry T-801 lane L2 from an isolated M2 runtime with run_lock=open and promote to executed_done only if the background ticket closes cleanly while source task remains rerun with L2/R1 scope`
+  - `promote the next unresolved manual-followup candidate; D3 and M3 do not yet have first-class scenario artifacts`
 
 ## 7. Raw References
 - runtime state refs:
+  - `/tmp/m2_live_rerun_20260428_launch/.aoe-team/orch_manager_state.json`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team/background_runs.json`
   - `/tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json`
 - log refs:
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m2 --control-root /tmp/m2_live_rerun_20260428_launch --run-lock-mode open --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `dashboard trigger: POST /control/actions/task/retry body={"task_ref":"T-801","lane_ids":["L2"]}`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/m2_live_rerun_20260428_launch/Alpha --workspace-root /tmp/m2_live_rerun_20260428_launch --team-dir /tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team --manager-state-file /tmp/m2_live_rerun_20260428_launch/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O8'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/m2_live_rerun_20260428_launch/Alpha --workspace-root /tmp/m2_live_rerun_20260428_launch --team-dir /tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team --manager-state-file /tmp/m2_live_rerun_20260428_launch/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-801'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/m2_live_rerun_20260428_launch/Alpha --workspace-root /tmp/m2_live_rerun_20260428_launch --team-dir /tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team --manager-state-file /tmp/m2_live_rerun_20260428_launch/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-802'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/m2_live_rerun_20260428_launch/Alpha --workspace-root /tmp/m2_live_rerun_20260428_launch --team-dir /tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team --manager-state-file /tmp/m2_live_rerun_20260428_launch/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O8'`
   - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m2 --control-root /tmp/aoe_m2_seed_check --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
   - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_m2_seed_check/Alpha --workspace-root /tmp/aoe_m2_seed_check --team-dir /tmp/aoe_m2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O8'`
   - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_m2_seed_check/Alpha --workspace-root /tmp/aoe_m2_seed_check --team-dir /tmp/aoe_m2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-801'`
@@ -144,6 +170,14 @@
 - regression refs:
   - `tests/gateway/test_live_rehearsal_seed.py::test_seed_m2_mixed_rerun_runtime_creates_handoff_retry_candidate`
 - artifact refs:
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/src/session.js`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/tests/session.test.js`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/docs/analysis/auth_scope_inventory.md`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/docs/handoff/operator_handoff.md`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/docs/reviews/reviewer_note.md`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/work_result`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team/background_run_logs/bgt-req-m2-001-20260428104315-8517190900.log`
+  - `/tmp/m2_live_rerun_20260428_launch/Alpha/.aoe-team/background_run_results/bgt-req-m2-001-20260428104315-8517190900.json`
   - `/tmp/aoe_m2_seed_check/Alpha/src/session.js`
   - `/tmp/aoe_m2_seed_check/Alpha/tests/session.test.js`
   - `/tmp/aoe_m2_seed_check/Alpha/docs/analysis/auth_scope_inventory.md`
