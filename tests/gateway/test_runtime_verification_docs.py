@@ -108,3 +108,36 @@ def test_live_runtime_inventory_exposes_promoted_status_for_each_scenario() -> N
         "`docs/runtime_verification/phase2/review/R3_manual_followup_execute.md`"
         in r3_section
     )
+
+
+def test_completion_status_docs_do_not_reopen_finished_runtime_verification() -> None:
+    completion_review = (ROOT / "docs" / "CURRENT_COMPLETION_REVIEW_20260327.md").read_text(
+        encoding="utf-8"
+    )
+    roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8")
+    runtime_readme = (ROOT / "docs" / "runtime_verification" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    inventory = (ROOT / "docs" / "LIVE_RUNTIME_VERIFICATION_SCENARIOS.md").read_text(
+        encoding="utf-8"
+    )
+    combined = "\n".join([completion_review, roadmap, runtime_readme, inventory])
+
+    stale_phrases = [
+        "live runtime verification:\n  - not done",
+        "live `Phase2` verification for `build`, `data`, `review`, `mixed` is still open",
+        "active rerun-path blocker",
+        "next incomplete scenario or cross-surface consistency review",
+        "only then start `Project Flow Compiler` implementation",
+        "only then continue deep rerun/manual-followup verification",
+        "first-wave verification artifact template and happy-path stubs",
+        "`followup execute` path는 현재 foreground + `local_tmux`까지만 연결됨",
+    ]
+    for phrase in stale_phrases:
+        assert phrase not in combined
+
+    assert "`8.7 / 10`" in completion_review
+    assert "all first-wave phase2 scenario docs are `executed_done`" in completion_review
+    assert "- [x] preset별 실제 `Phase2` 완료 흐름 검증" in roadmap
+    assert "move to `Project Flow Compiler` and document/runtime convergence" in runtime_readme
+    assert "`Project Flow Compiler` / document-runtime convergence" in inventory

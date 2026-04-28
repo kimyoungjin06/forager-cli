@@ -32,17 +32,21 @@
 
 ## 5. 현재 개발 완료도(요약)
 - 완료(DONE):
-  - `/pick` no-arg 메뉴 + 1..9 빠른 선택
-  - `/todo` CRUD 최소 기능 + `/todo next`(open todo를 dispatch 실행으로 연결)
-  - TF close 산출물 반출(인덱스/placeholder fill/close summary)
-  - tmux 전환 단축키/패널(상시 세션 리스트) 기본 UX
+  - `/pick`, `/todo`, `/next`, `/fanout`, `/auto`, `/offdesk` 중심 운영 흐름
+  - dashboard runtime/task/recovery/audit/history surface
+  - TF close 산출물 반출과 archive/close summary
+  - tmux 전환 단축키와 status hint bar
+  - preset completion matrix와 phase2 first-wave live runtime verification
+  - `WorkspaceBrief`, `DocumentRegistry`, `ContextPack` baseline
 - 진행 중(IN_PROGRESS):
-  - Mother-Orch 스케줄링(다중 Orch의 todo를 자동 순회 실행)
-  - TF 템플릿 자동 생성(태스크 접수 시 생성/압축/아카이브 정책)
-  - 상태 스키마 안정화(재시작 시 메타 보존/마이그레이션)
+  - `Project Flow Compiler`와 dashboard `Document Flow` card
+  - document/runtime drift detection
+  - 실제 non-local external runner pickup/ack loop
+  - governance/usage/budget/secret-redaction surface
+  - retention policy와 disk hygiene 연결
 
 ## 6. 다음 우선순위(제안)
-1. Mother-Orch "전체 프로젝트 todo next" 최소 스케줄러: 한 번의 명령으로 가장 우선인 todo를 실행하고 이벤트로 보고.
-2. TF 템플릿 자동 생성: 태스크 생성 시 `docs/investigations_mo` 템플릿을 자동으로 만들고 종료 시 압축/아카이브.
-3. 코드 분리 + 테스트: 게이트웨이/핸들러/상태 정규화 모듈 분리, 핵심 경로(권한/모드/투두/전환)에 스모크 테스트 추가.
-
+1. `Project Flow Compiler` 최소 산출물: `.aoe-team/project-flow/<project_alias>/latest.json` 생성.
+2. dashboard `Project Runtime Detail`에 `Document Flow` card 연결.
+3. recovery/nightly summary에 doc/runtime drift excerpt 추가.
+4. 이후 `github_runner` / `remote_worker` 실제 pickup/ack loop와 governance usage surface로 이동.

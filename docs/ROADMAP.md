@@ -89,11 +89,12 @@
   - 문서:
     - `docs/CURRENT_COMPLETION_REVIEW_20260327.md`
   - 핵심 판단:
-    - 다음 큰 축은 더 많은 shell/polish가 아니라 `Live Runtime Verification`
-    - 그 다음은 `Project Flow Compiler`를 통한 문서/런타임 수렴
+    - first-wave `Live Runtime Verification`은 완료됨
+    - 다음 큰 축은 `Project Flow Compiler`를 통한 문서/런타임 수렴
+    - 그 다음은 external runner pickup/ack productization
   - 우선순위:
-    1. `8.4 Live Runtime Verification`
-    2. `8.8 Document Registry + Dashboard Convergence`
+    1. `8.8 Document Registry + Dashboard Convergence`
+    2. `8.4 Background / Remote Execution` external pickup/ack 후속
     3. `8.6 Retention and Storage`
     4. `8.8 doctor / setup / migration` 후속 마무리
     5. `8.8 compatibility / deprecation` 후속 마무리
@@ -117,7 +118,7 @@
     4. `Project Progress Board`
     5. `Governance / Permissions / Usage`
     6. `Project Flow Compiler`
-    7. only then continue deep rerun/manual-followup verification
+    7. completed deep rerun/manual-followup verification now feeds productization work
   - reference discipline:
     - benchmark-driven imports must cite `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md` reference IDs
 - [x] control plane + executor adapter architecture fixed
@@ -305,14 +306,15 @@
 - [x] preset verification scenario inventory
   - 문서:
     - `docs/LIVE_RUNTIME_VERIFICATION_SCENARIOS.md`
-- [x] first-wave verification artifact template and happy-path stubs
+- [x] first-wave verification artifacts and doc consistency guard
   - 문서:
     - `docs/runtime_verification/README.md`
     - `docs/runtime_verification/phase2/TEMPLATE.md`
-    - `docs/runtime_verification/phase2/build/B1_happy_path.md`
-    - `docs/runtime_verification/phase2/data/D1_happy_path.md`
-    - `docs/runtime_verification/phase2/review/R1_happy_path.md`
-    - `docs/runtime_verification/phase2/mixed/M1_happy_path.md`
+    - `docs/runtime_verification/phase2/build/`
+    - `docs/runtime_verification/phase2/data/`
+    - `docs/runtime_verification/phase2/review/`
+    - `docs/runtime_verification/phase2/mixed/`
+    - `tests/gateway/test_runtime_verification_docs.py`
 - [ ] `Execution Brief` / on-desk -> off-desk handoff 계약 도입
   - 목적:
     - on-desk의 마지막 작업을 `실행 가능성 판정 + 실행계약 확정`으로 고정
@@ -363,9 +365,9 @@
       - `local_tmux` retry/replan launch path
       - `local_tmux` initial detached no-wait path for serializable gateway runs
       - tmux log/result artifact persistence + polling
-      - `github_runner` / `remote_worker` handoff manifest emission for externalizable retry paths
+      - `github_runner` / `remote_worker` handoff manifest emission for externalizable retry/followup paths
+      - `local_tmux` followup-execute proof for B3/D3/R3/M3
     - 남은 것:
-      - `followup execute` path는 현재 foreground + `local_tmux`까지만 연결됨
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
       - `github_runner` / `remote_worker` 실제 pickup worker / acknowledgement
   - 최소 범위:
@@ -409,7 +411,7 @@
     - `Amp` (`REF-AMP-1`, `REF-AMP-2`)
     - `Goose` (`REF-GS-1`, `REF-GS-2`)
     - `Claude Code` (`REF-CC-1`, `REF-CC-2`)
-- [ ] preset별 실제 `Phase2` 완료 흐름 검증
+- [x] preset별 실제 `Phase2` 완료 흐름 검증
   - 대상:
     - `build`
     - `data`
@@ -426,23 +428,18 @@
     - dashboard `Task Detail`
     - dashboard `Recovery`
   - 현재 상태:
-    - happy-path proof 확보:
-      - `B1`
-      - `D1`
-      - `R1`
-      - `M1`
-    - active rerun-path blocker:
-      - `R2`의 `review_report.md` 최종 완료조건이 아직 완전히 contract-derived가 아님
+    - all first-wave phase2 scenarios are `executed_done`
+    - happy-path proof:
+      - `B1`, `D1`, `R1`, `M1`
+    - rerun-path proof:
+      - `B2`, `D2`, `R2`, `M2`
+    - manual-followup proof:
+      - `B3`, `D3`, `R3-preview`, `R3-execute`, `M3`
+    - external background rail support proof:
+      - `R4`
   - 전략 위치:
-    - 중요하지만 더 이상 전체 전략의 1순위는 아니다
-    - 위의 product shell / execution model import가 먼저다
-  - 실행 순서:
-    1. `Execution Brief`를 먼저 도입해 on-desk/off-desk 경계를 고정
-    2. `Background / Remote Execution` rails를 추가
-    3. `Project Progress Board`로 operator progress surface를 강화
-    4. `Governance / Permissions / Usage`를 올린다
-    5. 그 다음 rerun path 1개씩
-    6. manual-followup path 1개씩
+    - first-wave runtime verification no longer blocks the next product block
+    - next priority is document/runtime convergence via `Project Flow Compiler`
 - [ ] `Planning Convergence` loop 도입
   - 목적:
     - planner one-shot 가정을 제거
@@ -586,25 +583,27 @@
   - 목표:
     - runtime-centric dashboard에 project document flow를 붙여 개별 프로젝트 진행도를 ondesk/dashboard에서 함께 판단할 수 있게 한다
   - 현재 상태:
-    - `PLANNED`
+    - `IN_PROGRESS`
+    - 1차 구현 완료:
+      - `WorkspaceBrief`
+      - `DocumentRegistry`
+      - `ContextPack Compiler`
+      - `/task`, `/orch status`, dashboard runtime/task detail summary surfaces
     - 기준 spec:
       - `docs/WORKSPACE_ONBOARDING_SPEC.md`
       - `docs/DOCUMENT_REGISTRY_SPEC.md`
       - `docs/CONTEXT_PACK_COMPILER_SPEC.md`
   - 구현 축:
-    - `WorkspaceBrief`
-    - `DocumentRegistry`
-    - `ContextPack Compiler`
-    - `Project Flow Compiler`
+    - `Project Flow Compiler` implementation
     - per-project compiled flow artifact
     - doc/runtime drift detection
     - dashboard `Project Runtime Detail` `Document Flow` card
+    - recovery/nightly doc drift excerpt
   - 실행 순서:
-    1. workspace onboarding 계약 고정
-    2. document registry artifact 추가
-    3. task-scoped context pack compiler 추가
-    4. dashboard read-only `Document Flow` / `Knowledge` card 연결
-    5. 그 다음 `Project Flow Compiler`와 drift detection 강화
+    1. minimal `Project Flow Compiler` artifact 추가
+    2. dashboard read-only `Document Flow` card 연결
+    3. recovery/nightly drift excerpt 연결
+    4. drift detection 강화
 - [x] `Project Flow Compiler` spec
   - 문서:
     - `docs/PROJECT_FLOW_COMPILER_SPEC.md`
