@@ -99,6 +99,7 @@ provider capacity override 후 재개:
 - comment-triggered runs post a completion callback with the workflow run URL plus exact `download-github-artifact --poll` and `auto-import-github-artifact --poll` commands.
 - workflow pickup uploads ack/result/log sidecars as an Actions artifact.
 - default workflow transport is artifact-only with `contents:read`; `commit_results=true` uses the separate write-permission commit job.
+- GitHub workflow helper actions should stay on Node 24-capable majors: `actions/checkout@v6`, `actions/setup-python@v6`, `actions/upload-artifact@v7`, and `actions/download-artifact@v8`.
 - sidecar import after downloading the artifact:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py import-artifact --team-dir <team_dir> --artifact-root <artifact-dir-or-zip> --ticket-id <ticket> --runner github_runner --poll`
 - direct GitHub artifact download + import:

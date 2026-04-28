@@ -550,8 +550,22 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
     assert "aoe-github-runner-bridge.py policy-check" in workflow
     assert "aoe-github-runner-bridge.py materialize-bundle" in workflow
     assert "aoe-background-worker.py worker-run" in workflow
-    assert "actions/upload-artifact@v4" in workflow
-    assert "actions/download-artifact@v4" in workflow
+    assert "actions/checkout@v6" in workflow
+    assert "actions/setup-python@v6" in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert "actions/download-artifact@v8" in workflow
+    assert "actions/checkout@v6" in comment_workflow
+    assert "actions/setup-python@v6" in comment_workflow
+    assert "actions/checkout@v6" in gateway_tests
+    assert "actions/setup-python@v6" in gateway_tests
+    all_workflows = "\n".join((workflow, comment_workflow, gateway_tests))
+    for legacy_action_ref in (
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+        "actions/upload-artifact@v4",
+        "actions/download-artifact@v4",
+    ):
+        assert legacy_action_ref not in all_workflows
     assert "github.event.client_payload.commit_results == 'true'" in workflow
     assert "comment_issue_number:" in workflow
     assert "comment-worker-result:" in workflow
