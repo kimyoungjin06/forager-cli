@@ -206,11 +206,15 @@
 
 ### 6.3 Third Block: External Execution Productization
 3. `External Runner Pickup / Ack`
-- turn the proven external rail lifecycle into an actual non-local worker loop
+- baseline non-local worker loop implemented through `aoe-background-worker.py worker-run`
 - preserve the same operator-visible lifecycle:
   - `handoff`
   - `pickup_acknowledged`
   - `result_received`
+- remaining productization:
+  - SCM/GitHub workflow trigger bridge
+  - credentials / transport policy
+  - remote artifact synchronization outside a shared filesystem
 
 ### 6.4 Fourth Block: Operational Hygiene
 4. `Retention And Disk Hygiene`

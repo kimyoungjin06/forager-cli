@@ -157,6 +157,7 @@
     - `.aoe-team/background_run_handoffs/github-runner-<ticket>.json`
     - `.aoe-team/background_run_acks/github-runner-<ticket>.json`
     - `.aoe-team/background_run_results/github-runner-<ticket>.json`
+    - `.aoe-team/background_run_logs/github-runner-<ticket>.log`
 - `remote_worker`
   - `kind=background_dispatch`
   - `mode=remote_worker_json`
@@ -168,6 +169,7 @@
     - `.aoe-team/background_run_handoffs/remote-worker-<ticket>.json`
     - `.aoe-team/background_run_acks/remote-worker-<ticket>.json`
     - `.aoe-team/background_run_results/remote-worker-<ticket>.json`
+    - `.aoe-team/background_run_logs/remote-worker-<ticket>.log`
 
 ### 5.4 Background Worker State
 - Durable heartbeat/state object for the active local worker.
@@ -205,7 +207,11 @@
 - external runners emit a durable handoff manifest and mark the ticket `running`
 - external runners may then write an acknowledgement sidecar to confirm pickup before terminal result exists
 - external runners can later complete the ticket by writing a result sidecar consumed by the local control plane poller
-  - automatic target selection stays conservative until explicit remote pickup/acknowledgement exists
+- baseline pickup entrypoint:
+  - `scripts/gateway/aoe-background-worker.py worker-run --runner <github_runner|remote_worker> --team-dir <team_dir>`
+  - selects a running handoff without an existing ack/result sidecar
+  - writes ack immediately, runs the serialized `command_argv`, writes log + result sidecars
+  - automatic target selection stays conservative; `github_runner` / `remote_worker` remain operator-selected until trigger and credential policy are hardened
   - project operators can cap non-local background launches with `background_runner_slot_limit`
   - when active non-local tickets already fill the slot budget, new retry/replan/followup-exec and serializable no-wait launches must block instead of overcommitting
 - operator inspect surfaces for non-local runners:
@@ -456,7 +462,7 @@
 6. SCM trigger bridge
 
 ## 11. Open Questions
-- Current `local_background` daemon is an in-process thread because execution targets still live in the gateway process registry. A future external worker requires serializable launch specs instead of in-memory callbacks.
+- Current `local_background` daemon is an in-process thread because execution targets still live in the gateway process registry. External workers can now consume serializable `github_runner` / `remote_worker` handoffs through `worker-run`; non-serializable dispatches still require the in-process registry.
 - Phase 1 launch specs are intentionally honest about the remaining limitation:
   - serializable detached runs can now use `local_tmux`
   - non-serializable detached runs still remain:
@@ -472,7 +478,8 @@
     - `runtime_handle=<handoff artifact path>`
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
-  - downstream pickup remains out of scope for the current gateway process
+  - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
+- Remaining external runner productization work is the SCM/GitHub workflow trigger bridge, credentials/transport policy, and remote artifact synchronization outside a shared filesystem.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?
