@@ -89,7 +89,10 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.github/workflows/external-background-worker.yml`
 - bundle export:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-github-runner-bridge.py export-bundle --team-dir <team_dir> --ticket-id <ticket>`
-- workflow pickup uploads ack/result/log sidecars as an Actions artifact; copy or commit those sidecars back before local polling can mark the run complete.
+- workflow pickup uploads ack/result/log sidecars as an Actions artifact.
+- sidecar import after downloading the artifact:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py import-artifact --team-dir <team_dir> --artifact-root <artifact-dir-or-zip> --ticket-id <ticket> --runner github_runner --poll`
+- `--poll` moves the local background ticket forward after the sidecars are imported.
 
 ## 2.1 Systemd User Mode (recommended)
 1. Install:

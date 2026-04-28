@@ -368,10 +368,11 @@
       - `github_runner` / `remote_worker` handoff manifest emission for externalizable retry/followup paths
       - `github_runner` / `remote_worker` `worker-run` pickup entrypoint with ack/result/log sidecars
       - `github_runner` bundle export/materialize bridge and GitHub Actions worker workflow
+      - external sidecar artifact import + local poll bridge
       - `local_tmux` followup-execute proof for B3/D3/R3/M3
     - 남은 것:
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
-      - credentials / transport policy, issue/PR ergonomics, and remote artifact synchronization policy
+      - credentials / transport policy, issue/PR ergonomics, and automated artifact retrieval policy
   - 최소 범위:
     - background queue
     - request-to-run audit trail
