@@ -268,6 +268,12 @@
 #### M2. Rerun Path
 - intent:
   - primary work is incomplete or handoff/review evidence drifts
+- current status:
+  - `live_rehearsal_ready`
+- current finding:
+  - isolated seed proof now creates a mixed rerun candidate with implementation lane `L1`, writer/handoff lane `L2`, and verifier lane `R1`
+  - concrete handoff/reviewer artifacts expose drift between implementation evidence and operator-facing handoff evidence
+  - `/task` keeps rerun scope on `execution=L2 review=R1`, so the completed implementation lane is not treated as recovery work
 - expected branch:
   - `rerun`
 - must prove:

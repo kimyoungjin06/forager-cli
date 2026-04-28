@@ -1,0 +1,182 @@
+# Mixed M2 Rerun Path
+
+## 1. Scenario Metadata
+- scenario_id:
+  - `M2`
+- preset:
+  - `mixed`
+- branch_target:
+  - `rerun`
+- status:
+  - `live_rehearsal_ready`
+- proof_mode:
+  - `bounded_replay`
+- seed_gate:
+  - `isolated mixed rerun seed creates concrete implementation, handoff, and reviewer-note artifacts`
+- live_gate:
+  - `pending launch-bearing local_tmux rehearsal`
+- current_fix_branch:
+  - `task/mixed-m2-rerun-seed-1`
+- executed_at:
+  - `2026-04-28T10:13:21+09:00`
+- operator:
+  - `Codex`
+
+## 2. Input
+- request text:
+  - `session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘. 구현 결과는 src/session.js와 tests/session.test.js에 남기고, handoff 문서는 변경 파일 목록과 테스트 증거를 포함해야 한다. handoff 문서나 reviewer note가 구현 증거와 불일치하면 done으로 닫지 말고 writer/handoff lane만 rerun으로 남겨라.`
+- normalized action:
+  - `dispatch_task`
+- target runtime:
+  - `/tmp/aoe_m2_seed_check`
+
+## 3. Expected Contract
+- expected preset:
+  - `mixed`
+- expected execution brief:
+  - status:
+    - `executable`
+  - executable slice:
+    - `work_result`
+    - `scope_inventory`
+    - `handoff_doc`
+    - `reviewer_note`
+  - blocked slice or operator decision:
+    - `-`
+- expected followup brief:
+  - status:
+    - `none`
+- expected lane shape:
+  - execution:
+    - `L1 Codex-Dev implementation lane`
+    - `L2 Codex-Writer handoff lane`
+  - review:
+    - `R1 Codex-Reviewer verifier lane`
+- expected completion branch:
+  - `rerun`
+- expected reentry rail:
+  - `retry=ready exec=L2 review=R1 | followup=none | bg=<runner or ->`
+- expected evidence:
+  - implementation lane `L1` remains closed as done
+  - writer/handoff lane `L2` is the rerun target
+  - review lane `R1` verifies handoff parity and is not treated as implementation recovery
+  - concrete `operator_handoff.md` and `reviewer_note.md` explain the drift
+
+## 4. Runtime Evidence
+- request_id:
+  - `REQ-M2-001`
+- task_short_id:
+  - `T-801`
+- planning:
+  - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m2`
+- execution brief:
+  - `executable | do=work_result,scope_inventory,handoff_doc,reviewer_note`
+- followup brief:
+  - `none`
+- reentry rails:
+  - `retry=ready exec=L2 review=R1 | followup=none`
+- stage progression:
+  - planning:
+    - `seeded mixed rerun candidate in isolated runtime`
+  - execution:
+    - `implementation lane L1 is done`
+    - `writer/handoff lane L2 is failed because operator_handoff.md omits tests/session.test.js and validation evidence`
+  - verification:
+    - `review lane R1 failed with retry verdict over handoff/reviewer evidence drift`
+  - integration:
+    - `not launched`
+  - close:
+    - `not launched`
+- critic/verifier verdict:
+  - `retry`
+- final branch:
+  - `needs_retry`
+- runtime proof:
+  - `request contract resolves to mixed with required outputs work_result, scope_inventory, handoff_doc, reviewer_note`
+  - `phase2 execution plan has L1 Codex-Dev and L2 Codex-Writer`
+  - `exec_critic.rerun_execution_lane_ids=["L2"] and rerun_review_lane_ids=["R1"]`
+  - `seeded artifacts include src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md, docs/handoff/operator_handoff.md, and docs/reviews/reviewer_note.md`
+
+## 5. Surface Evidence
+- `/task`:
+  - `T-801 shows status failed and team_phase needs_retry`
+  - `team_preset: phase1=mixed phase2=mixed`
+  - `phase2_execution: parallel lanes=2 with L1 Codex-Dev and L2 Codex-Writer`
+  - `phase2_review: single lanes=1 with R1 Codex-Reviewer/verifier`
+  - `phase2_lane_state: exec done=1, failed=1 | review failed=1 | review_verdict retry=1`
+  - `exec_rerun_targets: execution=L2 review=R1`
+  - `reentry_rails: retry=ready exec=L2 review=R1 | followup=none`
+- `/monitor`:
+  - `covered by /task and /orch status for this seed-only proof`
+- `/offdesk review`:
+  - `flags task:needs_retry but remains conservative under run_lock=test_only and bootstrap/no-backlog conditions`
+  - `do list includes /task T-801 | mixed-rerun rather than closing the task`
+- `/orch status`:
+  - `run_lock=test_only`
+  - `background_slots local_tmux=0/1`
+  - `background_queue depth=0`
+  - `background_runner pref=local_tmux | effective=local_background until an externalizable launch spec exists`
+- dashboard `Task Detail`:
+  - `/control/tasks/by-request/REQ-M2-001`
+- dashboard `Runtime Detail`:
+  - `/control/runtimes/O8`
+
+## 6. Result
+- result:
+  - `live_rehearsal_ready`
+- mismatch class:
+  - `launch_pending`
+- mismatch notes:
+  - `M2 now has a concrete seed showing mixed lane separation and writer-owned rerun targeting`
+  - `offdesk remains conservative while run_lock=test_only is active, matching the bounded replay posture`
+  - `no launch-bearing background ticket has been created yet`
+- next fix:
+  - `launch /retry T-801 lane L2 from an isolated M2 runtime with run_lock=open and promote to executed_done only if the background ticket closes cleanly while source task remains rerun with L2/R1 scope`
+
+## 7. Raw References
+- runtime state refs:
+  - `/tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json`
+- log refs:
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m2 --control-root /tmp/aoe_m2_seed_check --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_m2_seed_check/Alpha --workspace-root /tmp/aoe_m2_seed_check --team-dir /tmp/aoe_m2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O8'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_m2_seed_check/Alpha --workspace-root /tmp/aoe_m2_seed_check --team-dir /tmp/aoe_m2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-801'`
+  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_m2_seed_check/Alpha --workspace-root /tmp/aoe_m2_seed_check --team-dir /tmp/aoe_m2_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_m2_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O8'`
+- regression refs:
+  - `tests/gateway/test_live_rehearsal_seed.py::test_seed_m2_mixed_rerun_runtime_creates_handoff_retry_candidate`
+- artifact refs:
+  - `/tmp/aoe_m2_seed_check/Alpha/src/session.js`
+  - `/tmp/aoe_m2_seed_check/Alpha/tests/session.test.js`
+  - `/tmp/aoe_m2_seed_check/Alpha/docs/analysis/auth_scope_inventory.md`
+  - `/tmp/aoe_m2_seed_check/Alpha/docs/handoff/operator_handoff.md`
+  - `/tmp/aoe_m2_seed_check/Alpha/docs/reviews/reviewer_note.md`
+
+## 8. Live Rehearsal Runbook
+- rehearsal scope:
+  - `single lane-scoped mixed retry over local_tmux`
+- safety posture:
+  - use an isolated runtime
+  - seed it with:
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario m2 --control-root tmp/m2_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
+  - temporarily set:
+    - `run_lock_mode=open`
+    - `background_runner_target=local_tmux`
+    - `background_runner_slot_limits.local_tmux=1`
+- preflight:
+  - verify `/orch status O8` shows:
+    - `run_lock=open`
+    - `background_slots local_tmux=0/1`
+  - verify `/task T-801` shows:
+    - `phase2=mixed`
+    - `execution=L2 review=R1`
+    - `implementation lane L1 remains done`
+  - verify `/offdesk review O8` does not redirect the branch to manual followup or done
+- trigger:
+  - launch exactly one bounded retry:
+    - `dashboard retry action for T-801 lane L2`
+    - or `/retry T-801 lane L2`
+- pass criteria:
+  - runner target is `local_tmux`
+  - background ticket completes with `exit_code=0`
+  - source task remains `needs_retry`
+  - `reentry_rails_summary` remains on `exec=L2 review=R1`
+  - implementation lane `L1` is not selected for rerun

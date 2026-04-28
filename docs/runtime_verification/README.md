@@ -97,6 +97,12 @@
         - writer-owned handoff labeling
         - typed auth/session scope inventory and boundary policy
       - final successful run (`T-038`) reached `planning_ready`, completed execution/review/integration, and closed as `done` with `/task`, `/monitor`, and dashboard task detail evidence
+  - `mixed/M2_rerun_path.md`
+    - `live_rehearsal_ready`
+    - finding:
+      - isolated seed proof creates a mixed rerun candidate with implementation lane `L1`, writer/handoff lane `L2`, and verifier lane `R1`
+      - concrete artifacts show the implementation/test files exist while `operator_handoff.md` and `reviewer_note.md` identify handoff evidence drift
+      - `/task` surfaces `exec_rerun_targets: execution=L2 review=R1`, keeping completed implementation lane `L1` out of rerun scope
 
 ## Rule
 - Do not replace these artifacts with summaries detached from runtime evidence.
@@ -132,14 +138,15 @@
 - still bounded replay only:
   - `none in the review/build first wave rerun or manual-followup rails`
 - next live candidate:
-  - `none selected after current launch-bearing queue closure`
+  - `mixed/M2_rerun_path.md`
 - candidate reason:
-  - `B2`, `B3`, `D2`, `R2`, `R3 preview`, `R3 execute`, and `R4` now have documented non-happy-path proof artifacts; `M2` needs planning before a live candidate is selected
+  - `M2` is now seed-backed and surface-visible; it is the next launch-bearing mixed rerun proof
 - next selection gate:
-  - run a critical review pass before opening the next wave, with `mixed/M2_rerun_path.md` as the most obvious missing rerun artifact
+  - launch `/retry T-801 lane L2` from an isolated M2 runtime and verify the background ticket closes while source branch remains rerun with `L2/R1` scope
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`
+  - `M2` runbook is now embedded in `mixed/M2_rerun_path.md`
 
 ## Manual Followup Rule
 - `manual followup` proof is now split in two:
