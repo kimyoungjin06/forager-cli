@@ -12,6 +12,7 @@ from aoe_tg_background_runs import background_runs_state_path, upsert_background
 from aoe_tg_external_background_worker import emit_external_background_handoff, external_background_result_path
 from aoe_tg_external_worker_runtime import run_external_background_worker_once
 from aoe_tg_github_runner_bridge import (
+    build_github_runner_comment_dispatch,
     build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
     decode_github_runner_worker_bundle,
@@ -68,6 +69,23 @@ def _seed_github_handoff(team_dir: Path, *, ticket_id: str = "BGT-GHA-BRIDGE-001
     )
     assert launched["status"] == "running"
     return queue_path
+
+
+def _issue_comment_event(body: str, *, association: str = "OWNER", is_pr: bool = True) -> dict:
+    issue = {"number": 104}
+    if is_pr:
+        issue["pull_request"] = {"url": "https://api.github.test/repos/acme/repo/pulls/104"}
+    return {
+        "comment": {
+            "body": body,
+            "author_association": association,
+        },
+        "issue": issue,
+        "repository": {
+            "full_name": "acme/repo",
+            "default_branch": "main",
+        },
+    }
 
 
 def test_github_runner_bridge_bundle_round_trips_and_worker_run_consumes_materialized_handoff(tmp_path: Path) -> None:
@@ -251,8 +269,103 @@ def test_github_runner_bridge_cli_policy_check_reports_policy_json() -> None:
     assert blocked["violations"][0]["code"] == "unsupported_runner_target"
 
 
+def test_github_runner_comment_dispatch_accepts_trusted_bgx_run_command() -> None:
+    result = build_github_runner_comment_dispatch(
+        _issue_comment_event("/aoe bgx run BGT-GHA-COMMENT-001 --timeout-sec 120 --max-items=2")
+    )
+
+    assert result["ok"] is True
+    assert result["action"] == "dispatch_external_worker"
+    assert result["workflow"] == "external-background-worker.yml"
+    assert result["workflow_inputs"] == {
+        "runner_target": "github_runner",
+        "team_dir": ".aoe-team",
+        "ticket_id": "BGT-GHA-COMMENT-001",
+        "timeout_sec": "120",
+        "max_items": "2",
+        "commit_results": "false",
+    }
+    assert "download-github-artifact" in result["response_markdown"]
+
+
+def test_github_runner_comment_dispatch_ignores_non_command_comments() -> None:
+    result = build_github_runner_comment_dispatch(_issue_comment_event("Looks good to me."))
+
+    assert result["ok"] is False
+    assert result["command_seen"] is False
+    assert result["should_comment"] is False
+    assert result["reason"] == "no_aoe_command"
+
+
+def test_github_runner_comment_dispatch_blocks_untrusted_author() -> None:
+    result = build_github_runner_comment_dispatch(
+        _issue_comment_event("/aoe bgx run BGT-GHA-COMMENT-002", association="CONTRIBUTOR")
+    )
+
+    assert result["ok"] is False
+    assert result["command_seen"] is True
+    assert result["should_comment"] is True
+    assert result["reason"] == "unauthorized_author_association"
+
+
+def test_github_runner_comment_dispatch_rejects_write_or_bundle_modes() -> None:
+    for body, reason in (
+        ("/aoe bgx run BGT-GHA-COMMENT-003 --commit-results", "commit_results_not_allowed"),
+        ("/aoe bgx run BGT-GHA-COMMENT-003 --bundle-b64 abc", "bundle_not_allowed"),
+    ):
+        result = build_github_runner_comment_dispatch(_issue_comment_event(body))
+        assert result["ok"] is False
+        assert result["reason"] == reason
+
+
+def test_github_runner_comment_dispatch_rejects_unsafe_team_dir_for_outputs() -> None:
+    result = build_github_runner_comment_dispatch(
+        _issue_comment_event('/aoe bgx run BGT-GHA-COMMENT-004 --team-dir ".aoe-team; echo bad"')
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "invalid_team_dir"
+
+
+def test_github_runner_bridge_cli_comment_dispatch_writes_github_outputs(tmp_path: Path) -> None:
+    event_path = tmp_path / "event.json"
+    output_path = tmp_path / "github-output.txt"
+    response_path = tmp_path / "response.md"
+    event_path.write_text(
+        json.dumps(_issue_comment_event("/aoe bgx run BGT-GHA-CLI-COMMENT-001 --team-dir .aoe-team")),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-github-runner-bridge.py"),
+            "comment-dispatch",
+            "--event-path",
+            str(event_path),
+            "--github-output",
+            str(output_path),
+            "--response-file",
+            str(response_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    output = output_path.read_text(encoding="utf-8")
+    assert "ok=true" in output
+    assert "ticket_id=BGT-GHA-CLI-COMMENT-001" in output
+    assert "commit_results=false" in output
+    assert "dispatch accepted" in response_path.read_text(encoding="utf-8")
+
+
 def test_external_background_worker_workflow_contract_is_stable() -> None:
     workflow = (ROOT / ".github" / "workflows" / "external-background-worker.yml").read_text(encoding="utf-8")
+    comment_workflow = (ROOT / ".github" / "workflows" / "external-background-comment.yml").read_text(encoding="utf-8")
     gateway_tests = (ROOT / ".github" / "workflows" / "gateway-tests.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
@@ -270,4 +383,11 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
     assert "background_run_acks" in workflow
     assert "background_run_results" in workflow
     assert "background_run_logs" in workflow
+    assert "issue_comment:" in comment_workflow
+    assert "actions: write" in comment_workflow
+    assert "issues: write" in comment_workflow
+    assert "aoe-github-runner-bridge.py comment-dispatch" in comment_workflow
+    assert "gh workflow run" in comment_workflow
+    assert "external-background-worker.yml" in comment_workflow
+    assert "gh issue comment" in comment_workflow
     assert ".github/workflows/*.yml" in gateway_tests

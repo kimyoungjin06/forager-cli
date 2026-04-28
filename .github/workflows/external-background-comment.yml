@@ -1,0 +1,57 @@
+name: External Background Comment Bridge
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  comment-bridge:
+    name: external-background-comment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Parse comment command
+        id: plan
+        run: |
+          python3 scripts/gateway/aoe-github-runner-bridge.py comment-dispatch \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --github-output "$GITHUB_OUTPUT" \
+            --response-file "$RUNNER_TEMP/aoe-comment-response.md"
+
+      - name: Dispatch external worker workflow
+        if: steps.plan.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "external-background-worker.yml" \
+            --ref "${{ github.event.repository.default_branch }}" \
+            -f runner_target="${{ steps.plan.outputs.runner_target }}" \
+            -f team_dir="${{ steps.plan.outputs.team_dir }}" \
+            -f ticket_id="${{ steps.plan.outputs.ticket_id }}" \
+            -f timeout_sec="${{ steps.plan.outputs.timeout_sec }}" \
+            -f max_items="${{ steps.plan.outputs.max_items }}" \
+            -f commit_results="${{ steps.plan.outputs.commit_results }}"
+
+      - name: Comment response
+        if: steps.plan.outputs.should_comment == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" \
+            --body-file "$RUNNER_TEMP/aoe-comment-response.md"
