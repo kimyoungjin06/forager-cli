@@ -70,6 +70,15 @@ M2_REQUEST_TEXT = (
     "handoff 문서나 reviewer note가 구현 증거와 불일치하면 done으로 닫지 말고 writer/handoff lane만 rerun으로 남겨라."
 )
 
+M3_REQUEST_TEXT = (
+    "session_expired 로그인 실패 시 토큰을 비우는 구현과 회귀 테스트는 유지하되, "
+    "auth/session 패키지와 dashboard/session-banner 패키지 중 어디까지 이번 변경에 포함할지는 내가 결정해야 한다. "
+    "구현 증거는 src/session.js, tests/session.test.js, docs/analysis/auth_scope_inventory.md에 남기고, "
+    "writer lane은 docs/handoff/operator_handoff.md, docs/analysis/package_scope_matrix.md, "
+    "docs/reviews/reviewer_note.md에 패키징/스코프 선택지를 정리해라. "
+    "패키지 경계나 릴리즈 포함 범위는 operator arbitration이 필요하므로 done으로 닫지 말고 manual follow-up으로 남겨라."
+)
+
 
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
@@ -134,6 +143,63 @@ def _m2_request_contract() -> Dict[str, Any]:
         explicit_preset="mixed",
         project_key="alpha",
     )
+
+
+def _m3_request_contract() -> Dict[str, Any]:
+    return {
+        "version": "2026-03-30.v1",
+        "contract_type": "mixed",
+        "preset": "mixed",
+        "status": "complete",
+        "objective": M3_REQUEST_TEXT,
+        "source_prompt": M3_REQUEST_TEXT,
+        "summary": (
+            "mixed | manual_followup | package-scope arbitration | "
+            "outputs=work_result,scope_inventory,handoff_doc,reviewer_note,package_scope_matrix"
+        ),
+        "required_outputs": [
+            "work_result",
+            "scope_inventory",
+            "handoff_doc",
+            "reviewer_note",
+            "package_scope_matrix",
+        ],
+        "required_evidence": [
+            "implementation lane L1 remains complete",
+            "writer lane L2 produces operator arbitration packet",
+            "operator-owned package boundary is not auto-selected",
+        ],
+        "missing_fields": [],
+        "fields": {
+            "primary_package": "auth/session",
+            "conflicting_package": "dashboard/session-banner",
+            "target_failure_code": "session_expired",
+            "operator_owned_decisions": [
+                "whether dashboard/session-banner is in release scope",
+                "which package owns customer-facing expired-session copy",
+            ],
+            "manual_followup_reason": "package boundary and release scope require operator arbitration",
+        },
+        "artifact_contracts": {
+            "work_result": {"path": "work_result", "format": "text"},
+            "scope_inventory": {
+                "path": "docs/analysis/auth_scope_inventory.md",
+                "format": "markdown",
+            },
+            "handoff_doc": {
+                "path": "docs/handoff/operator_handoff.md",
+                "format": "markdown",
+            },
+            "reviewer_note": {
+                "path": "docs/reviews/reviewer_note.md",
+                "format": "markdown",
+            },
+            "package_scope_matrix": {
+                "path": "docs/analysis/package_scope_matrix.md",
+                "format": "markdown",
+            },
+        },
+    }
 
 
 def _d3_request_contract() -> Dict[str, Any]:
@@ -274,6 +340,125 @@ def _write_m2_artifacts(project_root: Path) -> None:
                 "- test gaps: handoff references no test command or result for tests/session.test.js.",
                 "- uncertainties: implementation lane appears complete, but handoff/review evidence is stale.",
                 "- verdict: retry writer/handoff lane L2 with reviewer lane R1; do not rerun implementation lane L1.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_m3_artifacts(project_root: Path) -> None:
+    (project_root / "src").mkdir(parents=True, exist_ok=True)
+    (project_root / "tests").mkdir(parents=True, exist_ok=True)
+    (project_root / "docs" / "analysis").mkdir(parents=True, exist_ok=True)
+    (project_root / "docs" / "handoff").mkdir(parents=True, exist_ok=True)
+    (project_root / "docs" / "reviews").mkdir(parents=True, exist_ok=True)
+    (project_root / "src" / "session.js").write_text(
+        "\n".join(
+            [
+                "export function handleLoginFailure(error, tokenStore) {",
+                "  if (error && error.code === 'session_expired') {",
+                "    tokenStore.clear();",
+                "    return { status: 'logged_out', reason: 'session_expired' };",
+                "  }",
+                "  return { status: 'failed', reason: error && error.code };",
+                "}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "tests" / "session.test.js").write_text(
+        "\n".join(
+            [
+                "import { handleLoginFailure } from '../src/session.js';",
+                "",
+                "test('clears persisted token on session_expired', () => {",
+                "  const calls = [];",
+                "  const tokenStore = { clear: () => calls.push('clear') };",
+                "  expect(handleLoginFailure({ code: 'session_expired' }, tokenStore)).toEqual({",
+                "    status: 'logged_out',",
+                "    reason: 'session_expired',",
+                "  });",
+                "  expect(calls).toEqual(['clear']);",
+                "});",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "analysis" / "auth_scope_inventory.md").write_text(
+        "\n".join(
+            [
+                "# Auth Scope Inventory",
+                "",
+                "- public_failure_entrypoints: login submit, token refresh",
+                "- caller_visible_auth_state_surfaces: logged_out banner, retry button",
+                "- persisted_token_or_session_store_paths: tokenStore.clear",
+                "- target_failure_codes: session_expired",
+                "- implementation_lane: L1 complete",
+                "- package_boundary_open: dashboard/session-banner copy and ownership require operator decision",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "analysis" / "package_scope_matrix.md").write_text(
+        "\n".join(
+            [
+                "# Package Scope Matrix",
+                "",
+                "| option | include packages | release impact | operator decision |",
+                "| --- | --- | --- | --- |",
+                "| A | auth/session only | low risk token cleanup release | approve if UI copy stays unchanged |",
+                "| B | auth/session + dashboard/session-banner | broader customer-facing release | approve if expired-session copy changes this cycle |",
+                "",
+                "- executable_slice: writer lane can keep this arbitration packet current.",
+                "- blocked_slice: operator must choose option A or B before done.",
+                "- branch: manual_followup",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "handoff" / "operator_handoff.md").write_text(
+        "\n".join(
+            [
+                "# Operator Handoff",
+                "",
+                "- implementation summary: session_expired now clears persisted token state.",
+                "- validation evidence: tests/session.test.js covers tokenStore.clear on session_expired.",
+                "- completed lane: L1 Codex-Dev implementation remains closed.",
+                "- runnable follow-up lane: L2 Codex-Writer may refresh this handoff and package_scope_matrix.md.",
+                "- operator arbitration: choose whether dashboard/session-banner belongs in this release scope.",
+                "- manual_followup: required before done; do not collapse this into generic retry.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "reviews" / "reviewer_note.md").write_text(
+        "\n".join(
+            [
+                "# Reviewer Note",
+                "",
+                "- severity findings: none in implementation lane L1; token cleanup evidence is present.",
+                "- packaging risk: dashboard/session-banner ownership is not an implementation defect.",
+                "- recommendation: run only L2 if the arbitration packet needs refresh.",
+                "- manual remainder: R1/operator must choose package boundary before done.",
+                "- verdict: manual_followup, not retry.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "work_result").write_text(
+        "\n".join(
+            [
+                "implementation_lane=L1",
+                "status=complete",
+                "changed_files=src/session.js,tests/session.test.js,docs/analysis/auth_scope_inventory.md",
+                "manual_remainder=operator package boundary decision",
             ]
         )
         + "\n",
@@ -1519,6 +1704,234 @@ def _m2_task(now: str) -> Dict[str, Any]:
     }
 
 
+def _m3_task(now: str) -> Dict[str, Any]:
+    contract = _m3_request_contract()
+    return {
+        "request_id": "REQ-M3-001",
+        "short_id": "T-1001",
+        "alias": "mixed-manual-followup",
+        "prompt": M3_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "failed",
+        "stage": "verification",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "done",
+            "verification": "failed",
+            "integration": "failed",
+            "close": "failed",
+        },
+        "roles": ["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        "verifier_roles": ["Codex-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "verification",
+        "phase1_current_round": 3,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "mixed",
+        "phase2_team_preset": "mixed",
+        **_approved_planning_fields(),
+        **request_contract_metadata(contract),
+        "execution_brief_status": "partially_executable",
+        "execution_brief_summary": (
+            "partially_executable | do=docs/handoff/operator_handoff.md,"
+            "docs/analysis/package_scope_matrix.md,docs/reviews/reviewer_note.md | "
+            "blocked=operator-owned package boundary and release scope"
+        ),
+        "execution_brief_executable_slice": [
+            "docs/handoff/operator_handoff.md",
+            "docs/analysis/package_scope_matrix.md",
+            "docs/reviews/reviewer_note.md",
+        ],
+        "execution_brief_blocked_slice": [
+            "operator-owned package boundary decision",
+            "operator-owned release scope decision",
+        ],
+        "execution_brief_operator_decision": (
+            "operator must choose auth/session-only or auth+dashboard package scope before done"
+        ),
+        "followup_brief_status": "partially_executable",
+        "followup_brief_summary": "partially_executable | execution=L2 | review=R1",
+        "followup_brief_execution_lane_ids": ["L2"],
+        "followup_brief_review_lane_ids": ["R1"],
+        "followup_brief_reason": (
+            "writer packet can refresh package-scope evidence, but final package boundary remains operator-owned"
+        ),
+        **_manual_followup_ready_checkpoint(
+            "writer packet can refresh package-scope evidence, but final package boundary remains operator-owned"
+        ),
+        "debug_packet_state": "active",
+        "debug_packet_summary": "state=active | symptom=manual_followup_ready | evidence=2 | next=/followup T-1001",
+        "debug_packet_symptom": "manual_followup_ready",
+        "debug_packet_root_cause": (
+            "mixed package-scope conflict is operator-owned; followup execution may only refresh writer lane L2"
+        ),
+        "debug_packet_evidence": [
+            "operator-owned package boundary decision",
+            "operator-owned release scope decision",
+        ],
+        "debug_packet_failed_attempt": "critic=manual_followup L2/R1",
+        "debug_packet_next_step": "/followup T-1001",
+        "reentry_rails_summary": "retry=none | followup=partially_executable exec=L2 review=R1",
+        "plan": {
+            "summary": (
+                "mixed | implementation lane L1 is complete while writer lane L2 prepares "
+                "package-scope arbitration for operator-owned R1 decision"
+            ),
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "owner_role": "Codex-Dev",
+                    "title": "Keep session_expired implementation evidence closed",
+                    "goal": "preserve src/session.js, tests/session.test.js, and auth scope evidence",
+                    "acceptance": ["src/session.js exists", "tests/session.test.js exists"],
+                },
+                {
+                    "id": "S2",
+                    "owner_role": "Codex-Writer",
+                    "title": "Prepare package-scope arbitration packet",
+                    "goal": (
+                        "refresh operator_handoff.md, package_scope_matrix.md, and reviewer_note.md "
+                        "without choosing the operator-owned package boundary"
+                    ),
+                    "acceptance": ["docs/analysis/package_scope_matrix.md lists package options"],
+                },
+            ],
+            "meta": {
+                "worker_roles": ["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+                "phase1_role_preset": "mixed",
+                "phase2_team_preset": "mixed",
+                "request_contract": contract,
+                "phase2_team_spec": {
+                    "execution_mode": "parallel",
+                    "execution_groups": [
+                        {"group_id": "L1", "role": "Codex-Dev", "kind": "implementation", "subtask_ids": ["S1"], "parallel": True},
+                        {"group_id": "L2", "role": "Codex-Writer", "kind": "scope_handoff", "subtask_ids": ["S2"], "parallel": True},
+                    ],
+                    "review_mode": "single",
+                    "review_groups": [
+                        {"group_id": "R1", "role": "Codex-Reviewer", "kind": "scope_arbitration", "depends_on": ["L2"]},
+                    ],
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Dev",
+                },
+                "phase2_execution_plan": {
+                    "execution_mode": "parallel",
+                    "execution_lanes": [
+                        {
+                            "lane_id": "L1",
+                            "role": "Codex-Dev",
+                            "kind": "implementation",
+                            "subtask_ids": ["S1"],
+                            "outputs": ["work_result", "scope_inventory"],
+                            "parallel": True,
+                        },
+                        {
+                            "lane_id": "L2",
+                            "role": "Codex-Writer",
+                            "kind": "scope_handoff",
+                            "subtask_ids": ["S2"],
+                            "outputs": ["handoff_doc", "package_scope_matrix"],
+                            "parallel": True,
+                        },
+                    ],
+                    "review_mode": "single",
+                    "review_lanes": [
+                        {
+                            "lane_id": "R1",
+                            "role": "Codex-Reviewer",
+                            "kind": "scope_arbitration",
+                            "depends_on": ["L2"],
+                            "outputs": ["reviewer_note", "package_scope_decision"],
+                        },
+                    ],
+                    "parallel_workers": True,
+                    "parallel_reviews": False,
+                },
+            },
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L1",
+                    "role": "Codex-Dev",
+                    "status": "done",
+                    "subtask_ids": ["S1"],
+                    "touched_files": [
+                        "src/session.js",
+                        "tests/session.test.js",
+                        "docs/analysis/auth_scope_inventory.md",
+                        "work_result",
+                    ],
+                },
+                {
+                    "lane_id": "L2",
+                    "role": "Codex-Writer",
+                    "status": "blocked",
+                    "subtask_ids": ["S2"],
+                    "reason": (
+                        "writer packet can be refreshed, but package boundary selection is operator-owned"
+                    ),
+                    "touched_files": [
+                        "docs/handoff/operator_handoff.md",
+                        "docs/analysis/package_scope_matrix.md",
+                        "docs/reviews/reviewer_note.md",
+                    ],
+                },
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "scope_arbitration",
+                    "status": "blocked",
+                    "depends_on": ["L2"],
+                    "reason": "operator must arbitrate auth/session-only versus auth+dashboard release scope",
+                    "verdict": "manual_followup",
+                    "action": "manual_followup",
+                    "touched_files": [
+                        "docs/analysis/package_scope_matrix.md",
+                        "docs/reviews/reviewer_note.md",
+                    ],
+                }
+            ],
+            "summary": {
+                "execution": {"done": 1, "blocked": 1},
+                "review": {"blocked": 1},
+                "review_verdicts": {"manual_followup": 1},
+            },
+        },
+        "exec_critic": {
+            "verdict": "manual_followup",
+            "action": "manual_followup",
+            "reason": (
+                "mixed package-scope conflict is operator-owned; followup execution may only refresh writer lane L2"
+            ),
+            "manual_followup_execution_lane_ids": ["L2"],
+            "manual_followup_review_lane_ids": ["R1"],
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "manual_followup",
+            "backend_contract": "mixed_manual_followup",
+            "backend_contract_note": (
+                "followup execute is limited to writer lane L2 while package arbitration R1 stays manual"
+            ),
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O10",
+            "task_short_id": "T-1001",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def _r3_execute_task(now: str) -> Dict[str, Any]:
     return {
         "request_id": "REQ-R3-001",
@@ -2197,6 +2610,82 @@ def seed_m2_mixed_rerun_runtime(
     }
 
 
+def seed_m3_mixed_manual_followup_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "local_tmux",
+    local_tmux_slot_limit: int = 1,
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated mixed manual followup live rehearsal",
+    )
+    _write_m3_artifacts(project_root)
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_m3_task(now), "REQ-M3-001")
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O10",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated mixed manual followup live rehearsal",
+        "last_request_id": "REQ-M3-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": local_tmux_slot_limit,
+        "background_runner_slot_limits": {
+            "local_tmux": local_tmux_slot_limit,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-M3-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "M3",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O10",
+        "request_id": "REQ-M3-001",
+        "task_ref": "T-1001",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "artifact_paths": [
+            "src/session.js",
+            "tests/session.test.js",
+            "docs/analysis/auth_scope_inventory.md",
+            "docs/analysis/package_scope_matrix.md",
+            "docs/handoff/operator_handoff.md",
+            "docs/reviews/reviewer_note.md",
+            "work_result",
+        ],
+        "preflight_commands": [
+            "/orch status O10",
+            "/task T-1001",
+            "/followup T-1001",
+            "/offdesk review O10",
+        ],
+        "trigger_command": "/followup-exec T-1001 lane L2",
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-M3-001",
+            "runtime_detail": "/control/runtimes/O10",
+        },
+    }
+
+
 def seed_r3_manual_followup_execute_runtime(
     control_root: Path,
     *,
@@ -2384,7 +2873,7 @@ def seed_r4_external_background_runtime(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "d3", "m2", "r2", "r3-execute", "r4"], default="r2")
+    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "d3", "m2", "m3", "r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
     parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
@@ -2428,6 +2917,13 @@ def main() -> int:
         )
     elif args.scenario == "m2":
         payload = seed_m2_mixed_rerun_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target,
+            local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "m3":
+        payload = seed_m3_mixed_manual_followup_runtime(
             Path(args.control_root),
             run_lock_mode=args.run_lock_mode,
             runner_target=args.runner_target,
