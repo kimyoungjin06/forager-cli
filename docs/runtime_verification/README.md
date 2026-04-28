@@ -156,11 +156,11 @@
 - still bounded replay only:
   - `-`
 - next hardening candidate:
-  - persisted background-run status sync after tmux result detection
+  - `-`
 - candidate reason:
-  - M3 surfaces computed `completed` correctly, but the raw `background_runs.json` ticket status field remained stale as `running`
+  - follow-up verification confirmed the raw `background_runs.json` ticket status is persisted as `completed` after tmux result polling
 - next selection gate:
-  - make `background_runs.json` persist the observed tmux result status without changing source-task manual-followup semantics
+  - continue with the next incomplete scenario or cross-surface consistency review
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`
