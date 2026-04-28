@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import tempfile
 import zipfile
 from datetime import datetime, timezone
@@ -275,3 +276,97 @@ def import_external_background_sidecars(
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
+
+
+def default_github_actions_artifact_name(*, ticket_id: str, runner_target: str) -> str:
+    token = _trim(ticket_id, 96)
+    target = normalize_executor_runner_target(runner_target)
+    if target not in EXTERNAL_SIDECAR_RUNNERS:
+        target = "github_runner"
+    return f"aoe-external-background-{target}-{token or 'batch'}"
+
+
+def _default_download_command_runner(command: List[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def download_and_import_github_external_sidecars(
+    *,
+    team_dir: Path | str,
+    run_id: str,
+    ticket_id: str,
+    runner_target: str = "github_runner",
+    artifact_name: str = "",
+    repo: str = "",
+    gh_bin: str = "gh",
+    overwrite: bool = False,
+    poll_after_import: bool = False,
+    now_iso: Callable[[], str] = _now_iso,
+    command_runner: Callable[[List[str]], subprocess.CompletedProcess[str]] = _default_download_command_runner,
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = normalize_executor_runner_target(runner_target)
+    if target not in EXTERNAL_SIDECAR_RUNNERS:
+        return {"ok": False, "reason": "unsupported_runner", "runner_target": target}
+    run_token = _trim(run_id, 80)
+    if not run_token:
+        return {"ok": False, "reason": "run_id_required", "ticket_id": token, "runner_target": target}
+    name = _trim(artifact_name, 180) or default_github_actions_artifact_name(ticket_id=token, runner_target=target)
+
+    with tempfile.TemporaryDirectory(prefix="aoe-gh-sidecars-") as temp_dir:
+        download_dir = Path(temp_dir) / "download"
+        download_dir.mkdir(parents=True, exist_ok=True)
+        command = [
+            _trim(gh_bin, 120) or "gh",
+            "run",
+            "download",
+            run_token,
+            "--name",
+            name,
+            "--dir",
+            str(download_dir),
+        ]
+        repo_token = _trim(repo, 180)
+        if repo_token:
+            command.extend(["--repo", repo_token])
+        proc = command_runner(command)
+        returncode = int(getattr(proc, "returncode", 1) or 0)
+        stdout = _trim(getattr(proc, "stdout", ""), 4000)
+        stderr = _trim(getattr(proc, "stderr", ""), 4000)
+        if returncode != 0:
+            return {
+                "ok": False,
+                "reason": "gh_run_download_failed",
+                "ticket_id": token,
+                "runner_target": target,
+                "run_id": run_token,
+                "artifact_name": name,
+                "download_command": command,
+                "download_returncode": returncode,
+                "download_stdout": stdout,
+                "download_stderr": stderr,
+            }
+        imported = import_external_background_sidecars(
+            team_dir=team_dir,
+            artifact_root=download_dir,
+            ticket_id=token,
+            runner_target=target,
+            overwrite=overwrite,
+            poll_after_import=poll_after_import,
+            now_iso=now_iso,
+        )
+        imported["github_download"] = {
+            "run_id": run_token,
+            "artifact_name": name,
+            "repo": repo_token,
+            "download_command": command,
+            "download_returncode": returncode,
+            "download_stdout": stdout,
+            "download_stderr": stderr,
+        }
+        return imported
