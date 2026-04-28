@@ -45,10 +45,16 @@ def test_filesystem_backend_round_trips_context_pack_and_audit_rows(tmp_path: Pa
     assert backend.load_harness_authoring_plan(request_id="REQ-1")["summary"] == "harness export"
     workspace_written = backend.write_workspace_brief({"workspace_key": "alpha", "summary": "status=active"})
     registry_written = backend.write_document_registry({"records": [{"doc_id": "spec-main"}], "summary": "indexed=1 canonical=1 stale=0"})
+    flow_written = backend.write_project_flow(project_alias="O7", payload={"project_alias": "O7", "summary": "flow"})
+    descriptor = backend.descriptor()
     assert workspace_written.name == "workspace_brief.json"
     assert registry_written.name == "document_registry.json"
+    assert flow_written == team_dir.resolve() / "project-flow" / "O7" / "latest.json"
     assert backend.load_workspace_brief()["workspace_key"] == "alpha"
     assert backend.load_document_registry()["records"][0]["doc_id"] == "spec-main"
+    assert backend.load_project_flow(project_alias="O7")["summary"] == "flow"
+    assert descriptor["project_flow_dir"].endswith("project-flow")
+    assert "flow=project-flow" in descriptor["summary"]
 
 
 def test_filesystem_backend_writes_recovery_summary_and_external_artifacts(tmp_path: Path) -> None:

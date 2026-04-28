@@ -20,6 +20,8 @@ from aoe_tg_runtime_core import (
     harness_authoring_plan_path as runtime_harness_authoring_plan_path,
     model_endpoint_registry_path as runtime_model_endpoint_registry_path,
     model_routing_policy_path as runtime_model_routing_policy_path,
+    project_flow_dir as runtime_project_flow_dir,
+    project_flow_path as runtime_project_flow_path,
     provider_capacity_state_path as runtime_provider_capacity_state_path,
     recovery_summary_dir as runtime_recovery_summary_dir,
     workspace_brief_path as runtime_workspace_brief_path,
@@ -163,6 +165,7 @@ class ArtifactBackendDescriptor:
     context_pack_dir: str
     workspace_brief_path: str
     document_registry_path: str
+    project_flow_dir: str
     harness_authoring_dir: str
     action_audit_path: str
     recovery_summary_dir: str
@@ -185,6 +188,7 @@ class FileSystemArtifactBackend:
             context_pack_dir=str(runtime_context_pack_dir(self.team_dir)),
             workspace_brief_path=str(self.workspace_brief_path()),
             document_registry_path=str(self.document_registry_path()),
+            project_flow_dir=str(self.project_flow_dir()),
             harness_authoring_dir=str(self.harness_authoring_dir()),
             action_audit_path=str(self.action_audit_path()),
             recovery_summary_dir=str(self.recovery_summary_dir()),
@@ -196,6 +200,7 @@ class FileSystemArtifactBackend:
                 f"context={runtime_context_pack_dir(self.team_dir).name} "
                 f"workspace={self.workspace_brief_path().name} "
                 f"docs={self.document_registry_path().name} "
+                f"flow={self.project_flow_dir().name} "
                 f"harness={self.harness_authoring_dir().name} "
                 f"audit={self.action_audit_path().name} "
                 f"recovery={self.recovery_summary_dir().name} "
@@ -231,6 +236,24 @@ class FileSystemArtifactBackend:
 
     def write_document_registry(self, payload: Dict[str, Any]) -> Path:
         return _write_json(self.document_registry_path(), payload)
+
+    def project_flow_dir(self) -> Path:
+        return runtime_project_flow_dir(self.team_dir)
+
+    def project_flow_path(self, *, project_alias: str, filename: str = "latest.json") -> Path:
+        return runtime_project_flow_path(self.team_dir, project_alias=project_alias, filename=filename)
+
+    def load_project_flow(self, *, project_alias: str, filename: str = "latest.json") -> Dict[str, Any]:
+        return load_json_file(self.project_flow_path(project_alias=project_alias, filename=filename))
+
+    def write_project_flow(
+        self,
+        *,
+        project_alias: str,
+        payload: Dict[str, Any],
+        filename: str = "latest.json",
+    ) -> Path:
+        return _write_json(self.project_flow_path(project_alias=project_alias, filename=filename), payload)
 
     def harness_authoring_dir(self) -> Path:
         return runtime_harness_authoring_dir(self.team_dir)

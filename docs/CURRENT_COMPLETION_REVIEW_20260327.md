@@ -148,6 +148,7 @@
   - `WorkspaceBrief` implemented
   - `DocumentRegistry` implemented
   - `ContextPack` compiler implemented
+  - `ProjectFlow` compiler baseline implemented
   - summaries are exposed on task/runtime/operator surfaces
 - centralized state root:
   - done for resolver, artifact helpers, migration helper
@@ -159,9 +160,9 @@
   - implemented for known retired forms
 
 ## 5. What Is Not Done
-- project flow compiler implementation:
-  - spec only
-  - no `.aoe-team/project-flow/<project_alias>/latest.json` artifact yet
+- project flow dashboard/recovery integration:
+  - minimal `.aoe-team/project-flow/<project_alias>/latest.json` artifact exists
+  - dashboard/recovery consumption is still not wired
 - document registry + dashboard convergence:
   - baseline summaries exist
   - first-class `Document Flow` dashboard card and doc/runtime drift excerpts are not done
@@ -195,9 +196,10 @@
 ### 6.2 Second Block: Document Convergence
 2. `Project Flow Compiler`
 - compile per-project flow artifacts from registry + project docs + runtime state
+  - baseline implemented
 - add `Document Flow` card to dashboard runtime detail
 - add doc/runtime drift excerpts to recovery
-- this is now the next primary implementation block
+- dashboard/recovery wiring is now the next primary implementation block
 
 ### 6.3 Third Block: External Execution Productization
 3. `External Runner Pickup / Ack`
@@ -236,6 +238,7 @@
 ## 7. Immediate Next Sprint
 1. implement the minimal `Project Flow Compiler` artifact:
    - `.aoe-team/project-flow/<project_alias>/latest.json`
+   - status: done
 2. wire dashboard runtime detail to a read-only `Document Flow` card
 3. surface conservative doc/runtime drift in recovery/nightly summary
 4. then move to production external runner pickup/ack

@@ -134,6 +134,16 @@ def context_pack_path(team_dir: Path | str, *, request_id: str, profile: str) ->
     return context_pack_dir(team_dir) / (safe_request or "runtime") / f"{safe_profile or 'default'}.json"
 
 
+def project_flow_dir(team_dir: Path | str, dirname: str = "project-flow") -> Path:
+    return Path(team_dir).expanduser().resolve() / str(dirname or "project-flow").strip()
+
+
+def project_flow_path(team_dir: Path | str, *, project_alias: str, filename: str = "latest.json") -> Path:
+    safe_alias = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(project_alias or "").strip()).strip("._-")
+    safe_filename = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(filename or "").strip()).strip("._-")
+    return project_flow_dir(team_dir) / (safe_alias or "project") / (safe_filename or "latest.json")
+
+
 def harness_authoring_dir(team_dir: Path | str, dirname: str = "harness_authoring") -> Path:
     return Path(team_dir).expanduser().resolve() / str(dirname or "harness_authoring").strip()
 
