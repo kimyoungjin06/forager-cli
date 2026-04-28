@@ -164,7 +164,7 @@
 - candidate reason:
   - follow-up verification confirmed the raw `background_runs.json` ticket status is persisted as `completed` after tmux result polling
 - next selection gate:
-  - continue with the next incomplete scenario or cross-surface consistency review
+  - move to `Project Flow Compiler` and document/runtime convergence
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`

@@ -194,6 +194,8 @@ Important rule:
   - `aoe_tg_management_chat.py`
   - `aoe_tg_management_acl.py`
 
-The project is in a `usable operator prototype` stage:
+The project is in an `operational owner-only control plane` stage:
 - suitable for personal multi-project operation
-- still evolving in `sync_sources`, `run_handlers`, and long-term backend abstraction
+- first-wave phase2 runtime verification is complete for build/data/review/mixed happy, rerun, and manual-followup paths
+- next maturity block is document/runtime convergence through `Project Flow Compiler`, dashboard `Document Flow`, and recovery drift excerpts
+- still evolving in external runner productionization, governance/usage boundaries, retention cleanup, and long-term backend abstraction

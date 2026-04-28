@@ -316,7 +316,7 @@
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
 - current next non-review candidate:
-  - next incomplete scenario or cross-surface consistency review
+  - `Project Flow Compiler` / document-runtime convergence
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.
