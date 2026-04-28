@@ -27,6 +27,8 @@ GITHUB_RUNNER_COMMENT_COMMAND_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_COMMENT_COMMAND_KIND = "github_runner_comment_command"
 GITHUB_RUNNER_COMPLETION_COMMENT_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_COMPLETION_COMMENT_KIND = "github_runner_completion_comment"
+GITHUB_RUNNER_COMMENT_FLOW_PLAN_VERSION = "2026-04-28.v1"
+GITHUB_RUNNER_COMMENT_FLOW_PLAN_KIND = "github_runner_comment_flow_plan"
 TRUSTED_COMMENT_AUTHOR_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
@@ -42,6 +44,13 @@ def _boolish(raw: Any) -> bool:
 def _intish(raw: Any, default: int) -> int:
     try:
         return int(str(raw).strip())
+    except Exception:
+        return default
+
+
+def _floatish(raw: Any, default: float) -> float:
+    try:
+        return float(str(raw).strip())
     except Exception:
         return default
 
@@ -71,6 +80,29 @@ def _safe_issue_number(raw: Any) -> int:
         return 0
     value = int(token)
     return value if value > 0 else 0
+
+
+def _safe_repo(raw: Any) -> str:
+    token = _trim(raw, 200)
+    if not token or token.count("/") != 1:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    owner, name = token.split("/", 1)
+    if not owner or not name:
+        return ""
+    if not all(char in allowed for char in owner + name):
+        return ""
+    return token
+
+
+def _format_float(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _shell_command(argv: List[Any]) -> str:
+    return shlex.join([str(item) for item in argv if str(item).strip()])
 
 
 def _resolve_team_dir(raw: Path | str) -> Path:
@@ -410,6 +442,7 @@ def build_github_runner_completion_comment(
     team_dir: str = ".aoe-team",
     run_id: str,
     run_url: str,
+    repo: str = "",
     artifact_name: str = "",
     worker_result: str = "",
     comment_issue_number: Any = "",
@@ -420,6 +453,8 @@ def build_github_runner_completion_comment(
     safe_team_dir = _safe_comment_team_dir(team_dir)
     safe_run_id = _trim(run_id, 80)
     safe_run_url = _trim(run_url, 240)
+    raw_repo = _trim(repo, 200)
+    safe_repo = _safe_repo(raw_repo)
     safe_worker_result = _trim(worker_result, 40).lower() or "unknown"
     safe_artifact_name = _trim(artifact_name, 180)
     violations = []
@@ -434,16 +469,42 @@ def build_github_runner_completion_comment(
         violations.append({"code": "invalid_team_dir"})
     if not safe_run_id:
         violations.append({"code": "run_id_required"})
+    if raw_repo and not safe_repo:
+        violations.append({"code": "invalid_repo"})
     if not safe_artifact_name and token:
         safe_artifact_name = f"aoe-external-background-{target}-{token}"
 
     ok = not violations
     if ok:
-        import_command = (
-            "scripts/gateway/aoe-external-sidecar-sync.py download-github-artifact "
-            f"--team-dir {safe_team_dir} --run-id {safe_run_id} --ticket-id {token} "
-            f"--runner {target} --poll"
-        )
+        download_command_argv = [
+            "scripts/gateway/aoe-external-sidecar-sync.py",
+            "download-github-artifact",
+            "--team-dir",
+            safe_team_dir,
+            "--run-id",
+            safe_run_id,
+            "--ticket-id",
+            token,
+            "--runner",
+            target,
+        ]
+        auto_import_command_argv = [
+            "scripts/gateway/aoe-external-sidecar-sync.py",
+            "auto-import-github-artifact",
+            "--team-dir",
+            safe_team_dir,
+            "--ticket-id",
+            token,
+            "--runner",
+            target,
+        ]
+        if safe_repo:
+            download_command_argv.extend(["--repo", safe_repo])
+            auto_import_command_argv.extend(["--repo", safe_repo])
+        download_command_argv.append("--poll")
+        auto_import_command_argv.append("--poll")
+        download_command = _shell_command(download_command_argv)
+        auto_import_command = _shell_command(auto_import_command_argv)
         response = "\n".join(
             [
                 "AOE external runner workflow finished.",
@@ -455,9 +516,17 @@ def build_github_runner_completion_comment(
                 "",
                 "Import and poll locally:",
                 "",
-                f"`{import_command}`",
+                f"`{download_command}`",
+                "",
+                "Or discover, schedule, import, and poll by ticket:",
+                "",
+                f"`{auto_import_command}`",
             ]
         )
+        import_commands = {
+            "download_github_artifact": download_command,
+            "auto_import_github_artifact": auto_import_command,
+        }
     else:
         response = "\n".join(
             [
@@ -468,6 +537,7 @@ def build_github_runner_completion_comment(
                 + ", ".join(str(item.get("code", "")).strip() for item in violations if item.get("code")),
             ]
         )
+        import_commands = {}
 
     return {
         "version": GITHUB_RUNNER_COMPLETION_COMMENT_VERSION,
@@ -480,10 +550,232 @@ def build_github_runner_completion_comment(
         "team_dir": safe_team_dir,
         "run_id": safe_run_id,
         "run_url": safe_run_url,
+        "repo": safe_repo,
         "artifact_name": safe_artifact_name,
         "worker_result": safe_worker_result,
         "violations": violations,
+        "import_commands": import_commands,
         "response_markdown": response,
+    }
+
+
+def build_github_runner_comment_flow_verification_plan(
+    *,
+    ticket_id: str,
+    issue_number: Any,
+    repo: str,
+    team_dir: str = ".aoe-team",
+    runner_target: str = "github_runner",
+    gh_bin: str = "gh",
+    timeout_sec: Any = 900,
+    max_items: Any = 1,
+    workflow: str = "external-background-worker.yml",
+    list_limit: Any = 20,
+    import_timeout_sec: Any = 900,
+    import_interval_sec: Any = 10.0,
+) -> Dict[str, Any]:
+    target = normalize_executor_runner_target(runner_target, "")
+    token = _safe_ticket_id(ticket_id)
+    safe_team_dir = _safe_comment_team_dir(team_dir)
+    safe_issue_number = _safe_issue_number(issue_number)
+    safe_repo = _safe_repo(repo)
+    safe_gh_bin = _trim(gh_bin, 200) or "gh"
+    safe_workflow = _trim(workflow, 160) or "external-background-worker.yml"
+    list_limit_value = _intish(list_limit, -1)
+    import_timeout_value = _intish(import_timeout_sec, -1)
+    import_interval_value = _floatish(import_interval_sec, -1.0)
+    violations: List[Dict[str, str]] = []
+    warnings: List[Dict[str, str]] = []
+
+    if target != "github_runner":
+        violations.append({"code": "unsupported_runner_target", "detail": "only github_runner is supported"})
+    if not token:
+        violations.append({"code": "invalid_ticket_id", "detail": "ticket_id must be a short safe token"})
+    if not safe_team_dir:
+        violations.append({"code": "invalid_team_dir", "detail": "team_dir must be a safe relative checkout path"})
+    if not safe_issue_number:
+        violations.append({"code": "comment_issue_number_required", "detail": "issue_number must be a positive integer"})
+    if not safe_repo:
+        violations.append({"code": "repo_required", "detail": "repo must be owner/name"})
+    if list_limit_value < 1 or list_limit_value > 100:
+        violations.append({"code": "list_limit_out_of_range", "detail": "list_limit must be between 1 and 100"})
+    if import_timeout_value < 1 or import_timeout_value > 21600:
+        violations.append(
+            {"code": "import_timeout_out_of_range", "detail": "import_timeout_sec must be between 1 and 21600"}
+        )
+    if import_interval_value < 0:
+        violations.append({"code": "import_interval_out_of_range", "detail": "import_interval_sec must be non-negative"})
+
+    policy = build_github_runner_transport_policy(
+        runner_target=target or runner_target,
+        team_dir=safe_team_dir or team_dir,
+        event_name="issue_comment",
+        commit_results=False,
+        bundle_present=False,
+        timeout_sec=timeout_sec,
+        max_items=max_items,
+    )
+    if not policy.get("ok"):
+        violations.append(
+            {
+                "code": "transport_policy_rejected",
+                "detail": ", ".join(
+                    str(item.get("code", "")).strip()
+                    for item in policy.get("violations", [])
+                    if item.get("code")
+                ),
+            }
+        )
+    warnings.extend(
+        {
+            "code": str(item.get("code", "")).strip(),
+            "detail": str(item.get("detail", "")).strip(),
+        }
+        for item in policy.get("warnings", [])
+        if item.get("code") and str(item.get("code", "")).strip() != "bundle_absent"
+    )
+
+    workflow_inputs = {
+        "runner_target": "github_runner",
+        "team_dir": safe_team_dir,
+        "ticket_id": token,
+        "timeout_sec": str(policy.get("timeout_sec", _intish(timeout_sec, 900))),
+        "max_items": str(policy.get("max_items", _intish(max_items, 1))),
+        "commit_results": "false",
+        "comment_issue_number": str(safe_issue_number or ""),
+    }
+    comment_body = (
+        f"/aoe bgx run {token} --team-dir {safe_team_dir} "
+        f"--timeout-sec {workflow_inputs['timeout_sec']} --max-items {workflow_inputs['max_items']}"
+        if token and safe_team_dir
+        else ""
+    )
+    expected_run_name = f"external-background-github_runner-{token}" if token else ""
+    expected_artifact_name = f"aoe-external-background-github_runner-{token}" if token else ""
+    dispatch_preview: Dict[str, Any] = {}
+    if comment_body:
+        dispatch_preview = build_github_runner_comment_dispatch(
+            {
+                "comment": {
+                    "body": comment_body,
+                    "author_association": "OWNER",
+                },
+                "issue": {
+                    "number": safe_issue_number,
+                    "pull_request": {"url": f"https://api.github.com/repos/{safe_repo}/pulls/{safe_issue_number}"},
+                },
+                "repository": {
+                    "full_name": safe_repo,
+                    "default_branch": "main",
+                },
+            }
+        )
+        if not dispatch_preview.get("ok"):
+            violations.append(
+                {
+                    "code": "generated_comment_rejected",
+                    "detail": str(dispatch_preview.get("reason", "unknown")),
+                }
+            )
+        elif dispatch_preview.get("workflow_inputs") != workflow_inputs:
+            violations.append(
+                {
+                    "code": "generated_workflow_inputs_mismatch",
+                    "detail": "comment-dispatch preview did not match the planned workflow inputs",
+                }
+            )
+    commands: Dict[str, str] = {}
+    if not violations:
+        commands = {
+            "post_comment": _shell_command(
+                [
+                    safe_gh_bin,
+                    "issue",
+                    "comment",
+                    safe_issue_number,
+                    "--repo",
+                    safe_repo,
+                    "--body",
+                    comment_body,
+                ]
+            ),
+            "discover_runs": _shell_command(
+                [
+                    safe_gh_bin,
+                    "run",
+                    "list",
+                    "--repo",
+                    safe_repo,
+                    "--workflow",
+                    safe_workflow,
+                    "--limit",
+                    list_limit_value,
+                    "--json",
+                    "databaseId,displayTitle,status,conclusion,url,event,createdAt",
+                ]
+            ),
+            "auto_import": _shell_command(
+                [
+                    "scripts/gateway/aoe-external-sidecar-sync.py",
+                    "auto-import-github-artifact",
+                    "--team-dir",
+                    safe_team_dir,
+                    "--ticket-id",
+                    token,
+                    "--runner",
+                    "github_runner",
+                    "--repo",
+                    safe_repo,
+                    "--workflow",
+                    safe_workflow,
+                    "--list-limit",
+                    list_limit_value,
+                    "--timeout-sec",
+                    import_timeout_value,
+                    "--interval-sec",
+                    _format_float(import_interval_value),
+                    "--poll",
+                ]
+            ),
+            "drain_scheduled_imports": _shell_command(
+                [
+                    "scripts/gateway/aoe-external-sidecar-sync.py",
+                    "drain-github-imports",
+                    "--team-dir",
+                    safe_team_dir,
+                    "--timeout-sec",
+                    import_timeout_value,
+                    "--interval-sec",
+                    _format_float(import_interval_value),
+                    "--poll",
+                ]
+            ),
+        }
+
+    ok = not violations
+    return {
+        "version": GITHUB_RUNNER_COMMENT_FLOW_PLAN_VERSION,
+        "kind": GITHUB_RUNNER_COMMENT_FLOW_PLAN_KIND,
+        "ok": ok,
+        "ticket_id": token,
+        "runner_target": target,
+        "team_dir": safe_team_dir,
+        "repo": safe_repo,
+        "issue_number": safe_issue_number,
+        "workflow": safe_workflow,
+        "comment_body": comment_body,
+        "workflow_inputs": workflow_inputs,
+        "expected_run_name": expected_run_name,
+        "expected_artifact_name": expected_artifact_name,
+        "dispatch_preview": dispatch_preview,
+        "commands": commands,
+        "policy": policy,
+        "violations": violations,
+        "warnings": warnings,
+        "summary": (
+            f"github_runner_comment_flow_plan | ok={'yes' if ok else 'no'} | "
+            f"ticket={token or '-'} | repo={safe_repo or '-'} | issue={safe_issue_number or '-'}"
+        ),
     }
 
 

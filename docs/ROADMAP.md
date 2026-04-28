@@ -377,10 +377,11 @@
       - ticket-named GitHub run discovery + scheduled local import drain
       - default long-running stack/timer hook for scheduled GitHub import drain
       - scheduled GitHub import backlog/failure dashboard visibility
+      - comment-flow live verification preflight for trusted comment, run discovery, auto-import, and scheduled drain
       - `local_tmux` followup-execute proof for B3/D3/R3/M3
     - 남은 것:
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
-      - live verification of comment-triggered GitHub runner pickup/import/poll loop
+      - one live comment-triggered GitHub runner pickup/import/poll smoke against a real issue/PR and seeded ticket
   - 최소 범위:
     - background queue
     - request-to-run audit trail

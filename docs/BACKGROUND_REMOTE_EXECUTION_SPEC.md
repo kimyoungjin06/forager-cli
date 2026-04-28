@@ -462,8 +462,11 @@
   - passes `comment_issue_number` into the worker workflow so completion can be reported back to the same thread
 - Completion callback:
   - `external-background-worker.yml` runs `comment-worker-result` when `comment_issue_number` is present
-  - the callback posts the worker result, workflow run URL, artifact name, and exact `download-github-artifact --poll` import command
+  - the callback posts the worker result, workflow run URL, artifact name, and exact `download-github-artifact --poll` / `auto-import-github-artifact --poll` import commands
   - the callback uses a separate `issues:write` job so the worker job remains `contents:read` by default
+- Live verification preflight:
+  - `scripts/gateway/aoe-github-runner-bridge.py comment-flow-plan --ticket-id <ticket> --issue-number <issue-or-pr-number> --repo <owner/repo>`
+  - validates the trusted-comment workflow inputs and emits the exact comment, GitHub run discovery, auto-import, and scheduled-drain commands for a live pickup/import/poll smoke
 - Remaining sync boundary:
   - local control-plane polling needs the resulting sidecars imported or committed back into the project `team_dir`
   - artifact import path:
@@ -532,7 +535,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is end-to-end live verification of the comment-triggered GitHub runner flow.
+- Remaining external runner productization work is one end-to-end live smoke using the comment-flow plan against a real issue/PR and pre-seeded externalizable `github_runner` ticket.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

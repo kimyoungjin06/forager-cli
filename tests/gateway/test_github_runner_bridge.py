@@ -13,6 +13,7 @@ from aoe_tg_external_background_worker import emit_external_background_handoff, 
 from aoe_tg_external_worker_runtime import run_external_background_worker_once
 from aoe_tg_github_runner_bridge import (
     build_github_runner_completion_comment,
+    build_github_runner_comment_flow_verification_plan,
     build_github_runner_comment_dispatch,
     build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
@@ -373,6 +374,7 @@ def test_github_runner_completion_comment_builds_import_instruction() -> None:
         team_dir=".aoe-team",
         run_id="25046272933",
         run_url="https://github.com/acme/repo/actions/runs/25046272933",
+        repo="acme/repo",
         artifact_name="aoe-external-background-github_runner-BGT-GHA-COMMENT-001",
         worker_result="success",
         comment_issue_number="104",
@@ -387,6 +389,9 @@ def test_github_runner_completion_comment_builds_import_instruction() -> None:
     assert "--run-id 25046272933" in body
     assert "--ticket-id BGT-GHA-COMMENT-001" in body
     assert "download-github-artifact" in body
+    assert "auto-import-github-artifact" in body
+    assert "--repo acme/repo" in body
+    assert result["import_commands"]["auto_import_github_artifact"].endswith("--repo acme/repo --poll")
 
 
 def test_github_runner_completion_comment_rejects_missing_issue_number() -> None:
@@ -422,6 +427,8 @@ def test_github_runner_bridge_cli_completion_comment_writes_response(tmp_path: P
             "25046272933",
             "--run-url",
             "https://github.com/acme/repo/actions/runs/25046272933",
+            "--repo",
+            "acme/repo",
             "--worker-result",
             "success",
             "--comment-issue-number",
@@ -440,6 +447,91 @@ def test_github_runner_bridge_cli_completion_comment_writes_response(tmp_path: P
     body = response_path.read_text(encoding="utf-8")
     assert "BGT-GHA-CLI-COMPLETION-001" in body
     assert "download-github-artifact" in body
+    assert "auto-import-github-artifact" in body
+    assert "--repo acme/repo" in body
+
+
+def test_github_runner_comment_flow_plan_builds_live_verification_commands() -> None:
+    result = build_github_runner_comment_flow_verification_plan(
+        ticket_id="BGT-GHA-COMMENT-VERIFY-001",
+        issue_number="104",
+        repo="acme/repo",
+        team_dir=".aoe-team",
+        timeout_sec="120",
+        max_items="2",
+        import_timeout_sec="30",
+        import_interval_sec="0",
+    )
+
+    assert result["ok"] is True
+    assert result["comment_body"] == (
+        "/aoe bgx run BGT-GHA-COMMENT-VERIFY-001 --team-dir .aoe-team --timeout-sec 120 --max-items 2"
+    )
+    assert result["workflow_inputs"] == {
+        "runner_target": "github_runner",
+        "team_dir": ".aoe-team",
+        "ticket_id": "BGT-GHA-COMMENT-VERIFY-001",
+        "timeout_sec": "120",
+        "max_items": "2",
+        "commit_results": "false",
+        "comment_issue_number": "104",
+    }
+    assert result["expected_run_name"] == "external-background-github_runner-BGT-GHA-COMMENT-VERIFY-001"
+    assert result["expected_artifact_name"] == "aoe-external-background-github_runner-BGT-GHA-COMMENT-VERIFY-001"
+    assert result["dispatch_preview"]["ok"] is True
+    assert result["dispatch_preview"]["workflow_inputs"] == result["workflow_inputs"]
+    commands = result["commands"]
+    assert commands["post_comment"].startswith("gh issue comment 104 --repo acme/repo --body ")
+    assert "/aoe bgx run BGT-GHA-COMMENT-VERIFY-001" in commands["post_comment"]
+    assert "gh run list --repo acme/repo --workflow external-background-worker.yml" in commands["discover_runs"]
+    assert "auto-import-github-artifact" in commands["auto_import"]
+    assert "--repo acme/repo" in commands["auto_import"]
+    assert "--timeout-sec 30 --interval-sec 0 --poll" in commands["auto_import"]
+    assert "drain-github-imports" in commands["drain_scheduled_imports"]
+
+
+def test_github_runner_comment_flow_plan_rejects_missing_live_targets() -> None:
+    result = build_github_runner_comment_flow_verification_plan(
+        ticket_id="BGT-GHA-COMMENT-VERIFY-002",
+        issue_number="",
+        repo="not a repo",
+    )
+
+    assert result["ok"] is False
+    assert result["commands"] == {}
+    assert {item["code"] for item in result["violations"]} >= {
+        "comment_issue_number_required",
+        "repo_required",
+    }
+
+
+def test_github_runner_bridge_cli_comment_flow_plan_reports_commands() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-github-runner-bridge.py"),
+            "comment-flow-plan",
+            "--ticket-id",
+            "BGT-GHA-CLI-FLOW-001",
+            "--issue-number",
+            "104",
+            "--repo",
+            "acme/repo",
+            "--import-timeout-sec",
+            "30",
+            "--import-interval-sec",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["commands"]["post_comment"].startswith("gh issue comment 104")
+    assert "auto-import-github-artifact" in payload["commands"]["auto_import"]
 
 
 def test_external_background_worker_workflow_contract_is_stable() -> None:
@@ -465,6 +557,7 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
     assert "comment-worker-result:" in workflow
     assert "needs.worker-run.result" in workflow
     assert "aoe-github-runner-bridge.py completion-comment" in workflow
+    assert '--repo "$GITHUB_REPOSITORY"' in workflow
     assert "background_run_acks" in workflow
     assert "background_run_results" in workflow
     assert "background_run_logs" in workflow

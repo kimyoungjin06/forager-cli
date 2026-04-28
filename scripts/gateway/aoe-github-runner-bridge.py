@@ -15,6 +15,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from aoe_tg_github_runner_bridge import (  # noqa: E402
     build_github_runner_completion_comment,
+    build_github_runner_comment_flow_verification_plan,
     build_github_runner_comment_dispatch,
     build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
@@ -60,10 +61,28 @@ def _build_parser() -> argparse.ArgumentParser:
     completion.add_argument("--team-dir", default=".aoe-team")
     completion.add_argument("--run-id", required=True)
     completion.add_argument("--run-url", default="")
+    completion.add_argument("--repo", default="")
     completion.add_argument("--artifact-name", default="")
     completion.add_argument("--worker-result", default="")
     completion.add_argument("--comment-issue-number", default="")
     completion.add_argument("--response-file", default="", help="Optional markdown response file path")
+
+    comment_flow = subparsers.add_parser(
+        "comment-flow-plan",
+        help="build a live verification plan for issue/PR comment-triggered github_runner pickup/import/poll",
+    )
+    comment_flow.add_argument("--ticket-id", required=True)
+    comment_flow.add_argument("--issue-number", required=True)
+    comment_flow.add_argument("--repo", required=True, help="GitHub repo as owner/name")
+    comment_flow.add_argument("--team-dir", default=".aoe-team")
+    comment_flow.add_argument("--runner", default="github_runner")
+    comment_flow.add_argument("--gh-bin", default="gh")
+    comment_flow.add_argument("--timeout-sec", default="900")
+    comment_flow.add_argument("--max-items", default="1")
+    comment_flow.add_argument("--workflow", default="external-background-worker.yml")
+    comment_flow.add_argument("--list-limit", default="20")
+    comment_flow.add_argument("--import-timeout-sec", default="900")
+    comment_flow.add_argument("--import-interval-sec", default="10")
     return parser
 
 
@@ -158,11 +177,29 @@ def main(argv: list[str] | None = None) -> int:
                 team_dir=args.team_dir,
                 run_id=args.run_id,
                 run_url=args.run_url,
+                repo=args.repo,
                 artifact_name=args.artifact_name,
                 worker_result=args.worker_result,
                 comment_issue_number=args.comment_issue_number,
             )
             _write_response_file(args.response_file, result)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("ok") else 1
+        if args.command == "comment-flow-plan":
+            result = build_github_runner_comment_flow_verification_plan(
+                ticket_id=args.ticket_id,
+                issue_number=args.issue_number,
+                repo=args.repo,
+                team_dir=args.team_dir,
+                runner_target=args.runner,
+                gh_bin=args.gh_bin,
+                timeout_sec=args.timeout_sec,
+                max_items=args.max_items,
+                workflow=args.workflow,
+                list_limit=args.list_limit,
+                import_timeout_sec=args.import_timeout_sec,
+                import_interval_sec=args.import_interval_sec,
+            )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result.get("ok") else 1
     except Exception as exc:
