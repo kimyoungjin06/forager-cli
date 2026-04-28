@@ -89,7 +89,10 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.github/workflows/external-background-worker.yml`
 - bundle export:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-github-runner-bridge.py export-bundle --team-dir <team_dir> --ticket-id <ticket>`
+- policy preflight:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-github-runner-bridge.py policy-check --runner github_runner --team-dir <team_dir> --event-name workflow_dispatch --bundle-present true`
 - workflow pickup uploads ack/result/log sidecars as an Actions artifact.
+- default workflow transport is artifact-only with `contents:read`; `commit_results=true` uses the separate write-permission commit job.
 - sidecar import after downloading the artifact:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-external-sidecar-sync.py import-artifact --team-dir <team_dir> --artifact-root <artifact-dir-or-zip> --ticket-id <ticket> --runner github_runner --poll`
 - direct GitHub artifact download + import:
