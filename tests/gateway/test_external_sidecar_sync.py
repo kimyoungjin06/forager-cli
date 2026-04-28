@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -16,7 +18,11 @@ from aoe_tg_external_background_worker import (
     emit_external_background_result,
     external_background_ack_path,
 )
-from aoe_tg_external_sidecar_sync import import_external_background_sidecars
+from aoe_tg_external_sidecar_sync import (
+    default_github_actions_artifact_name,
+    download_and_import_github_external_sidecars,
+    import_external_background_sidecars,
+)
 from aoe_tg_external_worker_runtime import external_background_log_path
 from aoe_tg_request_contract import build_background_run_ticket, build_runner_background_launch_spec
 
@@ -217,3 +223,108 @@ def test_external_sidecar_sync_does_not_overwrite_existing_sidecar_by_default(tm
     ack_result = next(item for item in result["copy_results"] if item["kind"] == "ack")
     assert ack_result["status"] == "skipped_existing"
     assert json.loads(existing_ack.read_text(encoding="utf-8"))["summary"] == "keep me"
+
+
+def test_download_and_import_github_external_sidecars_uses_gh_download_then_polls(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    artifact_dir = tmp_path / "downloaded-artifact"
+    ticket_id = "BGT-GHA-GH-DL-001"
+    queue_path = _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="github_runner")
+    _write_remote_sidecars(artifact_team_dir=artifact_dir, ticket_id=ticket_id, runner_target="github_runner")
+    seen: dict[str, list[str]] = {}
+
+    def _fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        seen["command"] = command
+        download_dir = Path(command[command.index("--dir") + 1])
+        download_dir.mkdir(parents=True, exist_ok=True)
+        for child in artifact_dir.iterdir():
+            target = download_dir / child.name
+            if child.is_dir():
+                shutil.copytree(child, target)
+            else:
+                shutil.copy2(child, target)
+        return subprocess.CompletedProcess(command, 0, stdout="downloaded\n", stderr="")
+
+    result = download_and_import_github_external_sidecars(
+        team_dir=team_dir,
+        run_id="123456789",
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+        repo="kimyoungjin06/aoe_orch_control",
+        poll_after_import=True,
+        now_iso=_fixed_now,
+        command_runner=_fake_runner,
+    )
+
+    assert result["ok"] is True
+    assert result["github_download"]["artifact_name"] == default_github_actions_artifact_name(
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+    )
+    assert seen["command"][:4] == ["gh", "run", "download", "123456789"]
+    assert "--repo" in seen["command"]
+    assert "kimyoungjin06/aoe_orch_control" in seen["command"]
+    assert result["copied_count"] == 3
+    assert result["poll_result"]["completed_count"] == 1
+    assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"
+
+
+def test_external_sidecar_sync_cli_downloads_github_artifact_with_fake_gh(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    artifact_dir = tmp_path / "downloaded-artifact"
+    ticket_id = "BGT-REMOTE-GH-DL-001"
+    queue_path = _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="remote_worker")
+    _write_remote_sidecars(artifact_team_dir=artifact_dir, ticket_id=ticket_id, runner_target="remote_worker")
+    fake_gh = tmp_path / "fake-gh"
+    fake_gh.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import os, pathlib, shutil, sys",
+                "args = sys.argv[1:]",
+                "download_dir = pathlib.Path(args[args.index('--dir') + 1])",
+                "download_dir.mkdir(parents=True, exist_ok=True)",
+                "source = pathlib.Path(os.environ['AOE_FAKE_ARTIFACT_SOURCE'])",
+                "for child in source.iterdir():",
+                "    target = download_dir / child.name",
+                "    if child.is_dir():",
+                "        shutil.copytree(child, target)",
+                "    else:",
+                "        shutil.copy2(child, target)",
+                "print('fake download')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-external-sidecar-sync.py"),
+            "download-github-artifact",
+            "--team-dir",
+            str(team_dir),
+            "--run-id",
+            "987654321",
+            "--ticket-id",
+            ticket_id,
+            "--runner",
+            "remote_worker",
+            "--gh-bin",
+            str(fake_gh),
+            "--poll",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "AOE_FAKE_ARTIFACT_SOURCE": str(artifact_dir)},
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["github_download"]["run_id"] == "987654321"
+    assert payload["copied_count"] == 3
+    assert payload["poll_result"]["completed_count"] == 1
+    assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"

@@ -214,8 +214,8 @@
 - remaining productization:
   - baseline SCM/GitHub workflow trigger bridge implemented
   - sidecar artifact import + local poll bridge implemented
+  - `gh run download` artifact retrieval + import bridge implemented
   - credentials / transport policy
-  - automated artifact retrieval outside a shared filesystem
   - issue/PR comment ergonomics
 
 ### 6.4 Fourth Block: Operational Hygiene
