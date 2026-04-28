@@ -373,10 +373,11 @@
       - GitHub runner credential/transport policy preflight and read-default workflow split
       - trusted issue/PR comment command bridge for artifact-only GitHub runner dispatch
       - worker workflow completion callback with run URL and artifact import command
+      - local `watch-github-artifact` run wait + artifact import orchestration
       - `local_tmux` followup-execute proof for B3/D3/R3/M3
     - 남은 것:
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
-      - automatic local import orchestration beyond GitHub-hosted artifact notification
+      - operator-free local import scheduling after GitHub dispatch
   - 최소 범위:
     - background queue
     - request-to-run audit trail

@@ -468,6 +468,8 @@
     - `scripts/gateway/aoe-external-sidecar-sync.py import-artifact --team-dir <team_dir> --artifact-root <artifact-dir-or-zip> --ticket-id <ticket> --runner github_runner --poll`
   - automated GitHub artifact retrieval path:
     - `scripts/gateway/aoe-external-sidecar-sync.py download-github-artifact --team-dir <team_dir> --run-id <run-id> --ticket-id <ticket> --runner github_runner --poll`
+  - automated GitHub run wait + artifact retrieval path:
+    - `scripts/gateway/aoe-external-sidecar-sync.py watch-github-artifact --team-dir <team_dir> --run-id <run-id> --ticket-id <ticket> --runner github_runner --poll`
   - imports only the expected ack/result/log filenames for the selected ticket and runner
   - refuses to overwrite existing sidecars unless `--overwrite` is provided
   - `--poll` runs the local external-ticket poller after import so task/runtime state can move to `pickup_acknowledged` or `result_received`
@@ -521,7 +523,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is automatic local import orchestration beyond GitHub-hosted artifact notification.
+- Remaining external runner productization work is operator-free local import scheduling that discovers the dispatched run and invokes local watch/import without manual command copying.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?
