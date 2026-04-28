@@ -445,6 +445,18 @@
   - `commit_results=true` is an explicit repository-write mode and is isolated to the `commit-result-sidecars` job with `contents:write`
   - the GitHub runner workflow rejects `team_dir` values that are absolute or contain parent-directory traversal
   - `bundle_b64` and `repository_dispatch` payloads are privileged operator-triggered inputs, not untrusted issue/PR comment text
+- Issue/PR comment bridge:
+  - `.github/workflows/external-background-comment.yml`
+  - trigger: `issue_comment.created`
+  - accepted trusted-author command:
+    - `/aoe bgx run <ticket_id> [--team-dir .aoe-team] [--timeout-sec 900] [--max-items 1]`
+  - trusted author associations:
+    - `OWNER`
+    - `MEMBER`
+    - `COLLABORATOR`
+  - parses comment JSON through `aoe-github-runner-bridge.py comment-dispatch`
+  - dispatches `external-background-worker.yml` through `gh workflow run`
+  - comment commands are artifact-only and reject `bundle_b64` / `commit_results`
 - Remaining sync boundary:
   - local control-plane polling needs the resulting sidecars imported or committed back into the project `team_dir`
   - artifact import path:
@@ -504,7 +516,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is issue/PR comment ergonomics.
+- Remaining external runner productization work is polishing richer status callbacks after workflow completion.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

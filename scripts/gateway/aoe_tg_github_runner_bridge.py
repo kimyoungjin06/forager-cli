@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from aoe_tg_artifact_backend import artifact_backend
 from aoe_tg_background_runs import (
@@ -22,6 +23,9 @@ GITHUB_RUNNER_BUNDLE_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_BUNDLE_KIND = "github_runner_worker_bundle"
 GITHUB_RUNNER_TRANSPORT_POLICY_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_TRANSPORT_POLICY_KIND = "github_runner_transport_policy"
+GITHUB_RUNNER_COMMENT_COMMAND_VERSION = "2026-04-28.v1"
+GITHUB_RUNNER_COMMENT_COMMAND_KIND = "github_runner_comment_command"
+TRUSTED_COMMENT_AUTHOR_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 def _trim(raw: Any, limit: int) -> str:
@@ -38,6 +42,25 @@ def _intish(raw: Any, default: int) -> int:
         return int(str(raw).strip())
     except Exception:
         return default
+
+
+def _safe_ticket_id(raw: Any) -> str:
+    token = _trim(raw, 96)
+    if not token:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
+    if not all(char in allowed for char in token):
+        return ""
+    return token
+
+
+def _safe_comment_team_dir(raw: Any) -> str:
+    token = _trim(raw, 160) or ".aoe-team"
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-")
+    path = Path(token).expanduser()
+    if path.is_absolute() or ".." in path.parts or not all(char in allowed for char in token):
+        return ""
+    return token
 
 
 def _resolve_team_dir(raw: Path | str) -> Path:
@@ -91,7 +114,7 @@ def build_github_runner_transport_policy(
                 "detail": "team_dir must be relative and must not contain parent-directory traversal",
             }
         )
-    if event and event not in {"workflow_dispatch", "repository_dispatch"}:
+    if event and event not in {"workflow_dispatch", "repository_dispatch", "issue_comment"}:
         warnings.append(
             {
                 "code": "unknown_event_name",
@@ -152,6 +175,225 @@ def build_github_runner_transport_policy(
             f"team_dir={raw_team_dir}"
         ),
     }
+
+
+def _find_aoe_comment_command_line(body: str) -> str:
+    for line in str(body or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("/aoe "):
+            return stripped
+    return ""
+
+
+def _parse_option_value(token: str, prefix: str) -> str:
+    if token.startswith(prefix + "="):
+        return token.split("=", 1)[1].strip()
+    return ""
+
+
+def _github_runner_comment_help(reason: str = "help_requested") -> Dict[str, Any]:
+    response = "\n".join(
+        [
+            "AOE external runner comment command:",
+            "",
+            "`/aoe bgx run <ticket_id> [--team-dir .aoe-team] [--timeout-sec 900] [--max-items 1]`",
+            "",
+            "Comment commands are artifact-only and do not accept `bundle_b64` or `commit_results`.",
+        ]
+    )
+    return {
+        "ok": False,
+        "command_seen": True,
+        "should_comment": True,
+        "action": "help",
+        "reason": reason,
+        "response_markdown": response,
+    }
+
+
+def _blocked_comment_command(*, reason: str, detail: str = "") -> Dict[str, Any]:
+    lines = ["AOE external runner dispatch was not started.", "", f"- reason: `{reason}`"]
+    if detail:
+        lines.append(f"- detail: {detail}")
+    return {
+        "ok": False,
+        "command_seen": True,
+        "should_comment": True,
+        "action": "blocked",
+        "reason": reason,
+        "detail": detail,
+        "response_markdown": "\n".join(lines),
+    }
+
+
+def _parse_github_runner_comment_tokens(tokens: List[str]) -> Dict[str, Any]:
+    if len(tokens) < 2 or tokens[0] != "/aoe":
+        return _blocked_comment_command(reason="invalid_command", detail="command must start with `/aoe`")
+    if tokens[1:] in (["bgx", "help"], ["external", "help"], ["github-runner", "help"]):
+        return _github_runner_comment_help()
+    if len(tokens) < 4 or tokens[1:3] not in (["bgx", "run"], ["external", "run"], ["github-runner", "run"]):
+        return _github_runner_comment_help(reason="unsupported_command")
+
+    ticket_id = _safe_ticket_id(tokens[3])
+    if not ticket_id:
+        return _blocked_comment_command(reason="invalid_ticket_id", detail="ticket_id must be a short safe token")
+
+    values = {
+        "ticket_id": ticket_id,
+        "runner_target": "github_runner",
+        "team_dir": ".aoe-team",
+        "timeout_sec": "900",
+        "max_items": "1",
+    }
+    rest = tokens[4:]
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        if token in {"--commit-results", "--commit_results"} or token.startswith("--commit-results="):
+            return _blocked_comment_command(
+                reason="commit_results_not_allowed",
+                detail="issue/PR comments dispatch artifact-only runs; use workflow_dispatch for repository-write mode",
+            )
+        if token in {"--bundle-b64", "--bundle_b64"} or token.startswith("--bundle-b64="):
+            return _blocked_comment_command(
+                reason="bundle_not_allowed",
+                detail="bundle_b64 is a privileged operator payload and is not accepted from comments",
+            )
+        matched = False
+        for option, key in (
+            ("--team-dir", "team_dir"),
+            ("--timeout-sec", "timeout_sec"),
+            ("--max-items", "max_items"),
+        ):
+            inline = _parse_option_value(token, option)
+            if inline:
+                values[key] = inline
+                matched = True
+                break
+            if token == option:
+                if index + 1 >= len(rest):
+                    return _blocked_comment_command(reason="missing_option_value", detail=f"{option} requires a value")
+                values[key] = rest[index + 1]
+                index += 1
+                matched = True
+                break
+        if not matched:
+            return _blocked_comment_command(reason="unknown_option", detail=f"unsupported option `{token}`")
+        index += 1
+    team_dir = _safe_comment_team_dir(values.get("team_dir", ""))
+    if not team_dir:
+        return _blocked_comment_command(reason="invalid_team_dir", detail="team_dir must be a safe relative checkout path")
+    values["team_dir"] = team_dir
+    return {"ok": True, "values": values}
+
+
+def build_github_runner_comment_dispatch(event: Dict[str, Any]) -> Dict[str, Any]:
+    comment = event.get("comment") if isinstance(event.get("comment"), dict) else {}
+    issue = event.get("issue") if isinstance(event.get("issue"), dict) else {}
+    repository = event.get("repository") if isinstance(event.get("repository"), dict) else {}
+    command_line = _find_aoe_comment_command_line(str(comment.get("body", "")))
+    if not command_line:
+        return {
+            "version": GITHUB_RUNNER_COMMENT_COMMAND_VERSION,
+            "kind": GITHUB_RUNNER_COMMENT_COMMAND_KIND,
+            "ok": False,
+            "command_seen": False,
+            "should_comment": False,
+            "action": "ignore",
+            "reason": "no_aoe_command",
+        }
+
+    try:
+        tokens = shlex.split(command_line)
+    except ValueError as exc:
+        parsed = _blocked_comment_command(reason="parse_error", detail=str(exc))
+    else:
+        parsed = _parse_github_runner_comment_tokens(tokens)
+
+    association = _trim(comment.get("author_association", ""), 40).upper()
+    trusted = association in TRUSTED_COMMENT_AUTHOR_ASSOCIATIONS
+    if parsed.get("ok") and not trusted:
+        parsed = _blocked_comment_command(
+            reason="unauthorized_author_association",
+            detail=f"author_association={association or '-'} is not allowed to dispatch external runners",
+        )
+
+    result: Dict[str, Any] = {
+        "version": GITHUB_RUNNER_COMMENT_COMMAND_VERSION,
+        "kind": GITHUB_RUNNER_COMMENT_COMMAND_KIND,
+        "command_seen": True,
+        "command_line": command_line,
+        "author_association": association,
+        "trusted_author": trusted,
+        "issue_number": int(issue.get("number") or 0),
+        "is_pull_request": isinstance(issue.get("pull_request"), dict),
+        "repository": _trim(repository.get("full_name", ""), 160),
+    }
+    if not parsed.get("ok"):
+        result.update(parsed)
+        return result
+
+    values = dict(parsed.get("values") or {})
+    policy = build_github_runner_transport_policy(
+        runner_target=values.get("runner_target", "github_runner"),
+        team_dir=values.get("team_dir", ".aoe-team"),
+        event_name="issue_comment",
+        commit_results=False,
+        bundle_present=False,
+        timeout_sec=values.get("timeout_sec", "900"),
+        max_items=values.get("max_items", "1"),
+    )
+    if not policy.get("ok"):
+        result.update(
+            _blocked_comment_command(
+                reason="transport_policy_rejected",
+                detail=", ".join(
+                    str(item.get("code", "")).strip()
+                    for item in policy.get("violations", [])
+                    if item.get("code")
+                ),
+            )
+        )
+        result["policy"] = policy
+        return result
+
+    workflow_inputs = {
+        "runner_target": "github_runner",
+        "team_dir": str(values.get("team_dir", ".aoe-team")),
+        "ticket_id": str(values.get("ticket_id", "")),
+        "timeout_sec": str(policy.get("timeout_sec", 900)),
+        "max_items": str(policy.get("max_items", 1)),
+        "commit_results": "false",
+    }
+    response = "\n".join(
+        [
+            "AOE external runner dispatch accepted.",
+            "",
+            f"- ticket: `{workflow_inputs['ticket_id']}`",
+            f"- team_dir: `{workflow_inputs['team_dir']}`",
+            "- transport: Actions artifact",
+            "- workflow: `external-background-worker.yml`",
+            "",
+            (
+                "After the workflow run completes, import the artifact with "
+                "`aoe-external-sidecar-sync.py download-github-artifact --run-id <run-id> "
+                f"--ticket-id {workflow_inputs['ticket_id']} --runner github_runner --poll`."
+            ),
+        ]
+    )
+    result.update(
+        {
+            "ok": True,
+            "should_comment": True,
+            "action": "dispatch_external_worker",
+            "reason": "accepted",
+            "workflow": "external-background-worker.yml",
+            "workflow_inputs": workflow_inputs,
+            "policy": policy,
+            "response_markdown": response,
+        }
+    )
+    return result
 
 
 def build_github_runner_worker_bundle(

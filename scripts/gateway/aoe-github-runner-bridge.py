@@ -14,6 +14,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from aoe_tg_github_runner_bridge import (  # noqa: E402
+    build_github_runner_comment_dispatch,
     build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
     decode_github_runner_worker_bundle,
@@ -46,6 +47,11 @@ def _build_parser() -> argparse.ArgumentParser:
     policy.add_argument("--bundle-present", default="false")
     policy.add_argument("--timeout-sec", default="900")
     policy.add_argument("--max-items", default="1")
+
+    comment = subparsers.add_parser("comment-dispatch", help="parse an issue/PR comment into safe workflow inputs")
+    comment.add_argument("--event-path", required=True, help="GitHub issue_comment event JSON path")
+    comment.add_argument("--github-output", default="", help="Optional GITHUB_OUTPUT file path")
+    comment.add_argument("--response-file", default="", help="Optional markdown response file path")
     return parser
 
 
@@ -55,6 +61,36 @@ def _read_bundle_b64(args: argparse.Namespace) -> str:
     if str(args.bundle_file or "").strip():
         return Path(args.bundle_file).expanduser().read_text(encoding="utf-8").strip()
     raise ValueError("--bundle-b64 or --bundle-file is required")
+
+
+def _write_github_output(path: str, result: dict) -> None:
+    if not str(path or "").strip():
+        return
+    workflow_inputs = result.get("workflow_inputs") if isinstance(result.get("workflow_inputs"), dict) else {}
+    rows = {
+        "ok": "true" if result.get("ok") else "false",
+        "command_seen": "true" if result.get("command_seen") else "false",
+        "should_comment": "true" if result.get("should_comment") else "false",
+        "reason": str(result.get("reason", "")).strip(),
+        "workflow": str(result.get("workflow", "")).strip(),
+        "runner_target": str(workflow_inputs.get("runner_target", "")).strip(),
+        "team_dir": str(workflow_inputs.get("team_dir", "")).strip(),
+        "ticket_id": str(workflow_inputs.get("ticket_id", "")).strip(),
+        "timeout_sec": str(workflow_inputs.get("timeout_sec", "")).strip(),
+        "max_items": str(workflow_inputs.get("max_items", "")).strip(),
+        "commit_results": str(workflow_inputs.get("commit_results", "false")).strip() or "false",
+    }
+    with Path(path).expanduser().open("a", encoding="utf-8") as handle:
+        for key, value in rows.items():
+            handle.write(f"{key}={value}\n")
+
+
+def _write_response_file(path: str, result: dict) -> None:
+    if not str(path or "").strip():
+        return
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(str(result.get("response_markdown", "")).strip() + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,6 +129,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result.get("ok") else 1
+        if args.command == "comment-dispatch":
+            event = json.loads(Path(args.event_path).expanduser().read_text(encoding="utf-8"))
+            if not isinstance(event, dict):
+                raise ValueError("event JSON must be an object")
+            result = build_github_runner_comment_dispatch(event)
+            _write_response_file(args.response_file, result)
+            _write_github_output(args.github_output, result)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -91,6 +91,9 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-github-runner-bridge.py export-bundle --team-dir <team_dir> --ticket-id <ticket>`
 - policy preflight:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe-github-runner-bridge.py policy-check --runner github_runner --team-dir <team_dir> --event-name workflow_dispatch --bundle-present true`
+- issue/PR comment trigger:
+`/aoe bgx run <ticket_id> [--team-dir .aoe-team] [--timeout-sec 900] [--max-items 1]`
+- comment trigger is trusted-author and artifact-only; it does not accept `bundle_b64` or `commit_results`.
 - workflow pickup uploads ack/result/log sidecars as an Actions artifact.
 - default workflow transport is artifact-only with `contents:read`; `commit_results=true` uses the separate write-permission commit job.
 - sidecar import after downloading the artifact:

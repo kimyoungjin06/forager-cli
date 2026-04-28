@@ -371,10 +371,11 @@
       - external sidecar artifact import + local poll bridge
       - `gh run download` external sidecar retrieval bridge
       - GitHub runner credential/transport policy preflight and read-default workflow split
+      - trusted issue/PR comment command bridge for artifact-only GitHub runner dispatch
       - `local_tmux` followup-execute proof for B3/D3/R3/M3
     - 남은 것:
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
-      - issue/PR ergonomics
+      - richer external workflow completion/status callbacks
   - 최소 범위:
     - background queue
     - request-to-run audit trail
