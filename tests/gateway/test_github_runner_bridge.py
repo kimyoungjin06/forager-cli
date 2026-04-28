@@ -449,6 +449,8 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
 
     assert "workflow_dispatch:" in workflow
     assert "repository_dispatch:" in workflow
+    assert "run-name:" in workflow
+    assert "external-background-" in workflow
     assert "aoe-external-background-worker" in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "commit-result-sidecars:" in workflow

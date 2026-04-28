@@ -42,6 +42,7 @@ truth:
 - `.aoe-team/telegram_gateway_state.json`
 - `.aoe-team/background_runs.json`
 - `.aoe-team/background_worker.json`
+- `.aoe-team/github_external_imports.json`
 - `.aoe-team/provider_capacity.json`
 - `.aoe-team/control/`
 - `.aoe-team/dashboard/`
