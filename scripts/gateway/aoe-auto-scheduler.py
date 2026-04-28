@@ -22,12 +22,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from aoe_tg_external_sidecar_sync import (
+    drain_scheduled_github_external_sidecar_imports,
+    github_external_imports_path,
+    load_github_external_imports_state,
+)
 
 DEFAULT_INTERVAL_SEC = 2.0
 DEFAULT_IDLE_SEC = 20.0
 DEFAULT_PREFETCH_MIN_INTERVAL_SEC = 60.0
 DEFAULT_PREFETCH_SINCE = "12h"
 DEFAULT_MAX_FAILURES = 3
+DEFAULT_GITHUB_IMPORT_DRAIN_INTERVAL_SEC = 15.0
+DEFAULT_GITHUB_IMPORT_DRAIN_MAX_ITEMS = 1
 PROVIDER_CAPACITY_STATE_FILE = "provider_capacity.json"
 
 
@@ -528,6 +535,139 @@ def _auto_max_failures(auto_state: Dict[str, Any], fallback: int) -> int:
     return max(1, min(50, int(val)))
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _float_setting(auto_state: Dict[str, Any], key: str, env_name: str, fallback: float, *, minimum: float, maximum: float) -> float:
+    raw = auto_state.get(key)
+    if raw in (None, ""):
+        raw = os.environ.get(env_name, "")
+    try:
+        value = float(raw)
+    except Exception:
+        value = float(fallback)
+    return max(float(minimum), min(float(maximum), value))
+
+
+def _int_setting(auto_state: Dict[str, Any], key: str, env_name: str, fallback: int, *, minimum: int, maximum: int) -> int:
+    raw = auto_state.get(key)
+    if raw in (None, ""):
+        raw = os.environ.get(env_name, "")
+    try:
+        value = int(float(raw))
+    except Exception:
+        value = int(fallback)
+    return max(int(minimum), min(int(maximum), int(value)))
+
+
+def _pending_github_import_count(team_dir: Path) -> int:
+    path = github_external_imports_path(team_dir)
+    if not path.exists():
+        return 0
+    state = load_github_external_imports_state(path)
+    count = 0
+    for row in list(state.get("imports") or []):
+        if str(row.get("status", "")).strip().lower() in {"pending", "retry"}:
+            count += 1
+    return count
+
+
+def _drain_github_imports_tick(
+    *,
+    team_dir: Path,
+    auto_state: Dict[str, Any],
+    auto_state_path: Path,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    if _bool_env("AOE_AUTO_GITHUB_IMPORT_DRAIN", True) is False:
+        return {"ran": False, "reason": "disabled"}
+    pending_count = _pending_github_import_count(team_dir)
+    if pending_count <= 0:
+        return {"ran": False, "reason": "no_pending", "pending_count": 0}
+
+    now_ts = time.time()
+    interval_sec = _float_setting(
+        auto_state,
+        "github_import_drain_interval_sec",
+        "AOE_AUTO_GITHUB_IMPORT_DRAIN_INTERVAL_SEC",
+        DEFAULT_GITHUB_IMPORT_DRAIN_INTERVAL_SEC,
+        minimum=1.0,
+        maximum=3600.0,
+    )
+    try:
+        last_ts = float(auto_state.get("last_github_import_drain_ts") or 0.0)
+    except Exception:
+        last_ts = 0.0
+    if last_ts > 0 and (now_ts - last_ts) < interval_sec:
+        return {
+            "ran": False,
+            "reason": "throttled",
+            "pending_count": pending_count,
+            "next_in_sec": max(0.0, interval_sec - (now_ts - last_ts)),
+        }
+
+    max_items = _int_setting(
+        auto_state,
+        "github_import_drain_max_items",
+        "AOE_AUTO_GITHUB_IMPORT_DRAIN_MAX_ITEMS",
+        DEFAULT_GITHUB_IMPORT_DRAIN_MAX_ITEMS,
+        minimum=1,
+        maximum=10,
+    )
+    timeout_sec = _int_setting(
+        auto_state,
+        "github_import_drain_timeout_sec",
+        "AOE_AUTO_GITHUB_IMPORT_DRAIN_TIMEOUT_SEC",
+        0,
+        minimum=0,
+        maximum=3600,
+    )
+    interval_wait_sec = _float_setting(
+        auto_state,
+        "github_import_drain_watch_interval_sec",
+        "AOE_AUTO_GITHUB_IMPORT_DRAIN_WATCH_INTERVAL_SEC",
+        0.0,
+        minimum=0.0,
+        maximum=300.0,
+    )
+    result = drain_scheduled_github_external_sidecar_imports(
+        team_dir=team_dir,
+        max_items=max_items,
+        poll_after_import=True,
+        timeout_sec=timeout_sec,
+        interval_sec=interval_wait_sec,
+    )
+    auto_state["last_github_import_drain_ts"] = int(now_ts)
+    auto_state["last_github_import_drain_at"] = _now_iso()
+    auto_state["last_github_import_pending_count"] = int(result.get("pending_count", pending_count) or 0)
+    auto_state["last_github_import_processed_count"] = int(result.get("processed_count", 0) or 0)
+    auto_state["last_github_import_completed_count"] = int(result.get("completed_count", 0) or 0)
+    auto_state["last_github_import_failed_count"] = int(result.get("failed_count", 0) or 0)
+    auto_state["last_github_import_drain_reason"] = "ok" if result.get("ok") else "failed"
+    if not result.get("ok"):
+        auto_state["last_reason"] = "github_import_drain_failed"
+    _save_json(auto_state_path, auto_state)
+    if verbose:
+        print(
+            "[AUTO] github-import-drain: "
+            f"processed={result.get('processed_count', 0)} "
+            f"completed={result.get('completed_count', 0)} "
+            f"pending={result.get('pending_count', 0)} "
+            f"failed={result.get('failed_count', 0)}",
+            flush=True,
+        )
+    return {
+        "ran": True,
+        "reason": "drained",
+        "pending_count": pending_count,
+        "result": result,
+    }
+
+
 def _load_gateway_module(gateway_path: Path) -> Any:
     sys.path.insert(0, str(gateway_path.parent.resolve()))
     spec = importlib.util.spec_from_file_location("aoe_telegram_gateway", str(gateway_path))
@@ -750,6 +890,18 @@ def main() -> int:
         prefetch_since = _auto_prefetch_since(auto_state, DEFAULT_PREFETCH_SINCE)
         interval_sec = _auto_interval(auto_state, float(args0.interval_sec))
         idle_sec = _auto_idle(auto_state, float(args0.idle_sec))
+        try:
+            drain_result = _drain_github_imports_tick(
+                team_dir=team_dir,
+                auto_state=auto_state,
+                auto_state_path=auto_state_path,
+                verbose=bool(args0.verbose),
+            )
+            if drain_result.get("ran"):
+                auto_state = _load_json(auto_state_path)
+        except Exception as exc:
+            if args0.verbose:
+                print(f"[AUTO] github-import-drain failed: {exc}", flush=True)
 
         try:
             manager_state = gw.load_manager_state(gw_args.manager_state_file, gw_args.project_root, gw_args.team_dir)

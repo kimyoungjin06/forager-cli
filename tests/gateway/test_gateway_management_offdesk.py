@@ -1478,6 +1478,36 @@ def test_auto_status_shows_next_retry_at_when_rate_limited_work_is_waiting(tmp_p
     assert "- next_retry_target: O1 T-201 providers=codex,claude degraded=claude_rate_limit->codex" in text
 
 
+def test_auto_status_surfaces_github_import_drain_summary(tmp_path: Path) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "auto_scheduler.json").write_text(
+        json.dumps(
+            {
+                "enabled": False,
+                "chat_id": "939062873",
+                "command": "next",
+                "last_github_import_drain_at": "2026-04-28T11:30:00+0900",
+                "last_github_import_drain_reason": "ok",
+                "last_github_import_processed_count": 1,
+                "last_github_import_completed_count": 1,
+                "last_github_import_pending_count": 0,
+                "last_github_import_failed_count": "bad-value",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state = gw.default_manager_state(tmp_path, team_dir)
+
+    text = _call_management_status(tmp_path=tmp_path, manager_state=state, cmd="auto", rest="status")
+
+    assert "- github_import_drain_at: 2026-04-28T11:30:00+0900" in text
+    assert "- github_import_drain: processed=1 completed=1 pending=0 failed=0 reason=ok" in text
+
+
 def test_auto_status_short_compacts_failure_reason_and_uses_ops_summary(tmp_path: Path) -> None:
     team_dir = tmp_path / ".aoe-team"
     team_dir.mkdir(parents=True, exist_ok=True)
@@ -2916,6 +2946,135 @@ def test_auto_prefetch_plan_uses_incremental_files_and_recent_when_replace_disab
         ("/sync files all since 3h quiet", "files"),
         ("/sync salvage all since 3h quiet", "salvage"),
     ]
+
+
+def test_auto_scheduler_github_import_drain_skips_without_pending_state(tmp_path: Path, monkeypatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    auto_state_path = team_dir / "auto_scheduler.json"
+    monkeypatch.setenv("AOE_AUTO_GITHUB_IMPORT_DRAIN", "1")
+
+    result = auto_sched._drain_github_imports_tick(
+        team_dir=team_dir,
+        auto_state={},
+        auto_state_path=auto_state_path,
+    )
+
+    assert result == {"ran": False, "reason": "no_pending", "pending_count": 0}
+    assert not auto_state_path.exists()
+
+
+def test_auto_scheduler_github_import_drain_throttles_pending_state(tmp_path: Path, monkeypatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "github_external_imports.json").write_text(
+        json.dumps(
+            {
+                "version": "2026-04-28.v1",
+                "imports": [
+                    {
+                        "status": "pending",
+                        "ticket_id": "BGT-GHA-AUTO-001",
+                        "runner_target": "github_runner",
+                        "run_id": "123",
+                        "repo": "acme/aoe",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AOE_AUTO_GITHUB_IMPORT_DRAIN", "1")
+    monkeypatch.setattr(auto_sched.time, "time", lambda: 1000.0)
+
+    result = auto_sched._drain_github_imports_tick(
+        team_dir=team_dir,
+        auto_state={
+            "last_github_import_drain_ts": 995,
+            "github_import_drain_interval_sec": 15,
+        },
+        auto_state_path=team_dir / "auto_scheduler.json",
+    )
+
+    assert result["ran"] is False
+    assert result["reason"] == "throttled"
+    assert result["pending_count"] == 1
+    assert 9.0 <= result["next_in_sec"] <= 10.0
+
+
+def test_auto_scheduler_github_import_drain_updates_auto_state(tmp_path: Path, monkeypatch) -> None:
+    team_dir = tmp_path / ".aoe-team"
+    team_dir.mkdir(parents=True, exist_ok=True)
+    (team_dir / "github_external_imports.json").write_text(
+        json.dumps(
+            {
+                "version": "2026-04-28.v1",
+                "imports": [
+                    {
+                        "status": "retry",
+                        "ticket_id": "BGT-GHA-AUTO-001",
+                        "runner_target": "github_runner",
+                        "run_id": "123",
+                        "repo": "acme/aoe",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    calls: list[dict] = []
+    monkeypatch.setenv("AOE_AUTO_GITHUB_IMPORT_DRAIN", "1")
+    monkeypatch.setattr(auto_sched.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(auto_sched, "_now_iso", lambda: "2026-04-28T11:30:00+0900")
+    monkeypatch.setattr(
+        auto_sched,
+        "drain_scheduled_github_external_sidecar_imports",
+        lambda **kwargs: calls.append(kwargs)
+        or {
+            "ok": True,
+            "processed_count": 1,
+            "completed_count": 1,
+            "pending_count": 0,
+            "failed_count": 0,
+        },
+    )
+    auto_state_path = team_dir / "auto_scheduler.json"
+
+    result = auto_sched._drain_github_imports_tick(
+        team_dir=team_dir,
+        auto_state={
+            "github_import_drain_max_items": 2,
+            "github_import_drain_timeout_sec": 30,
+            "github_import_drain_watch_interval_sec": 0.5,
+        },
+        auto_state_path=auto_state_path,
+    )
+    saved = json.loads(auto_state_path.read_text(encoding="utf-8"))
+
+    assert result["ran"] is True
+    assert result["reason"] == "drained"
+    assert calls == [
+        {
+            "team_dir": team_dir,
+            "max_items": 2,
+            "poll_after_import": True,
+            "timeout_sec": 30,
+            "interval_sec": 0.5,
+        }
+    ]
+    assert saved["last_github_import_drain_ts"] == 2000
+    assert saved["last_github_import_drain_at"] == "2026-04-28T11:30:00+0900"
+    assert saved["last_github_import_pending_count"] == 0
+    assert saved["last_github_import_processed_count"] == 1
+    assert saved["last_github_import_completed_count"] == 1
+    assert saved["last_github_import_failed_count"] == 0
+    assert saved["last_github_import_drain_reason"] == "ok"
 
 
 def test_auto_scheduler_tracks_next_rate_limited_retry_at() -> None:
