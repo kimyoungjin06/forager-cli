@@ -1,0 +1,51 @@
+{
+  "version": "2026-04-07.v1",
+  "emitted_at": "2026-04-28T22:10:00+09:00",
+  "runner_target": "github_runner",
+  "ticket_id": "BGT-GHA-LIVE-20260428-001",
+  "request_id": "REQ-GHA-LIVE-20260428-001",
+  "project_key": "aoe_orch_control",
+  "launch_mode": "comment_flow_live_smoke",
+  "source_surface": "github_issue_comment_live_smoke",
+  "created_by": "codex",
+  "launch_spec": {
+    "version": "2026-04-06.v1",
+    "runner_target": "github_runner",
+    "spec_id": "BLS-REQ-GHA-LIVE-20260428-001",
+    "kind": "background_dispatch",
+    "mode": "github_action_json",
+    "entrypoint": "aoe-background-worker",
+    "command_cwd": ".",
+    "project_root": ".",
+    "team_dir": ".aoe-team",
+    "manager_state_file": ".aoe-team/orch_manager_state.json",
+    "request_id": "REQ-GHA-LIVE-20260428-001",
+    "project_key": "aoe_orch_control",
+    "launch_mode": "comment_flow_live_smoke",
+    "source_surface": "github_issue_comment_live_smoke",
+    "created_by": "codex",
+    "env_keys": [
+      "AOE_TEAM_DIR",
+      "AOE_STATE_DIR",
+      "GITHUB_TOKEN",
+      "GITHUB_REPOSITORY"
+    ],
+    "argv": [
+      "worker-run",
+      "--runner",
+      "github_runner"
+    ],
+    "command_argv": [
+      "python3",
+      "-c",
+      "from pathlib import Path; Path('tmp/github_comment_live_smoke.txt').parent.mkdir(parents=True, exist_ok=True); Path('tmp/github_comment_live_smoke.txt').write_text('ok\\n', encoding='utf-8'); print('aoe github comment live smoke ok')"
+    ],
+    "externalizable": true,
+    "summary": "background_dispatch | mode=github_action_json | entry=aoe-background-worker | externalizable=yes",
+    "model_worker_probe_status": "unbound",
+    "model_worker_probe_summary": "bg=unbound:qwen3-coder"
+  },
+  "task_runtime": {
+    "execution_brief_status": "executable"
+  }
+}
