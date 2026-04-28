@@ -25,6 +25,7 @@ import aoe_tg_operator_preferences as operator_preferences
 import aoe_tg_history_search as history_search
 import aoe_tg_chat_aliases as chat_aliases
 import aoe_tg_chat_state as chat_state
+import aoe_tg_external_sidecar_sync as external_sidecar_sync
 import aoe_tg_room_handlers as room_handlers
 import aoe_tg_task_state as task_state
 import aoe_tg_task_view as task_view
@@ -560,6 +561,80 @@ def _background_worker_summary_text(runtime_cards: list[RuntimeCardDTO]) -> str:
     return " | ".join(parts) or "-"
 
 
+def _int_or_zero(raw: Any) -> int:
+    try:
+        return int(raw or 0)
+    except Exception:
+        return 0
+
+
+def _github_import_row_sort_key(row: Dict[str, Any]) -> str:
+    return (
+        str(row.get("updated_at", "")).strip()
+        or str(row.get("failed_at", "")).strip()
+        or str(row.get("completed_at", "")).strip()
+        or str(row.get("created_at", "")).strip()
+    )
+
+
+def _github_import_row_label(row: Dict[str, Any]) -> str:
+    ticket_id = str(row.get("ticket_id", "")).strip() or "-"
+    runner = str(row.get("runner_target", "")).strip() or "-"
+    run_id = str(row.get("run_id", "")).strip() or "-"
+    attempts = _int_or_zero(row.get("attempts"))
+    reason = str(row.get("last_reason", "")).strip() or "-"
+    return f"{ticket_id}/{runner} run={run_id} attempts={attempts} reason={reason}"
+
+
+def _github_import_dashboard_summary(team_dir: Path) -> Tuple[Dict[str, str], FileFreshnessDTO]:
+    path = external_sidecar_sync.github_external_imports_path(team_dir)
+    _raw_state, freshness = _load_json_file(path, name="github_external_imports")
+    state = external_sidecar_sync.load_github_external_imports_state(path)
+    rows = [row for row in list(state.get("imports") or []) if isinstance(row, dict)]
+    counts: Dict[str, int] = {}
+    for row in rows:
+        status = str(row.get("status", "")).strip().lower() or "unknown"
+        counts[status] = int(counts.get(status, 0) or 0) + 1
+    if not rows:
+        return (
+            {
+                "summary": "-",
+                "failure_summary": "-",
+                "state_path": str(path),
+                "updated_at": str(state.get("updated_at", "")).strip() or freshness.updated_at or "-",
+            },
+            freshness,
+        )
+    status_order = ("pending", "retry", "completed", "failed")
+    parts = [f"total={len(rows)}"]
+    parts.extend(f"{status}={counts[status]}" for status in status_order if counts.get(status))
+    for status in sorted(counts.keys()):
+        if status not in status_order:
+            parts.append(f"{status}={counts[status]}")
+    pending_rows = sorted(
+        [row for row in rows if str(row.get("status", "")).strip().lower() in {"pending", "retry"}],
+        key=_github_import_row_sort_key,
+        reverse=True,
+    )
+    if pending_rows:
+        parts.append(f"next={_github_import_row_label(pending_rows[0])}")
+    failed_rows = sorted(
+        [row for row in rows if str(row.get("status", "")).strip().lower() == "failed"],
+        key=_github_import_row_sort_key,
+        reverse=True,
+    )
+    failures = " | ".join(_github_import_row_label(row) for row in failed_rows[:3]) if failed_rows else "-"
+    return (
+        {
+            "summary": " | ".join(parts),
+            "failure_summary": failures,
+            "state_path": str(path),
+            "updated_at": str(state.get("updated_at", "")).strip() or freshness.updated_at or "-",
+        },
+        freshness,
+    )
+
+
 def resolve_task_request_for_alias(manager_state: Dict[str, Any], project_alias: str, task_short_id: str) -> str:
     projects = manager_state.get("projects") if isinstance(manager_state.get("projects"), dict) else {}
     alias_token = str(project_alias or "").strip().upper()
@@ -614,6 +689,7 @@ def load_dashboard_snapshot_result(
     manager_loaded = _load_manager_state(paths)
     auto_state, auto_freshness = _load_json_file(paths.auto_state_file, name="auto_state")
     provider_state, provider_freshness = _load_json_file(paths.provider_capacity_file, name="provider_capacity")
+    github_import, github_import_freshness = _github_import_dashboard_summary(paths.team_dir)
     latest_intent, latest_intent_freshness, gateway_events_freshness = _load_latest_command_resolution(
         paths.latest_intent_file,
         paths.gateway_events_file,
@@ -666,6 +742,10 @@ def load_dashboard_snapshot_result(
         execution_brief_summary=_execution_brief_summary_text(runtime_cards),
         background_run_summary=_background_run_summary_text(runtime_cards),
         background_worker_summary=_background_worker_summary_text(runtime_cards),
+        github_import_summary=str(github_import.get("summary", "")).strip() or "-",
+        github_import_failure_summary=str(github_import.get("failure_summary", "")).strip() or "-",
+        github_import_state_path=str(github_import.get("state_path", "")).strip() or "-",
+        github_import_updated_at=str(github_import.get("updated_at", "")).strip() or "-",
         latest_intent_command=str(latest_intent.get("command", "")).strip() or "-",
         latest_intent_action=str(latest_intent.get("action", "")).strip() or "-",
         latest_intent_trace=str(latest_intent.get("trace", "")).strip() or "-",
@@ -696,6 +776,7 @@ def load_dashboard_snapshot_result(
                 manager_loaded.freshness,
                 auto_freshness,
                 provider_freshness,
+                github_import_freshness,
                 latest_intent_freshness,
                 *([gateway_events_freshness] if gateway_events_freshness is not None else []),
                 action_audit_freshness,

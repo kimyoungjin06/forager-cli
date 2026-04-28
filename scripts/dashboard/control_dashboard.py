@@ -139,6 +139,10 @@ def build_dashboard_response(raw_path: str, config: DashboardAppConfig) -> Tuple
                 "server_guard_latest_action_path": snapshot.control_summary.server_guard_latest_action_path,
                 "server_guard_latest_result_summary": snapshot.control_summary.server_guard_latest_result_summary,
                 "server_guard_latest_result_path": snapshot.control_summary.server_guard_latest_result_path,
+                "github_import_summary": snapshot.control_summary.github_import_summary,
+                "github_import_failure_summary": snapshot.control_summary.github_import_failure_summary,
+                "github_import_state_path": snapshot.control_summary.github_import_state_path,
+                "github_import_updated_at": snapshot.control_summary.github_import_updated_at,
             }
         )
 
