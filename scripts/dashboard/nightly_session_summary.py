@@ -118,6 +118,24 @@ def _runtime_subagent_gate_summary(detail: RuntimeDetailDTO) -> str:
     )
 
 
+def _compact_string_items(raw: Any, *, limit: int = 6) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    items: List[str] = []
+    for item in raw:
+        value = str(item).strip()
+        if not value:
+            continue
+        items.append(value)
+        if len(items) >= max(1, int(limit)):
+            break
+    return items
+
+
+def _compact_joined_items(raw: Any, *, limit: int = 6) -> str:
+    return " | ".join(_compact_string_items(raw, limit=limit)) or "-"
+
+
 def _task_summary_dict(task: TaskDetailDTO) -> Dict[str, Any]:
     return {
         "request_id": task.request_id,
@@ -375,6 +393,7 @@ def build_nightly_session_summary(
                 "active_task_background_run_model_plan_summary": detail.active_task_background_run_model_plan_summary,
                 "workspace_summary": detail.workspace_summary,
                 "document_registry_summary": detail.document_registry_summary,
+                "document_flow": asdict(detail.document_flow),
                 "latest_judge_summary": _latest_judge_summary(snapshot.team_dir, detail.project_alias),
                 "latest_judge_decision_summary": _latest_judge_decision_summary(snapshot.team_dir, detail.project_alias),
                 "latest_judge_decision_bridge_summary": _latest_judge_decision_bridge_summary(snapshot.team_dir, detail.project_alias),
@@ -608,6 +627,24 @@ def render_nightly_session_summary(summary: Dict[str, Any]) -> str:
                 f"- repeat_memory: {runtime.get('repeat_summary', '-')}",
             ]
         )
+        document_flow = runtime.get("document_flow") if isinstance(runtime.get("document_flow"), dict) else {}
+        if document_flow:
+            drift_level = str(document_flow.get("drift_level", "")).strip() or "none"
+            drift_reasons = _compact_joined_items(document_flow.get("drift_reasons"), limit=6)
+            drift_summary = drift_level if drift_reasons == "-" else f"{drift_level} | {drift_reasons}"
+            lines.extend(
+                [
+                    f"- doc_flow: {str(document_flow.get('summary', '')).strip() or '-'}",
+                    f"- doc_flow_drift: {drift_summary}",
+                    f"- doc_flow_objective: {str(document_flow.get('objective', '')).strip() or '-'}",
+                    f"- doc_flow_next: {_compact_joined_items(document_flow.get('next_steps'), limit=4)}",
+                    f"- doc_flow_latest_tf: {str(document_flow.get('latest_tf_report_path', '')).strip() or '-'}",
+                    f"- doc_flow_open_tf: {_compact_joined_items(document_flow.get('open_tf_ids'), limit=6)}",
+                    f"- doc_flow_closed_tf: {_compact_joined_items(document_flow.get('recent_closed_tf_ids'), limit=6)}",
+                    f"- doc_flow_stale_refs: {_compact_joined_items(document_flow.get('stale_doc_refs'), limit=4)}",
+                    f"- doc_flow_artifact: {str(document_flow.get('artifact_path', '')).strip() or '-'}",
+                ]
+            )
         operator_hints = runtime.get("operator_hints") if isinstance(runtime.get("operator_hints"), list) else []
         phase2_actions = runtime.get("phase2_actions") if isinstance(runtime.get("phase2_actions"), list) else []
         if operator_hints:

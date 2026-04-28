@@ -167,9 +167,13 @@
   - evidence refs
 
 ### 9.2 Recovery
-- blocked runtime rows may show:
-  - `doc drift: ...`
-  - `latest TF: ...`
+- nightly summary runtime rows include `document_flow` JSON and compact markdown excerpts:
+  - `doc_flow`
+  - `doc_flow_drift`
+  - `doc_flow_objective`
+  - `doc_flow_next`
+  - `doc_flow_latest_tf`
+- dashboard recovery rebuilds the read-only `Document Flow` fold from the latest nightly artifact.
 
 ### 9.3 History Search
 - Phase 2:
@@ -194,6 +198,7 @@
 5. add dashboard `Document Flow` card to runtime detail
    - implemented in `templates/dashboard/runtime_detail.html`
 6. add drift warning excerpts to recovery
+   - implemented in nightly summary JSON/markdown and `/control/recovery`
 7. later consider optional rendered `flow.md`
 
 ## 12. Guardrails

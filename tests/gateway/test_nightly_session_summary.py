@@ -18,12 +18,18 @@ for path in (GW_DIR, DASH_DIR, TEST_DIR):
 import aoe_tg_action_audit as action_audit  # noqa: E402
 import control_dashboard_server_guard as server_guard  # noqa: E402
 import nightly_session_summary as nightly_summary  # noqa: E402
-from test_control_dashboard import _build_runtime, _mark_task_planning_gate_blocked, _persist_general_subagent_artifact  # noqa: E402
+from test_control_dashboard import (  # noqa: E402
+    _build_runtime,
+    _mark_task_planning_gate_blocked,
+    _persist_general_subagent_artifact,
+    _write_project_flow_fixture,
+)
 
 
 def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    _write_project_flow_fixture(project_root)
     monkeypatch.setattr(server_guard, "_proc_counts", lambda: {"total": 320, "python": 24, "tmux": 3, "codex": 75})
     state = json.loads(manager_state_file.read_text(encoding="utf-8"))
     task = state["projects"]["alpha"]["tasks"]["REQ-1"]
@@ -235,6 +241,10 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     )
     assert runtimes[0]["latest_subagent_gate_summary"] == "subagent_gate=vendor notes still need a local delta check"
     assert runtimes[0]["active_task_general_subagent_gate_summary"] == "subagent_gate=vendor notes still need a local delta check"
+    assert runtimes[0]["document_flow"]["drift_level"] == "none"
+    assert runtimes[0]["document_flow"]["objective"] == "Connect document flow to runtime detail."
+    assert runtimes[0]["document_flow"]["next_steps"] == ["TODO-001: Render Document Flow card"]
+    assert runtimes[0]["document_flow"]["latest_tf_report_path"] == "docs/investigations_mo/projects/O2/tfs/TF-002/report.md"
     assert "/monitor O2" in runtimes[0]["operator_hints"]
     assert "/offdesk review O2" in runtimes[0]["operator_hints"]
     assert runtimes[0]["active_task_phase2_actions"] == []
@@ -264,6 +274,10 @@ def test_build_nightly_session_summary_uses_runtime_state_contract(tmp_path: Pat
     assert "preference_candidates: preference_candidates=legend_position=bottom" in rendered
     assert "subagent_evidence=general_research | confidence=high | sources=2 | findings=2 | blocking=1" in rendered
     assert "subagent_gate=vendor notes still need a local delta check" in rendered
+    assert "- doc_flow: alias=O2 status=active drift=none" in rendered
+    assert "- doc_flow_objective: Connect document flow to runtime detail." in rendered
+    assert "- doc_flow_next: TODO-001: Render Document Flow card" in rendered
+    assert "- doc_flow_latest_tf: docs/investigations_mo/projects/O2/tfs/TF-002/report.md" in rendered
     assert "latest_planning_review_summary" not in runtimes[0]
     assert runtimes[0]["latest_replan_auto_route_summary"] == "Replan Auto Route | applied | next=/retry T-001 | retry_command=/retry T-001"
     assert runtimes[0]["latest_replan_auto_route_status_summary"] == "ready+applied=/retry T-001 | at=2026-04-09T11:06:00+09:00"

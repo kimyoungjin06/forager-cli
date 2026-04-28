@@ -41,7 +41,14 @@ from control_dashboard_state_common import (
     _worker_update_proposal_accept_button,
 )
 from control_dashboard_state_io import FileFreshnessDTO
-from control_dashboard_state_models import RecoveryRuntimeDTO, RecoverySummaryDTO, RecoveryTaskDTO, ServerGuardActionDTO, ServerGuardDTO
+from control_dashboard_state_models import (
+    DocumentFlowDTO,
+    RecoveryRuntimeDTO,
+    RecoverySummaryDTO,
+    RecoveryTaskDTO,
+    ServerGuardActionDTO,
+    ServerGuardDTO,
+)
 
 
 def _server_guard_from_recovery_control(control: Dict[str, Any]) -> ServerGuardDTO:
@@ -118,6 +125,47 @@ def _recovery_latest_planning_compact_summary(row: Dict[str, Any]) -> str:
 
 def _legacy_recovery_latest_planning_compact_summary(row: Dict[str, Any]) -> str:
     return str(row.get("latest_planning_review_summary", "")).strip()
+
+
+def _recovery_string_list(raw: Any, *, limit: int = 8) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    items: List[str] = []
+    for item in raw:
+        value = str(item).strip()
+        if not value:
+            continue
+        items.append(value)
+        if len(items) >= max(1, int(limit)):
+            break
+    return items
+
+
+def _document_flow_from_recovery(row: Dict[str, Any]) -> DocumentFlowDTO:
+    raw = row.get("document_flow") if isinstance(row.get("document_flow"), dict) else {}
+    if not raw:
+        return DocumentFlowDTO()
+    return DocumentFlowDTO(
+        summary=str(raw.get("summary", "")).strip() or "-",
+        artifact_path=str(raw.get("artifact_path", "")).strip(),
+        compiled_at=str(raw.get("compiled_at", "")).strip(),
+        drift_level=str(raw.get("drift_level", "")).strip() or "none",
+        drift_reasons=_recovery_string_list(raw.get("drift_reasons"), limit=12),
+        runtime_status=str(raw.get("runtime_status", "")).strip() or "-",
+        active_requests=_recovery_string_list(raw.get("active_requests"), limit=12),
+        latest_runtime_phase=str(raw.get("latest_runtime_phase", "")).strip() or "-",
+        objective=str(raw.get("objective", "")).strip() or "-",
+        next_steps=_recovery_string_list(raw.get("next_steps"), limit=8),
+        open_decisions=_recovery_string_list(raw.get("open_decisions"), limit=8),
+        blockers=_recovery_string_list(raw.get("blockers"), limit=8),
+        ongoing_doc_path=str(raw.get("ongoing_doc_path", "")).strip(),
+        note_doc_path=str(raw.get("note_doc_path", "")).strip(),
+        latest_tf_report_path=str(raw.get("latest_tf_report_path", "")).strip(),
+        open_tf_ids=_recovery_string_list(raw.get("open_tf_ids"), limit=12),
+        recent_closed_tf_ids=_recovery_string_list(raw.get("recent_closed_tf_ids"), limit=8),
+        stale_doc_refs=_recovery_string_list(raw.get("stale_doc_refs"), limit=12),
+        evidence_refs=_recovery_string_list(raw.get("evidence_refs"), limit=12),
+    )
 
 
 def _build_recovery_task_rows(
@@ -778,6 +826,7 @@ def _build_recovery_runtime_rows(
                 active_task_backend=str(row.get("active_task_backend", "")).strip() or "-",
                 active_task_backend_note=str(row.get("active_task_backend_note", "")).strip(),
                 active_task_rate_limit=active_rate_limit,
+                document_flow=_document_flow_from_recovery(row),
                 runtime_command_hints=list(runtime_action_contract.get("safe") or []),
                 runtime_phase2_action_hints=list(runtime_action_contract.get("phase2") or []),
                 active_task_command_hints=list(active_task_action_contract.get("safe") or []),
