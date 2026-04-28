@@ -218,6 +218,7 @@
   - baseline credentials / transport policy implemented
   - baseline issue/PR comment ergonomics implemented
   - baseline workflow completion callback implemented
+  - baseline local run wait + artifact import orchestration implemented
 
 ### 6.4 Fourth Block: Operational Hygiene
 4. `Retention And Disk Hygiene`

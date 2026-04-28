@@ -22,6 +22,7 @@ from aoe_tg_external_sidecar_sync import (
     default_github_actions_artifact_name,
     download_and_import_github_external_sidecars,
     import_external_background_sidecars,
+    watch_and_import_github_external_sidecars,
 )
 from aoe_tg_external_worker_runtime import external_background_log_path
 from aoe_tg_request_contract import build_background_run_ticket, build_runner_background_launch_spec
@@ -325,6 +326,186 @@ def test_external_sidecar_sync_cli_downloads_github_artifact_with_fake_gh(tmp_pa
     assert proc.returncode == 0
     payload = json.loads(proc.stdout)
     assert payload["github_download"]["run_id"] == "987654321"
+    assert payload["copied_count"] == 3
+    assert payload["poll_result"]["completed_count"] == 1
+    assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"
+
+
+def test_watch_and_import_github_external_sidecars_waits_for_completion_then_polls(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    artifact_dir = tmp_path / "downloaded-artifact"
+    ticket_id = "BGT-GHA-WATCH-001"
+    queue_path = _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="github_runner")
+    _write_remote_sidecars(artifact_team_dir=artifact_dir, ticket_id=ticket_id, runner_target="github_runner")
+    commands: list[list[str]] = []
+    view_calls = 0
+
+    def _fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal view_calls
+        commands.append(command)
+        if command[:3] == ["gh", "run", "view"]:
+            view_calls += 1
+            status = "completed" if view_calls == 2 else "in_progress"
+            conclusion = "success" if status == "completed" else None
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "status": status,
+                        "conclusion": conclusion,
+                        "url": "https://github.com/acme/aoe/actions/runs/123456789",
+                        "databaseId": 123456789,
+                    }
+                ),
+                stderr="",
+            )
+        if command[:3] == ["gh", "run", "download"]:
+            download_dir = Path(command[command.index("--dir") + 1])
+            download_dir.mkdir(parents=True, exist_ok=True)
+            for child in artifact_dir.iterdir():
+                target = download_dir / child.name
+                if child.is_dir():
+                    shutil.copytree(child, target)
+                else:
+                    shutil.copy2(child, target)
+            return subprocess.CompletedProcess(command, 0, stdout="downloaded\n", stderr="")
+        return subprocess.CompletedProcess(command, 2, stdout="", stderr="unexpected command")
+
+    result = watch_and_import_github_external_sidecars(
+        team_dir=team_dir,
+        run_id="123456789",
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+        repo="acme/aoe",
+        poll_after_import=True,
+        now_iso=_fixed_now,
+        timeout_sec=30,
+        interval_sec=0,
+        command_runner=_fake_runner,
+        sleeper=lambda _: None,
+    )
+
+    assert result["ok"] is True
+    assert result["github_watch"]["attempts"] == 2
+    assert result["github_watch"]["conclusion"] == "success"
+    assert commands[0][:4] == ["gh", "run", "view", "123456789"]
+    assert commands[-1][:4] == ["gh", "run", "download", "123456789"]
+    assert result["copied_count"] == 3
+    assert result["poll_result"]["completed_count"] == 1
+    assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"
+
+
+def test_watch_and_import_github_external_sidecars_times_out_without_downloading(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    ticket_id = "BGT-GHA-WATCH-TIMEOUT-001"
+    _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="github_runner")
+    commands: list[list[str]] = []
+
+    def _fake_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "status": "in_progress",
+                    "conclusion": None,
+                    "url": "https://github.com/acme/aoe/actions/runs/111",
+                    "databaseId": 111,
+                }
+            ),
+            stderr="",
+        )
+
+    result = watch_and_import_github_external_sidecars(
+        team_dir=team_dir,
+        run_id="111",
+        ticket_id=ticket_id,
+        runner_target="github_runner",
+        timeout_sec=0,
+        interval_sec=0,
+        command_runner=_fake_runner,
+        sleeper=lambda _: None,
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "github_run_timeout"
+    assert result["attempts"] == 1
+    assert commands == [["gh", "run", "view", "111", "--json", "status,conclusion,url,databaseId"]]
+
+
+def test_external_sidecar_sync_cli_watches_github_artifact_with_fake_gh(tmp_path: Path) -> None:
+    team_dir = tmp_path / "local" / ".aoe-team"
+    artifact_dir = tmp_path / "downloaded-artifact"
+    ticket_id = "BGT-REMOTE-GH-WATCH-001"
+    queue_path = _seed_local_running_ticket(team_dir=team_dir, ticket_id=ticket_id, runner_target="remote_worker")
+    _write_remote_sidecars(artifact_team_dir=artifact_dir, ticket_id=ticket_id, runner_target="remote_worker")
+    fake_gh = tmp_path / "fake-gh-watch"
+    fake_gh.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, os, pathlib, shutil, sys",
+                "args = sys.argv[1:]",
+                "if args[:2] == ['run', 'view']:",
+                "    print(json.dumps({",
+                "        'status': 'completed',",
+                "        'conclusion': 'success',",
+                "        'url': 'https://github.com/acme/aoe/actions/runs/2468',",
+                "        'databaseId': 2468,",
+                "    }))",
+                "    raise SystemExit(0)",
+                "if args[:2] != ['run', 'download']:",
+                "    raise SystemExit(2)",
+                "download_dir = pathlib.Path(args[args.index('--dir') + 1])",
+                "download_dir.mkdir(parents=True, exist_ok=True)",
+                "source = pathlib.Path(os.environ['AOE_FAKE_ARTIFACT_SOURCE'])",
+                "for child in source.iterdir():",
+                "    target = download_dir / child.name",
+                "    if child.is_dir():",
+                "        shutil.copytree(child, target)",
+                "    else:",
+                "        shutil.copy2(child, target)",
+                "print('fake download')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-external-sidecar-sync.py"),
+            "watch-github-artifact",
+            "--team-dir",
+            str(team_dir),
+            "--run-id",
+            "2468",
+            "--ticket-id",
+            ticket_id,
+            "--runner",
+            "remote_worker",
+            "--gh-bin",
+            str(fake_gh),
+            "--poll",
+            "--interval-sec",
+            "0",
+            "--timeout-sec",
+            "30",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "AOE_FAKE_ARTIFACT_SOURCE": str(artifact_dir)},
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["github_watch"]["run_id"] == "2468"
+    assert payload["github_watch"]["conclusion"] == "success"
     assert payload["copied_count"] == 3
     assert payload["poll_result"]["completed_count"] == 1
     assert load_background_runs_state(queue_path)["runs"][0]["status"] == "completed"

@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -295,6 +296,38 @@ def _default_download_command_runner(command: List[str]) -> subprocess.Completed
     )
 
 
+def _github_run_view_command(
+    *,
+    gh_bin: str,
+    run_id: str,
+    repo: str,
+) -> List[str]:
+    command = [
+        _trim(gh_bin, 120) or "gh",
+        "run",
+        "view",
+        run_id,
+        "--json",
+        "status,conclusion,url,databaseId",
+    ]
+    repo_token = _trim(repo, 180)
+    if repo_token:
+        command.extend(["--repo", repo_token])
+    return command
+
+
+def _parse_github_run_view(raw: str) -> Dict[str, Any]:
+    parsed = json.loads(raw or "{}")
+    if not isinstance(parsed, dict):
+        raise ValueError("run view JSON is not an object")
+    return {
+        "status": _trim(parsed.get("status", ""), 32).lower(),
+        "conclusion": _trim(parsed.get("conclusion", ""), 32).lower(),
+        "url": _trim(parsed.get("url", ""), 500),
+        "database_id": _trim(parsed.get("databaseId", ""), 80),
+    }
+
+
 def download_and_import_github_external_sidecars(
     *,
     team_dir: Path | str,
@@ -370,3 +403,125 @@ def download_and_import_github_external_sidecars(
             "download_stderr": stderr,
         }
         return imported
+
+
+def watch_and_import_github_external_sidecars(
+    *,
+    team_dir: Path | str,
+    run_id: str,
+    ticket_id: str,
+    runner_target: str = "github_runner",
+    artifact_name: str = "",
+    repo: str = "",
+    gh_bin: str = "gh",
+    overwrite: bool = False,
+    poll_after_import: bool = False,
+    timeout_sec: int = 900,
+    interval_sec: float = 10.0,
+    now_iso: Callable[[], str] = _now_iso,
+    command_runner: Callable[[List[str]], subprocess.CompletedProcess[str]] = _default_download_command_runner,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> Dict[str, Any]:
+    token = _trim(ticket_id, 96)
+    target = normalize_executor_runner_target(runner_target)
+    if target not in EXTERNAL_SIDECAR_RUNNERS:
+        return {"ok": False, "reason": "unsupported_runner", "runner_target": target}
+    run_token = _trim(run_id, 80)
+    if not run_token:
+        return {"ok": False, "reason": "run_id_required", "ticket_id": token, "runner_target": target}
+    if not token:
+        return {"ok": False, "reason": "ticket_id_required", "runner_target": target, "run_id": run_token}
+
+    timeout = max(0.0, float(timeout_sec))
+    interval = max(0.0, float(interval_sec))
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    latest_view: Dict[str, Any] = {}
+    latest_command: List[str] = []
+    repo_token = _trim(repo, 180)
+
+    while True:
+        attempts += 1
+        latest_command = _github_run_view_command(gh_bin=gh_bin, run_id=run_token, repo=repo_token)
+        proc = command_runner(latest_command)
+        returncode = int(getattr(proc, "returncode", 1) or 0)
+        stdout = _trim(getattr(proc, "stdout", ""), 4000)
+        stderr = _trim(getattr(proc, "stderr", ""), 4000)
+        if returncode != 0:
+            return {
+                "ok": False,
+                "reason": "gh_run_view_failed",
+                "ticket_id": token,
+                "runner_target": target,
+                "run_id": run_token,
+                "repo": repo_token,
+                "attempts": attempts,
+                "view_command": latest_command,
+                "view_returncode": returncode,
+                "view_stdout": stdout,
+                "view_stderr": stderr,
+            }
+        try:
+            latest_view = _parse_github_run_view(stdout)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "reason": "gh_run_view_json_invalid",
+                "ticket_id": token,
+                "runner_target": target,
+                "run_id": run_token,
+                "repo": repo_token,
+                "attempts": attempts,
+                "view_command": latest_command,
+                "view_stdout": stdout,
+                "view_stderr": stderr,
+                "error": type(exc).__name__,
+            }
+        if latest_view.get("status") == "completed":
+            imported = download_and_import_github_external_sidecars(
+                team_dir=team_dir,
+                run_id=run_token,
+                ticket_id=token,
+                runner_target=target,
+                artifact_name=artifact_name,
+                repo=repo_token,
+                gh_bin=gh_bin,
+                overwrite=overwrite,
+                poll_after_import=poll_after_import,
+                now_iso=now_iso,
+                command_runner=command_runner,
+            )
+            imported["github_watch"] = {
+                "run_id": run_token,
+                "repo": repo_token,
+                "attempts": attempts,
+                "timeout_sec": timeout,
+                "interval_sec": interval,
+                "view_command": latest_command,
+                "view": latest_view,
+                "status": latest_view.get("status", ""),
+                "conclusion": latest_view.get("conclusion", ""),
+                "url": latest_view.get("url", ""),
+            }
+            return imported
+
+        if time.monotonic() >= deadline:
+            return {
+                "ok": False,
+                "reason": "github_run_timeout",
+                "ticket_id": token,
+                "runner_target": target,
+                "run_id": run_token,
+                "repo": repo_token,
+                "attempts": attempts,
+                "timeout_sec": timeout,
+                "interval_sec": interval,
+                "view_command": latest_command,
+                "view": latest_view,
+                "status": latest_view.get("status", ""),
+                "conclusion": latest_view.get("conclusion", ""),
+                "url": latest_view.get("url", ""),
+            }
+        wait_for = min(interval if interval > 0 else 0.1, max(0.0, deadline - time.monotonic()))
+        if wait_for > 0:
+            sleeper(wait_for)
