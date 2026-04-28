@@ -9,17 +9,17 @@
   - `manual_followup`
   - `preview_surface`
 - status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - proof_mode:
-  - `bounded_replay`
+  - `live_rehearsal`
 - seed_gate:
   - `isolated data manual-followup seed creates concrete profiling artifacts and operator-owned business-rule remainder`
 - live_gate:
-  - `pending launch-bearing local_tmux followup-execute rehearsal`
+  - `satisfied: launch-bearing local_tmux followup-execute rehearsal completed with source manual-followup preserved`
 - current_fix_branch:
-  - `task/data-d3-manual-followup-seed-1`
+  - `task/data-d3-launch-followup-1`
 - executed_at:
-  - `2026-04-28T11:09:39+09:00`
+  - `2026-04-28T11:41:43+09:00`
 - operator:
   - `Codex`
 
@@ -27,9 +27,9 @@
 - request text:
   - `입력 CSV는 data/customer_events.csv이고 region_code 매핑에는 KR=Korea, US=United States만 확정되어 있다. EU와 APAC은 운영자가 비즈니스 기준으로 어느 reporting_region에 넣을지 결정해야 한다. 확정 매핑만 적용해 normalized_customers.csv와 data_profile.md를 만들고, 미확정 매핑은 business_rule_questions.md와 sample_ambiguous_rows.csv에 남겨라. EU/APAC 매핑 결정은 내가 판단해야 하므로 done으로 닫지 말고 manual follow-up으로 남겨라.`
 - normalized action:
-  - `dispatch_task`
+  - `followup_execute`
 - target runtime:
-  - `/tmp/aoe_d3_seed_check`
+  - `/tmp/d3_live_followup_20260428_launch2`
 
 ## 3. Expected Contract
 - expected preset:
@@ -72,6 +72,14 @@
   - `REQ-D3-001`
 - task_short_id:
   - `T-901`
+- child_task_short_id:
+  - `T-902`
+- child_request_id:
+  - `r_20260428113726_ccc9b925`
+- background_ticket:
+  - `BGT-REQ-D3-001-20260428113725.9379270900`
+- runner:
+  - `local_tmux`
 - planning:
   - `isolated runtime seeded via scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario d3`
 - execution brief:
@@ -89,9 +97,9 @@
   - verification:
     - `business_rule_questions.md keeps final mapping decision operator-owned`
   - integration:
-    - `not launched`
+    - `child T-902 integration closed done after execution critic success`
   - close:
-    - `not launched`
+    - `background ticket completed with exit_code=0`
 - critic/verifier verdict:
   - `manual_followup`
 - final branch:
@@ -102,6 +110,10 @@
   - `followup_brief_execution_lane_ids=["L2"] and followup_brief_review_lane_ids=["R1"]`
   - `exec_critic.manual_followup_execution_lane_ids=["L2"] and manual_followup_review_lane_ids=["R1"]`
   - `seeded artifacts include data/customer_events.csv, normalized_customers.csv, data_profile.md, business_rule_questions.md, and sample_ambiguous_rows.csv`
+  - `child task T-902 completed with roles=DataEngineer and verifier_roles=-`
+  - `child exec_critic=success action=none`
+  - `source task T-901 remained status=failed, team_phase=manual_intervention, followup_brief=partially_executable`
+  - `source reentry rails after queue sync: retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
 
 ## 5. Surface Evidence
 - `/task`:
@@ -114,7 +126,17 @@
   - `phase2_lane_state: exec pending=1 | review pending=1 | review_verdict fail=1`
   - `exec_manual_followup_targets: execution=L2 review=R1`
   - `followup_brief: partially_executable`
-  - `reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1`
+  - `background_run: completed`
+  - `background_run_evidence: status=completed | outcome=tmux_exit_code | exit_code=0 | log=background_run_logs/bgt-req-d3-001-20260428113725-9379270900.log`
+  - `reentry_rails: retry=none | followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
+- `/task T-902`:
+  - `status completed and team_phase completed`
+  - `context_lineage: followup <- REQ-D3-001`
+  - `roles: DataEngineer`
+  - `verifier_roles: -`
+  - `execution_brief: executable`
+  - `phase_checkpoint: status=done | current=done | plan=done | implement=done | verify=done | handoff=done`
+  - `exec_critic: success (action=none)`
 - `/followup`:
   - `manual follow-up task T-901`
   - `execution lanes: L2`
@@ -122,12 +144,13 @@
   - `reason: data profiling can rerun, but EU/APAC reporting_region mapping remains operator-owned`
 - `/offdesk review`:
   - `first action is /followup T-901 | data-manual-followup lane L2,R1`
-  - `attention includes run_lock:test_only and brief:partial`
+  - `attention includes brief:partial and task:manual_intervention`
+  - `proposal_top includes operator EU/APAC mapping decision and follow-up regeneration`
   - `does not redirect into done or generic retry`
 - `/orch status`:
-  - `run_lock=test_only`
+  - `run_lock=open`
   - `background_slots local_tmux=0/1`
-  - `background_queue depth=0`
+  - `background_queue depth=0 | status completed=1 | target local_tmux=1`
   - `background_runner pref=local_tmux | effective=local_background until an externalizable launch spec exists`
 - dashboard `Task Detail`:
   - `/control/tasks/by-request/REQ-D3-001`
@@ -136,33 +159,39 @@
 
 ## 6. Result
 - result:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - mismatch class:
-  - `launch_pending`
+  - `none`
 - mismatch notes:
-  - `D3 now has a concrete seed proving data manual-followup lane separation and operator-owned business-rule preservation`
-  - `the current proof is read-only/seed-bound under run_lock=test_only`
-  - `no launch-bearing background followup-exec ticket has been created yet`
+  - `launch-bearing D3 proof initially exposed two runtime gaps: followup child request-contract parsing did not inherit the source task's complete data contract, and source task background_run fields could remain stale after the queue ticket completed`
+  - `both gaps are now fixed in code: followup/retry/replan can reuse a complete source request contract, and task/status surfaces sync background ticket status plus reentry rails from background_runs.json`
+  - `worker initially attempted pandas, recovered to the standard csv module, regenerated all artifacts, and passed validation`
 - next fix:
-  - `launch /followup-exec T-901 lane L2 from an isolated D3 runtime with run_lock=open and promote to executed_done only if the background ticket closes while source task remains manual_followup with R1 visible`
+  - `promote the next unresolved non-review manual-followup candidate, likely mixed/M3`
 
 ## 7. Raw References
 - runtime state refs:
-  - `/tmp/aoe_d3_seed_check/.aoe-team/orch_manager_state.json`
+  - `/tmp/d3_live_followup_20260428_launch2/.aoe-team/orch_manager_state.json`
+  - `/tmp/d3_live_followup_20260428_launch2/Alpha/.aoe-team/background_runs.json`
 - log refs:
-  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario d3 --control-root /tmp/aoe_d3_seed_check --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
-  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d3_seed_check/Alpha --workspace-root /tmp/aoe_d3_seed_check --team-dir /tmp/aoe_d3_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d3_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/orch status O9'`
-  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d3_seed_check/Alpha --workspace-root /tmp/aoe_d3_seed_check --team-dir /tmp/aoe_d3_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d3_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/task T-901'`
-  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d3_seed_check/Alpha --workspace-root /tmp/aoe_d3_seed_check --team-dir /tmp/aoe_d3_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d3_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/followup T-901'`
-  - `surface command: python3 scripts/gateway/aoe-telegram-gateway.py --project-root /tmp/aoe_d3_seed_check/Alpha --workspace-root /tmp/aoe_d3_seed_check --team-dir /tmp/aoe_d3_seed_check/Alpha/.aoe-team --manager-state-file /tmp/aoe_d3_seed_check/.aoe-team/orch_manager_state.json --simulate-chat-id 939062873 --simulate-live --once --no-owner-only --no-deny-by-default --simulate-text '/offdesk review O9'`
+  - `seed command: python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario d3 --control-root /tmp/d3_live_followup_20260428_launch2 --run-lock-mode open --runner-target local_tmux --local-tmux-slot-limit 1`
+  - `trigger: dashboard followup-execute action with {"task_ref":"T-901","lane_ids":["L2"]}`
+  - `background result: /tmp/d3_live_followup_20260428_launch2/Alpha/.aoe-team/background_run_results/bgt-req-d3-001-20260428113725-9379270900.json`
+  - `background log: /tmp/d3_live_followup_20260428_launch2/Alpha/.aoe-team/background_run_logs/bgt-req-d3-001-20260428113725-9379270900.log`
+  - `surface command: /orch status O9`
+  - `surface command: /task T-901`
+  - `surface command: /task T-902`
+  - `surface command: /followup T-901`
+  - `surface command: /offdesk review O9`
 - regression refs:
   - `tests/gateway/test_live_rehearsal_seed.py::test_seed_d3_data_manual_followup_runtime_creates_business_rule_candidate`
+  - `tests/gateway/test_phase1_planning.py::test_followup_request_contract_reuses_complete_source_contract`
 - artifact refs:
-  - `/tmp/aoe_d3_seed_check/Alpha/data/customer_events.csv`
-  - `/tmp/aoe_d3_seed_check/Alpha/normalized_customers.csv`
-  - `/tmp/aoe_d3_seed_check/Alpha/data_profile.md`
-  - `/tmp/aoe_d3_seed_check/Alpha/business_rule_questions.md`
-  - `/tmp/aoe_d3_seed_check/Alpha/sample_ambiguous_rows.csv`
+  - `/tmp/d3_live_followup_20260428_launch2/Alpha/data/customer_events.csv`
+  - `/tmp/d3_live_followup_20260428_launch2/Alpha/normalized_customers.csv`
+  - `/tmp/d3_live_followup_20260428_launch2/Alpha/data_profile.md`
+  - `/tmp/d3_live_followup_20260428_launch2/Alpha/business_rule_questions.md`
+  - `/tmp/d3_live_followup_20260428_launch2/Alpha/sample_ambiguous_rows.csv`
 
 ## 8. Live Rehearsal Runbook
 - rehearsal scope:
@@ -170,11 +199,7 @@
 - safety posture:
   - use an isolated runtime
   - seed it with:
-    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario d3 --control-root tmp/d3_rehearsal --run-lock-mode test_only --runner-target local_tmux --local-tmux-slot-limit 1`
-  - temporarily set:
-    - `run_lock_mode=open`
-    - `background_runner_target=local_tmux`
-    - `background_runner_slot_limits.local_tmux=1`
+    - `python3 scripts/gateway/aoe_tg_live_rehearsal_seed.py --scenario d3 --control-root tmp/d3_rehearsal --run-lock-mode open --runner-target local_tmux --local-tmux-slot-limit 1`
 - preflight:
   - verify `/orch status O9` shows:
     - `run_lock=open`
@@ -195,5 +220,6 @@
   - background ticket completes with `exit_code=0`
   - source task remains `manual_intervention`
   - `reentry_rails_summary` remains on `followup=partially_executable exec=L2 review=R1`
+  - child followup task completes execution-only with `DataEngineer` and no verifier roles
   - review/manual remainder `R1` remains visible after launch
   - no generic retry branch replaces manual followup

@@ -129,11 +129,12 @@
 - intent:
   - transform requires operator business-rule judgment or source data interpretation
 - current status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - current finding:
-  - isolated seed proof creates a data manual-followup candidate with `L2 DataEngineer` execution and `R1 Codex-Reviewer` business-rule remainder
+  - launch-bearing `local_tmux` rehearsal proved `/followup-exec T-901 lane L2` can close with `exit_code=0`
+  - child task `T-902` completed execution-only as `DataEngineer` while source task `T-901` stayed on `manual_intervention`
   - `normalized_customers.csv` applies confirmed `KR`/`US` mappings while `business_rule_questions.md` and `sample_ambiguous_rows.csv` preserve `EU`/`APAC` ambiguity
-  - `/task`, `/followup`, and `/offdesk review` agree on `manual_intervention` and `followup=partially_executable exec=L2 review=R1`
+  - `/task`, `/followup`, `/offdesk review`, `/orch status`, and queue evidence agree on `manual_intervention` and `followup=partially_executable exec=L2 review=R1 | bg=completed/local_tmux`
 - expected branch:
   - `manual followup`
 - must prove:
@@ -300,7 +301,7 @@
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
 - current next non-review candidate:
-  - `D3`
+  - `M3`
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.

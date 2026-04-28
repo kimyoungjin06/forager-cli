@@ -1430,6 +1430,37 @@ def _lineage_preset(run_control_mode: str, run_source_task: Optional[Dict[str, A
     return ""
 
 
+def _lineage_request_contract_snapshot(
+    run_control_mode: str,
+    run_source_task: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if str(run_control_mode or "").strip().lower() not in {"retry", "replan", "followup"}:
+        return {}
+    if not isinstance(run_source_task, dict):
+        return {}
+
+    flat = {
+        "version": run_source_task.get("request_contract_version"),
+        "contract_type": run_source_task.get("request_contract_type"),
+        "preset": run_source_task.get("request_contract_preset"),
+        "status": run_source_task.get("request_contract_status"),
+        "summary": run_source_task.get("request_contract_summary"),
+        "missing_fields": run_source_task.get("request_contract_missing_fields"),
+        "required_outputs": run_source_task.get("request_contract_required_outputs"),
+        "fields": run_source_task.get("request_contract_fields"),
+        "artifact_contracts": run_source_task.get("request_contract_artifact_contracts"),
+        "source_prompt": run_source_task.get("prompt"),
+    }
+    plan = run_source_task.get("plan") if isinstance(run_source_task.get("plan"), dict) else {}
+    meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+    candidates = [flat, meta.get("request_contract")]
+    for raw in candidates:
+        snapshot = normalize_request_contract_snapshot(raw)
+        if str(snapshot.get("status", "")).strip().lower() == "complete":
+            return snapshot
+    return {}
+
+
 def resolve_request_contract_preset(
     *,
     source_prompt: str,
@@ -1580,6 +1611,17 @@ def build_request_contract(
     intent_action: str = "",
     project_key: str = "",
 ) -> Dict[str, Any]:
+    lineage_contract = _lineage_request_contract_snapshot(run_control_mode, run_source_task)
+    if lineage_contract:
+        contract = deepcopy(lineage_contract)
+        if source_prompt and not str(contract.get("source_prompt", "")).strip():
+            contract["source_prompt"] = _trim(source_prompt, 2000)
+        if source_prompt and not str(contract.get("objective", "")).strip():
+            contract["objective"] = _trim(source_prompt, 240)
+        contract["intent_action"] = _trim(intent_action, 64)
+        contract["project_key"] = _trim(project_key, 64)
+        return normalize_request_contract_snapshot(contract)
+
     resolved_preset = resolve_request_contract_preset(
         source_prompt=source_prompt,
         selected_roles=selected_roles,
