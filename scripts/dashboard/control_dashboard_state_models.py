@@ -422,6 +422,29 @@ class TaskDetailDTO(_PlanningCompactSummaryCompatMixin):
     phase2_action_buttons: List[ActionButtonDTO] = field(default_factory=list)
     reference_lines: List[str] = field(default_factory=list)
 
+
+@dataclass(frozen=True)
+class DocumentFlowDTO:
+    summary: str = "-"
+    artifact_path: str = ""
+    compiled_at: str = ""
+    drift_level: str = "none"
+    drift_reasons: List[str] = field(default_factory=list)
+    runtime_status: str = "-"
+    active_requests: List[str] = field(default_factory=list)
+    latest_runtime_phase: str = "-"
+    objective: str = "-"
+    next_steps: List[str] = field(default_factory=list)
+    open_decisions: List[str] = field(default_factory=list)
+    blockers: List[str] = field(default_factory=list)
+    ongoing_doc_path: str = ""
+    note_doc_path: str = ""
+    latest_tf_report_path: str = ""
+    open_tf_ids: List[str] = field(default_factory=list)
+    recent_closed_tf_ids: List[str] = field(default_factory=list)
+    stale_doc_refs: List[str] = field(default_factory=list)
+    evidence_refs: List[str] = field(default_factory=list)
+
 @dataclass(frozen=True)
 class RuntimeDetailDTO(
     _PlanningCompactSummaryCompatMixin,
@@ -595,6 +618,7 @@ class RuntimeDetailDTO(
     active_task_backend: str
     active_task_backend_note: str
     active_task_rate_limit: str
+    document_flow: DocumentFlowDTO = field(default_factory=DocumentFlowDTO)
     runtime_command_hints: List[str] = field(default_factory=list)
     runtime_phase2_action_hints: List[str] = field(default_factory=list)
     active_task_command_hints: List[str] = field(default_factory=list)

@@ -719,6 +719,95 @@ def _build_runtime(control_root: Path) -> tuple[Path, Path, Path]:
     return team_dir, manager_state_file, project_root
 
 
+def _write_project_flow_fixture(project_root: Path, *, project_alias: str = "O2") -> None:
+    registry_dir = project_root / "docs" / "investigations_mo" / "registry"
+    project_dir = project_root / "docs" / "investigations_mo" / "projects" / project_alias
+    tf_dir = project_dir / "tfs" / "TF-002"
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    tf_dir.mkdir(parents=True, exist_ok=True)
+    (registry_dir / "project_registry.md").write_text(
+        "\n".join(
+            [
+                "| project_alias | purpose | status | ongoing_doc | note_doc |",
+                "| --- | --- | --- | --- | --- |",
+                f"| {project_alias} | Alpha project flow | active | `docs/investigations_mo/projects/{project_alias}/ongoing.md` | `docs/investigations_mo/projects/{project_alias}/note.md` |",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (registry_dir / "project_lock.yaml").write_text(
+        "\n".join(
+            [
+                f"active_project: {project_alias}",
+                "active_tf: TF-002",
+                "active_paths:",
+                f"  project_ongoing: docs/investigations_mo/projects/{project_alias}/ongoing.md",
+                f"  project_note: docs/investigations_mo/projects/{project_alias}/note.md",
+                f"  tf_report: docs/investigations_mo/projects/{project_alias}/tfs/TF-002/report.md",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (registry_dir / "tf_registry.md").write_text(
+        "\n".join(
+            [
+                "| tf_id | project_alias | objective | status | exec_verdict | owner | created_at | closed_at | report_doc |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                f"| TF-001 | {project_alias} | Closed setup | closed | success | codex | 2026-04-01 | 2026-04-02 | `docs/investigations_mo/projects/{project_alias}/tfs/TF-001/report.md` |",
+                f"| TF-002 | {project_alias} | Dashboard card | running |  | codex | 2026-04-03 |  | `docs/investigations_mo/projects/{project_alias}/tfs/TF-002/report.md` |",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (registry_dir / "handoff_index.csv").write_text(
+        "project_alias,tf_id,request_id,status,report_doc\n"
+        f"{project_alias},TF-002,REQ-1,running,docs/investigations_mo/projects/{project_alias}/tfs/TF-002/report.md\n",
+        encoding="utf-8",
+    )
+    (registry_dir / "tf_close_index.csv").write_text(
+        "project_alias,tf_id,task_label,request_id,status,exec_verdict,closed_at,report_doc,archive_bundle\n"
+        f"{project_alias},TF-001,Closed setup,REQ-OLD,closed,success,2026-04-02,docs/investigations_mo/projects/{project_alias}/tfs/TF-001/report.md,\n",
+        encoding="utf-8",
+    )
+    (project_dir / "ongoing.md").write_text(
+        "\n".join(
+            [
+                f"# {project_alias}",
+                "",
+                "## Objective",
+                "- Connect document flow to runtime detail.",
+                "",
+                "## Todo Queue",
+                "| todo_id | summary | priority | status |",
+                "| --- | --- | --- | --- |",
+                "| TODO-001 | Render Document Flow card | P1 | open |",
+                "| TODO-002 | Close old setup note | P2 | closed |",
+                "",
+                "## Open Decisions",
+                "- Keep dashboard document flow read-only.",
+                "",
+                "## Blockers",
+                "- Recovery excerpt is still separate.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_dir / "note.md").write_text(
+        "## Accepted Project Decisions\n- Reuse Project Flow compiler output.\n",
+        encoding="utf-8",
+    )
+    (tf_dir / "report.md").write_text("## Outcome\n- Dashboard card wiring is in progress.\n", encoding="utf-8")
+    (project_dir / "tfs" / "TF-001").mkdir(parents=True, exist_ok=True)
+    (project_dir / "tfs" / "TF-001" / "report.md").write_text(
+        "## Outcome\n- Closed setup.\n",
+        encoding="utf-8",
+    )
+
+
 def _mark_task_planning_gate_blocked(task: dict) -> None:
     plan = task.get("plan") if isinstance(task.get("plan"), dict) else {}
     plan["subtasks"] = []
@@ -4497,6 +4586,49 @@ def test_control_dashboard_runtime_detail_route_renders_runtime_scope(tmp_path: 
     assert "action-section" in text
     assert "/task T-001" in text
     assert "/request REQ-1" in text
+
+
+def test_control_dashboard_runtime_detail_renders_document_flow_card(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, project_root = _build_runtime(control_root)
+    _write_project_flow_fixture(project_root)
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    snapshot, detail = dashboard_state.load_dashboard_runtime_page(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        project_alias="O2",
+    )
+    status, headers, body = dashboard_app.build_dashboard_response("/control/runtimes/O2", config)
+    text = body.decode("utf-8")
+
+    assert snapshot.control_summary.active_runtime_count >= 1
+    assert detail is not None
+    assert detail.document_flow.summary.startswith("alias=O2 status=active drift=none")
+    assert detail.document_flow.drift_level == "none"
+    assert detail.document_flow.objective == "Connect document flow to runtime detail."
+    assert detail.document_flow.next_steps == ["TODO-001: Render Document Flow card"]
+    assert detail.document_flow.latest_tf_report_path == "docs/investigations_mo/projects/O2/tfs/TF-002/report.md"
+    assert detail.document_flow.open_tf_ids == ["TF-002"]
+    assert detail.document_flow.recent_closed_tf_ids == ["TF-001"]
+    assert "registry: docs/investigations_mo/registry/project_registry.md" in detail.document_flow.evidence_refs
+    assert "runtime_request: REQ-1" in detail.document_flow.evidence_refs
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert "Document Flow" in text
+    assert "Connect document flow to runtime detail." in text
+    assert "TODO-001: Render Document Flow card" in text
+    assert "Keep dashboard document flow read-only." in text
+    assert "Recovery excerpt is still separate." in text
+    assert "project-flow/O2/latest.json" in text
+    assert "docs/investigations_mo/projects/O2/tfs/TF-002/report.md" in text
 
 
 def test_control_dashboard_runtime_detail_surfaces_model_routing_summary(tmp_path: Path) -> None:

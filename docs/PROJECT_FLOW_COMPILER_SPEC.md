@@ -192,6 +192,7 @@
 4. emit `.aoe-team/project-flow/<project_alias>/latest.json`
    - implemented via artifact backend `write_project_flow`
 5. add dashboard `Document Flow` card to runtime detail
+   - implemented in `templates/dashboard/runtime_detail.html`
 6. add drift warning excerpts to recovery
 7. later consider optional rendered `flow.md`
 
