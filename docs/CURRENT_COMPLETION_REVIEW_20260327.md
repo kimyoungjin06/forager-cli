@@ -170,7 +170,7 @@
   - doc/runtime drift excerpts are present in nightly summary and recovery
 - external runner productionization:
   - `github_runner` / `remote_worker` lifecycle is now backed by worker-run pickup, ack/result/log sidecars, and artifact import
-  - baseline issue/PR comment trigger ergonomics are implemented for trusted artifact-only GitHub runner dispatch
+  - baseline issue/PR comment trigger and completion callback ergonomics are implemented for trusted artifact-only GitHub runner dispatch
 - governance / permissions / usage:
   - owner-only safety baseline exists
   - usage reporting, budget boundaries, and secret-redaction surfaces remain open
@@ -217,6 +217,7 @@
   - `gh run download` artifact retrieval + import bridge implemented
   - baseline credentials / transport policy implemented
   - baseline issue/PR comment ergonomics implemented
+  - baseline workflow completion callback implemented
 
 ### 6.4 Fourth Block: Operational Hygiene
 4. `Retention And Disk Hygiene`

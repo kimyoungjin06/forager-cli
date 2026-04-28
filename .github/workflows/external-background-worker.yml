@@ -40,6 +40,11 @@ on:
         required: true
         default: false
         type: boolean
+      comment_issue_number:
+        description: "Optional issue/PR number to receive workflow completion status"
+        required: false
+        default: ""
+        type: string
   repository_dispatch:
     types:
       - aoe-external-background-worker
@@ -190,3 +195,50 @@ jobs:
           fi
           git commit -m "Record external background worker result ${AOE_TICKET_ID:-batch}"
           git push
+
+  comment-worker-result:
+    name: comment-worker-result
+    needs: worker-run
+    if: ${{ always() && ((github.event_name == 'repository_dispatch' && github.event.client_payload.comment_issue_number != null && github.event.client_payload.comment_issue_number != '') || (github.event_name == 'workflow_dispatch' && inputs.comment_issue_number != '')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    env:
+      AOE_RUNNER_TARGET: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.runner_target || inputs.runner_target || 'github_runner' }}
+      AOE_TEAM_DIR: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.team_dir || inputs.team_dir || '.aoe-team' }}
+      AOE_TICKET_ID: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ticket_id || inputs.ticket_id || '' }}
+      AOE_COMMENT_ISSUE_NUMBER: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.comment_issue_number || inputs.comment_issue_number || '' }}
+      AOE_WORKER_RESULT: ${{ needs.worker-run.result }}
+      AOE_ARTIFACT_NAME: aoe-external-background-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.runner_target || inputs.runner_target || 'github_runner' }}-${{ github.event_name == 'repository_dispatch' && github.event.client_payload.ticket_id || inputs.ticket_id || github.run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build completion comment
+        run: |
+          python3 scripts/gateway/aoe-github-runner-bridge.py completion-comment \
+            --ticket-id "$AOE_TICKET_ID" \
+            --runner "$AOE_RUNNER_TARGET" \
+            --team-dir "$AOE_TEAM_DIR" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --artifact-name "$AOE_ARTIFACT_NAME" \
+            --worker-result "$AOE_WORKER_RESULT" \
+            --comment-issue-number "$AOE_COMMENT_ISSUE_NUMBER" \
+            --response-file "$RUNNER_TEMP/aoe-worker-completion.md"
+
+      - name: Comment worker result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "$AOE_COMMENT_ISSUE_NUMBER" \
+            --body-file "$RUNNER_TEMP/aoe-worker-completion.md"

@@ -457,6 +457,11 @@
   - parses comment JSON through `aoe-github-runner-bridge.py comment-dispatch`
   - dispatches `external-background-worker.yml` through `gh workflow run`
   - comment commands are artifact-only and reject `bundle_b64` / `commit_results`
+  - passes `comment_issue_number` into the worker workflow so completion can be reported back to the same thread
+- Completion callback:
+  - `external-background-worker.yml` runs `comment-worker-result` when `comment_issue_number` is present
+  - the callback posts the worker result, workflow run URL, artifact name, and exact `download-github-artifact --poll` import command
+  - the callback uses a separate `issues:write` job so the worker job remains `contents:read` by default
 - Remaining sync boundary:
   - local control-plane polling needs the resulting sidecars imported or committed back into the project `team_dir`
   - artifact import path:
@@ -516,7 +521,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is polishing richer status callbacks after workflow completion.
+- Remaining external runner productization work is automatic local import orchestration beyond GitHub-hosted artifact notification.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

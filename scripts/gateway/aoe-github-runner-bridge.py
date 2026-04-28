@@ -14,6 +14,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from aoe_tg_github_runner_bridge import (  # noqa: E402
+    build_github_runner_completion_comment,
     build_github_runner_comment_dispatch,
     build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
@@ -52,6 +53,17 @@ def _build_parser() -> argparse.ArgumentParser:
     comment.add_argument("--event-path", required=True, help="GitHub issue_comment event JSON path")
     comment.add_argument("--github-output", default="", help="Optional GITHUB_OUTPUT file path")
     comment.add_argument("--response-file", default="", help="Optional markdown response file path")
+
+    completion = subparsers.add_parser("completion-comment", help="build a worker completion comment body")
+    completion.add_argument("--ticket-id", required=True)
+    completion.add_argument("--runner", default="github_runner")
+    completion.add_argument("--team-dir", default=".aoe-team")
+    completion.add_argument("--run-id", required=True)
+    completion.add_argument("--run-url", default="")
+    completion.add_argument("--artifact-name", default="")
+    completion.add_argument("--worker-result", default="")
+    completion.add_argument("--comment-issue-number", default="")
+    completion.add_argument("--response-file", default="", help="Optional markdown response file path")
     return parser
 
 
@@ -79,6 +91,7 @@ def _write_github_output(path: str, result: dict) -> None:
         "timeout_sec": str(workflow_inputs.get("timeout_sec", "")).strip(),
         "max_items": str(workflow_inputs.get("max_items", "")).strip(),
         "commit_results": str(workflow_inputs.get("commit_results", "false")).strip() or "false",
+        "comment_issue_number": str(workflow_inputs.get("comment_issue_number", "")).strip(),
     }
     with Path(path).expanduser().open("a", encoding="utf-8") as handle:
         for key, value in rows.items():
@@ -138,6 +151,20 @@ def main(argv: list[str] | None = None) -> int:
             _write_github_output(args.github_output, result)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
+        if args.command == "completion-comment":
+            result = build_github_runner_completion_comment(
+                ticket_id=args.ticket_id,
+                runner_target=args.runner,
+                team_dir=args.team_dir,
+                run_id=args.run_id,
+                run_url=args.run_url,
+                artifact_name=args.artifact_name,
+                worker_result=args.worker_result,
+                comment_issue_number=args.comment_issue_number,
+            )
+            _write_response_file(args.response_file, result)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("ok") else 1
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

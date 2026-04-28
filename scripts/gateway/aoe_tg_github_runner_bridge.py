@@ -25,6 +25,8 @@ GITHUB_RUNNER_TRANSPORT_POLICY_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_TRANSPORT_POLICY_KIND = "github_runner_transport_policy"
 GITHUB_RUNNER_COMMENT_COMMAND_VERSION = "2026-04-28.v1"
 GITHUB_RUNNER_COMMENT_COMMAND_KIND = "github_runner_comment_command"
+GITHUB_RUNNER_COMPLETION_COMMENT_VERSION = "2026-04-28.v1"
+GITHUB_RUNNER_COMPLETION_COMMENT_KIND = "github_runner_completion_comment"
 TRUSTED_COMMENT_AUTHOR_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
@@ -61,6 +63,14 @@ def _safe_comment_team_dir(raw: Any) -> str:
     if path.is_absolute() or ".." in path.parts or not all(char in allowed for char in token):
         return ""
     return token
+
+
+def _safe_issue_number(raw: Any) -> int:
+    token = _trim(raw, 20)
+    if not token or not token.isdigit():
+        return 0
+    value = int(token)
+    return value if value > 0 else 0
 
 
 def _resolve_team_dir(raw: Path | str) -> Path:
@@ -364,6 +374,7 @@ def build_github_runner_comment_dispatch(event: Dict[str, Any]) -> Dict[str, Any
         "timeout_sec": str(policy.get("timeout_sec", 900)),
         "max_items": str(policy.get("max_items", 1)),
         "commit_results": "false",
+        "comment_issue_number": str(result.get("issue_number", 0) or ""),
     }
     response = "\n".join(
         [
@@ -374,11 +385,7 @@ def build_github_runner_comment_dispatch(event: Dict[str, Any]) -> Dict[str, Any
             "- transport: Actions artifact",
             "- workflow: `external-background-worker.yml`",
             "",
-            (
-                "After the workflow run completes, import the artifact with "
-                "`aoe-external-sidecar-sync.py download-github-artifact --run-id <run-id> "
-                f"--ticket-id {workflow_inputs['ticket_id']} --runner github_runner --poll`."
-            ),
+            "When the workflow finishes, this thread will receive the run link and artifact import command.",
         ]
     )
     result.update(
@@ -394,6 +401,90 @@ def build_github_runner_comment_dispatch(event: Dict[str, Any]) -> Dict[str, Any
         }
     )
     return result
+
+
+def build_github_runner_completion_comment(
+    *,
+    ticket_id: str,
+    runner_target: str = "github_runner",
+    team_dir: str = ".aoe-team",
+    run_id: str,
+    run_url: str,
+    artifact_name: str = "",
+    worker_result: str = "",
+    comment_issue_number: Any = "",
+) -> Dict[str, Any]:
+    issue_number = _safe_issue_number(comment_issue_number)
+    token = _safe_ticket_id(ticket_id)
+    target = normalize_executor_runner_target(runner_target, "github_runner")
+    safe_team_dir = _safe_comment_team_dir(team_dir)
+    safe_run_id = _trim(run_id, 80)
+    safe_run_url = _trim(run_url, 240)
+    safe_worker_result = _trim(worker_result, 40).lower() or "unknown"
+    safe_artifact_name = _trim(artifact_name, 180)
+    violations = []
+
+    if not issue_number:
+        violations.append({"code": "comment_issue_number_required"})
+    if target != "github_runner":
+        violations.append({"code": "unsupported_runner_target"})
+    if not token:
+        violations.append({"code": "ticket_id_required"})
+    if not safe_team_dir:
+        violations.append({"code": "invalid_team_dir"})
+    if not safe_run_id:
+        violations.append({"code": "run_id_required"})
+    if not safe_artifact_name and token:
+        safe_artifact_name = f"aoe-external-background-{target}-{token}"
+
+    ok = not violations
+    if ok:
+        import_command = (
+            "scripts/gateway/aoe-external-sidecar-sync.py download-github-artifact "
+            f"--team-dir {safe_team_dir} --run-id {safe_run_id} --ticket-id {token} "
+            f"--runner {target} --poll"
+        )
+        response = "\n".join(
+            [
+                "AOE external runner workflow finished.",
+                "",
+                f"- ticket: `{token}`",
+                f"- worker_result: `{safe_worker_result}`",
+                f"- run: {safe_run_url or safe_run_id}",
+                f"- artifact: `{safe_artifact_name}`",
+                "",
+                "Import and poll locally:",
+                "",
+                f"`{import_command}`",
+            ]
+        )
+    else:
+        response = "\n".join(
+            [
+                "AOE external runner completion callback could not be prepared.",
+                "",
+                "- reason: `completion_comment_invalid`",
+                "- violations: "
+                + ", ".join(str(item.get("code", "")).strip() for item in violations if item.get("code")),
+            ]
+        )
+
+    return {
+        "version": GITHUB_RUNNER_COMPLETION_COMMENT_VERSION,
+        "kind": GITHUB_RUNNER_COMPLETION_COMMENT_KIND,
+        "ok": ok,
+        "should_comment": bool(issue_number),
+        "issue_number": issue_number,
+        "ticket_id": token,
+        "runner_target": target,
+        "team_dir": safe_team_dir,
+        "run_id": safe_run_id,
+        "run_url": safe_run_url,
+        "artifact_name": safe_artifact_name,
+        "worker_result": safe_worker_result,
+        "violations": violations,
+        "response_markdown": response,
+    }
 
 
 def build_github_runner_worker_bundle(
