@@ -56,6 +56,14 @@ D2_REQUEST_TEXT = (
     "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
 )
 
+D3_REQUEST_TEXT = (
+    "입력 CSV는 data/customer_events.csv이고 region_code 매핑에는 KR=Korea, US=United States만 확정되어 있다. "
+    "EU와 APAC은 운영자가 비즈니스 기준으로 어느 reporting_region에 넣을지 결정해야 한다. "
+    "확정 매핑만 적용해 normalized_customers.csv와 data_profile.md를 만들고, "
+    "미확정 매핑은 business_rule_questions.md와 sample_ambiguous_rows.csv에 남겨라. "
+    "EU/APAC 매핑 결정은 내가 판단해야 하므로 done으로 닫지 말고 manual follow-up으로 남겨라."
+)
+
 M2_REQUEST_TEXT = (
     "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘. "
     "구현 결과는 src/session.js와 tests/session.test.js에 남기고, handoff 문서는 변경 파일 목록과 테스트 증거를 포함해야 한다. "
@@ -364,6 +372,85 @@ def _write_d2_artifacts(project_root: Path) -> None:
                 "2026-03,APAC,7,NaN,null-like revenue",
                 "2026/13,NA,abc,1500.00,bad month and bad orders",
                 "bad-month,EU,14,bad,bad month and bad revenue",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_d3_artifacts(project_root: Path) -> None:
+    (project_root / "data").mkdir(parents=True, exist_ok=True)
+    (project_root / "data" / "customer_events.csv").write_text(
+        "\n".join(
+            [
+                "customer_id,region_code,event_type,amount",
+                "C-001,KR,signup,0",
+                "C-002,US,purchase,125.00",
+                "C-003,EU,purchase,89.50",
+                "C-004,APAC,refund,21.00",
+                "C-005,EU,signup,0",
+                "C-006,APAC,purchase,210.25",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "normalized_customers.csv").write_text(
+        "\n".join(
+            [
+                "customer_id,region_code,reporting_region,event_type,amount,mapping_status",
+                "C-001,KR,Korea,signup,0,resolved",
+                "C-002,US,United States,purchase,125.00,resolved",
+                "C-003,EU,,purchase,89.50,operator_decision_required",
+                "C-004,APAC,,refund,21.00,operator_decision_required",
+                "C-005,EU,,signup,0,operator_decision_required",
+                "C-006,APAC,,purchase,210.25,operator_decision_required",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "data_profile.md").write_text(
+        "\n".join(
+            [
+                "# Data Profile",
+                "",
+                "- source_path: data/customer_events.csv",
+                "- normalized_output: normalized_customers.csv",
+                "- resolved_region_codes: KR, US",
+                "- ambiguous_region_codes: EU, APAC",
+                "- ambiguous_row_count: 4",
+                "- executable_slice: apply confirmed mappings and isolate ambiguous rows",
+                "- blocked_slice: operator-owned reporting_region mapping for EU/APAC",
+                "- branch: manual_followup",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "business_rule_questions.md").write_text(
+        "\n".join(
+            [
+                "# Business Rule Questions",
+                "",
+                "- Should `EU` map to a single `Europe` reporting region or be split by country before reporting?",
+                "- Should `APAC` map to `Asia Pacific`, or should refunds be excluded until a regional owner confirms treatment?",
+                "- Should unresolved region rows be withheld from the final dashboard or carried with blank `reporting_region`?",
+                "- operator_decision: required before done; keep as manual follow-up.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "sample_ambiguous_rows.csv").write_text(
+        "\n".join(
+            [
+                "customer_id,region_code,event_type,amount,reason",
+                "C-003,EU,purchase,89.50,reporting_region mapping not confirmed",
+                "C-004,APAC,refund,21.00,reporting_region mapping not confirmed",
+                "C-005,EU,signup,0,reporting_region mapping not confirmed",
+                "C-006,APAC,purchase,210.25,reporting_region mapping not confirmed",
             ]
         )
         + "\n",
@@ -988,6 +1075,228 @@ def _d2_task(now: str) -> Dict[str, Any]:
             "project_key": "alpha",
             "project_alias": "O7",
             "task_short_id": "T-701",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _d3_task(now: str) -> Dict[str, Any]:
+    contract = {
+        "type": "data",
+        "status": "complete",
+        "summary": (
+            "data | manual_followup | outputs=normalized_customers.csv,"
+            "data_profile.md,business_rule_questions.md,sample_ambiguous_rows.csv"
+        ),
+        "required_outputs": [
+            "normalized_customers.csv",
+            "data_profile.md",
+            "business_rule_questions.md",
+            "sample_ambiguous_rows.csv",
+        ],
+        "fields": {
+            "source_path": "data/customer_events.csv",
+            "confirmed_region_mappings": {"KR": "Korea", "US": "United States"},
+            "operator_owned_region_codes": ["EU", "APAC"],
+            "manual_followup_reason": "reporting_region mapping requires business-rule judgment",
+        },
+        "artifact_contracts": {
+            "normalized_customers": {"path": "normalized_customers.csv", "format": "csv"},
+            "data_profile": {"path": "data_profile.md", "format": "markdown"},
+            "business_rule_questions": {
+                "path": "business_rule_questions.md",
+                "format": "markdown",
+            },
+            "sample_ambiguous_rows": {"path": "sample_ambiguous_rows.csv", "format": "csv"},
+        },
+    }
+    return {
+        "request_id": "REQ-D3-001",
+        "short_id": "T-901",
+        "alias": "data-manual-followup",
+        "prompt": D3_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "failed",
+        "stage": "verification",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "done",
+            "verification": "failed",
+            "integration": "failed",
+            "close": "failed",
+        },
+        "roles": ["DataEngineer", "Codex-Reviewer"],
+        "verifier_roles": ["Codex-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "verification",
+        "phase1_current_round": 3,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "data",
+        "phase2_team_preset": "data",
+        **_approved_planning_fields(),
+        "execution_brief_status": "partially_executable",
+        "execution_brief_summary": (
+            "partially_executable | do=normalized_customers.csv,data_profile.md,"
+            "business_rule_questions.md,sample_ambiguous_rows.csv | "
+            "blocked=operator-owned reporting_region mapping for EU/APAC"
+        ),
+        "execution_brief_executable_slice": [
+            "normalized_customers.csv",
+            "data_profile.md",
+            "business_rule_questions.md",
+            "sample_ambiguous_rows.csv",
+        ],
+        "execution_brief_blocked_slice": [
+            "operator-owned reporting_region mapping for EU",
+            "operator-owned reporting_region mapping for APAC",
+        ],
+        "execution_brief_operator_decision": (
+            "operator must decide EU/APAC reporting_region mapping before final done"
+        ),
+        "followup_brief_status": "partially_executable",
+        "followup_brief_summary": "partially_executable | execution=L2 | review=R1",
+        "followup_brief_execution_lane_ids": ["L2"],
+        "followup_brief_review_lane_ids": ["R1"],
+        "followup_brief_reason": (
+            "data profiling can rerun, but EU/APAC reporting_region mapping remains operator-owned"
+        ),
+        **_manual_followup_ready_checkpoint(
+            "data profiling can rerun, but EU/APAC reporting_region mapping remains operator-owned"
+        ),
+        "reentry_rails_summary": "retry=none | followup=partially_executable exec=L2 review=R1",
+        "plan": {
+            "summary": (
+                "data | confirmed region mapping can be applied while EU/APAC reporting rules "
+                "remain manual in R1"
+            ),
+            "subtasks": [
+                {
+                    "id": "S2",
+                    "owner_role": "DataEngineer",
+                    "title": "Data manual followup evidence",
+                    "goal": (
+                        "refresh confirmed region mapping outputs and isolate ambiguous EU/APAC rows "
+                        "without choosing the business rule"
+                    ),
+                    "acceptance": [
+                        "normalized_customers.csv exists",
+                        "business_rule_questions.md exists",
+                        "sample_ambiguous_rows.csv exists",
+                    ],
+                },
+            ],
+            "meta": {
+                "worker_roles": ["DataEngineer", "Codex-Reviewer"],
+                "phase1_role_preset": "data",
+                "phase2_team_preset": "data",
+                "request_contract": contract,
+                "phase2_team_spec": {
+                    "execution_groups": [
+                        {
+                            "group_id": "L2",
+                            "role": "DataEngineer",
+                            "kind": "data_followup",
+                            "subtask_ids": ["S2"],
+                        },
+                    ],
+                    "review_groups": [
+                        {
+                            "group_id": "R1",
+                            "role": "Codex-Reviewer",
+                            "kind": "business_rule_remainder",
+                            "depends_on": ["L2"],
+                        },
+                    ],
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "DataEngineer",
+                },
+                "phase2_execution_plan": {
+                    "execution_lanes": [
+                        {
+                            "lane_id": "L2",
+                            "role": "DataEngineer",
+                            "kind": "data_followup",
+                            "subtask_ids": ["S2"],
+                            "outputs": [
+                                "normalized_customers.csv",
+                                "data_profile.md",
+                                "business_rule_questions.md",
+                                "sample_ambiguous_rows.csv",
+                            ],
+                        },
+                    ],
+                    "review_lanes": [
+                        {
+                            "lane_id": "R1",
+                            "role": "Codex-Reviewer",
+                            "kind": "business_rule_remainder",
+                            "depends_on": ["L2"],
+                            "outputs": ["operator_region_mapping_decision"],
+                        },
+                    ],
+                },
+            },
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L2",
+                    "role": "DataEngineer",
+                    "status": "blocked",
+                    "subtask_ids": ["S2"],
+                    "reason": "confirmed mappings can run, but EU/APAC rows must remain isolated",
+                    "touched_files": [
+                        "normalized_customers.csv",
+                        "data_profile.md",
+                        "business_rule_questions.md",
+                        "sample_ambiguous_rows.csv",
+                    ],
+                }
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "business_rule_remainder",
+                    "status": "blocked",
+                    "depends_on": ["L2"],
+                    "reason": "operator must decide EU/APAC reporting_region mapping before done",
+                    "verdict": "manual_followup",
+                    "action": "manual_followup",
+                    "touched_files": ["business_rule_questions.md"],
+                }
+            ],
+            "summary": {
+                "execution": {"blocked": 1},
+                "review": {"blocked": 1},
+                "review_verdicts": {"manual_followup": 1},
+            },
+        },
+        "exec_critic": {
+            "verdict": "manual_followup",
+            "action": "manual_followup",
+            "reason": "EU/APAC reporting_region mapping is a business-rule decision; keep done blocked",
+            "manual_followup_execution_lane_ids": ["L2"],
+            "manual_followup_review_lane_ids": ["R1"],
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "manual_followup",
+            "backend_contract": "data_manual_followup",
+            "backend_contract_note": (
+                "followup execute is limited to confirmed data profiling while EU/APAC mapping stays manual"
+            ),
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O9",
+            "task_short_id": "T-901",
         },
         "created_at": now,
         "updated_at": now,
@@ -1676,6 +1985,80 @@ def seed_d2_data_rerun_runtime(
     }
 
 
+def seed_d3_data_manual_followup_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "local_tmux",
+    local_tmux_slot_limit: int = 1,
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated data manual followup live rehearsal",
+    )
+    _write_d3_artifacts(project_root)
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_d3_task(now), "REQ-D3-001")
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O9",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated data manual followup live rehearsal",
+        "last_request_id": "REQ-D3-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": local_tmux_slot_limit,
+        "background_runner_slot_limits": {
+            "local_tmux": local_tmux_slot_limit,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-D3-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "D3",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O9",
+        "request_id": "REQ-D3-001",
+        "task_ref": "T-901",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "artifact_paths": [
+            "data/customer_events.csv",
+            "normalized_customers.csv",
+            "data_profile.md",
+            "business_rule_questions.md",
+            "sample_ambiguous_rows.csv",
+        ],
+        "preflight_commands": [
+            "/orch status O9",
+            "/task T-901",
+            "/followup T-901",
+            "/offdesk review O9",
+        ],
+        "trigger_command": "/followup-exec T-901 lane L2",
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-D3-001",
+            "runtime_detail": "/control/runtimes/O9",
+        },
+    }
+
+
 def seed_m2_mixed_rerun_runtime(
     control_root: Path,
     *,
@@ -1936,7 +2319,7 @@ def seed_r4_external_background_runtime(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "m2", "r2", "r3-execute", "r4"], default="r2")
+    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "d3", "m2", "r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
     parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
@@ -1966,6 +2349,13 @@ def main() -> int:
         )
     elif args.scenario == "d2":
         payload = seed_d2_data_rerun_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target,
+            local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "d3":
+        payload = seed_d3_data_manual_followup_runtime(
             Path(args.control_root),
             run_lock_mode=args.run_lock_mode,
             runner_target=args.runner_target,

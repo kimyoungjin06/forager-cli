@@ -13,6 +13,7 @@
   - `build/B2_rerun_path.md`
   - `build/B3_manual_followup_path.md`
 - `phase2/data/`
+  - `data/D3_manual_followup_path.md`
 - `phase2/review/`
 - `phase2/mixed/`
 - review-specific non-happy-path split now includes:
@@ -59,6 +60,12 @@
       - isolated D2 seed proof materialized concrete `schema_report.json`, `null_summary.md`, and `sample_5.csv` evidence with `affected_columns`, `null_or_invalid_count`, `null_heavy`, `rerun_required`, and `reason`
       - launch-bearing `local_tmux` rehearsal closed the retry ticket with `exit_code=0`
       - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime evidence kept source task `T-701` on the `rerun` branch while the child retry task completed
+  - `data/D3_manual_followup_path.md`
+    - `live_rehearsal_ready`
+    - finding:
+      - isolated seed proof creates a data manual-followup candidate with `L2 DataEngineer` execution and `R1 Codex-Reviewer` business-rule remainder
+      - concrete artifacts apply confirmed `KR`/`US` mappings while isolating `EU`/`APAC` ambiguity in `business_rule_questions.md` and `sample_ambiguous_rows.csv`
+      - `/task`, `/followup`, and `/offdesk review` all keep the branch on `manual_intervention` with `followup=partially_executable exec=L2 review=R1`
   - `review/R1_happy_path.md`
     - `executed_done`
     - finding:
@@ -137,13 +144,13 @@
   - source task `T-801` stayed on the rerun branch with `execution=L2 review=R1`
   - child retry task `T-802` completed without auto-closing the source task
 - still bounded replay only:
-  - `data/D3 and mixed/M3 do not yet have first-class scenario artifacts`
+  - `mixed/M3 does not yet have a first-class scenario artifact`
 - next live candidate:
-  - `data/D3_manual_followup_path.md` (planned artifact)
+  - `data/D3_manual_followup_path.md`
 - candidate reason:
-  - `B3` and `R3` manual-followup execute proofs are already documented; `D3` is the next recommended-order manual-followup gap before `M3`
+  - `D3` is now seed-backed and surface-visible; it is the next launch-bearing data manual-followup proof before `M3`
 - next selection gate:
-  - create a first-class D3 manual-followup artifact, seed an isolated runtime, and prove preview/execute surfaces without collapsing business-rule ambiguity into done or generic retry
+  - launch `/followup-exec T-901 lane L2` from an isolated D3 runtime and verify the background ticket closes while source branch remains manual_followup with `L2/R1` scope
 - runbook:
   - `B2` runbook is now embedded in `build/B2_rerun_path.md`
   - `D2` runbook is now embedded in `data/D2_rerun_path.md`

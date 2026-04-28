@@ -17,6 +17,7 @@ from aoe_tg_live_rehearsal_seed import (  # noqa: E402
     seed_b2_build_rerun_runtime,
     seed_b3_build_manual_followup_runtime,
     seed_d2_data_rerun_runtime,
+    seed_d3_data_manual_followup_runtime,
     seed_m2_mixed_rerun_runtime,
     seed_r2_review_rerun_runtime,
     seed_r3_manual_followup_execute_runtime,
@@ -151,6 +152,60 @@ def test_seed_d2_data_rerun_runtime_creates_isolated_null_heavy_candidate(tmp_pa
     assert "null_heavy: true" in null_summary
     assert "rerun_required: true" in null_summary
     assert "close as rerun, not done" in null_summary
+
+
+def test_seed_d3_data_manual_followup_runtime_creates_business_rule_candidate(tmp_path: Path) -> None:
+    payload = seed_d3_data_manual_followup_runtime(
+        tmp_path / "control",
+        run_lock_mode="test_only",
+        runner_target="local_tmux",
+        local_tmux_slot_limit=1,
+    )
+
+    control_root = Path(payload["control_root"])
+    team_dir = Path(payload["team_dir"])
+    project_root = Path(payload["project_root"])
+    manager_state_file = Path(payload["manager_state_file"])
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    project = state["projects"]["alpha"]
+    task = project["tasks"]["REQ-D3-001"]
+
+    assert project["project_alias"] == "O9"
+    assert project["overview"] == "isolated data manual followup live rehearsal"
+    assert project["run_lock_mode"] == "test_only"
+    assert project["background_runner_target"] == "local_tmux"
+    assert project["background_runner_slot_limits"]["local_tmux"] == 1
+    assert task["phase1_role_preset"] == "data"
+    assert task["phase2_team_preset"] == "data"
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task["phase_checkpoint_status"] == "active"
+    assert task["phase_checkpoint_current_phase"] == "verify"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
+    assert task_state.derive_task_manual_gate(task)["status"] == "ready"
+    assert task["execution_brief_status"] == "partially_executable"
+    assert "operator-owned reporting_region mapping" in task["execution_brief_summary"]
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["lane_id"] == "L2"
+    assert task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"][0]["role"] == "DataEngineer"
+    assert task["followup_brief_status"] == "partially_executable"
+    assert task["followup_brief_execution_lane_ids"] == ["L2"]
+    assert task["followup_brief_review_lane_ids"] == ["R1"]
+    assert task["exec_critic"]["manual_followup_execution_lane_ids"] == ["L2"]
+    assert task["exec_critic"]["manual_followup_review_lane_ids"] == ["R1"]
+    assert task["reentry_rails_summary"] == "retry=none | followup=partially_executable exec=L2 review=R1"
+    assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
+    assert payload["trigger_command"] == "/followup-exec T-901 lane L2"
+
+    for artifact in payload["artifact_paths"]:
+        assert (project_root / artifact).exists()
+    profile = (project_root / "data_profile.md").read_text(encoding="utf-8")
+    questions = (project_root / "business_rule_questions.md").read_text(encoding="utf-8")
+    sample = (project_root / "sample_ambiguous_rows.csv").read_text(encoding="utf-8")
+    assert "ambiguous_region_codes: EU, APAC" in profile
+    assert "branch: manual_followup" in profile
+    assert "operator_decision: required before done" in questions
+    assert "C-003,EU" in sample
+    assert "C-004,APAC" in sample
 
 
 def test_seed_m2_mixed_rerun_runtime_creates_handoff_retry_candidate(tmp_path: Path) -> None:
