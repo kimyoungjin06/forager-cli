@@ -113,11 +113,12 @@
 - intent:
   - transform runs but schema drift, null explosion, or broken pipeline step appears
 - current status:
-  - `live_rehearsal_ready`
+  - `executed_done`
 - current finding:
   - live runs promoted reusable `data` rerun abstractions: `quality_gate_policy`, `schema_column_expectations`, numeric null-heavy thresholds, and `schema_value_quality_policy`
-  - isolated seed proof now materializes concrete `schema_report.json`, `null_summary.md`, and `sample_5.csv` evidence while keeping the task on `rerun`
-  - remaining gate is launch-bearing verification of `/retry T-701 lane L1`
+  - isolated seed proof materialized concrete `schema_report.json`, `null_summary.md`, and `sample_5.csv` evidence while keeping the source task on `rerun`
+  - launch-bearing `local_tmux` rehearsal proved `/retry T-701 lane L1` can close with `exit_code=0`
+  - `/task`, `/offdesk review`, `/orch status`, and dashboard task/runtime detail kept source task `T-701` on the rerun branch after child task `T-702` completed
 - expected branch:
   - `rerun`
 - must prove:
@@ -287,7 +288,7 @@
 2. `B2`, `D2`, `R2`, `M2`
 3. `B3`, `D3`, `R3`, `M3`
 - current next non-review candidate:
-  - `B3`
+  - `M2`
 
 ## 6. Minimum Pass Threshold
 - the first milestone is not all twelve scenarios.
