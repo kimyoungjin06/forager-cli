@@ -184,10 +184,13 @@
 
 ## 11. Proposed Implementation Plan
 1. add pure-read compiler helper
-   - proposed module: `scripts/gateway/aoe_tg_project_flow.py`
+   - implemented module: `scripts/gateway/aoe_tg_project_flow.py`
 2. define compiled flow JSON schema
+   - implemented baseline: `PROJECT_FLOW_VERSION=2026-04-28.v1`
 3. load registry + per-project docs + runtime state
+   - implemented baseline: markdown registry tables, lock yaml subset, TF close CSV, per-project markdown, manager state
 4. emit `.aoe-team/project-flow/<project_alias>/latest.json`
+   - implemented via artifact backend `write_project_flow`
 5. add dashboard `Document Flow` card to runtime detail
 6. add drift warning excerpts to recovery
 7. later consider optional rendered `flow.md`
