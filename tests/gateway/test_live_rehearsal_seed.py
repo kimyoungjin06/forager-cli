@@ -17,6 +17,7 @@ from aoe_tg_live_rehearsal_seed import (  # noqa: E402
     seed_b2_build_rerun_runtime,
     seed_b3_build_manual_followup_runtime,
     seed_d2_data_rerun_runtime,
+    seed_m2_mixed_rerun_runtime,
     seed_r2_review_rerun_runtime,
     seed_r3_manual_followup_execute_runtime,
     seed_r4_external_background_runtime,
@@ -150,6 +151,60 @@ def test_seed_d2_data_rerun_runtime_creates_isolated_null_heavy_candidate(tmp_pa
     assert "null_heavy: true" in null_summary
     assert "rerun_required: true" in null_summary
     assert "close as rerun, not done" in null_summary
+
+
+def test_seed_m2_mixed_rerun_runtime_creates_handoff_retry_candidate(tmp_path: Path) -> None:
+    payload = seed_m2_mixed_rerun_runtime(
+        tmp_path / "control",
+        run_lock_mode="test_only",
+        runner_target="local_tmux",
+        local_tmux_slot_limit=1,
+    )
+
+    control_root = Path(payload["control_root"])
+    team_dir = Path(payload["team_dir"])
+    project_root = Path(payload["project_root"])
+    manager_state_file = Path(payload["manager_state_file"])
+    state = runtime_read.load_manager_state(manager_state_file, control_root, team_dir)
+    project = state["projects"]["alpha"]
+    task = project["tasks"]["REQ-M2-001"]
+
+    assert project["project_alias"] == "O8"
+    assert project["overview"] == "isolated mixed rerun live rehearsal"
+    assert project["run_lock_mode"] == "test_only"
+    assert project["background_runner_target"] == "local_tmux"
+    assert task["phase1_role_preset"] == "mixed"
+    assert task["phase2_team_preset"] == "mixed"
+    assert task["request_contract_type"] == "mixed"
+    assert task["request_contract_status"] == "complete"
+    assert task["request_contract_required_outputs"] == [
+        "work_result",
+        "scope_inventory",
+        "handoff_doc",
+        "reviewer_note",
+    ]
+    assert task["request_contract_artifact_contracts"]["handoff_doc"]["path"] == "docs/handoff/operator_handoff.md"
+    assert task["request_contract_artifact_contracts"]["reviewer_note"]["path"] == "docs/reviews/reviewer_note.md"
+    assert task["approved_plan_status"] == "approved"
+    assert task["critic_review_status"] == "approved"
+    assert task_state.derive_task_dispatch_gate(task)["status"] == "ready"
+    assert task["execution_brief_status"] == "executable"
+    execution_lanes = task["plan"]["meta"]["phase2_execution_plan"]["execution_lanes"]
+    assert [lane["lane_id"] for lane in execution_lanes] == ["L1", "L2"]
+    assert [lane["role"] for lane in execution_lanes] == ["Codex-Dev", "Codex-Writer"]
+    assert task["exec_critic"]["rerun_execution_lane_ids"] == ["L2"]
+    assert task["exec_critic"]["rerun_review_lane_ids"] == ["R1"]
+    assert task["reentry_rails_summary"] == "retry=ready exec=L2 review=R1 | followup=none"
+    assert payload["reentry_rails_summary"] == task["reentry_rails_summary"]
+    assert payload["trigger_command"] == "/retry T-801 lane L2"
+
+    for artifact in payload["artifact_paths"]:
+        assert (project_root / artifact).exists()
+    handoff = (project_root / "docs" / "handoff" / "operator_handoff.md").read_text(encoding="utf-8")
+    reviewer_note = (project_root / "docs" / "reviews" / "reviewer_note.md").read_text(encoding="utf-8")
+    assert "missing changed files: tests/session.test.js" in handoff
+    assert "retry writer/handoff lane L2" in reviewer_note
+    assert "do not rerun implementation lane L1" in reviewer_note
 
 
 def test_seed_r2_review_rerun_runtime_creates_isolated_retry_candidate(tmp_path: Path) -> None:

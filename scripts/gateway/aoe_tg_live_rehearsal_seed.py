@@ -56,6 +56,12 @@ D2_REQUEST_TEXT = (
     "schema_report.json, null_summary.md, sample_5.csv도 함께 남겨라."
 )
 
+M2_REQUEST_TEXT = (
+    "session_expired 로그인 실패 시 토큰을 비우도록 수정하고 operator handoff 문서와 reviewer note를 함께 남겨줘. "
+    "구현 결과는 src/session.js와 tests/session.test.js에 남기고, handoff 문서는 변경 파일 목록과 테스트 증거를 포함해야 한다. "
+    "handoff 문서나 reviewer note가 구현 증거와 불일치하면 done으로 닫지 말고 writer/handoff lane만 rerun으로 남겨라."
+)
+
 
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
@@ -94,6 +100,7 @@ def _prepare_project_layout(control_root: Path, *, overview: str) -> tuple[Path,
             },
             "agents": [
                 {"role": "Codex-Dev", "provider": "codex", "launch": "codex", "session": ""},
+                {"role": "Codex-Writer", "provider": "codex", "launch": "codex", "session": ""},
                 {"role": "DataEngineer", "provider": "codex", "launch": "codex", "session": ""},
                 {"role": "Codex-Reviewer", "provider": "codex", "launch": "codex", "session": ""},
                 {"role": "Claude-Reviewer", "provider": "claude", "launch": "claude", "session": ""},
@@ -109,6 +116,104 @@ def _d2_request_contract() -> Dict[str, Any]:
         selected_roles=["DataEngineer", "Codex-Reviewer", "Claude-Reviewer"],
         explicit_preset="data",
         project_key="alpha",
+    )
+
+
+def _m2_request_contract() -> Dict[str, Any]:
+    return build_request_contract(
+        source_prompt=M2_REQUEST_TEXT,
+        selected_roles=["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        explicit_preset="mixed",
+        project_key="alpha",
+    )
+
+
+def _write_m2_artifacts(project_root: Path) -> None:
+    (project_root / "src").mkdir(parents=True, exist_ok=True)
+    (project_root / "tests").mkdir(parents=True, exist_ok=True)
+    (project_root / "docs" / "analysis").mkdir(parents=True, exist_ok=True)
+    (project_root / "docs" / "handoff").mkdir(parents=True, exist_ok=True)
+    (project_root / "docs" / "reviews").mkdir(parents=True, exist_ok=True)
+    (project_root / "src" / "session.js").write_text(
+        "\n".join(
+            [
+                "export function handleLoginFailure(error, tokenStore) {",
+                "  if (error && error.code === 'session_expired') {",
+                "    tokenStore.clear();",
+                "    return { status: 'logged_out', reason: 'session_expired' };",
+                "  }",
+                "  return { status: 'failed', reason: error && error.code };",
+                "}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "tests" / "session.test.js").write_text(
+        "\n".join(
+            [
+                "import { handleLoginFailure } from '../src/session.js';",
+                "",
+                "test('clears persisted token on session_expired', () => {",
+                "  const calls = [];",
+                "  const tokenStore = { clear: () => calls.push('clear') };",
+                "  expect(handleLoginFailure({ code: 'session_expired' }, tokenStore)).toEqual({",
+                "    status: 'logged_out',",
+                "    reason: 'session_expired',",
+                "  });",
+                "  expect(calls).toEqual(['clear']);",
+                "});",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "analysis" / "auth_scope_inventory.md").write_text(
+        "\n".join(
+            [
+                "# Auth Scope Inventory",
+                "",
+                "- public_failure_entrypoints: login submit, token refresh",
+                "- caller_visible_auth_state_surfaces: logged_out banner, retry button",
+                "- persisted_token_or_session_store_paths: tokenStore.clear",
+                "- excluded_paths_with_reasons: password reset is not a session_expired path",
+                "- target_failure_codes: session_expired",
+                "- non_target_failures_preserve_existing_auth_state: true",
+                "- single_helper_boundary_proof_when_used: handleLoginFailure owns token clearing",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "handoff" / "operator_handoff.md").write_text(
+        "\n".join(
+            [
+                "# Operator Handoff",
+                "",
+                "- change summary: session_expired now clears persisted token state.",
+                "- validation status: implementation reviewed, but test evidence is missing from this handoff.",
+                "- changed files: src/session.js",
+                "- missing changed files: tests/session.test.js",
+                "- operator follow-ups: rerun writer handoff lane to reconcile changed files and validation evidence.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (project_root / "docs" / "reviews" / "reviewer_note.md").write_text(
+        "\n".join(
+            [
+                "# Reviewer Note",
+                "",
+                "- severity findings: medium; handoff evidence omits the regression test file.",
+                "- regression risks: operator may ship without seeing session_expired regression proof.",
+                "- test gaps: handoff references no test command or result for tests/session.test.js.",
+                "- uncertainties: implementation lane appears complete, but handoff/review evidence is stale.",
+                "- verdict: retry writer/handoff lane L2 with reviewer lane R1; do not rerun implementation lane L1.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -889,6 +994,193 @@ def _d2_task(now: str) -> Dict[str, Any]:
     }
 
 
+def _m2_task(now: str) -> Dict[str, Any]:
+    contract = _m2_request_contract()
+    brief = build_execution_brief(contract)
+    return {
+        "request_id": "REQ-M2-001",
+        "short_id": "T-801",
+        "alias": "mixed-rerun",
+        "prompt": M2_REQUEST_TEXT,
+        "mode": "dispatch",
+        "status": "failed",
+        "stage": "verification",
+        "stages": {
+            "intake": "done",
+            "planning": "done",
+            "execution": "done",
+            "verification": "failed",
+            "integration": "failed",
+            "close": "failed",
+        },
+        "roles": ["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+        "verifier_roles": ["Codex-Reviewer"],
+        "require_verifier": True,
+        "phase1_mode": "ensemble",
+        "phase1_rounds": 3,
+        "phase1_providers": ["codex", "claude"],
+        "phase1_current_phase": "verification",
+        "phase1_current_round": 3,
+        "phase1_current_total_rounds": 3,
+        "phase1_role_preset": "mixed",
+        "phase2_team_preset": "mixed",
+        **_approved_planning_fields(),
+        **request_contract_metadata(contract),
+        "execution_brief_status": brief.get("status", "executable"),
+        "execution_brief_summary": brief.get(
+            "summary",
+            "executable | do=work_result,scope_inventory,handoff_doc,reviewer_note",
+        ),
+        "execution_brief_executable_slice": list(
+            brief.get("executable_slice")
+            or ["work_result", "scope_inventory", "handoff_doc", "reviewer_note"]
+        ),
+        "execution_brief_blocked_slice": list(brief.get("blocked_slice") or []),
+        "execution_brief_operator_decision": "",
+        "followup_brief_status": "none",
+        "reentry_rails_summary": "retry=ready exec=L2 review=R1 | followup=none | bg=-",
+        "plan": {
+            "summary": (
+                "mixed | implementation evidence is complete while handoff/reviewer evidence drift "
+                "requires a writer-lane rerun"
+            ),
+            "subtasks": [
+                {
+                    "id": "S1",
+                    "owner_role": "Codex-Dev",
+                    "title": "Patch session_expired token cleanup",
+                    "goal": "update src/session.js and tests/session.test.js with regression evidence",
+                    "acceptance": ["src/session.js exists", "tests/session.test.js exists"],
+                },
+                {
+                    "id": "S2",
+                    "owner_role": "Codex-Writer",
+                    "title": "Repair operator handoff evidence",
+                    "goal": (
+                        "rewrite docs/handoff/operator_handoff.md so changed files, validation status, "
+                        "and test evidence match the implementation lane"
+                    ),
+                    "acceptance": ["docs/handoff/operator_handoff.md includes tests/session.test.js and test evidence"],
+                },
+            ],
+            "meta": {
+                "worker_roles": ["Codex-Dev", "Codex-Writer", "Codex-Reviewer"],
+                "phase1_role_preset": "mixed",
+                "phase2_team_preset": "mixed",
+                "request_contract": contract,
+                "phase2_team_spec": {
+                    "execution_mode": "parallel",
+                    "execution_groups": [
+                        {"group_id": "L1", "role": "Codex-Dev", "kind": "implementation", "subtask_ids": ["S1"], "parallel": True},
+                        {"group_id": "L2", "role": "Codex-Writer", "kind": "handoff", "subtask_ids": ["S2"], "parallel": True},
+                    ],
+                    "review_mode": "single",
+                    "review_groups": [
+                        {"group_id": "R1", "role": "Codex-Reviewer", "kind": "verifier", "depends_on": ["L2"]},
+                    ],
+                    "critic_role": "Codex-Reviewer",
+                    "integration_role": "Codex-Dev",
+                },
+                "phase2_execution_plan": {
+                    "execution_mode": "parallel",
+                    "execution_lanes": [
+                        {
+                            "lane_id": "L1",
+                            "role": "Codex-Dev",
+                            "kind": "implementation",
+                            "subtask_ids": ["S1"],
+                            "outputs": ["work_result", "scope_inventory"],
+                            "parallel": True,
+                        },
+                        {
+                            "lane_id": "L2",
+                            "role": "Codex-Writer",
+                            "kind": "handoff",
+                            "subtask_ids": ["S2"],
+                            "outputs": ["handoff_doc"],
+                            "parallel": True,
+                        },
+                    ],
+                    "review_mode": "single",
+                    "review_lanes": [
+                        {
+                            "lane_id": "R1",
+                            "role": "Codex-Reviewer",
+                            "kind": "verifier",
+                            "depends_on": ["L2"],
+                            "outputs": ["reviewer_note", "handoff_parity_decision"],
+                        },
+                    ],
+                    "parallel_workers": True,
+                    "parallel_reviews": False,
+                },
+            },
+        },
+        "lane_states": {
+            "execution": [
+                {
+                    "lane_id": "L1",
+                    "role": "Codex-Dev",
+                    "status": "done",
+                    "subtask_ids": ["S1"],
+                    "touched_files": [
+                        "src/session.js",
+                        "tests/session.test.js",
+                        "docs/analysis/auth_scope_inventory.md",
+                    ],
+                },
+                {
+                    "lane_id": "L2",
+                    "role": "Codex-Writer",
+                    "status": "failed",
+                    "subtask_ids": ["S2"],
+                    "reason": "operator_handoff.md omits tests/session.test.js and validation evidence from the implementation lane",
+                    "touched_files": ["docs/handoff/operator_handoff.md"],
+                },
+            ],
+            "review": [
+                {
+                    "lane_id": "R1",
+                    "role": "Codex-Reviewer",
+                    "kind": "verifier",
+                    "status": "failed",
+                    "depends_on": ["L2"],
+                    "reason": "handoff/reviewer evidence drift is isolated to writer lane L2; implementation lane L1 should not rerun",
+                    "verdict": "retry",
+                    "action": "retry",
+                    "touched_files": ["docs/handoff/operator_handoff.md", "docs/reviews/reviewer_note.md"],
+                }
+            ],
+            "summary": {
+                "execution": {"done": 1, "failed": 1},
+                "review": {"failed": 1},
+                "review_verdicts": {"retry": 1},
+            },
+        },
+        "exec_critic": {
+            "verdict": "retry",
+            "action": "retry",
+            "reason": "mixed handoff evidence drift is writer-owned; rerun L2 with reviewer R1 and keep implementation lane L1 closed",
+            "rerun_execution_lane_ids": ["L2"],
+            "rerun_review_lane_ids": ["R1"],
+        },
+        "result": {
+            "backend": "autogen_core",
+            "backend_profile": "sandbox",
+            "backend_verdict": "retry",
+            "backend_contract": "mixed_rerun",
+            "backend_contract_note": "rerun is scoped to the writer/handoff lane and verifier, not the completed implementation lane",
+        },
+        "context": {
+            "project_key": "alpha",
+            "project_alias": "O8",
+            "task_short_id": "T-801",
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 def _r3_execute_task(now: str) -> Dict[str, Any]:
     return {
         "request_id": "REQ-R3-001",
@@ -1384,6 +1676,79 @@ def seed_d2_data_rerun_runtime(
     }
 
 
+def seed_m2_mixed_rerun_runtime(
+    control_root: Path,
+    *,
+    run_lock_mode: str = "test_only",
+    runner_target: str = "local_tmux",
+    local_tmux_slot_limit: int = 1,
+) -> Dict[str, Any]:
+    control_root = Path(control_root).expanduser().resolve()
+    team_dir, project_root, project_team_dir = _prepare_project_layout(
+        control_root,
+        overview="isolated mixed rerun live rehearsal",
+    )
+    _write_m2_artifacts(project_root)
+    manager_state_file = team_dir / "orch_manager_state.json"
+    now = _now_iso()
+
+    state = runtime_read.default_manager_state(control_root, team_dir)
+    state["active"] = "alpha"
+    state.pop("project_lock", None)
+    task = runtime_read.sanitize_task_record(_m2_task(now), "REQ-M2-001")
+    state["projects"]["alpha"] = {
+        "name": "alpha",
+        "display_name": "Alpha",
+        "project_alias": "O8",
+        "project_root": str(project_root),
+        "team_dir": str(project_team_dir),
+        "overview": "isolated mixed rerun live rehearsal",
+        "last_request_id": "REQ-M2-001",
+        "background_runner_target": runner_target,
+        "run_lock_mode": run_lock_mode,
+        "background_runner_slot_limit": local_tmux_slot_limit,
+        "background_runner_slot_limits": {
+            "local_tmux": local_tmux_slot_limit,
+            "github_runner": 1,
+            "remote_worker": 1,
+        },
+        "tasks": {"REQ-M2-001": task},
+    }
+    _write_json(manager_state_file, state)
+
+    return {
+        "scenario": "M2",
+        "control_root": str(control_root),
+        "team_dir": str(team_dir),
+        "manager_state_file": str(manager_state_file),
+        "project_root": str(project_root),
+        "project_alias": "O8",
+        "request_id": "REQ-M2-001",
+        "task_ref": "T-801",
+        "run_lock_mode": run_lock_mode,
+        "background_runner_target": runner_target,
+        "background_runner_slot_limits": state["projects"]["alpha"]["background_runner_slot_limits"],
+        "reentry_rails_summary": task.get("reentry_rails_summary", ""),
+        "artifact_paths": [
+            "src/session.js",
+            "tests/session.test.js",
+            "docs/analysis/auth_scope_inventory.md",
+            "docs/handoff/operator_handoff.md",
+            "docs/reviews/reviewer_note.md",
+        ],
+        "preflight_commands": [
+            "/orch status O8",
+            "/task T-801",
+            "/offdesk review O8",
+        ],
+        "trigger_command": "/retry T-801 lane L2",
+        "dashboard_paths": {
+            "task_detail": "/control/tasks/by-request/REQ-M2-001",
+            "runtime_detail": "/control/runtimes/O8",
+        },
+    }
+
+
 def seed_r3_manual_followup_execute_runtime(
     control_root: Path,
     *,
@@ -1571,7 +1936,7 @@ def seed_r4_external_background_runtime(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Seed an isolated live-rehearsal runtime without launching work.")
-    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "r2", "r3-execute", "r4"], default="r2")
+    parser.add_argument("--scenario", choices=["b2", "b3", "d2", "m2", "r2", "r3-execute", "r4"], default="r2")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--run-lock-mode", choices=["open", "test_only"], default="test_only")
     parser.add_argument("--runner-target", choices=["local_tmux", "github_runner", "remote_worker"], default="local_tmux")
@@ -1601,6 +1966,13 @@ def main() -> int:
         )
     elif args.scenario == "d2":
         payload = seed_d2_data_rerun_runtime(
+            Path(args.control_root),
+            run_lock_mode=args.run_lock_mode,
+            runner_target=args.runner_target,
+            local_tmux_slot_limit=max(1, int(args.local_tmux_slot_limit)),
+        )
+    elif args.scenario == "m2":
+        payload = seed_m2_mixed_rerun_runtime(
             Path(args.control_root),
             run_lock_mode=args.run_lock_mode,
             runner_target=args.runner_target,
