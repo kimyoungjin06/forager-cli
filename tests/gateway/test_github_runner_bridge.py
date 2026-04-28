@@ -12,6 +12,7 @@ from aoe_tg_background_runs import background_runs_state_path, upsert_background
 from aoe_tg_external_background_worker import emit_external_background_handoff, external_background_result_path
 from aoe_tg_external_worker_runtime import run_external_background_worker_once
 from aoe_tg_github_runner_bridge import (
+    build_github_runner_completion_comment,
     build_github_runner_comment_dispatch,
     build_github_runner_transport_policy,
     build_github_runner_worker_bundle,
@@ -284,8 +285,9 @@ def test_github_runner_comment_dispatch_accepts_trusted_bgx_run_command() -> Non
         "timeout_sec": "120",
         "max_items": "2",
         "commit_results": "false",
+        "comment_issue_number": "104",
     }
-    assert "download-github-artifact" in result["response_markdown"]
+    assert "run link and artifact import command" in result["response_markdown"]
 
 
 def test_github_runner_comment_dispatch_ignores_non_command_comments() -> None:
@@ -360,7 +362,84 @@ def test_github_runner_bridge_cli_comment_dispatch_writes_github_outputs(tmp_pat
     assert "ok=true" in output
     assert "ticket_id=BGT-GHA-CLI-COMMENT-001" in output
     assert "commit_results=false" in output
+    assert "comment_issue_number=104" in output
     assert "dispatch accepted" in response_path.read_text(encoding="utf-8")
+
+
+def test_github_runner_completion_comment_builds_import_instruction() -> None:
+    result = build_github_runner_completion_comment(
+        ticket_id="BGT-GHA-COMMENT-001",
+        runner_target="github_runner",
+        team_dir=".aoe-team",
+        run_id="25046272933",
+        run_url="https://github.com/acme/repo/actions/runs/25046272933",
+        artifact_name="aoe-external-background-github_runner-BGT-GHA-COMMENT-001",
+        worker_result="success",
+        comment_issue_number="104",
+    )
+
+    assert result["ok"] is True
+    assert result["should_comment"] is True
+    assert result["issue_number"] == 104
+    body = result["response_markdown"]
+    assert "AOE external runner workflow finished." in body
+    assert "worker_result: `success`" in body
+    assert "--run-id 25046272933" in body
+    assert "--ticket-id BGT-GHA-COMMENT-001" in body
+    assert "download-github-artifact" in body
+
+
+def test_github_runner_completion_comment_rejects_missing_issue_number() -> None:
+    result = build_github_runner_completion_comment(
+        ticket_id="BGT-GHA-COMMENT-001",
+        runner_target="github_runner",
+        team_dir=".aoe-team",
+        run_id="25046272933",
+        run_url="https://github.com/acme/repo/actions/runs/25046272933",
+        worker_result="success",
+        comment_issue_number="",
+    )
+
+    assert result["ok"] is False
+    assert result["should_comment"] is False
+    assert result["violations"][0]["code"] == "comment_issue_number_required"
+
+
+def test_github_runner_bridge_cli_completion_comment_writes_response(tmp_path: Path) -> None:
+    response_path = tmp_path / "completion.md"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(GW_DIR / "aoe-github-runner-bridge.py"),
+            "completion-comment",
+            "--ticket-id",
+            "BGT-GHA-CLI-COMPLETION-001",
+            "--runner",
+            "github_runner",
+            "--team-dir",
+            ".aoe-team",
+            "--run-id",
+            "25046272933",
+            "--run-url",
+            "https://github.com/acme/repo/actions/runs/25046272933",
+            "--worker-result",
+            "success",
+            "--comment-issue-number",
+            "104",
+            "--response-file",
+            str(response_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    body = response_path.read_text(encoding="utf-8")
+    assert "BGT-GHA-CLI-COMPLETION-001" in body
+    assert "download-github-artifact" in body
 
 
 def test_external_background_worker_workflow_contract_is_stable() -> None:
@@ -380,6 +459,10 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
     assert "actions/upload-artifact@v4" in workflow
     assert "actions/download-artifact@v4" in workflow
     assert "github.event.client_payload.commit_results == 'true'" in workflow
+    assert "comment_issue_number:" in workflow
+    assert "comment-worker-result:" in workflow
+    assert "needs.worker-run.result" in workflow
+    assert "aoe-github-runner-bridge.py completion-comment" in workflow
     assert "background_run_acks" in workflow
     assert "background_run_results" in workflow
     assert "background_run_logs" in workflow
@@ -389,5 +472,6 @@ def test_external_background_worker_workflow_contract_is_stable() -> None:
     assert "aoe-github-runner-bridge.py comment-dispatch" in comment_workflow
     assert "gh workflow run" in comment_workflow
     assert "external-background-worker.yml" in comment_workflow
+    assert "comment_issue_number" in comment_workflow
     assert "gh issue comment" in comment_workflow
     assert ".github/workflows/*.yml" in gateway_tests

@@ -94,6 +94,7 @@ provider capacity override 후 재개:
 - issue/PR comment trigger:
 `/aoe bgx run <ticket_id> [--team-dir .aoe-team] [--timeout-sec 900] [--max-items 1]`
 - comment trigger is trusted-author and artifact-only; it does not accept `bundle_b64` or `commit_results`.
+- comment-triggered runs post a completion callback with the workflow run URL and exact `download-github-artifact --poll` command.
 - workflow pickup uploads ack/result/log sidecars as an Actions artifact.
 - default workflow transport is artifact-only with `contents:read`; `commit_results=true` uses the separate write-permission commit job.
 - sidecar import after downloading the artifact:

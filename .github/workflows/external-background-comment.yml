@@ -46,7 +46,8 @@ jobs:
             -f ticket_id="${{ steps.plan.outputs.ticket_id }}" \
             -f timeout_sec="${{ steps.plan.outputs.timeout_sec }}" \
             -f max_items="${{ steps.plan.outputs.max_items }}" \
-            -f commit_results="${{ steps.plan.outputs.commit_results }}"
+            -f commit_results="${{ steps.plan.outputs.commit_results }}" \
+            -f comment_issue_number="${{ steps.plan.outputs.comment_issue_number }}"
 
       - name: Comment response
         if: steps.plan.outputs.should_comment == 'true'
