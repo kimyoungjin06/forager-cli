@@ -478,6 +478,7 @@
     - `scripts/gateway/aoe-external-sidecar-sync.py drain-github-imports --team-dir <team_dir> --poll` can be run repeatedly by a local timer without copying a run id from GitHub
     - `scripts/gateway/aoe-auto-scheduler.py` drains the scheduled import file by default while the local stack is running, even when `/auto` task dispatch is disabled
     - `/auto status` reports the last scheduled GitHub import drain timestamp and processed/completed/pending/failed counts
+    - `/control` and `/control/health` report scheduled GitHub import backlog counts and latest failure reasons
   - imports only the expected ack/result/log filenames for the selected ticket and runner
   - refuses to overwrite existing sidecars unless `--overwrite` is provided
   - `--poll` runs the local external-ticket poller after import so task/runtime state can move to `pickup_acknowledged` or `result_received`
@@ -531,7 +532,7 @@
     - `runtime_summary=<runner>_handoff=<handoff artifact path>`
     - `evidence_bundle=status=running | outcome=external_handoff_emitted | handoff=<artifact>`
   - `worker-run` pickup writes `.aoe-team/background_run_acks/`, executes the serialized command, and writes `.aoe-team/background_run_results/` plus `.aoe-team/background_run_logs/`
-- Remaining external runner productization work is end-to-end live verification of the comment-triggered GitHub runner flow and richer dashboard visibility for scheduled import backlog/failure reasons.
+- Remaining external runner productization work is end-to-end live verification of the comment-triggered GitHub runner flow.
 - How much of the current tmux/runtime process model should be reused as `local_background`?
 - Should `github_runner` be phase2-only or allow full off-desk dispatch?
 - What is the minimum evidence bundle for partial execution?

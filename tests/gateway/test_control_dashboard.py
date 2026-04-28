@@ -1109,6 +1109,94 @@ def test_control_dashboard_overview_and_tasks_routes_render_structured_state(tmp
     )
 
 
+def test_control_dashboard_overview_surfaces_scheduled_github_imports(tmp_path: Path) -> None:
+    control_root = tmp_path / "control"
+    team_dir, manager_state_file, _project_root = _build_runtime(control_root)
+    (team_dir / "github_external_imports.json").write_text(
+        json.dumps(
+            {
+                "version": "2026-04-28.v1",
+                "updated_at": "2026-04-28T12:05:00+09:00",
+                "imports": [
+                    {
+                        "status": "pending",
+                        "ticket_id": "BGT-GHA-PENDING-001",
+                        "runner_target": "github_runner",
+                        "run_id": "111",
+                        "repo": "kimyoungjin06/aoe_orch_control",
+                        "attempts": 0,
+                        "updated_at": "2026-04-28T12:00:00+09:00",
+                    },
+                    {
+                        "status": "retry",
+                        "ticket_id": "BGT-GHA-RETRY-001",
+                        "runner_target": "github_runner",
+                        "run_id": "222",
+                        "repo": "kimyoungjin06/aoe_orch_control",
+                        "attempts": 2,
+                        "last_reason": "github_run_timeout",
+                        "updated_at": "2026-04-28T12:05:00+09:00",
+                    },
+                    {
+                        "status": "failed",
+                        "ticket_id": "BGT-GHA-FAIL-001",
+                        "runner_target": "github_runner",
+                        "run_id": "333",
+                        "repo": "kimyoungjin06/aoe_orch_control",
+                        "attempts": 1,
+                        "last_reason": "artifact_missing",
+                        "updated_at": "2026-04-28T12:03:00+09:00",
+                    },
+                    {
+                        "status": "completed",
+                        "ticket_id": "BGT-GHA-DONE-001",
+                        "runner_target": "github_runner",
+                        "run_id": "444",
+                        "repo": "kimyoungjin06/aoe_orch_control",
+                        "attempts": 1,
+                        "updated_at": "2026-04-28T12:01:00+09:00",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = dashboard_app.DashboardAppConfig(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    overview_status, _overview_headers, overview_body = dashboard_app.build_dashboard_response("/control", config)
+    health_status, _health_headers, health_body = dashboard_app.build_dashboard_response("/control/health", config)
+    snapshot = dashboard_state.load_dashboard_snapshot(
+        control_root=control_root,
+        team_dir=team_dir,
+        manager_state_file=manager_state_file,
+    )
+    overview_text = overview_body.decode("utf-8")
+    health = json.loads(health_body.decode("utf-8"))
+
+    assert overview_status == 200
+    assert health_status == 200
+    assert "github_imports" in overview_text
+    assert "total=4 | pending=1 | retry=1 | completed=1 | failed=1" in overview_text
+    assert "next=BGT-GHA-RETRY-001/github_runner run=222 attempts=2 reason=github_run_timeout" in overview_text
+    assert "github_import_failures" in overview_text
+    assert "BGT-GHA-FAIL-001/github_runner run=333 attempts=1 reason=artifact_missing" in overview_text
+    assert health["github_import_summary"].startswith("total=4 | pending=1 | retry=1")
+    assert health["github_import_failure_summary"] == (
+        "BGT-GHA-FAIL-001/github_runner run=333 attempts=1 reason=artifact_missing"
+    )
+    assert health["github_import_updated_at"] == "2026-04-28T12:05:00+09:00"
+    assert any(row.name == "github_external_imports" and row.exists for row in snapshot.source_files)
+
+
 def test_control_dashboard_chat_console_route_renders_sessions_and_room_tail(tmp_path: Path, monkeypatch) -> None:
     control_root = tmp_path / "control"
     team_dir, manager_state_file, _project_root = _build_runtime(control_root)

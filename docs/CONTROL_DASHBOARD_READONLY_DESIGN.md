@@ -461,6 +461,7 @@ python3 scripts/dashboard/control_dashboard.py --control-root /path/to/control/r
 
 ### 15.2 Parity Checks
 - `Overview` retains the same critical fields visible in `/auto status`
+- `Overview` exposes scheduled GitHub import backlog/failure visibility from `.aoe-team/github_external_imports.json`
 - `Active Tasks` retains the same critical fields visible in `/monitor`
 - `Task Detail` retains the same critical fields visible in `/task`
 - `Offdesk Prep` retains the same critical fields visible in `/offdesk prepare`

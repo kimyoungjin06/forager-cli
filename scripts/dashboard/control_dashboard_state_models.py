@@ -127,6 +127,10 @@ class ControlSummaryDTO:
     execution_brief_summary: str
     background_run_summary: str
     background_worker_summary: str
+    github_import_summary: str
+    github_import_failure_summary: str
+    github_import_state_path: str
+    github_import_updated_at: str
     latest_intent_command: str
     latest_intent_action: str
     latest_intent_trace: str

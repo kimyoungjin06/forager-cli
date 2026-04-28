@@ -55,6 +55,7 @@ Current implementation note:
 - Sections:
   - global automation status
   - provider capacity summary
+  - scheduled GitHub import backlog and latest failure reason
   - next retry target
   - active project count
   - blocked / parked / repeat-heavy project count

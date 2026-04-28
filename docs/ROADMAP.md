@@ -376,10 +376,10 @@
       - local `watch-github-artifact` run wait + artifact import orchestration
       - ticket-named GitHub run discovery + scheduled local import drain
       - default long-running stack/timer hook for scheduled GitHub import drain
+      - scheduled GitHub import backlog/failure dashboard visibility
       - `local_tmux` followup-execute proof for B3/D3/R3/M3
     - 남은 것:
       - non-serializable `initial detached no-wait` cases의 externalizable 분리
-      - scheduled GitHub import backlog/failure dashboard visibility
       - live verification of comment-triggered GitHub runner pickup/import/poll loop
   - 최소 범위:
     - background queue
