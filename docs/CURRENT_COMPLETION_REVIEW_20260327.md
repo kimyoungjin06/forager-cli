@@ -173,6 +173,7 @@
   - baseline issue/PR comment trigger and completion callback ergonomics are implemented for trusted artifact-only GitHub runner dispatch
   - scheduled GitHub import drain is wired into the long-running local auto scheduler by default
   - scheduled GitHub import backlog/failure counts are visible in the dashboard overview and health JSON
+  - comment-flow live verification preflight emits the exact trusted comment, run discovery, auto-import, and scheduled-drain commands
 - governance / permissions / usage:
   - owner-only safety baseline exists
   - usage reporting, budget boundaries, and secret-redaction surfaces remain open
@@ -224,7 +225,8 @@
   - baseline ticket-named GitHub run discovery + scheduled local import drain implemented
   - baseline long-running stack/timer hook for scheduled GitHub import drain implemented
   - baseline dashboard-level scheduled import backlog/failure visibility implemented
-  - remaining: live comment-triggered GitHub runner verification
+  - baseline comment-flow live verification preflight implemented
+  - remaining: one live comment-triggered GitHub runner smoke against a real issue/PR and seeded externalizable ticket
 
 ### 6.4 Fourth Block: Operational Hygiene
 4. `Retention And Disk Hygiene`

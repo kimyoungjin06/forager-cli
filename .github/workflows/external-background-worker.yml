@@ -232,6 +232,7 @@ jobs:
             --team-dir "$AOE_TEAM_DIR" \
             --run-id "$GITHUB_RUN_ID" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
             --artifact-name "$AOE_ARTIFACT_NAME" \
             --worker-result "$AOE_WORKER_RESULT" \
             --comment-issue-number "$AOE_COMMENT_ISSUE_NUMBER" \
