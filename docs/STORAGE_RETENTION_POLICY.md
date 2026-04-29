@@ -51,8 +51,18 @@
   - room/event logs
   - dashboard-related snapshots and action audit trails
 
-## 4. Immediate Follow-up
-- Connect this policy to:
-  - TTL settings already in use
-  - disk hygiene checks
-  - future storage location split between fast local state and larger evidence/archive storage
+## 4. Operational Mapping
+- Use the read-only retention report to connect this policy to live runtime settings:
+  - `python3 scripts/gateway/aoe_tg_retention_report.py --project-root .`
+  - `python3 scripts/gateway/aoe_tg_retention_report.py --project-root . --json`
+- The report groups disk hygiene surfaces by the storage classes above and includes:
+  - live TTL/keep settings from environment variables
+  - cleanup surfaces such as `/gc`, gateway log rotation, failed queue pruning, and dashboard action audit pruning
+  - observed path existence, file counts, byte counts, and JSONL row counts where relevant
+- Warning status means an operator has deliberately disabled a time window or selected a permanent artifact policy.
+
+## 5. Remaining Direction
+- Future storage split should separate:
+  - fast local runtime state
+  - larger evidence/archive storage
+- Evidence and artifact cleanup must remain manual until archival rules are explicit.

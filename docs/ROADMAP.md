@@ -534,8 +534,12 @@
     - evidence/artifacts
     - ephemeral runtime artifacts
     - logs/rooms
-- [ ] disk hygiene와 retention policy 연결
+- [x] disk hygiene와 retention policy 연결
   - TTL/cleanup 설정값과 실제 운영 저장소 전략 연결
+  - 추가:
+    - `scripts/gateway/aoe_tg_retention_report.py`
+    - text/JSON retention policy disk hygiene report
+    - storage class별 TTL/keep env, cleanup surface, observed path stats 연결
 - [x] dashboard action audit retention 연결
   - tunables:
     - `AOE_DASHBOARD_ACTION_AUDIT_RETENTION_DAYS`
