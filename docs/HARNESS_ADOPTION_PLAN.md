@@ -489,6 +489,11 @@ without grepping raw logs manually.
   - canonical `replacement`
   - human `note`
   - optional `next` operator hint
+- inventory surface:
+  - `python3 scripts/gateway/aoe_tg_deprecation.py`
+  - `python3 scripts/gateway/aoe_tg_deprecation.py --json`
+- regression guard:
+  - every inventory slash/CLI surface must resolve through the runtime deprecated-surface matcher and render the deterministic envelope
 
 ## 9. Package F: Delegation Contract Enforcement
 

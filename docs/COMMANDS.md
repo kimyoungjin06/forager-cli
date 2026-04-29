@@ -358,6 +358,9 @@ pause/resume 동작 규칙:
 source of truth:
 
 - `scripts/gateway/aoe_tg_deprecation.py`
+- inventory:
+  - `python3 scripts/gateway/aoe_tg_deprecation.py`
+  - `python3 scripts/gateway/aoe_tg_deprecation.py --json`
 
 - `/mother`
 - `/mother-orch`

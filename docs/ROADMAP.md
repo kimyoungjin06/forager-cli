@@ -637,11 +637,13 @@
     - standalone `setup guide` script added for bootstrap/env/migration/systemd/dashboard/doctor next-steps
     - state-root migration helper is already added
     - standalone `upgrade guide` script added for doctor/setup/migration/workflow-runtime/full-suite post-upgrade checks
-- [ ] compatibility / deprecation envelope
+- [x] compatibility / deprecation envelope
   - legacy surface retirements에 deterministic response envelope 추가
   - note:
     - shared deprecation envelope helper added
     - code-centric retired surface inventory added
+    - text/JSON inventory CLI added
+    - inventory-to-matcher contract tests added
     - retired surface set now includes:
       - `mother-orch`
       - `swarm`
