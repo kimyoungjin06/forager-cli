@@ -9,6 +9,75 @@
 - `IN_PROGRESS`: 부분 구현 완료, 정책/자동화 추가 필요
 - `PLANNED`: 설계 합의만 완료, 구현 미착수
 
+## 2A. Current TODO Snapshot
+### 2A.1 Immediate TODO
+1. `BuildRequestContract` extractor 추가
+   - 이유:
+     - `data`, `review`, `mixed`는 전용 extractor가 있지만 `build`는 아직 fallback contract에 의존한다.
+     - build/auth/session 계열 acceptance가 keyword floor에 남아 있어 `Request Contract` 전환의 가장 큰 공백이다.
+   - 구현 범위:
+     - `scripts/gateway/aoe_tg_request_contract_build.py`
+     - dispatcher에서 build fallback 전에 build extractor 호출
+     - `target_surface`, `public_boundary`, `persisted_state_scope`, `verification_scope`, `risk_scope`, `required_artifacts` 추출
+     - auth/session prompt에서 caller-visible behavior와 persisted token/session boundary를 contract field로 저장
+   - exit criteria:
+     - build happy/rerun path가 `/task`, dashboard, recovery에서 build contract field를 직접 보여준다.
+     - build acceptance generation이 raw prompt marker보다 contract fields를 우선한다.
+
+2. `ExecutionBrief` preset slice 정교화
+   - 이유:
+     - brief 상태와 surface 노출은 연결됐지만 preset별 `executable` / `partially_executable` / `operator_decision_required` 판정은 더 강해져야 한다.
+   - 구현 범위:
+     - build/data/review/mixed별 executable slice와 blocked slice 명시
+     - build auth/session에서 public boundary 또는 persisted-state boundary가 비어 있으면 `underspecified` 또는 `operator_decision_required`로 fail closed
+     - `execution_brief_done_criteria` / `execution_brief_rerun_criteria` 저장 경로 정리
+
+3. `Request Contract` coverage audit
+   - 이유:
+     - roadmap에는 `Request Contract layer`가 미완료로 남아 있지만 실제로는 data/review/mixed와 persistence/surface 일부가 구현되어 있다.
+   - 구현 범위:
+     - preset별 extractor/brief/surface coverage 표 작성
+     - missing fields와 ambiguity notes가 실제 planning gate까지 전파되는지 회귀 테스트 고정
+     - roadmap의 `Request Contract` 항목을 phase별 완료/미완료로 재분해
+
+### 2A.2 Mid-term TODO
+1. `Project Progress Board` dedicated view
+   - overview/offdesk/runtime/recovery에 흩어진 brief, queue, worker, doc/runtime drift truth를 한 화면에 모은다.
+   - queue depth, stale age, brief severity, operator decision 필요 여부로 정렬한다.
+
+2. `Background / Remote Execution` live external smoke
+   - trusted issue/PR comment -> GitHub runner pickup -> artifact import -> poll bridge까지 실제 issue/PR로 검증한다.
+   - non-serializable initial detached no-wait cases를 externalizable path로 분리한다.
+
+3. `Governance / Permissions / Usage` 운영 경계
+   - permission policy, budget boundary, usage report, audit event, secret redaction을 off-desk 실행 경로에 결합한다.
+
+4. `Document Registry + Dashboard Convergence` drift 강화
+   - 현재는 conservative drift excerpt와 dashboard card가 있다.
+   - 다음은 drift severity, stale document owner, next intervention까지 정렬한다.
+
+5. structural debt target 선정
+   - 새 기능을 더하기 전에 `aoe_tg_task_state.py`, `aoe_tg_request_contract.py`, `aoe_tg_offdesk_flow.py` 중 운영 병목이 큰 모듈부터 분해한다.
+
+### 2A.3 Long-term TODO
+1. multi-project scheduling autonomy
+   - `/next`, project todo, offdesk priority를 multi-project queue scheduling으로 통합한다.
+
+2. remote execution productization
+   - local tmux, GitHub runner, remote worker를 동일한 executor-adapter contract로 운영한다.
+   - pickup/ack/result/import/audit trail을 runner별 차이가 아닌 공통 product surface로 만든다.
+
+3. governance-grade operations
+   - permissions, budget, usage, audit, secret redaction을 default-on 운영 정책으로 만든다.
+
+4. evidence archive lifecycle
+   - retention report는 read-only 진단까지 완료됐다.
+   - 장기적으로는 canonical state, ephemeral cache, evidence archive를 저장 위치와 pruning policy로 분리한다.
+
+5. adaptive provider capacity policy
+   - 현재 cooldown/fallback memory는 동작한다.
+   - 다음은 provider별 backoff level, model/role별 degraded mode, operator override expiry를 정책화한다.
+
 ## 3. Constitution Trace Matrix
 | Clause | Requirement | Status | Evidence | Next Action |
 |---|---|---|---|---|
@@ -58,10 +127,18 @@
 - 대응 실패 시 즉시 operator 보고/승인 루프
 
 ## 5. Near-term Sprint (Next 2 cycles)
-- [x] replay 권한 분리 완성
-- [x] failed queue TTL + purge 정책 자동화
-- [x] Critic fail 상태를 기준으로 재실행 3회 + 에스컬레이션 훅 구현(`--exec-critic`, `--exec-critic-retry-max`)
-- [x] Telegram 보고 레벨(짧게/보통/상세) 스위치 추가(`/report`)
+- [ ] `BuildRequestContract` extractor 도입
+  - `build` preset fallback contract를 전용 extractor로 대체
+  - auth/session persisted-state boundary를 structured field로 저장
+- [ ] build contract 기반 acceptance generation 연결
+  - raw prompt marker floor보다 `request_contract.fields`를 우선
+  - caller-visible behavior, persisted state, verification scope를 acceptance에 반영
+- [ ] `ExecutionBrief` preset별 executable/blocked slice 강화
+  - build/data/review/mixed별 slice 기준 정리
+  - operator decision이 필요한 ambiguity는 planning guesswork로 넘기지 않음
+- [ ] `Request Contract` coverage audit 문서화
+  - preset별 extractor, brief, gate, persistence, surface coverage 표 작성
+  - roadmap의 Request Contract 항목을 phase별 완료/미완료로 재분해
 
 ## 6. Current Orch Bug Bundle
 - [x] planning 시작 직후 provisional task에 `phase1_*` 메타와 candidate roles를 즉시 반영
@@ -93,12 +170,12 @@
     - 다음 큰 축은 `Project Flow Compiler`를 통한 문서/런타임 수렴
     - 그 다음은 external runner pickup/ack productization
   - 우선순위:
-    1. `8.8 Document Registry + Dashboard Convergence`
-    2. `8.4 Background / Remote Execution` external pickup/ack 후속
-    3. `8.6 Retention and Storage`
-    4. `8.8 doctor / setup / migration` 후속 마무리
-    5. `8.8 compatibility / deprecation` 후속 마무리
-    6. `8.8 learned runbook extraction`
+    1. `8.4 Request Contract` build extractor와 build/auth/session contract truth 전환
+    2. `8.4 Execution Brief` preset별 executable/blocked slice 정교화
+    3. `8.4 Project Progress Board` dedicated view
+    4. `8.4 Background / Remote Execution` live external pickup/import/poll smoke
+    5. `8.4 Governance / Permissions / Usage` 운영 경계
+    6. `8.8 Document Registry + Dashboard Convergence` drift severity 강화
     7. `8.7 Structural Debt` 후속
 - [x] hot harness benchmark import baseline fixed
   - 문서:
@@ -112,13 +189,14 @@
       - operator dashboard
       - governance / audit / permissions
   - 재정렬된 큰 축:
-    1. `Execution Brief`
-    2. `Ondesk / Offdesk state model`
-    3. `Background / Remote Execution`
-    4. `Project Progress Board`
-    5. `Governance / Permissions / Usage`
-    6. `Project Flow Compiler`
-    7. completed deep rerun/manual-followup verification now feeds productization work
+    1. `Request Contract` coverage completion
+    2. `Execution Brief` preset feasibility model
+    3. `Ondesk / Offdesk state model`
+    4. `Background / Remote Execution`
+    5. `Project Progress Board`
+    6. `Governance / Permissions / Usage`
+    7. `Project Flow Compiler` drift severity 강화
+    8. completed deep rerun/manual-followup verification now feeds productization work
   - reference discipline:
     - benchmark-driven imports must cite `docs/HOT_HARNESS_IMPORT_PLAN_20260404.md` reference IDs
 - [x] control plane + executor adapter architecture fixed
@@ -483,25 +561,40 @@
   - 목적:
     - `text -> request contract -> planning/runtime`
     - marker-only acceptance floor 의존 제거
+  - 현재 상태:
+    - `IN_PROGRESS`
+    - 구현됨:
+      - shared request contract dispatcher / snapshot normalizer
+      - `data` extractor
+      - `review` extractor
+      - `mixed` extractor
+      - lineage-based preset reuse
+      - contract/brief fields persistence and `/task` / dashboard / recovery surface exposure
+      - `RequestContract -> ExecutionBrief -> OrchTaskSpec` baseline seam
+    - 주요 공백:
+      - `build`는 아직 fallback contract 중심
+      - build/auth/session boundary가 structured contract field보다 marker floor에 더 많이 의존
+      - preset별 coverage 표와 gate/surface completeness audit가 없음
   - 1단계:
-    - `data` contract extractor
-    - `RequestContract -> ExecutionBrief -> OrchTaskSpec` assembly seam 명시화
-    - `contract_incomplete` / `contract_ambiguous` fail-closed gate
-    - preset precedence 구현
+    - [x] `data` contract extractor
+    - [x] `RequestContract -> ExecutionBrief -> OrchTaskSpec` assembly seam 명시화
+    - [x] `contract_incomplete` / `contract_ambiguous` fail-closed gate
+    - [x] preset precedence 구현
       - explicit override
       - existing task lineage
       - artifact/work shape
       - role-preset inference
       - fallback text heuristic
-    - `aoe_tg_schema.py`의 data acceptance를 contract 기반으로 전환
-    - task/runtime state에 `request_contract_*` canonical subset 저장
-    - `/task` / dashboard `Task Detail`에 contract summary와 missing fields 노출
+    - [x] `aoe_tg_schema.py`의 data acceptance를 contract 기반으로 전환
+    - [x] task/runtime state에 `request_contract_*` canonical subset 저장
+    - [x] `/task` / dashboard `Task Detail`에 contract summary와 missing fields 노출
   - 2단계:
-    - `build` contract extractor
-    - auth/session persisted-state boundary를 contract 기반으로 전환
+    - [ ] `build` contract extractor
+    - [ ] auth/session persisted-state boundary를 contract 기반으로 전환
   - 3단계:
-    - `review` / `mixed` contract extractor
-    - handoff/review/work separation을 contract 기반으로 전환
+    - [x] `review` / `mixed` contract extractor baseline
+    - [x] handoff/review/work separation을 contract 기반으로 전환 baseline
+    - [ ] preset별 coverage audit와 missing edge 보강
   - note:
     - `Execution Brief`가 먼저 on-desk/off-desk handoff를 안정화하고, 그 다음 `Planning Convergence`가 planning truth를 안정화한다
 
