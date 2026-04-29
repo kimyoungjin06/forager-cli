@@ -342,6 +342,14 @@ Operational rule:
 - `AOE_TF_DOC_MODE`: TF 문서 스캐폴드 모드 (`single`|`legacy`, default `single`)  
   `single`은 TF당 `report.md` 1장만 유지하고, `legacy`는 `ongoing/note/handoff` 스캐폴드를 유지
 
+## 8.1 Retention / Disk Hygiene Report
+- Text report:
+  - `python3 scripts/gateway/aoe_tg_retention_report.py --project-root .`
+- JSON report:
+  - `python3 scripts/gateway/aoe_tg_retention_report.py --project-root . --json`
+- Use this before changing retention knobs. It maps `docs/STORAGE_RETENTION_POLICY.md` classes to live TTL/keep settings, cleanup surfaces, and observed runtime paths.
+- Warning status indicates a disabled time window or a TF artifact policy that can keep execution artifacts indefinitely.
+
 ## 9. Command Delta
 - `/cancel` : pending mode 해제
 - `/pick [번호|label]` : 현재 task 포커스 지정 (빈칸이면 최근 목록 + 버튼 제공)
