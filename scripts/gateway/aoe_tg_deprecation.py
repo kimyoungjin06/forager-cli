@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 
@@ -157,6 +159,37 @@ def list_deprecated_surfaces() -> List[dict]:
     return rows
 
 
+def render_deprecated_surface_inventory(rows: Optional[Sequence[dict]] = None) -> str:
+    inventory = list(rows) if rows is not None else list_deprecated_surfaces()
+    lines = [
+        "deprecated surface inventory",
+        f"- total: {len(inventory)}",
+        "",
+        "surfaces:",
+    ]
+    for row in inventory:
+        lines.append(f"- code: {row.get('code', '')}")
+        slash_surfaces = ", ".join(str(value) for value in row.get("slash_surfaces", []) if str(value).strip())
+        cli_surfaces = ", ".join(str(value) for value in row.get("cli_surfaces", []) if str(value).strip())
+        if slash_surfaces:
+            lines.append(f"  slash: {slash_surfaces}")
+        if cli_surfaces:
+            lines.append(f"  cli: {cli_surfaces}")
+        slash_replacement = str(row.get("slash_replacement", "")).strip()
+        cli_replacement = str(row.get("cli_replacement", "")).strip()
+        if slash_replacement:
+            lines.append(f"  slash_replacement: {slash_replacement}")
+        if cli_replacement:
+            lines.append(f"  cli_replacement: {cli_replacement}")
+        next_step = str(row.get("next_step", "")).strip()
+        if next_step:
+            lines.append(f"  next: {next_step}")
+        note = str(row.get("note", "")).strip()
+        if note:
+            lines.append(f"  note: {note}")
+    return "\n".join(lines).strip()
+
+
 def _match_slash_surface(spec: DeprecatedSurfaceSpec, cmd: str, rest: str) -> Optional[DeprecatedSurfaceMatch]:
     token = str(cmd or "").strip().lower()
     tail = str(rest or "").strip()
@@ -244,3 +277,23 @@ def render_deprecated_surface_message(match: DeprecatedSurfaceMatch) -> str:
     if str(match.next_step or "").strip():
         lines.append(f"- next: {match.next_step}")
     return "\n".join(lines).strip()
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="List deterministic deprecated gateway surfaces")
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
+    rows = list_deprecated_surfaces()
+    if args.json:
+        print(json.dumps({"deprecated_surfaces": rows, "count": len(rows)}, ensure_ascii=False, indent=2))
+    else:
+        print(render_deprecated_surface_inventory(rows))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -86,6 +86,10 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_upgrade_guide.py --project-root /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control`
 - use before/after dependency, workflow, state-root, setup, or migration changes.
 - the guide combines doctor status, state-root migration guidance, setup readiness, GitHub helper action runtime checks, and the required full gateway suite command.
+8.2 Deprecated surface inventory:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_deprecation.py`
+- JSON form:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_deprecation.py --json`
 9. CI workflow definition:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.github/workflows/gateway-tests.yml`
 - job shape: `gateway-smoke`, `gateway-error`, `gateway-dashboard`, `gateway-full` (matrix parallel run)
