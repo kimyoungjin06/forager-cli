@@ -90,6 +90,12 @@ provider capacity override 후 재개:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_deprecation.py`
 - JSON form:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_deprecation.py --json`
+8.3 Learned recovery runbook extraction:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_learned_runbook.py --project-root /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control`
+- JSON form:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_learned_runbook.py --project-root /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control --json`
+- write generated candidates:
+`/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/scripts/gateway/aoe_tg_learned_runbook.py --project-root /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control --write-doc`
 9. CI workflow definition:
 `/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.github/workflows/gateway-tests.yml`
 - job shape: `gateway-smoke`, `gateway-error`, `gateway-dashboard`, `gateway-full` (matrix parallel run)

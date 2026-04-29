@@ -527,9 +527,17 @@ without grepping raw logs manually.
 - `docs/runbooks/*.md`
 - or `.aoe-team/learned/*.json` + rendered docs
 
-### 10.4 Timing
-- long-term
-- depends on session search and observability first
+### 10.4 Current Status
+- baseline extractor added:
+  - `scripts/gateway/aoe_tg_learned_runbook.py`
+- sources:
+  - dashboard action audit
+  - nightly session summary JSON
+- output:
+  - text/JSON learned runbook report
+  - optional `docs/runbooks/learned-recovery-runbook.md`
+- guardrail:
+  - only repeated non-benign `reason_code + remediation + next_step` patterns that meet `--min-count` are promoted as candidates
 
 ## 11. Sequence
 
