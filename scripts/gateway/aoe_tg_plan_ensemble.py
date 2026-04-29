@@ -87,16 +87,58 @@ def _dedupe_issue_codes(rows: List[Dict[str, Any]]) -> List[str]:
     return out[:12]
 
 
+def _row_issue_code_set(row: Dict[str, Any]) -> set[str]:
+    codes: set[str] = set()
+    if not isinstance(row, dict):
+        return codes
+    for code in list(row.get("issue_codes") or []):
+        token = str(code or "").strip().lower()
+        if token:
+            codes.add(token[:64])
+    return codes
+
+
+def _row_has_blockers(row: Dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if _row_issue_code_set(row):
+        return True
+    if str(row.get("primary_issue", "")).strip():
+        return True
+    if str(row.get("status", "")).strip().lower() == "issues":
+        return True
+    try:
+        return int(row.get("issue_count", 0) or 0) > 0
+    except Exception:
+        return False
+
+
 def _detect_stalled_issue(rows: List[Dict[str, Any]]) -> str:
+    valid_rows = [row for row in rows if isinstance(row, dict)]
     primaries = [
         str(row.get("primary_issue", "")).strip()
-        for row in rows
-        if isinstance(row, dict) and str(row.get("primary_issue", "")).strip()
+        for row in valid_rows
+        if str(row.get("primary_issue", "")).strip()
     ]
-    if len(primaries) < 2:
-        return ""
-    if primaries[-1] and primaries[-1] == primaries[-2]:
+    if len(primaries) >= 2 and primaries[-1] and primaries[-1] == primaries[-2]:
         return primaries[-1][:240]
+    if len(valid_rows) < 3:
+        return ""
+    previous = valid_rows[-2]
+    latest = valid_rows[-1]
+    try:
+        latest_round = int(latest.get("round", len(valid_rows)) or len(valid_rows))
+    except Exception:
+        latest_round = len(valid_rows)
+    if latest_round < 3 or not (_row_has_blockers(previous) and _row_has_blockers(latest)):
+        return ""
+    previous_codes = _row_issue_code_set(previous)
+    latest_codes = _row_issue_code_set(latest)
+    if previous_codes and latest_codes and previous_codes.issubset(latest_codes):
+        primary = str(latest.get("primary_issue", "")).strip()
+        if primary:
+            return f"blocker set did not narrow: {primary}"[:240]
+        return f"blocker set did not narrow: {', '.join(sorted(latest_codes))}"[:240]
     return ""
 
 

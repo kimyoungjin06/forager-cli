@@ -288,6 +288,97 @@ def test_phase1_ensemble_marks_repeated_blocker_as_stalled() -> None:
     assert result["plan_issue_codes"] == ["acceptance_gap"]
 
 
+def test_planning_stall_detector_marks_broader_round3_issue_set_as_stalled() -> None:
+    rows = [
+        {
+            "round": 1,
+            "status": "issues",
+            "issue_codes": ["artifact_contract_gap"],
+            "primary_issue": "artifact contract missing",
+        },
+        {
+            "round": 2,
+            "status": "issues",
+            "issue_codes": ["invalid_dependency"],
+            "primary_issue": "dependency edge missing",
+        },
+        {
+            "round": 3,
+            "status": "issues",
+            "issue_codes": ["acceptance_gap", "invalid_dependency"],
+            "primary_issue": "operator-visible acceptance evidence missing",
+        },
+    ]
+
+    ensemble_reason = ensemble_mod._detect_stalled_issue(rows)
+    pipeline_reason = pipeline_mod._detect_stalled_issue(rows)
+
+    assert ensemble_reason.startswith("blocker set did not narrow:")
+    assert "operator-visible acceptance evidence missing" in ensemble_reason
+    assert pipeline_reason == ensemble_reason
+
+
+def test_phase1_ensemble_marks_broader_round3_blocker_set_as_stalled() -> None:
+    def _runner(prompt: str, timeout_sec: int) -> str:
+        if "critic이다" in prompt:
+            if "round: 1/3" in prompt:
+                issues = ["report.md artifact contract missing"]
+            elif "round: 2/3" in prompt:
+                issues = ["dependency edge missing between subtasks"]
+            else:
+                issues = [
+                    "acceptance evidence missing for reviewer",
+                    "dependency edge missing between subtasks",
+                ]
+            return json.dumps(
+                {
+                    "approved": False,
+                    "issues": issues,
+                    "recommendations": [],
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "summary": "plan from codex",
+                "subtasks": [
+                    {
+                        "id": "S1",
+                        "title": "Draft",
+                        "goal": "Write the plan",
+                        "owner_role": "Codex-Writer",
+                        "acceptance": ["has a concise plan"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    args = SimpleNamespace(
+        plan_phase1_providers="codex",
+        plan_phase1_rounds=3,
+        plan_max_subtasks=3,
+        orch_command_timeout_sec=120,
+        plan_block_on_critic=True,
+    )
+
+    result = ensemble_mod.run_phase1_ensemble_planning(
+        args=args,
+        user_prompt="Prepare a stable execution plan",
+        available_roles=["Codex-Writer", "Codex-Reviewer"],
+        normalize_task_plan_payload=gw.normalize_task_plan_payload,
+        parse_json_object_from_text=gw.parse_json_object_from_text,
+        run_provider_execs={"codex": _runner},
+        plan_roles_from_subtasks=gw.plan_roles_from_subtasks,
+        report_progress=None,
+    )
+
+    assert result["plan_gate_blocked"] is True
+    assert result["plan_convergence_status"] == "stalled"
+    assert result["plan_stalled_reason"].startswith("blocker set did not narrow:")
+    assert result["plan_issue_codes"] == ["artifact_contract_gap", "invalid_dependency", "acceptance_gap"]
+
+
 def test_phase1_ensemble_launches_round1_planners_in_parallel() -> None:
     start_times: dict[str, float] = {}
     lock = threading.Lock()

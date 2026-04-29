@@ -180,6 +180,11 @@ Question:
 4. add `stalled` detection
 5. rerun `D1` under the new loop before widening further preset verification
 
+Current implementation status:
+- Phase1 ensemble planning enforces at least `3` critic review passes before `ready`.
+- Runtime state preserves `plan_review_count`, `plan_issue_codes`, `plan_issue_history`, `plan_convergence_status`, `plan_stalled_reason`, and `plan_last_round`.
+- `stalled` detection covers repeated primary issues and the round-3 case where the blocker code set stays unchanged or grows.
+
 ## 11. Bottom Line
 - Planning is not a one-shot generation step.
 - Planning is a bounded convergence process.

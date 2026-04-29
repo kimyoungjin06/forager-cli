@@ -452,7 +452,7 @@
   - 전략 위치:
     - first-wave runtime verification no longer blocks the next product block
     - next priority is document/runtime convergence via `Project Flow Compiler`
-- [ ] `Planning Convergence` loop 도입
+- [x] `Planning Convergence` loop 도입
   - 목적:
     - planner one-shot 가정을 제거
     - `planning_ready`를 최소 `3`회 비판 검토의 결과로 강제
@@ -473,6 +473,10 @@
     - `blocked`
     - `stalled`
     판정 구현
+  - 현재 상태:
+    - Phase1 ensemble planning이 최소 3회 critic review를 강제
+    - `plan_issue_history`는 `contract` / `execution` / `verification` focus를 기록
+    - repeated primary blocker와 3회차 blocker set 미축소/확대 케이스를 `stalled`로 분리
   - note:
     - `D1`의 반복 blocker 이력을 issue taxonomy 초기 corpus로 재사용한다
 - [ ] `Request Contract` layer 도입
