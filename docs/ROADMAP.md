@@ -653,5 +653,11 @@
       - `follow-up`
       - `off-desk`
       - `cleanup`
-- [ ] learned runbook extraction
+- [x] learned runbook extraction
   - repeated blocker / remediation를 durable runbook으로 승격
+  - source:
+    - dashboard action audit
+    - nightly session summary JSON
+  - output:
+    - text/JSON learned runbook report
+    - optional `docs/runbooks/learned-recovery-runbook.md`
