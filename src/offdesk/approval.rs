@@ -52,6 +52,8 @@ pub enum ApprovalMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingActionApproval {
     pub approval_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub action_id: String,
     pub status: ApprovalStatus,
     pub scope: ApprovalScope,
     pub project_key: String,
@@ -69,6 +71,16 @@ pub struct PendingActionApproval {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_by: Option<String>,
     pub source_surface: String,
+}
+
+impl PendingActionApproval {
+    pub fn action_id(&self) -> &str {
+        if self.action_id.is_empty() {
+            &self.approval_id
+        } else {
+            &self.action_id
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,13 +177,23 @@ impl ActionApprovalRequest {
 struct ActionAuditEntry<'a> {
     transition: &'a str,
     approval_id: &'a str,
+    action_id: &'a str,
     status: ApprovalStatus,
+    result: ApprovalStatus,
+    scope: ApprovalScope,
     project_key: &'a str,
     request_id: &'a str,
     task_id: &'a str,
     action: &'a str,
     risk_level: RiskLevel,
     approval_mode: ApprovalMode,
+    source_surface: &'a str,
+    preview: &'a str,
+    reason: &'a str,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    resolved_at: Option<DateTime<Utc>>,
+    resolved_by: Option<&'a str>,
     detail: &'a str,
     recorded_at: DateTime<Utc>,
 }
@@ -333,24 +355,7 @@ impl ApprovalLedger {
             | RiskLevel::CanonicalMutation
             | RiskLevel::Destructive
             | RiskLevel::ExternalSideEffect => {
-                let approval = PendingActionApproval {
-                    approval_id: format!("approval_{}", Uuid::new_v4()),
-                    status: ApprovalStatus::Pending,
-                    scope: ApprovalScope::Once,
-                    project_key: request.project_key,
-                    request_id: request.request_id,
-                    task_id: request.task_id,
-                    action: request.action,
-                    risk_level: request.risk_level,
-                    approval_mode: ApprovalMode::OperatorRequired,
-                    preview: operator_safe_text(&request.preview),
-                    reason: operator_safe_text(&request.reason),
-                    created_at: now,
-                    expires_at: now + request.ttl,
-                    resolved_at: None,
-                    resolved_by: None,
-                    source_surface: request.source_surface,
-                };
+                let approval = pending_approval_from_request(request, now);
                 approvals.push(approval.clone());
                 self.save(&approvals)?;
                 self.append_transition("pending", &approval, "created")?;
@@ -524,13 +529,23 @@ impl ApprovalLedger {
             let entry = ActionAuditEntry {
                 transition: transition.transition,
                 approval_id: &approval.approval_id,
+                action_id: approval.action_id(),
                 status: approval.status,
+                result: approval.status,
+                scope: approval.scope,
                 project_key: &approval.project_key,
                 request_id: &approval.request_id,
                 task_id: &approval.task_id,
                 action: &approval.action,
                 risk_level: approval.risk_level,
                 approval_mode: approval.approval_mode,
+                source_surface: &approval.source_surface,
+                preview: &approval.preview,
+                reason: &approval.reason,
+                created_at: approval.created_at,
+                expires_at: approval.expires_at,
+                resolved_at: approval.resolved_at,
+                resolved_by: approval.resolved_by.as_deref(),
                 detail: &transition.detail,
                 recorded_at: Utc::now(),
             };
@@ -623,24 +638,7 @@ impl ApprovalLedgerSession {
             | RiskLevel::CanonicalMutation
             | RiskLevel::Destructive
             | RiskLevel::ExternalSideEffect => {
-                let approval = PendingActionApproval {
-                    approval_id: format!("approval_{}", Uuid::new_v4()),
-                    status: ApprovalStatus::Pending,
-                    scope: ApprovalScope::Once,
-                    project_key: request.project_key,
-                    request_id: request.request_id,
-                    task_id: request.task_id,
-                    action: request.action,
-                    risk_level: request.risk_level,
-                    approval_mode: ApprovalMode::OperatorRequired,
-                    preview: operator_safe_text(&request.preview),
-                    reason: operator_safe_text(&request.reason),
-                    created_at: now,
-                    expires_at: now + request.ttl,
-                    resolved_at: None,
-                    resolved_by: None,
-                    source_surface: request.source_surface,
-                };
+                let approval = pending_approval_from_request(request, now);
                 let index = self.approvals.len();
                 self.lookup.entry(lookup_key).or_default().push(index);
                 self.approvals.push(approval.clone());
@@ -665,6 +663,31 @@ impl ApprovalLedgerSession {
         let transitions = std::mem::take(&mut self.transitions);
         self.ledger.append_queued_transitions(&transitions)?;
         Ok(())
+    }
+}
+
+fn pending_approval_from_request(
+    request: ActionApprovalRequest,
+    now: DateTime<Utc>,
+) -> PendingActionApproval {
+    PendingActionApproval {
+        approval_id: format!("approval_{}", Uuid::new_v4()),
+        action_id: format!("action_{}", Uuid::new_v4()),
+        status: ApprovalStatus::Pending,
+        scope: ApprovalScope::Once,
+        project_key: request.project_key,
+        request_id: request.request_id,
+        task_id: request.task_id,
+        action: request.action,
+        risk_level: request.risk_level,
+        approval_mode: ApprovalMode::OperatorRequired,
+        preview: operator_safe_text(&request.preview),
+        reason: operator_safe_text(&request.reason),
+        created_at: now,
+        expires_at: now + request.ttl,
+        resolved_at: None,
+        resolved_by: None,
+        source_surface: request.source_surface,
     }
 }
 
@@ -801,6 +824,7 @@ mod tests {
     ) -> PendingActionApproval {
         PendingActionApproval {
             approval_id: approval_id.to_string(),
+            action_id: format!("action_{approval_id}"),
             status,
             scope: ApprovalScope::Once,
             project_key: project_key.to_string(),
@@ -865,6 +889,7 @@ mod tests {
             panic!("expected pending approval");
         };
         assert_eq!(approval.status, ApprovalStatus::Pending);
+        assert!(approval.action_id.starts_with("action_"));
         assert!(!approval.preview.contains("sk-secret"));
         assert_eq!(ledger.load()?.len(), 1);
         Ok(())
@@ -897,6 +922,52 @@ mod tests {
         assert!(audit.contains("\"transition\":\"pending\""));
         assert!(audit.contains("\"transition\":\"approve\""));
         assert!(audit.contains("\"transition\":\"deny\""));
+        assert!(audit.contains("\"action_id\":\"action_"));
+        assert!(audit.contains("\"result\":\"approved\""));
+        assert!(audit.contains("\"resolved_by\":\"operator\""));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_approval_without_action_id_uses_approval_id_fallback() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        fs::create_dir_all(temp.path())?;
+        fs::write(
+            ledger.approvals_path(),
+            serde_json::to_string_pretty(&serde_json::json!([
+                {
+                    "approval_id": "approval_legacy",
+                    "status": "pending",
+                    "scope": "once",
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "task",
+                    "action": "dispatch",
+                    "risk_level": "runtime_mutation",
+                    "approval_mode": "operator_required",
+                    "preview": "",
+                    "reason": "",
+                    "created_at": now,
+                    "expires_at": now + Duration::minutes(10),
+                    "source_surface": "legacy"
+                }
+            ]))?,
+        )?;
+
+        let resolved = ledger
+            .approve_pending(
+                Some("approval_legacy"),
+                "operator",
+                now + Duration::seconds(1),
+            )?
+            .expect("approval");
+
+        assert!(resolved.action_id.is_empty());
+        assert_eq!(resolved.action_id(), "approval_legacy");
+        let audit = fs::read_to_string(ledger.action_audit_path())?;
+        assert!(audit.contains("\"action_id\":\"approval_legacy\""));
         Ok(())
     }
 

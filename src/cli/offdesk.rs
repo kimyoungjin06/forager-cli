@@ -826,6 +826,7 @@ fn print_gate_outcome(outcome: &crate::offdesk::SchedulerGateOutcome) {
             );
             if let Some(approval) = &outcome.approval {
                 println!("  approval_id: {}", approval.approval_id);
+                println!("  action_id:   {}", approval.action_id());
                 if !approval.preview.trim().is_empty() {
                     println!("  preview:     {}", approval.preview);
                 }
@@ -845,13 +846,14 @@ fn print_gate_outcome(outcome: &crate::offdesk::SchedulerGateOutcome) {
 
 fn print_approvals(approvals: &[PendingActionApproval]) {
     println!(
-        "{:<44} {:<10} {:<18} {:<24} ACTION",
-        "APPROVAL ID", "STATUS", "RISK", "TASK"
+        "{:<44} {:<44} {:<10} {:<18} {:<24} ACTION",
+        "APPROVAL ID", "ACTION ID", "STATUS", "RISK", "TASK"
     );
     for approval in approvals {
         println!(
-            "{:<44} {:<10} {:<18} {:<24} {}",
+            "{:<44} {:<44} {:<10} {:<18} {:<24} {}",
             approval.approval_id,
+            approval.action_id(),
             format!("{:?}", approval.status).to_lowercase(),
             format!("{:?}", approval.risk_level).to_lowercase(),
             approval.task_id,

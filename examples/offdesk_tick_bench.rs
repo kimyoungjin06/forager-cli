@@ -347,6 +347,7 @@ fn approval(
 ) -> PendingActionApproval {
     PendingActionApproval {
         approval_id: format!("approval_{index}"),
+        action_id: format!("action_{index}"),
         status,
         scope: ApprovalScope::Once,
         project_key: PROJECT_KEY.to_string(),

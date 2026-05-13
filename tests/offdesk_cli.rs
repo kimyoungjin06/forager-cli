@@ -229,6 +229,7 @@ fn offdesk_pending_and_ok_resolve_approval() -> Result<()> {
     assert!(pending_output.status.success());
     let pending: serde_json::Value = serde_json::from_slice(&pending_output.stdout)?;
     assert_eq!(pending.as_array().expect("array").len(), 1);
+    assert_eq!(pending[0]["action_id"], serde_json::Value::Null);
 
     let ok_output = forager_command(temp.path())
         .args(["offdesk", "ok", "approval_one", "--json"])
@@ -236,9 +237,13 @@ fn offdesk_pending_and_ok_resolve_approval() -> Result<()> {
     assert!(ok_output.status.success());
     let approved: serde_json::Value = serde_json::from_slice(&ok_output.stdout)?;
     assert_eq!(approved["status"], "approved");
+    assert_eq!(approved["approval_id"], "approval_one");
 
     let audit = fs::read_to_string(profile_dir.join("action_audit.jsonl"))?;
     assert!(audit.contains("\"transition\":\"approve\""));
+    assert!(audit.contains("\"action_id\":\"approval_one\""));
+    assert!(audit.contains("\"result\":\"approved\""));
+    assert!(audit.contains("\"resolved_by\":\"cli\""));
     Ok(())
 }
 
@@ -306,6 +311,10 @@ fn offdesk_gate_creates_pending_approval_for_runtime_mutation_without_brief() ->
     let outcome: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(outcome["status"], "pending_approval");
     assert_eq!(outcome["approval"]["status"], "pending");
+    assert!(outcome["approval"]["action_id"]
+        .as_str()
+        .expect("action id")
+        .starts_with("action_"));
     assert!(!outcome["approval"]["preview"]
         .as_str()
         .expect("preview")
@@ -315,6 +324,10 @@ fn offdesk_gate_creates_pending_approval_for_runtime_mutation_without_brief() ->
         profile_dir(temp.path()).join("pending_action_approvals.json"),
     )?)?;
     assert_eq!(approvals.as_array().expect("approvals").len(), 1);
+    assert!(approvals[0]["action_id"]
+        .as_str()
+        .expect("action id")
+        .starts_with("action_"));
     Ok(())
 }
 

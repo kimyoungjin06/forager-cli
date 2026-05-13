@@ -24,4 +24,5 @@
 # Contributing
 
 - [Development](development.md)
+- [Hermes Pattern Review](hermes-pattern-review.md)
 - [Credits](credits.md)
