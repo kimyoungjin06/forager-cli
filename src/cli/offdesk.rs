@@ -892,6 +892,33 @@ fn print_resume_states(states: &[TaskResumeState]) {
             state.runner_target,
             state.next_safe_resume_step
         );
+        println!("  resume_id: {}", state.resume_id());
+        for evidence in state.evidence.iter().take(3) {
+            let present = evidence
+                .present
+                .map(|present| if present { "present" } else { "missing" });
+            match (evidence.path.as_deref(), present) {
+                (Some(path), Some(present)) => {
+                    println!(
+                        "  evidence: {}: {} ({present}, {path})",
+                        evidence.kind, evidence.summary
+                    );
+                }
+                (Some(path), None) => {
+                    println!(
+                        "  evidence: {}: {} ({path})",
+                        evidence.kind, evidence.summary
+                    );
+                }
+                _ => println!("  evidence: {}: {}", evidence.kind, evidence.summary),
+            }
+        }
+        if state.evidence.len() > 3 {
+            println!("  evidence: +{} more", state.evidence.len() - 3);
+        }
+        if let Some(tail) = state.last_log_tail.as_deref() {
+            println!("  tail: {tail}");
+        }
     }
 }
 

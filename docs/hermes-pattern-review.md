@@ -23,7 +23,7 @@ review note, `aoe_orch_control/docs/HERMES_AGENT_BENCHMARK_20260512.md`.
 | Priority | Hermes Pattern | Forager Target | Review Question | Status |
 |---|---|---|---|---|
 | 1 | Approval rail | `offdesk` pending action approvals | Can runtime/canonical mutation pause on a bounded action object with id, TTL, result, and audit trail? | First pass active |
-| 2 | Session and resume durability | task transcript and resume artifacts | Can restart recovery explain the next safe task step without treating chat history as truth? | Planned |
+| 2 | Session and resume durability | task transcript and resume artifacts | Can restart recovery explain the next safe task step without treating chat history as truth? | First pass active |
 | 3 | Background process recovery | background run tickets and sidecars | Can stale local/tmux/background runners be reconciled with better tail and heartbeat evidence? | Planned |
 | 4 | Provider profile and error classifier | provider routing and capacity memory | Can provider errors become structured retry/compress/fallback reasons before scheduler policy? | Planned |
 | 5 | Checkpoint and rollback | pre-mutation evidence artifacts | Can canonical mutations require rollback evidence without copying Hermes shadow git wholesale? | Planned |
@@ -65,3 +65,32 @@ policy review and revocation.
   `--new-approval` retry supersedes the denial.
 - Audit JSON lines are sufficient to reconstruct who resolved what action and
   when.
+
+## Second Pass: Session and Resume Durability
+
+Hermes' useful shape is not its conversation database. The useful pattern is
+that restart recovery is driven by durable, inspectable state and recent
+evidence. Forager keeps this task-centric:
+
+- `task_resume_state.json` remains the canonical resume artifact;
+- every new resume-pending row gets a `resume_id`;
+- legacy rows without `resume_id` still load and use `project_key:task_id` as
+  the operator-facing fallback;
+- resume rows record the previous task status, attempt count, background probe
+  evidence, artifact presence, and redacted log tail when available;
+- `forager offdesk resume` prints the resume id and compact evidence summaries
+  below each task row.
+
+Do not replay chat transcripts as task truth. Transcript or message history can
+be attached later as evidence only after it has an explicit Forager-owned source,
+redaction policy, and retention boundary.
+
+## Session/Resume Acceptance Checks
+
+- Stale or failed background probes create exactly one resume-pending row for
+  the affected task.
+- Resume rows are sufficient to explain the next safe operator action without
+  inspecting raw chat history.
+- Log tails and evidence summaries are operator-safe redacted.
+- Legacy `task_resume_state.json` rows still load and render through both JSON
+  and human CLI output.

@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
 const RESUME_FILE: &str = "task_resume_state.json";
 
@@ -20,6 +21,8 @@ pub enum ResumeStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskResumeState {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub resume_id: String,
     pub task_id: String,
     pub request_id: String,
     pub project_key: String,
@@ -29,9 +32,17 @@ pub struct TaskResumeState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background_ticket_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_task_status: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub attempt_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_durable_action: Option<String>,
     #[serde(default)]
     pub last_evidence_artifacts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<ResumeEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_log_tail: Option<String>,
     pub next_safe_resume_step: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interrupted_at: Option<DateTime<Utc>>,
@@ -41,6 +52,51 @@ pub struct TaskResumeState {
     pub fresh_until: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cleared_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResumeEvidence {
+    pub kind: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub present: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<DateTime<Utc>>,
+}
+
+impl ResumeEvidence {
+    pub fn new(
+        kind: impl Into<String>,
+        summary: impl Into<String>,
+        observed_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            summary: summary.into(),
+            path: None,
+            present: None,
+            observed_at: Some(observed_at),
+        }
+    }
+
+    pub fn artifact(
+        kind: impl Into<String>,
+        path: impl Into<String>,
+        present: bool,
+        observed_at: DateTime<Utc>,
+    ) -> Self {
+        let kind = kind.into();
+        let present_label = if present { "present" } else { "missing" };
+        Self {
+            summary: format!("{kind} {present_label}"),
+            kind,
+            path: Some(path.into()),
+            present: Some(present),
+            observed_at: Some(observed_at),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +114,7 @@ pub struct ResumePendingInput {
 impl TaskResumeState {
     pub fn mark_pending(input: ResumePendingInput) -> Self {
         Self {
+            resume_id: format!("resume_{}", Uuid::new_v4()),
             task_id: input.task_id,
             request_id: input.request_id,
             project_key: input.project_key,
@@ -65,13 +122,25 @@ impl TaskResumeState {
             phase: input.phase,
             runner_target: input.runner_target,
             background_ticket_id: None,
+            last_task_status: None,
+            attempt_count: 0,
             last_durable_action: None,
             last_evidence_artifacts: Vec::new(),
+            evidence: Vec::new(),
+            last_log_tail: None,
             next_safe_resume_step: "recover from last durable action before mutating".to_string(),
             interrupted_at: Some(input.interrupted_at),
             interruption_reason: Some(input.interruption_reason),
             fresh_until: Some(input.fresh_until),
             cleared_at: None,
+        }
+    }
+
+    pub fn resume_id(&self) -> String {
+        if self.resume_id.is_empty() {
+            format!("{}:{}", self.project_key, self.task_id)
+        } else {
+            self.resume_id.clone()
         }
     }
 
@@ -114,6 +183,10 @@ impl TaskResumeState {
             self.project_key, self.task_id, status, freshness
         )
     }
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone)]
@@ -257,12 +330,47 @@ mod tests {
         let now = Utc::now();
         let mut state =
             TaskResumeState::mark_pending(pending_input(now, now + Duration::minutes(10)));
+        assert!(state.resume_id.starts_with("resume_"));
         state.background_ticket_id = Some("ticket-1".to_string());
         store.mark_resume_pending(state)?;
 
         let fresh = store.fresh_pending(now + Duration::minutes(5))?;
         assert_eq!(fresh.len(), 1);
         assert_eq!(fresh[0].status, ResumeStatus::ResumePending);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_resume_state_without_resume_id_still_loads() -> Result<()> {
+        let temp = tempdir()?;
+        let store = TaskResumeStore::new(temp.path());
+        let now = Utc::now();
+        fs::create_dir_all(temp.path())?;
+        fs::write(
+            store.path(),
+            serde_json::to_string_pretty(&serde_json::json!([
+                {
+                    "task_id": "task",
+                    "request_id": "request",
+                    "project_key": "project",
+                    "status": "resume_pending",
+                    "phase": "background",
+                    "runner_target": "local_background",
+                    "last_evidence_artifacts": [],
+                    "next_safe_resume_step": "inspect result sidecar",
+                    "interrupted_at": now,
+                    "interruption_reason": "restart",
+                    "fresh_until": now + Duration::minutes(10)
+                }
+            ]))?,
+        )?;
+
+        let states = store.load()?;
+        assert_eq!(states.len(), 1);
+        assert!(states[0].resume_id.is_empty());
+        assert_eq!(states[0].resume_id(), "project:task");
+        assert!(states[0].evidence.is_empty());
+        assert_eq!(states[0].attempt_count, 0);
         Ok(())
     }
 

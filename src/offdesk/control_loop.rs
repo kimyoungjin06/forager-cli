@@ -7,8 +7,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::approval::{ApprovalLedger, ApprovalLedgerSession, ApprovalStatus};
-use super::background::{BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerPhase};
-use super::resume::{ResumePendingInput, TaskResumeState, TaskResumeStore};
+use super::background::{BackgroundProbe, BackgroundRunStore, BackgroundRunnerPhase};
+use super::redaction::operator_safe_text;
+use super::resume::{ResumeEvidence, ResumePendingInput, TaskResumeState, TaskResumeStore};
 use super::runner::{
     launch_background_command_with_gate_outcome, poll_background_runs, BackgroundLaunchRequest,
     BackgroundPollOutcome, LocalCommandLaunchSpec,
@@ -209,10 +210,11 @@ fn apply_background_outcome(
         | BackgroundRunnerPhase::StaleLostCallback
         | BackgroundRunnerPhase::Reconstructable => {
             if task.status != OffdeskTaskStatus::ResumePending {
+                let previous_status = task.status;
                 task.status = OffdeskTaskStatus::ResumePending;
                 task.last_error = Some(outcome.decision.evidence.clone());
                 task.updated_at = now;
-                write_resume_state(task, &outcome.decision, resume_store, now)?;
+                write_resume_state(task, previous_status, outcome, resume_store, now)?;
                 report.resume_pending += 1;
                 report.updated_task_ids.push(task.task_id.clone());
             }
@@ -316,10 +318,12 @@ fn dispatch_task(
 
 fn write_resume_state(
     task: &OffdeskTask,
-    decision: &BackgroundRecoveryDecision,
+    previous_status: OffdeskTaskStatus,
+    outcome: &BackgroundPollOutcome,
     resume_store: &TaskResumeStore,
     now: DateTime<Utc>,
 ) -> Result<()> {
+    let decision = &outcome.decision;
     let mut state = TaskResumeState::mark_pending(ResumePendingInput {
         task_id: task.task_id.clone(),
         request_id: task.request_id.clone(),
@@ -331,16 +335,63 @@ fn write_resume_state(
         fresh_until: now + Duration::minutes(30),
     });
     state.background_ticket_id = task.background_ticket_id.clone();
+    state.last_task_status = Some(format!("{:?}", previous_status).to_lowercase());
+    state.attempt_count = task.attempt_count;
     state.last_durable_action = Some("background runner poll".to_string());
-    state.last_evidence_artifacts = task
+    state.last_evidence_artifacts = outcome
+        .probe
         .log_artifact_path
         .iter()
-        .chain(task.result_artifact_path.iter())
+        .chain(outcome.probe.result_artifact_path.iter())
         .cloned()
         .collect();
+    state.last_log_tail = decision.last_log_tail.as_deref().map(operator_safe_text);
+    state.evidence = resume_evidence_from_background(&outcome.probe, decision, now);
     state.next_safe_resume_step =
         "inspect background result sidecar and logs before retrying".to_string();
     resume_store.mark_resume_pending(state)
+}
+
+fn resume_evidence_from_background(
+    probe: &BackgroundProbe,
+    decision: &super::background::BackgroundRecoveryDecision,
+    now: DateTime<Utc>,
+) -> Vec<ResumeEvidence> {
+    let mut evidence = vec![ResumeEvidence::new(
+        "background_probe",
+        operator_safe_text(&format!(
+            "{}: {}",
+            format!("{:?}", decision.phase).to_lowercase(),
+            decision.evidence
+        )),
+        now,
+    )];
+
+    if let Some(path) = probe.log_artifact_path.as_deref() {
+        evidence.push(ResumeEvidence::artifact(
+            "log_artifact",
+            operator_safe_text(path),
+            probe.log_artifact_present,
+            now,
+        ));
+    }
+    if let Some(path) = probe.result_artifact_path.as_deref() {
+        evidence.push(ResumeEvidence::artifact(
+            "result_artifact",
+            operator_safe_text(path),
+            probe.result_artifact_present,
+            now,
+        ));
+    }
+    if let Some(tail) = decision.last_log_tail.as_deref() {
+        evidence.push(ResumeEvidence::new(
+            "log_tail",
+            operator_safe_text(tail),
+            now,
+        ));
+    }
+
+    evidence
 }
 
 #[cfg(test)]

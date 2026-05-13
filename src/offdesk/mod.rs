@@ -40,7 +40,9 @@ pub use provider::{
     ProviderKind,
 };
 pub use redaction::{force_redact, operator_safe_text, strip_runner_context};
-pub use resume::{ResumePendingInput, ResumeStatus, TaskResumeState, TaskResumeStore};
+pub use resume::{
+    ResumeEvidence, ResumePendingInput, ResumeStatus, TaskResumeState, TaskResumeStore,
+};
 pub use runner::{
     launch_background_command, launch_background_command_with_gate_outcome, launch_background_run,
     poll_background_runs, BackgroundLaunchOutcome, BackgroundLaunchRequest, BackgroundPollOutcome,

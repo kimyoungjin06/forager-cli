@@ -279,7 +279,15 @@ fn offdesk_resume_json_reports_artifacts() -> Result<()> {
     assert!(output.status.success());
     let states: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(states[0]["status"], "resume_pending");
+    assert_eq!(states[0]["resume_id"], serde_json::Value::Null);
     assert_eq!(states[0]["next_safe_resume_step"], "inspect result sidecar");
+
+    let human_output = forager_command(temp.path())
+        .args(["offdesk", "resume"])
+        .output()?;
+    assert!(human_output.status.success());
+    let stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(stdout.contains("resume_id: project:task"));
     Ok(())
 }
 
@@ -1242,6 +1250,12 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
     let profile_dir = profile_dir(temp.path());
     fs::create_dir_all(&profile_dir)?;
     let now = Utc::now();
+    let log_path = temp.path().join("background.log");
+    let result_path = temp.path().join("background-result.txt");
+    fs::write(
+        &log_path,
+        "first line\nlast line token=sk-secretsecretsecretsecret\n",
+    )?;
     fs::write(
         profile_dir.join("offdesk_tasks.json"),
         serde_json::to_string_pretty(&json!([
@@ -1256,6 +1270,8 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
                 "workdir": temp.path().to_str().expect("utf-8 path"),
                 "background_ticket_id": "ticket",
                 "attempt_count": 1,
+                "log_artifact_path": log_path.to_str().expect("utf-8 path"),
+                "result_artifact_path": result_path.to_str().expect("utf-8 path"),
                 "created_at": now,
                 "updated_at": now
             }
@@ -1268,6 +1284,8 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
                 "ticket_id": "ticket",
                 "runner_kind": "local_background",
                 "phase": "launched",
+                "log_artifact_path": log_path.to_str().expect("utf-8 path"),
+                "result_artifact_path": result_path.to_str().expect("utf-8 path"),
                 "runtime_handle_alive": false
             }
         ]))?,
@@ -1288,7 +1306,39 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
         profile_dir.join("task_resume_state.json"),
     )?)?;
     assert_eq!(resume[0]["status"], "resume_pending");
+    assert!(resume[0]["resume_id"]
+        .as_str()
+        .expect("resume id")
+        .starts_with("resume_"));
     assert_eq!(resume[0]["background_ticket_id"], "ticket");
+    assert_eq!(resume[0]["last_task_status"], "running");
+    assert_eq!(resume[0]["attempt_count"], 1);
+    assert!(!resume[0]["last_log_tail"]
+        .as_str()
+        .expect("last log tail")
+        .contains("sk-secretsecretsecretsecret"));
+    let evidence = resume[0]["evidence"].as_array().expect("evidence");
+    assert!(evidence
+        .iter()
+        .any(|entry| entry["kind"].as_str() == Some("background_probe")));
+    assert!(evidence.iter().any(|entry| {
+        entry["kind"].as_str() == Some("log_artifact") && entry["present"].as_bool() == Some(true)
+    }));
+    assert!(evidence.iter().any(|entry| {
+        entry["kind"].as_str() == Some("result_artifact")
+            && entry["present"].as_bool() == Some(false)
+    }));
+    assert!(evidence
+        .iter()
+        .any(|entry| entry["kind"].as_str() == Some("log_tail")));
+
+    let resume_output = forager_command(temp.path())
+        .args(["offdesk", "resume"])
+        .output()?;
+    assert!(resume_output.status.success());
+    let stdout = String::from_utf8_lossy(&resume_output.stdout);
+    assert!(stdout.contains("resume_id: resume_"));
+    assert!(stdout.contains("evidence: background_probe"));
     Ok(())
 }
 
