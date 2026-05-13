@@ -1,67 +1,54 @@
-# Runtime secrets
-.aoe-team/telegram.env
+# Claude artifacts (allow .claude/skills/ for cross-agent skills)
+.claude/*
+!.claude/skills/
+# Rust build artifacts
+/target/
+# Documentation build output
+/book/
 
-# Runtime state
-.aoe-team/orch_manager_state.json
-.aoe-team/telegram_gateway_state.json
-.aoe-team/telegram_chat_aliases.json
-.aoe-team/tf_exec_map.json
-.aoe-team/auto_scheduler.json
-.aoe-team/offdesk_state.json
-.aoe-team/background_runs.json
-.aoe-team/background_worker.json
-.aoe-team/provider_capacity.json
-.aoe-team/team.json
-.aoe-team/orchestrator.json
-.aoe-team/AOE_TODO.md
-.aoe-team/TODO_SNAPSHOT_*.md
-.aoe-team/telegram.env.sample
-.aoe-team/sync_policy.sample.json
-.aoe-team/telegram_tmux.sh
-.aoe-team/telegram_stack.sh
-.aoe-team/worker_codex_handler.sh
-.aoe-team/*.bak*
-.aoe-team/workers/*.json
-.aoe-team/agents/*/AGENTS.md
-.aoe-team/model_endpoints.json
-.aoe-team/model_routing.json
-.aoe-team/workspace_brief.json
-.aoe-team/document_registry.json
-.aoe-team/control/
-.aoe-team/dashboard/
-.aoe-team/recovery/
-.aoe-team/context_packs/
-.aoe-team/harness_authoring/
-.aoe-team/background_run_handoffs/
-.aoe-team/background_run_results/
-.aoe-team/background_run_acks/
-.aoe-team/background_run_logs/
-.aoe-team/setup_sudo_nopasswd.sh
+# Website build output
+/dist/
 
-# Runtime queues/logs
-.aoe-team/messages/
-.aoe-team/logs/
-.aoe-team/tf_runs/
-.aoe-team/*.log
-.aoe-team/*.pid
-.aoe-team/*.lock
-.aoe-team/_*.log
-.aoe-team/_*.pid
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 
-# Editor/OS noise
-.DS_Store
+# IDE
+.idea/
+.vscode/
 *.swp
 *.swo
+*~
 
-# Python cache
-__pycache__/
-*.pyc
-.pytest_cache/
+# OS
+.DS_Store
+Thumbs.db
 
-# Generated investigations docs (runtime)
-docs/investigations_mo/
+# Local config
+.env
+.env.local
 
-# Local test fixtures
-tmp_preview_root/
-tmp_sync_stamp_case2/
-tmp_sync_stamp_case3/
+# Agent of Empires data (for development)
+.agent-of-empires/
+
+# VS Code extensions data
+.serena/
+
+# AI coding tools
+.opencode/
+
+# Per-repo aoe config (created by `aoe init`, should be committed per-repo by users)
+# Ignored here since this is the aoe tool repo itself
+.aoe/
+
+# Spec Kit
+.genreleases/
+sdd-*/
+
+# Personal/local files
+*.screenstudio/
+
+debug.log

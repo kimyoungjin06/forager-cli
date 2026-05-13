@@ -1,205 +1,137 @@
-# aoe_orch_control
+<p align="center">
+  <img src="assets/logo.png" alt="Forager" width="128">
+  <h1 align="center">Forager</h1>
+  <p align="center">
+    <a href="https://kimyoungjin06.github.io/forager-cli/"><img src="https://img.shields.io/badge/docs-forager-blue" alt="Documentation"></a>
+    <a href="https://github.com/kimyoungjin06/forager-cli/actions/workflows/ci.yml"><img src="https://github.com/kimyoungjin06/forager-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+    <a href="https://github.com/kimyoungjin06/forager-cli/releases"><img src="https://img.shields.io/github/v/release/kimyoungjin06/forager-cli" alt="GitHub release"></a>
+    <a href="https://blog.rust-lang.org/2023/11/16/Rust-1.74.0.html"><img src="https://img.shields.io/badge/MSRV-1.74-blue?logo=rust" alt="MSRV"></a>
+    <a href="https://github.com/kimyoungjin06/forager-cli/stargazers"><img src="https://img.shields.io/github/stars/kimyoungjin06/forager-cli?style=social" alt="GitHub stars"></a>
+    <a href="https://kimyoungjin06.github.io/forager-cli/credits.html"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkimyoungjin06%2Fforager-cli%2Fcredit%2Fcredits.json&query=%24.contributors.length&label=contributors&color=blue&logo=github" alt="Contributors"></a>
+  </p>
+</p>
 
-Telegram-controlled orchestration workspace for multi-project AOE operations.
+Offdesk agent orchestration with approvals, recovery, and audit trails. Built on tmux, written in Rust.
 
-## Source Attribution
-- Base project (fork/upstream): `njbrake/agent-of-empires`
-- Upstream repository: `https://github.com/njbrake/agent-of-empires`
-- This repository adds a Telegram control plane, runtime queue/proposal handling, offdesk automation, and tmux-oriented operator workflow.
+Run multiple AI agents in parallel across different branches of your codebase, each in its own isolated session. `aoe` remains available as a legacy compatibility alias while the project moves to `forager`.
 
-## What This Repository Is
-- A `Python + shell/tmux` control plane for orchestrating project runtimes.
-- A runtime queue/task system with `todo`, `proposal`, `sync`, `salvage`, and `syncback` flows.
-- An operator-first workflow for:
-  - `on-desk`: tmux/session switching and local orchestration
-  - `off-desk`: Telegram-based review, scheduling, and monitoring
+> If you find this project useful, please consider giving it a star on GitHub: it helps others discover the project!
 
-## What This Repository Is Not
-- It is not a Rust codebase.
-- It is not a replacement for upstream `aoe` core behavior.
-- It is not a generic SaaS multi-agent platform.
+![Forager Demo](docs/assets/demo.gif)
 
-## Core Intent
-- Run project work reliably during off-hours.
-- Keep orchestration separate from execution and verification.
-- Preserve backlog state explicitly instead of burying it in chat history.
+## Features
 
-Project charter:
-- `docs/PROJECT_CHARTER.md`
-- `docs/CONSTITUTION.md`
-- `docs/OPERATING_MODEL.md`
+- **Multi-agent support** -- Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI
+- **TUI dashboard** -- visual interface to create, monitor, and manage sessions
+- **Agent + terminal views** -- toggle between your AI agents and paired shell terminals with `t`
+- **Status detection** -- see which agents are running, waiting for input, or idle
+- **Git worktrees** -- run parallel agents on different branches of the same repo
+- **Diff view** -- review git changes and edit files without leaving the TUI
+- **Per-repo config** -- `.forager/config.toml` for project-specific settings and hooks, with `.aoe/config.toml` fallback
+- **Profiles** -- separate workspaces for different projects or clients
+- **Rename diagnostics** -- `forager doctor` shows active Forager paths and legacy AoE compatibility state
+- **Safe AoE migration** -- `forager migrate aoe` copies legacy paths without overwriting Forager targets
+- **Offdesk recovery** -- durable task queueing, approval retry, lifecycle recovery, and audit trails
+- **CLI and TUI** -- full functionality from both interfaces
 
-## Architecture At A Glance
-- Control plane:
-  - Telegram gateway
-  - `aoe-team-stack`
-  - tmux operator surface
-- Execution plane:
-  - request-scoped Task Team workdirs
-  - role worker sessions
-  - runtime queue/task state
+## How It Works
 
-Primary docs:
-- Architecture: `docs/ARCHITECTURE.md`
-- Operating model: `docs/OPERATING_MODEL.md`
-- Control dashboard MVP: `docs/CONTROL_DASHBOARD_MVP.md`
-- Control dashboard read-only design: `docs/CONTROL_DASHBOARD_READONLY_DESIGN.md`
-- Preset completion matrix: `docs/PRESET_COMPLETION_MATRIX.md`
-- Nightly session summary: `docs/NIGHTLY_SESSION_SUMMARY.md`
-- Storage retention policy: `docs/STORAGE_RETENTION_POLICY.md`
-- Control Action API: `docs/MOTHER_ORCH_ACTION_API.md`
-- Command reference: `docs/COMMANDS.md`
-- Deployment: `docs/DEPLOYMENT.md`
-- Runbook: `docs/RUNBOOK.md`
-- Daily checklist: `docs/DAILY_CHECKLIST.md`
-- Roadmap: `docs/ROADMAP.md`
-- Core decomposition plan: `docs/CORE_DECOMPOSITION_PLAN.md`
-- AutoGen Core adoption note: `docs/AUTOGEN_CORE_ADOPTION.md`
-- AutoGen Core sandbox pilot criteria: `docs/AUTOGEN_CORE_PILOT.md`
-- LangChain deepagents benchmark note: `docs/LANGCHAIN_DEEPAGENTS_BENCHMARK_20260421.md`
+Forager wraps [tmux](https://github.com/tmux/tmux/wiki). Each session is a tmux session, so agents keep running when you close the TUI. Reopen `forager` and everything is still there.
 
-## Repository Layout
-- `scripts/gateway/`
-  - Telegram gateway, scheduling, run pipeline, state/policy/view modules
-- `scripts/team/`
-  - stack launcher, runtime bootstrap, global CLI wrappers
-- `templates/aoe-team/`
-  - versioned runtime defaults
-- `systemd/`
-  - user service templates
-- `docs/`
-  - architecture, operations, deployment, governance
-- `tests/gateway/`
-  - gateway regression tests
+The key tmux shortcut to know: **`Ctrl+b d`** detaches from a session and returns to the TUI.
 
-## Main Entrypoints
-- Stack launcher:
-  - `scripts/team/aoe-team-stack.sh`
-- Gateway process:
-  - `scripts/gateway/aoe-telegram-gateway.py`
-- Runtime bootstrap:
-  - `scripts/team/bootstrap_runtime_templates.sh`
+## Installation
+
+**Prerequisites:** [tmux](https://github.com/tmux/tmux/wiki) (required)
+
+```bash
+# Quick install (Linux & macOS)
+curl -fsSL \
+  https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/scripts/install.sh \
+  | bash
+
+# Build from source
+git clone https://github.com/kimyoungjin06/forager-cli
+cd forager && cargo build --release
+```
+
+The install script and release artifacts now use `forager` as the primary
+command and keep `aoe` as a legacy alias during the transition.
 
 ## Quick Start
-1. Initialize runtime for a project
+
 ```bash
-aoe-team-stack --project-root /path/to/project init
+# Launch the TUI
+forager
+
+# Add a session from CLI
+forager add /path/to/project
+
+# Add a session on a new git branch
+forager add . -w feat/my-feature -b
+
 ```
 
-2. Start the stack
+In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal view, `D` for diff view, `d` to delete, `?` for help.
+
+## Documentation
+
+- **[Installation](https://kimyoungjin06.github.io/forager-cli/installation)** -- prerequisites and install methods
+- **[Quick Start](https://kimyoungjin06.github.io/forager-cli/quick-start)** -- first steps and basic usage
+- **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/guides/workflow)** -- recommended setup with bare repos and worktrees
+- **[Repo Config & Hooks](https://kimyoungjin06.github.io/forager-cli/guides/repo-config)** -- per-project settings and automation
+- **[Configuration Reference](https://kimyoungjin06.github.io/forager-cli/guides/configuration)** -- all config options
+- **[CLI Reference](https://kimyoungjin06.github.io/forager-cli/cli/reference)** -- complete command documentation
+
+## FAQ
+
+### What happens when I close Forager?
+
+Nothing. Sessions are tmux sessions running in the background. Open and close `forager` as often as you like. Sessions only get removed when you explicitly delete them.
+
+### Which AI tools are supported?
+
+Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. Forager auto-detects which are installed on your system.
+
+## Troubleshooting
+
+### Using Forager with mobile SSH clients (Termius, Blink, etc.)
+
+Run `forager` inside a tmux session when connecting from mobile:
+
 ```bash
-aoe-team-stack --project-root /path/to/project start
+tmux new-session -s main
+forager
 ```
 
-3. Apply tmux UI helpers
+Use `Ctrl+b L` to toggle back to Forager after attaching to an agent session.
+
+### Claude Code is flickering
+
+This is a known Claude Code issue, not a Forager problem: https://github.com/anthropics/claude-code/issues/1913
+
+## Development
+
 ```bash
-aoe-team-stack --project-root /path/to/project ui
+cargo check          # Type-check
+cargo test           # Run tests
+cargo fmt            # Format
+cargo clippy         # Lint
+cargo build --release  # Release build
+
+# Debug logging
+FORAGER_DEBUG=1 cargo run --bin forager
 ```
 
-4. Telegram-side offdesk routine
-```text
-/offdesk prepare
-/offdesk review
-/offdesk on
-```
+## Star History
 
-## Key Operator Workflows
+[![Star History Chart](https://api.star-history.com/svg?repos=kimyoungjin06/forager-cli&type=date&legend=top-left)](https://www.star-history.com/#kimyoungjin06/forager-cli&type=date&legend=top-left)
 
-### On-desk
-- Inspect projects: `/map`
-- Focus one project: `/use O#` or `/focus O#`
-- Review backlog: `/queue`, `/todo O#`
-- Run next item: `/next` or `/todo O# next`
+## Acknowledgments
 
-### Off-desk
-- Preflight: `/offdesk prepare`
-- Resolve warnings: `/offdesk review`
-- Enable automation: `/offdesk on`
-- Check automation state: `/auto status short`
+Inspired by [agent-deck](https://github.com/asheshgoplani/agent-deck) (Go + Bubble Tea).
 
-## Runtime Boundary
-Package-managed, versioned assets:
-- `scripts/`
-- `templates/`
-- `docs/`
-- `tests/`
-- `systemd/`
+## License
 
-Generated runtime state:
-- `.aoe-team/orch_manager_state.json`
-- `.aoe-team/auto_scheduler.json`
-- `.aoe-team/tf_exec_map.json`
-- `.aoe-team/telegram_gateway_state.json`
-- `.aoe-team/logs/`
-- `.aoe-team/messages/`
-- `.aoe-team/tf_runs/`
-
-Rule:
-- keep code and templates in the repository
-- treat `.aoe-team/` as mutable environment-local state
-
-## Testing
-- Gateway pytest wrapper (defaults to CLI regressions; accepts explicit test paths):
-```bash
-scripts/gateway_pytest.sh
-```
-
-- Smoke subset:
-```bash
-bash scripts/gateway_smoke_test.sh
-```
-
-- Error subset:
-```bash
-bash scripts/gateway_error_test.sh
-```
-
-- Dashboard/operator subset:
-```bash
-bash scripts/gateway_dashboard_test.sh
-```
-
-- Full gateway suite:
-```bash
-bash scripts/gateway_full_test.sh
-```
-
-- CI workflow:
-  - `.github/workflows/gateway-tests.yml`
-  - `.github/workflows/external-background-worker.yml` for manual/repository-dispatch `github_runner` handoff pickup
-- External sidecar import:
-  - `scripts/gateway/aoe-external-sidecar-sync.py import-artifact --team-dir <team_dir> --artifact-root <artifact-dir-or-zip> --ticket-id <ticket> --runner github_runner --poll`
-  - `scripts/gateway/aoe-external-sidecar-sync.py download-github-artifact --team-dir <team_dir> --run-id <run-id> --ticket-id <ticket> --runner github_runner --poll`
-
-## Experimental Task Team Backends
-Current production path:
-- local Task Team backend based on `aoe-orch` + tmux/request-scoped workers
-
-Planned experimental seam:
-- `scripts/gateway/aoe_tg_tf_backend.py`
-- `scripts/gateway/aoe_tg_tf_backend_local.py`
-- `scripts/gateway/aoe_tg_tf_backend_autogen.py`
-- `scripts/experiments/autogen_core_tf_spike.py`
-
-Important rule:
-- external frameworks may be used inside one Task Team execution backend
-- backlog ownership, syncback, Telegram control, and offdesk scheduling remain in this repository
-
-## Current Status
-- Scheduler domain has been split into:
-  - `aoe_tg_scheduler_handlers.py`
-  - `aoe_tg_sync_sources.py`
-  - `aoe_tg_sync_merge.py`
-  - `aoe_tg_queue_engine.py`
-- Management flows have been split into:
-  - `aoe_tg_management_handlers.py`
-  - `aoe_tg_scheduler_control_handlers.py`
-  - `aoe_tg_offdesk_flow.py`
-  - `aoe_tg_management_chat.py`
-  - `aoe_tg_management_acl.py`
-
-The project is in an `operational owner-only control plane` stage:
-- suitable for personal multi-project operation
-- first-wave phase2 runtime verification is complete for build/data/review/mixed happy, rerun, and manual-followup paths
-- next maturity block is document/runtime convergence through `Project Flow Compiler`, dashboard `Document Flow`, and recovery drift excerpts
-- still evolving in external runner productionization, governance/usage boundaries, retention cleanup, and long-term backend abstraction
+MIT License -- see [LICENSE](LICENSE) for details.
