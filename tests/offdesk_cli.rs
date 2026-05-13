@@ -57,6 +57,25 @@ fn legacy_app_dir(home: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+fn normalize_test_path(path: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        path.strip_prefix("/private").unwrap_or(path).to_owned()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        path.to_owned()
+    }
+}
+
+fn expected_path(path: &Path) -> String {
+    normalize_test_path(&path.display().to_string())
+}
+
+fn reported_path(value: &serde_json::Value) -> String {
+    normalize_test_path(value.as_str().expect("path string"))
+}
+
 fn profile_dir(home: &std::path::Path) -> std::path::PathBuf {
     profile_dir_for(home, "default")
 }
@@ -823,18 +842,14 @@ fn forager_doctor_reports_new_primary_paths_without_creating_storage() -> Result
     assert_eq!(report["profile"]["active"], "default");
     assert_eq!(report["global_data"]["active_source"], "new_primary");
     assert_eq!(
-        report["global_data"]["primary_path"],
-        app_dir(home.path()).display().to_string()
+        reported_path(&report["global_data"]["primary_path"]),
+        expected_path(&app_dir(home.path()))
     );
     assert!(!app_dir(home.path()).exists());
     assert_eq!(report["repo_config"]["active_source"], "none");
     assert_eq!(
-        report["repo_config"]["primary_path"],
-        repo.path()
-            .join(".forager")
-            .join("config.toml")
-            .display()
-            .to_string()
+        reported_path(&report["repo_config"]["primary_path"]),
+        expected_path(&repo.path().join(".forager").join("config.toml"))
     );
     Ok(())
 }
@@ -862,17 +877,13 @@ fn forager_doctor_reports_legacy_storage_and_repo_config() -> Result<()> {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["global_data"]["active_source"], "legacy");
     assert_eq!(
-        report["global_data"]["active_path"],
-        legacy_app_dir(home.path()).display().to_string()
+        reported_path(&report["global_data"]["active_path"]),
+        expected_path(&legacy_app_dir(home.path()))
     );
     assert_eq!(report["repo_config"]["active_source"], "legacy");
     assert_eq!(
-        report["repo_config"]["active_path"],
-        repo.path()
-            .join(".aoe")
-            .join("config.toml")
-            .display()
-            .to_string()
+        reported_path(&report["repo_config"]["active_path"]),
+        expected_path(&repo.path().join(".aoe").join("config.toml"))
     );
     assert!(!app_dir(home.path()).exists());
     Ok(())

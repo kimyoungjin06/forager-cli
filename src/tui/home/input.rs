@@ -504,11 +504,9 @@ impl HomeView {
                 self.cursor = 0;
                 self.update_selected();
             }
-            KeyCode::End | KeyCode::Char('G') => {
-                if !self.flat_items.is_empty() {
-                    self.cursor = self.flat_items.len() - 1;
-                    self.update_selected();
-                }
+            KeyCode::End | KeyCode::Char('G') if !self.flat_items.is_empty() => {
+                self.cursor = self.flat_items.len() - 1;
+                self.update_selected();
             }
             KeyCode::Enter => {
                 if let Some(id) = &self.selected_session {
