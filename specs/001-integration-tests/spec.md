@@ -9,9 +9,9 @@
 
 ### User Story 1 - CLI Session Lifecycle (Priority: P1)
 
-A developer adds a session via `aoe add`, verifies it persists in storage, lists it with `aoe list`, checks status with `aoe status`, and removes it with `aoe remove`. The full CRUD lifecycle works end-to-end through the CLI layer.
+A developer adds a session via `forager add`, verifies it persists in storage, lists it with `forager list`, checks status with `forager status`, and removes it with `forager remove`. The full CRUD lifecycle works end-to-end through the CLI layer.
 
-**Why this priority**: The add/remove/list/status commands are the core user workflow. They're the most-used commands and currently have zero integration test coverage despite touching 8+ subsystems (storage, groups, config, git, Docker, tmux, hooks, worktrees).
+**Why this priority**: The add/remove/list/status commands are the core user workflow. They're the most-used commands and currently have zero integration test coverage despite touching 8+ subsystems (storage, groups, config, git, tmux, hooks, worktrees, and legacy cleanup metadata).
 
 **Independent Test**: Can be tested by calling library functions directly in a temp directory with mocked HOME, creating sessions, and asserting on storage state and output.
 
@@ -67,7 +67,7 @@ A developer has global settings and profile-specific overrides. When loading con
 
 **Acceptance Scenarios**:
 
-1. **Given** global config has `sandbox.auto_cleanup = true` and profile override has `sandbox.auto_cleanup = false`, **When** configs are merged, **Then** the resolved value is `false`
+1. **Given** global config has legacy `sandbox.auto_cleanup = true` and profile override has `sandbox.auto_cleanup = false`, **When** configs are merged, **Then** the resolved value is `false`
 2. **Given** a profile override with only `theme` set, **When** merged with global config, **Then** all non-overridden fields inherit from global
 3. **Given** a config with all fields set, **When** saved to TOML and reloaded, **Then** all values round-trip correctly
 
@@ -91,11 +91,11 @@ When the app starts with an old schema version, pending migrations run in order,
 
 ### User Story 6 - Repo Config and Hook Trust (Priority: P3)
 
-When a developer initializes `aoe` in a repo with `.aoe/config.toml`, hooks are detected. Hooks require trust verification before execution. Changing hooks invalidates trust.
+When a developer initializes `forager` in a repo with `.forager/config.toml`, hooks are detected. Hooks require trust verification before execution. Changing hooks invalidates trust.
 
 **Why this priority**: Already partially tested in `repo_config.rs` but missing the full trust lifecycle: detect hooks, trust, execute, detect change, re-verify.
 
-**Independent Test**: Can be tested by creating a temp git repo with `.aoe/config.toml` containing hooks, and verifying trust/untrust/execute behavior.
+**Independent Test**: Can be tested by creating a temp git repo with `.forager/config.toml` containing hooks, and verifying trust/untrust/execute behavior.
 
 **Acceptance Scenarios**:
 

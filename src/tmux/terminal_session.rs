@@ -4,20 +4,20 @@ use anyhow::{bail, Result};
 use std::process::Command;
 
 use super::utils::sanitize_session_name;
-use super::{
-    refresh_session_cache, session_exists_from_cache, CONTAINER_TERMINAL_PREFIX, TERMINAL_PREFIX,
-};
+use super::{refresh_session_cache, tmux_session_exists, LEGACY_TERMINAL_PREFIX, TERMINAL_PREFIX};
 use crate::cli::truncate_id;
 use crate::process;
 
 pub struct TerminalSession {
     name: String,
+    legacy_name: String,
 }
 
 impl TerminalSession {
     pub fn new(id: &str, title: &str) -> Result<Self> {
         Ok(Self {
             name: Self::generate_name(id, title),
+            legacy_name: Self::generate_legacy_name(id, title),
         })
     }
 
@@ -26,16 +26,28 @@ impl TerminalSession {
         format!("{}{}_{}", TERMINAL_PREFIX, safe_title, truncate_id(id, 8))
     }
 
-    pub fn exists(&self) -> bool {
-        if let Some(exists) = session_exists_from_cache(&self.name) {
-            return exists;
-        }
+    pub fn generate_legacy_name(id: &str, title: &str) -> String {
+        let safe_title = sanitize_session_name(title);
+        format!(
+            "{}{}_{}",
+            LEGACY_TERMINAL_PREFIX,
+            safe_title,
+            truncate_id(id, 8)
+        )
+    }
 
-        Command::new("tmux")
-            .args(["has-session", "-t", &self.name])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+    fn target_name(&self) -> &str {
+        if tmux_session_exists(&self.name) {
+            &self.name
+        } else if tmux_session_exists(&self.legacy_name) {
+            &self.legacy_name
+        } else {
+            &self.name
+        }
+    }
+
+    pub fn exists(&self) -> bool {
+        tmux_session_exists(&self.name) || tmux_session_exists(&self.legacy_name)
     }
 
     pub fn create(&self, working_dir: &str) -> Result<()> {
@@ -70,13 +82,20 @@ impl TerminalSession {
             return Ok(());
         }
 
+        let target_name = self.target_name().to_string();
+
         // Kill the entire process tree first to ensure child processes are terminated
-        if let Some(pane_pid) = self.get_pane_pid() {
+        if let Some(pane_pid) = process::get_pane_pid(&target_name) {
             process::kill_process_tree(pane_pid);
         }
 
+        refresh_session_cache();
+        if !tmux_session_exists(&target_name) {
+            return Ok(());
+        }
+
         let output = Command::new("tmux")
-            .args(["kill-session", "-t", &self.name])
+            .args(["kill-session", "-t", &target_name])
             .output()?;
 
         if !output.status.success() {
@@ -90,7 +109,7 @@ impl TerminalSession {
     }
 
     pub fn get_pane_pid(&self) -> Option<u32> {
-        process::get_pane_pid(&self.name)
+        process::get_pane_pid(self.target_name())
     }
 
     pub fn attach(&self) -> Result<()> {
@@ -98,14 +117,15 @@ impl TerminalSession {
             bail!("Terminal session does not exist: {}", self.name);
         }
 
+        let target_name = self.target_name();
         if std::env::var("TMUX").is_ok() {
             let status = Command::new("tmux")
-                .args(["switch-client", "-t", &self.name])
+                .args(["switch-client", "-t", target_name])
                 .status()?;
 
             if !status.success() {
                 let status = Command::new("tmux")
-                    .args(["attach-session", "-t", &self.name])
+                    .args(["attach-session", "-t", target_name])
                     .status()?;
 
                 if !status.success() {
@@ -114,7 +134,7 @@ impl TerminalSession {
             }
         } else {
             let status = Command::new("tmux")
-                .args(["attach-session", "-t", &self.name])
+                .args(["attach-session", "-t", target_name])
                 .status()?;
 
             if !status.success() {
@@ -130,153 +150,12 @@ impl TerminalSession {
             return Ok(String::new());
         }
 
+        let target_name = self.target_name();
         let output = Command::new("tmux")
             .args([
                 "capture-pane",
                 "-t",
-                &self.name,
-                "-p",
-                "-S",
-                &format!("-{}", lines),
-            ])
-            .output()?;
-
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        } else {
-            Ok(String::new())
-        }
-    }
-}
-
-/// Container terminal session for sandboxed sessions.
-/// Uses a separate prefix (aoe_cterm_) to allow both container and host terminals to coexist.
-pub struct ContainerTerminalSession {
-    name: String,
-}
-
-impl ContainerTerminalSession {
-    pub fn new(id: &str, title: &str) -> Result<Self> {
-        Ok(Self {
-            name: Self::generate_name(id, title),
-        })
-    }
-
-    pub fn generate_name(id: &str, title: &str) -> String {
-        let safe_title = sanitize_session_name(title);
-        format!(
-            "{}{}_{}",
-            CONTAINER_TERMINAL_PREFIX,
-            safe_title,
-            truncate_id(id, 8)
-        )
-    }
-
-    pub fn exists(&self) -> bool {
-        if let Some(exists) = session_exists_from_cache(&self.name) {
-            return exists;
-        }
-
-        Command::new("tmux")
-            .args(["has-session", "-t", &self.name])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-
-    pub fn create_with_size(
-        &self,
-        working_dir: &str,
-        command: Option<&str>,
-        size: Option<(u16, u16)>,
-    ) -> Result<()> {
-        if self.exists() {
-            return Ok(());
-        }
-
-        let args = build_terminal_create_args(&self.name, working_dir, command, size);
-        let output = Command::new("tmux").args(&args).output()?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to create container terminal session: {}", stderr);
-        }
-
-        refresh_session_cache();
-
-        Ok(())
-    }
-
-    pub fn kill(&self) -> Result<()> {
-        if !self.exists() {
-            return Ok(());
-        }
-
-        // Kill the entire process tree first to ensure child processes are terminated
-        if let Some(pane_pid) = self.get_pane_pid() {
-            process::kill_process_tree(pane_pid);
-        }
-
-        let output = Command::new("tmux")
-            .args(["kill-session", "-t", &self.name])
-            .output()?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to kill container terminal session: {}", stderr);
-        }
-
-        refresh_session_cache();
-
-        Ok(())
-    }
-
-    pub fn get_pane_pid(&self) -> Option<u32> {
-        process::get_pane_pid(&self.name)
-    }
-
-    pub fn attach(&self) -> Result<()> {
-        if !self.exists() {
-            bail!("Container terminal session does not exist: {}", self.name);
-        }
-
-        if std::env::var("TMUX").is_ok() {
-            let status = Command::new("tmux")
-                .args(["switch-client", "-t", &self.name])
-                .status()?;
-
-            if !status.success() {
-                let status = Command::new("tmux")
-                    .args(["attach-session", "-t", &self.name])
-                    .status()?;
-
-                if !status.success() {
-                    bail!("Failed to attach to container terminal session");
-                }
-            }
-        } else {
-            let status = Command::new("tmux")
-                .args(["attach-session", "-t", &self.name])
-                .status()?;
-
-            if !status.success() {
-                bail!("Failed to attach to container terminal session");
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn capture_pane(&self, lines: usize) -> Result<String> {
-        if !self.exists() {
-            return Ok(String::new());
-        }
-
-        let output = Command::new("tmux")
-            .args([
-                "capture-pane",
-                "-t",
-                &self.name,
+                target_name,
                 "-p",
                 "-S",
                 &format!("-{}", lines),
@@ -325,7 +204,7 @@ fn build_terminal_create_args(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tmux::{Session, SESSION_PREFIX};
+    use crate::tmux::{Session, LEGACY_TERMINAL_PREFIX, SESSION_PREFIX};
 
     #[test]
     fn test_terminal_session_generate_name() {
@@ -336,9 +215,9 @@ mod tests {
     }
 
     #[test]
-    fn test_container_terminal_session_generate_name() {
-        let name = ContainerTerminalSession::generate_name("abc123def456", "My Project");
-        assert!(name.starts_with(CONTAINER_TERMINAL_PREFIX));
+    fn test_terminal_session_generate_legacy_name() {
+        let name = TerminalSession::generate_legacy_name("abc123def456", "My Project");
+        assert!(name.starts_with(LEGACY_TERMINAL_PREFIX));
         assert!(name.contains("My_Project"));
         assert!(name.contains("abc123de"));
     }
@@ -350,15 +229,6 @@ mod tests {
         assert_ne!(agent_name, terminal_name);
         assert!(agent_name.starts_with(SESSION_PREFIX));
         assert!(terminal_name.starts_with(TERMINAL_PREFIX));
-    }
-
-    #[test]
-    fn test_container_terminal_name_differs_from_host_terminal() {
-        let host_name = TerminalSession::generate_name("abc123def456", "My Project");
-        let container_name = ContainerTerminalSession::generate_name("abc123def456", "My Project");
-        assert_ne!(host_name, container_name);
-        assert!(host_name.starts_with(TERMINAL_PREFIX));
-        assert!(container_name.starts_with(CONTAINER_TERMINAL_PREFIX));
     }
 
     #[test]
@@ -399,10 +269,10 @@ mod tests {
         let args = build_terminal_create_args(
             "test_terminal",
             "/tmp/work",
-            Some("docker exec -it container /bin/bash"),
+            Some("bash -lc 'echo ready'"),
             None,
         );
-        assert_eq!(args.last().unwrap(), "docker exec -it container /bin/bash");
+        assert_eq!(args.last().unwrap(), "bash -lc 'echo ready'");
     }
 
     #[test]
@@ -410,7 +280,7 @@ mod tests {
         let args = build_terminal_create_args(
             "test_terminal",
             "/tmp/work",
-            Some("docker exec -it container /bin/bash"),
+            Some("bash -lc 'echo ready'"),
             Some((80, 24)),
         );
 
@@ -421,6 +291,6 @@ mod tests {
         assert!(args.contains(&"24".to_string()));
 
         // Command should be last
-        assert_eq!(args.last().unwrap(), "docker exec -it container /bin/bash");
+        assert_eq!(args.last().unwrap(), "bash -lc 'echo ready'");
     }
 }

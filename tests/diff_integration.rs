@@ -32,7 +32,7 @@ fn setup_test_repo() -> TempDir {
 
 mod git_diff {
     use super::*;
-    use agent_of_empires::git::diff::{
+    use forager::git::diff::{
         compute_changed_files, compute_file_diff, get_default_branch, list_branches, FileStatus,
     };
 
@@ -168,7 +168,7 @@ mod git_diff {
 }
 
 mod config {
-    use agent_of_empires::session::config::{Config, DiffConfig};
+    use forager::session::config::{Config, DiffConfig};
 
     #[test]
     fn test_diff_config_defaults() {

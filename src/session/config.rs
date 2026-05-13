@@ -4,7 +4,6 @@ use super::get_app_dir;
 use super::repo_config::HooksConfig;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -60,9 +59,6 @@ pub struct AppStateConfig {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_file_list_width: Option<u16>,
-
-    #[serde(default)]
-    pub has_seen_custom_instruction_warning: bool,
 }
 
 /// Session-related configuration defaults
@@ -76,6 +72,18 @@ pub struct SessionConfig {
     /// Enable YOLO mode by default for new sessions (skip permission prompts)
     #[serde(default)]
     pub yolo_mode_default: bool,
+
+    /// Automatically create/start an orchestrator session when creating a new project session.
+    #[serde(default)]
+    pub auto_orchestrator: bool,
+
+    /// Display title for the auto-created orchestrator session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_title: Option<String>,
+
+    /// Optional command override for orchestrator sessions (e.g. "forager-orch start").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_command: Option<String>,
 }
 
 /// Diff view configuration
@@ -202,105 +210,15 @@ fn default_bare_repo_template() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxConfig {
-    #[serde(default)]
-    pub enabled_by_default: bool,
-
-    #[serde(default = "default_sandbox_image")]
-    pub default_image: String,
-
-    #[serde(default)]
-    pub extra_volumes: Vec<String>,
-
-    #[serde(default = "default_sandbox_environment")]
-    pub environment: Vec<String>,
-
-    /// Environment variables with explicit values to inject into sandbox containers.
-    /// Unlike `environment` (which passes through host values), these are stored in config
-    /// and injected directly. Useful for sandbox-specific credentials like GH_TOKEN.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub environment_values: HashMap<String, String>,
-
+    /// Legacy cleanup policy for stored sandbox container metadata.
     #[serde(default = "default_true")]
     pub auto_cleanup: bool,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu_limit: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory_limit: Option<String>,
-
-    /// Default terminal mode for sandboxed sessions (host or container)
-    #[serde(default)]
-    pub default_terminal_mode: DefaultTerminalMode,
-
-    /// Relative directory paths to exclude from the host bind mount via anonymous volumes
-    #[serde(default)]
-    pub volume_ignores: Vec<String>,
-
-    /// Mount ~/.ssh into sandbox containers (default: false)
-    #[serde(default)]
-    pub mount_ssh: bool,
-
-    /// Custom instruction text appended to the agent's system prompt in sandboxed sessions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custom_instruction: Option<String>,
-
-    /// Container runtime to use for sandboxing (docker or apple_container)
-    #[serde(default)]
-    pub container_runtime: ContainerRuntimeName,
-}
-
-/// Container runtime options for sandboxing
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ContainerRuntimeName {
-    AppleContainer,
-    #[default]
-    Docker,
 }
 
 impl Default for SandboxConfig {
     fn default() -> Self {
-        Self {
-            enabled_by_default: false,
-            default_image: default_sandbox_image(),
-            extra_volumes: Vec::new(),
-            environment: default_sandbox_environment(),
-            environment_values: HashMap::new(),
-            auto_cleanup: true,
-            cpu_limit: None,
-            memory_limit: None,
-            default_terminal_mode: DefaultTerminalMode::default(),
-            volume_ignores: Vec::new(),
-            mount_ssh: false,
-            custom_instruction: None,
-            container_runtime: ContainerRuntimeName::default(),
-        }
+        Self { auto_cleanup: true }
     }
-}
-
-fn default_sandbox_image() -> String {
-    "ghcr.io/njbrake/aoe-sandbox:latest".to_string()
-}
-
-fn default_sandbox_environment() -> Vec<String> {
-    vec![
-        "TERM".to_string(),
-        "COLORTERM".to_string(),
-        "FORCE_COLOR".to_string(),
-        "NO_COLOR".to_string(),
-    ]
-}
-
-/// Default terminal mode for sandboxed sessions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum DefaultTerminalMode {
-    /// Default to host terminal (shell on the host machine)
-    #[default]
-    Host,
-    /// Default to container terminal (shell inside the Docker container)
-    Container,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -318,9 +236,9 @@ pub enum TmuxMouseMode {
     /// Only enable mouse if user doesn't have their own tmux config
     #[default]
     Auto,
-    /// Always enable mouse for aoe sessions
+    /// Always enable mouse for Forager sessions
     Enabled,
-    /// Never enable mouse for aoe sessions (explicitly disable)
+    /// Never enable mouse for Forager sessions (explicitly disable)
     Disabled,
 }
 
@@ -447,7 +365,7 @@ mod tests {
         let deserialized: Config = toml::from_str("").unwrap();
         assert_eq!(deserialized.default_profile, "default");
         assert!(!config.worktree.enabled);
-        assert!(!config.sandbox.enabled_by_default);
+        assert!(config.sandbox.auto_cleanup);
         assert!(config.updates.check_enabled);
     }
 
@@ -546,18 +464,11 @@ mod tests {
     #[test]
     fn test_sandbox_config_default() {
         let sb = SandboxConfig::default();
-        assert!(!sb.enabled_by_default);
         assert!(sb.auto_cleanup);
-        assert!(sb.extra_volumes.is_empty());
-        assert!(sb.environment.contains(&"TERM".to_string()));
-        assert!(sb.environment.contains(&"COLORTERM".to_string()));
-        assert!(sb.cpu_limit.is_none());
-        assert!(sb.memory_limit.is_none());
-        assert!(sb.volume_ignores.is_empty());
     }
 
     #[test]
-    fn test_sandbox_config_deserialize() {
+    fn test_sandbox_config_deserializes_legacy_fields_but_keeps_cleanup_only() {
         let toml = r#"
             enabled_by_default = true
             default_image = "custom:latest"
@@ -568,43 +479,17 @@ mod tests {
             memory_limit = "4g"
         "#;
         let sb: SandboxConfig = toml::from_str(toml).unwrap();
-        assert!(sb.enabled_by_default);
-        assert_eq!(sb.default_image, "custom:latest");
-        assert_eq!(sb.extra_volumes, vec!["/data:/data"]);
-        assert_eq!(sb.environment, vec!["MY_VAR"]);
         assert!(!sb.auto_cleanup);
-        assert_eq!(sb.cpu_limit, Some("2".to_string()));
-        assert_eq!(sb.memory_limit, Some("4g".to_string()));
     }
 
     #[test]
-    fn test_sandbox_config_volume_ignores_deserialize() {
+    fn test_sandbox_config_ignores_retired_fields_with_defaults() {
         let toml = r#"
+            enabled_by_default = true
             volume_ignores = ["target", ".venv", "node_modules"]
         "#;
         let sb: SandboxConfig = toml::from_str(toml).unwrap();
-        assert_eq!(sb.volume_ignores, vec!["target", ".venv", "node_modules"]);
-    }
-
-    #[test]
-    fn test_sandbox_config_volume_ignores_defaults_empty() {
-        let toml = r#"enabled_by_default = false"#;
-        let sb: SandboxConfig = toml::from_str(toml).unwrap();
-        assert!(sb.volume_ignores.is_empty());
-    }
-
-    #[test]
-    fn test_sandbox_config_volume_ignores_roundtrip() {
-        let mut config = Config::default();
-        config.sandbox.volume_ignores = vec!["target".to_string(), "node_modules".to_string()];
-
-        let serialized = toml::to_string(&config).unwrap();
-        let deserialized: Config = toml::from_str(&serialized).unwrap();
-
-        assert_eq!(
-            deserialized.sandbox.volume_ignores,
-            vec!["target", "node_modules"]
-        );
+        assert!(sb.auto_cleanup);
     }
 
     // Tests for ClaudeConfig
@@ -650,8 +535,7 @@ mod tests {
                 ..Default::default()
             },
             sandbox: SandboxConfig {
-                enabled_by_default: true,
-                ..Default::default()
+                auto_cleanup: false,
             },
             updates: UpdatesConfig {
                 check_interval_hours: 48,
@@ -666,8 +550,8 @@ mod tests {
         assert_eq!(config.default_profile, deserialized.default_profile);
         assert_eq!(config.worktree.enabled, deserialized.worktree.enabled);
         assert_eq!(
-            config.sandbox.enabled_by_default,
-            deserialized.sandbox.enabled_by_default
+            config.sandbox.auto_cleanup,
+            deserialized.sandbox.auto_cleanup
         );
         assert_eq!(
             config.updates.check_interval_hours,
@@ -690,6 +574,7 @@ mod tests {
 
             [sandbox]
             enabled_by_default = true
+            auto_cleanup = false
 
             [updates]
             check_enabled = true
@@ -704,7 +589,7 @@ mod tests {
         assert_eq!(config.theme.name, "monokai");
         assert!(config.worktree.enabled);
         assert_eq!(config.worktree.path_template, "../wt/{branch}");
-        assert!(config.sandbox.enabled_by_default);
+        assert!(!config.sandbox.auto_cleanup);
         assert!(config.updates.check_enabled);
         assert_eq!(config.updates.check_interval_hours, 12);
         assert!(config.app_state.has_seen_welcome);

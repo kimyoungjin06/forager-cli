@@ -3,19 +3,21 @@
 use anyhow::{bail, Result};
 use std::process::Command;
 
-use super::{refresh_session_cache, session_exists_from_cache, SESSION_PREFIX};
+use super::{refresh_session_cache, tmux_session_exists, LEGACY_SESSION_PREFIX, SESSION_PREFIX};
 use crate::cli::truncate_id;
 use crate::process;
 use crate::session::Status;
 
 pub struct Session {
     name: String,
+    legacy_name: String,
 }
 
 impl Session {
     pub fn new(id: &str, title: &str) -> Result<Self> {
         Ok(Self {
             name: Self::generate_name(id, title),
+            legacy_name: Self::generate_legacy_name(id, title),
         })
     }
 
@@ -24,16 +26,28 @@ impl Session {
         format!("{}{}_{}", SESSION_PREFIX, safe_title, truncate_id(id, 8))
     }
 
-    pub fn exists(&self) -> bool {
-        if let Some(exists) = session_exists_from_cache(&self.name) {
-            return exists;
-        }
+    pub fn generate_legacy_name(id: &str, title: &str) -> String {
+        let safe_title = sanitize_session_name(title);
+        format!(
+            "{}{}_{}",
+            LEGACY_SESSION_PREFIX,
+            safe_title,
+            truncate_id(id, 8)
+        )
+    }
 
-        Command::new("tmux")
-            .args(["has-session", "-t", &self.name])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+    fn target_name(&self) -> &str {
+        if tmux_session_exists(&self.name) {
+            &self.name
+        } else if tmux_session_exists(&self.legacy_name) {
+            &self.legacy_name
+        } else {
+            &self.name
+        }
+    }
+
+    pub fn exists(&self) -> bool {
+        tmux_session_exists(&self.name) || tmux_session_exists(&self.legacy_name)
     }
 
     pub fn create(&self, working_dir: &str, command: Option<&str>) -> Result<()> {
@@ -72,15 +86,22 @@ impl Session {
             return Ok(());
         }
 
+        let target_name = self.target_name().to_string();
+
         // Kill the entire process tree first to ensure child processes are terminated.
         // This handles cases where tools like Claude spawn subprocesses that may
         // survive tmux's SIGHUP signal.
-        if let Some(pane_pid) = self.get_pane_pid() {
+        if let Some(pane_pid) = process::get_pane_pid(&target_name) {
             process::kill_process_tree(pane_pid);
         }
 
+        refresh_session_cache();
+        if !tmux_session_exists(&target_name) {
+            return Ok(());
+        }
+
         let output = Command::new("tmux")
-            .args(["kill-session", "-t", &self.name])
+            .args(["kill-session", "-t", &target_name])
             .output()?;
 
         if !output.status.success() {
@@ -98,8 +119,9 @@ impl Session {
             return Ok(());
         }
 
+        let target_name = self.target_name();
         let output = Command::new("tmux")
-            .args(["rename-session", "-t", &self.name, new_name])
+            .args(["rename-session", "-t", target_name, new_name])
             .output()?;
 
         if !output.status.success() {
@@ -115,9 +137,10 @@ impl Session {
             bail!("Session does not exist: {}", self.name);
         }
 
+        let target_name = self.target_name();
         if std::env::var("TMUX").is_ok() {
             let status = Command::new("tmux")
-                .args(["switch-client", "-t", &self.name])
+                .args(["switch-client", "-t", target_name])
                 .status()?;
 
             if !status.success() {
@@ -126,7 +149,7 @@ impl Session {
                 // not actually inside a tmux client (e.g., terminal spawned
                 // from within tmux via `open -a Terminal`).
                 let status = Command::new("tmux")
-                    .args(["attach-session", "-t", &self.name])
+                    .args(["attach-session", "-t", target_name])
                     .status()?;
 
                 if !status.success() {
@@ -135,7 +158,7 @@ impl Session {
             }
         } else {
             let status = Command::new("tmux")
-                .args(["attach-session", "-t", &self.name])
+                .args(["attach-session", "-t", target_name])
                 .status()?;
 
             if !status.success() {
@@ -160,11 +183,12 @@ impl Session {
             return Ok(String::new());
         }
 
+        let target_name = self.target_name();
         let output = Command::new("tmux")
             .args([
                 "capture-pane",
                 "-t",
-                &self.name,
+                target_name,
                 "-p",
                 "-S",
                 &format!("-{}", lines),
@@ -179,7 +203,7 @@ impl Session {
     }
 
     pub fn get_pane_pid(&self) -> Option<u32> {
-        process::get_pane_pid(&self.name)
+        process::get_pane_pid(self.target_name())
     }
 
     pub fn get_foreground_pid(&self) -> Option<u32> {
@@ -255,6 +279,14 @@ mod tests {
     fn test_generate_name() {
         let name = Session::generate_name("abc123def456", "My Project");
         assert!(name.starts_with(SESSION_PREFIX));
+        assert!(name.contains("My_Project"));
+        assert!(name.contains("abc123de"));
+    }
+
+    #[test]
+    fn test_generate_legacy_name() {
+        let name = Session::generate_legacy_name("abc123def456", "My Project");
+        assert!(name.starts_with(LEGACY_SESSION_PREFIX));
         assert!(name.contains("My_Project"));
         assert!(name.contains("abc123de"));
     }

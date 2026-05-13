@@ -1,6 +1,6 @@
 # Worktrees Reference
 
-Reference documentation for git worktree commands and configuration in `aoe`.
+Reference documentation for git worktree commands and configuration in `forager`.
 
 For workflow guidance, see the [Workflow Guide](workflow.md).
 
@@ -16,25 +16,25 @@ For workflow guidance, see the [Workflow Guide](workflow.md).
 
 ```bash
 # Create worktree session (new branch)
-aoe add . -w feat/my-feature -b
+forager add . -w feat/my-feature -b
 
 # Create worktree session (existing branch)
-aoe add . -w feat/my-feature
+forager add . -w feat/my-feature
 
 # List all worktrees
-aoe worktree list
+forager worktree list
 
 # Show session info
-aoe worktree info <session>
+forager worktree info <session>
 
 # Find orphaned worktrees
-aoe worktree cleanup
+forager worktree cleanup
 
 # Remove session (prompts for worktree cleanup)
-aoe remove <session>
+forager remove <session>
 
 # Remove session and delete worktree
-aoe remove <session> --delete-worktree
+forager remove <session> --delete-worktree
 ```
 
 ## TUI Keyboard Shortcuts
@@ -92,21 +92,21 @@ path_template = "../wt/{branch}-{session-id}"
 
 | Scenario | Cleanup Prompt? |
 |----------|-----------------|
-| aoe-managed worktree | Yes |
+| Forager-managed worktree | Yes |
 | Manual worktree | No |
 | `--delete-worktree` flag | Yes (deletes worktree) |
 | Non-worktree session | No |
 
 ## Auto-Detection
 
-AOE automatically detects bare repos and uses `bare_repo_path_template` instead of `path_template`, creating worktrees as siblings within the project directory.
+Forager automatically detects bare repos and uses `bare_repo_path_template` instead of `path_template`, creating worktrees as siblings within the project directory.
 
 ## File Locations
 
 | Item | Path |
 |------|------|
-| Config | `~/.agent-of-empires/config.toml` |
-| Sessions | `~/.agent-of-empires/profiles/<profile>/sessions.json` |
+| Config | `~/.forager/config.toml` (`~/.config/forager/config.toml` on Linux) |
+| Sessions | `~/.forager/profiles/<profile>/sessions.json` |
 
 ## Error Messages
 

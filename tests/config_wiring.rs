@@ -4,8 +4,8 @@
 //! that uses them, specifically the auto_cleanup settings for worktrees and
 //! sandbox containers.
 
-use agent_of_empires::session::{save_config, Config, SandboxConfig, WorktreeConfig};
-use agent_of_empires::tui::dialogs::{DeleteDialogConfig, UnifiedDeleteDialog};
+use forager::session::{save_config, Config, SandboxConfig, WorktreeConfig};
+use forager::tui::dialogs::{DeleteDialogConfig, UnifiedDeleteDialog};
 use serial_test::serial;
 
 fn setup_temp_home() -> tempfile::TempDir {
@@ -146,13 +146,7 @@ fn test_all_worktree_config_fields_accessible() {
 }
 
 #[test]
-fn test_all_sandbox_config_fields_accessible() {
+fn test_legacy_sandbox_cleanup_config_accessible() {
     let config = SandboxConfig::default();
-    let _ = config.enabled_by_default;
-    let _ = config.default_image.as_str();
-    let _ = &config.extra_volumes;
-    let _ = &config.environment;
-    let _ = config.auto_cleanup;
-    let _ = &config.cpu_limit;
-    let _ = &config.memory_limit;
+    assert!(config.auto_cleanup);
 }

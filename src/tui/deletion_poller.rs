@@ -67,7 +67,7 @@ impl DeletionPoller {
                 .instance
                 .worktree_info
                 .as_ref()
-                .filter(|wt| wt.managed_by_aoe)
+                .filter(|wt| wt.managed_by_forager)
                 .map(|wt| (wt.branch.clone(), PathBuf::from(&wt.main_repo_path)))
         } else {
             None
@@ -77,7 +77,7 @@ impl DeletionPoller {
         // Must happen before branch deletion since the worktree is using the branch
         if request.delete_worktree {
             if let Some(wt_info) = &request.instance.worktree_info {
-                if wt_info.managed_by_aoe {
+                if wt_info.managed_by_forager {
                     let worktree_path = PathBuf::from(&request.instance.project_path);
                     let main_repo = PathBuf::from(&wt_info.main_repo_path);
 
@@ -109,7 +109,11 @@ impl DeletionPoller {
         if request.delete_sandbox {
             if let Some(sandbox) = &request.instance.sandbox_info {
                 if sandbox.enabled {
-                    let container = DockerContainer::from_session_id(&request.instance.id);
+                    let container = DockerContainer::from_stored_name(
+                        &request.instance.id,
+                        &sandbox.image,
+                        &sandbox.container_name,
+                    );
                     if container.exists().unwrap_or(false) {
                         if let Err(e) = container.remove(true) {
                             errors.push(format!("Container: {}", e));

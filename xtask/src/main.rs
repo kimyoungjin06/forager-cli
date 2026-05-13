@@ -1,4 +1,4 @@
-//! xtask - Development tasks for agent-of-empires
+//! xtask - Development tasks for Forager
 
 use clap::{Parser, Subcommand};
 use std::fs;
@@ -6,7 +6,7 @@ use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "xtask")]
-#[command(about = "Development tasks for agent-of-empires")]
+#[command(about = "Development tasks for Forager")]
 struct Xtask {
     #[command(subcommand)]
     command: Commands,
@@ -26,7 +26,7 @@ fn main() {
 }
 
 fn generate_cli_docs() {
-    let markdown = clap_markdown::help_markdown::<agent_of_empires::cli::Cli>();
+    let markdown = clap_markdown::help_markdown::<forager::cli::Cli>();
 
     let docs_dir = Path::new("docs/cli");
     fs::create_dir_all(docs_dir).expect("Failed to create docs/cli directory");

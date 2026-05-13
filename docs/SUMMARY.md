@@ -10,7 +10,6 @@
 # Guides
 
 - [Workflow](guides/workflow.md)
-- [Docker Sandbox](guides/sandbox.md)
 - [Repo Config & Hooks](guides/repo-config.md)
 - [Git Worktrees](guides/worktrees.md)
 - [Diff View](guides/diff-view.md)

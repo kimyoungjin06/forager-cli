@@ -5,12 +5,9 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 
-use super::config::{
-    Config, ContainerRuntimeName, DefaultTerminalMode, TmuxMouseMode, TmuxStatusBarMode,
-};
+use super::config::{Config, TmuxMouseMode, TmuxStatusBarMode};
 use super::get_profile_dir;
 
 /// Profile-specific settings. All fields are Option<T> - None means "inherit from global"
@@ -95,43 +92,7 @@ pub struct WorktreeConfigOverride {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SandboxConfigOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled_by_default: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_image: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra_volumes: Option<Vec<String>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Vec<String>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_values: Option<HashMap<String, String>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_cleanup: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu_limit: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory_limit: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_terminal_mode: Option<DefaultTerminalMode>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub volume_ignores: Option<Vec<String>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mount_ssh: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custom_instruction: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub container_runtime: Option<ContainerRuntimeName>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -150,6 +111,15 @@ pub struct SessionConfigOverride {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yolo_mode_default: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_orchestrator: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_title: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -213,44 +183,8 @@ pub fn apply_sandbox_overrides(
     target: &mut super::config::SandboxConfig,
     source: &SandboxConfigOverride,
 ) {
-    if let Some(enabled_by_default) = source.enabled_by_default {
-        target.enabled_by_default = enabled_by_default;
-    }
-    if let Some(ref default_image) = source.default_image {
-        target.default_image = default_image.clone();
-    }
-    if let Some(ref extra_volumes) = source.extra_volumes {
-        target.extra_volumes = extra_volumes.clone();
-    }
-    if let Some(ref environment) = source.environment {
-        target.environment = environment.clone();
-    }
-    if let Some(ref environment_values) = source.environment_values {
-        target.environment_values = environment_values.clone();
-    }
     if let Some(auto_cleanup) = source.auto_cleanup {
         target.auto_cleanup = auto_cleanup;
-    }
-    if let Some(ref cpu_limit) = source.cpu_limit {
-        target.cpu_limit = Some(cpu_limit.clone());
-    }
-    if let Some(ref memory_limit) = source.memory_limit {
-        target.memory_limit = Some(memory_limit.clone());
-    }
-    if let Some(default_terminal_mode) = source.default_terminal_mode {
-        target.default_terminal_mode = default_terminal_mode;
-    }
-    if let Some(ref volume_ignores) = source.volume_ignores {
-        target.volume_ignores = volume_ignores.clone();
-    }
-    if let Some(mount_ssh) = source.mount_ssh {
-        target.mount_ssh = mount_ssh;
-    }
-    if let Some(ref custom_instruction) = source.custom_instruction {
-        target.custom_instruction = Some(custom_instruction.clone());
-    }
-    if let Some(container_runtime) = source.container_runtime {
-        target.container_runtime = container_runtime;
     }
 }
 
@@ -302,6 +236,15 @@ pub fn apply_session_overrides(
     }
     if let Some(yolo_mode_default) = source.yolo_mode_default {
         target.yolo_mode_default = yolo_mode_default;
+    }
+    if let Some(auto_orchestrator) = source.auto_orchestrator {
+        target.auto_orchestrator = auto_orchestrator;
+    }
+    if source.orchestrator_title.is_some() {
+        target.orchestrator_title = source.orchestrator_title.clone();
+    }
+    if source.orchestrator_command.is_some() {
+        target.orchestrator_command = source.orchestrator_command.clone();
     }
 }
 
@@ -412,20 +355,6 @@ pub fn validate_volume_format(volume: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate Docker memory limit format (e.g., "512m", "2g")
-pub fn validate_memory_limit(limit: &str) -> Result<(), String> {
-    if limit.is_empty() {
-        return Ok(());
-    }
-
-    let re = regex::Regex::new(r"^\d+[bkmgBKMG]?$").unwrap();
-    if re.is_match(limit) {
-        Ok(())
-    } else {
-        Err("Memory limit must be a number optionally followed by b, k, m, or g".to_string())
-    }
-}
-
 /// Validate check interval is positive
 pub fn validate_check_interval(hours: u64) -> Result<(), String> {
     if hours == 0 {
@@ -482,6 +411,7 @@ mod tests {
 
             [sandbox]
             enabled_by_default = true
+            auto_cleanup = false
         "#;
 
         let config: ProfileConfig = toml::from_str(toml).unwrap();
@@ -493,7 +423,7 @@ mod tests {
 
         assert!(config.sandbox.is_some());
         let sandbox = config.sandbox.unwrap();
-        assert_eq!(sandbox.enabled_by_default, Some(true));
+        assert_eq!(sandbox.auto_cleanup, Some(false));
     }
 
     #[test]
@@ -556,16 +486,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_memory_limit() {
-        assert!(validate_memory_limit("").is_ok());
-        assert!(validate_memory_limit("512m").is_ok());
-        assert!(validate_memory_limit("2g").is_ok());
-        assert!(validate_memory_limit("1024").is_ok());
-        assert!(validate_memory_limit("invalid").is_err());
-        assert!(validate_memory_limit("512mb").is_err());
-    }
-
-    #[test]
     fn test_validate_check_interval() {
         assert!(validate_check_interval(1).is_ok());
         assert!(validate_check_interval(24).is_ok());
@@ -625,62 +545,49 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_configs_with_volume_ignores_override() {
+    fn test_merge_configs_with_sandbox_auto_cleanup_override() {
         let global = Config::default();
-        assert!(global.sandbox.volume_ignores.is_empty());
+        assert!(global.sandbox.auto_cleanup);
 
         let profile = ProfileConfig {
             sandbox: Some(SandboxConfigOverride {
-                volume_ignores: Some(vec!["target".to_string(), "node_modules".to_string()]),
-                ..Default::default()
+                auto_cleanup: Some(false),
             }),
             ..Default::default()
         };
 
         let merged = merge_configs(global, &profile);
-        assert_eq!(
-            merged.sandbox.volume_ignores,
-            vec!["target", "node_modules"]
-        );
+        assert!(!merged.sandbox.auto_cleanup);
     }
 
     #[test]
-    fn test_merge_configs_volume_ignores_inherits_when_not_overridden() {
+    fn test_merge_configs_sandbox_auto_cleanup_inherits_when_not_overridden() {
         let mut global = Config::default();
-        global.sandbox.volume_ignores = vec!["target".to_string()];
+        global.sandbox.auto_cleanup = false;
 
         let profile = ProfileConfig {
-            sandbox: Some(SandboxConfigOverride {
-                enabled_by_default: Some(true),
-                volume_ignores: None,
-                ..Default::default()
-            }),
+            sandbox: Some(SandboxConfigOverride::default()),
             ..Default::default()
         };
 
         let merged = merge_configs(global, &profile);
-        assert_eq!(merged.sandbox.volume_ignores, vec!["target"]);
-        assert!(merged.sandbox.enabled_by_default);
+        assert!(!merged.sandbox.auto_cleanup);
     }
 
     #[test]
-    fn test_volume_ignores_override_serialization() {
+    fn test_sandbox_cleanup_override_serialization() {
         let config = ProfileConfig {
             sandbox: Some(SandboxConfigOverride {
-                volume_ignores: Some(vec!["target".to_string(), ".venv".to_string()]),
-                ..Default::default()
+                auto_cleanup: Some(false),
             }),
             ..Default::default()
         };
 
         let serialized = toml::to_string_pretty(&config).unwrap();
-        assert!(serialized.contains("volume_ignores"));
+        assert!(serialized.contains("auto_cleanup"));
 
         let deserialized: ProfileConfig = toml::from_str(&serialized).unwrap();
-        assert_eq!(
-            deserialized.sandbox.unwrap().volume_ignores,
-            Some(vec!["target".to_string(), ".venv".to_string()])
-        );
+        assert_eq!(deserialized.sandbox.unwrap().auto_cleanup, Some(false));
     }
 
     #[test]

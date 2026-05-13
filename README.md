@@ -1,26 +1,24 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Agent of Empires" width="128">
-  <h1 align="center">Agent of Empires (AoE)</h1>
+  <img src="assets/logo.png" alt="Forager" width="128">
+  <h1 align="center">Forager</h1>
   <p align="center">
-    <a href="https://njbrake.github.io/agent-of-empires/"><img src="https://img.shields.io/badge/docs-aoe-blue" alt="Documentation"></a>
-    <a href="https://github.com/njbrake/agent-of-empires/actions/workflows/ci.yml"><img src="https://github.com/njbrake/agent-of-empires/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://kimyoungjin06.github.io/forager-cli/"><img src="https://img.shields.io/badge/docs-forager-blue" alt="Documentation"></a>
+    <a href="https://github.com/kimyoungjin06/forager-cli/actions/workflows/ci.yml"><img src="https://github.com/kimyoungjin06/forager-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-    <a href="https://github.com/njbrake/agent-of-empires/releases"><img src="https://img.shields.io/github/v/release/njbrake/agent-of-empires" alt="GitHub release"></a>
-    <a href="https://formulae.brew.sh/formula/aoe"><img src="https://img.shields.io/homebrew/v/aoe" alt="Homebrew"></a>
+    <a href="https://github.com/kimyoungjin06/forager-cli/releases"><img src="https://img.shields.io/github/v/release/kimyoungjin06/forager-cli" alt="GitHub release"></a>
     <a href="https://blog.rust-lang.org/2023/11/16/Rust-1.74.0.html"><img src="https://img.shields.io/badge/MSRV-1.74-blue?logo=rust" alt="MSRV"></a>
-    <a href="https://github.com/njbrake/agent-of-empires/stargazers"><img src="https://img.shields.io/github/stars/njbrake/agent-of-empires?style=social" alt="GitHub stars"></a>
-    <a href="https://agent-of-empires.com/docs/credits.html"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnjbrake%2Fagent-of-empires%2Fcredit%2Fcredits.json&query=%24.contributors.length&label=contributors&color=blue&logo=github" alt="Contributors"></a>
-    <a href="https://www.youtube.com/@agent-of-empires"><img src="https://img.shields.io/badge/YouTube-channel-red?logo=youtube" alt="YouTube"></a>
+    <a href="https://github.com/kimyoungjin06/forager-cli/stargazers"><img src="https://img.shields.io/github/stars/kimyoungjin06/forager-cli?style=social" alt="GitHub stars"></a>
+    <a href="https://kimyoungjin06.github.io/forager-cli/credits.html"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkimyoungjin06%2Fforager-cli%2Fcredit%2Fcredits.json&query=%24.contributors.length&label=contributors&color=blue&logo=github" alt="Contributors"></a>
   </p>
 </p>
 
-A terminal session manager for AI coding agents on Linux and macOS. Built on tmux, written in Rust.
+Offdesk agent orchestration with approvals, recovery, and audit trails. Built on tmux, written in Rust.
 
-Run multiple AI agents in parallel across different branches of your codebase, each in its own isolated session with optional Docker sandboxing.
+Run multiple AI agents in parallel across different branches of your codebase, each in its own isolated session. `aoe` remains available as a legacy compatibility alias while the project moves to `forager`.
 
 > If you find this project useful, please consider giving it a star on GitHub: it helps others discover the project!
 
-![Agent of Empires Demo](docs/assets/demo.gif)
+![Forager Demo](docs/assets/demo.gif)
 
 ## Features
 
@@ -29,90 +27,89 @@ Run multiple AI agents in parallel across different branches of your codebase, e
 - **Agent + terminal views** -- toggle between your AI agents and paired shell terminals with `t`
 - **Status detection** -- see which agents are running, waiting for input, or idle
 - **Git worktrees** -- run parallel agents on different branches of the same repo
-- **Docker sandboxing** -- isolate agents in containers with shared auth volumes
 - **Diff view** -- review git changes and edit files without leaving the TUI
-- **Per-repo config** -- `.aoe/config.toml` for project-specific settings and hooks
+- **Per-repo config** -- `.forager/config.toml` for project-specific settings and hooks, with `.aoe/config.toml` fallback
 - **Profiles** -- separate workspaces for different projects or clients
+- **Rename diagnostics** -- `forager doctor` shows active Forager paths and legacy AoE compatibility state
+- **Safe AoE migration** -- `forager migrate aoe` copies legacy paths without overwriting Forager targets
+- **Offdesk recovery** -- durable task queueing, approval retry, lifecycle recovery, and audit trails
 - **CLI and TUI** -- full functionality from both interfaces
 
 ## How It Works
 
-AoE wraps [tmux](https://github.com/tmux/tmux/wiki). Each session is a tmux session, so agents keep running when you close the TUI. Reopen `aoe` and everything is still there.
+Forager wraps [tmux](https://github.com/tmux/tmux/wiki). Each session is a tmux session, so agents keep running when you close the TUI. Reopen `forager` and everything is still there.
 
 The key tmux shortcut to know: **`Ctrl+b d`** detaches from a session and returns to the TUI.
 
 ## Installation
 
-**Prerequisites:** [tmux](https://github.com/tmux/tmux/wiki) (required), [Docker](https://www.docker.com/) (optional, for sandboxing)
+**Prerequisites:** [tmux](https://github.com/tmux/tmux/wiki) (required)
 
 ```bash
 # Quick install (Linux & macOS)
 curl -fsSL \
-  https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh \
+  https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/scripts/install.sh \
   | bash
 
-# Homebrew
-brew install aoe
-
 # Build from source
-git clone https://github.com/njbrake/agent-of-empires
-cd agent-of-empires && cargo build --release
+git clone https://github.com/kimyoungjin06/forager-cli
+cd forager && cargo build --release
 ```
+
+The install script and release artifacts now use `forager` as the primary
+command and keep `aoe` as a legacy alias during the transition.
 
 ## Quick Start
 
 ```bash
 # Launch the TUI
-aoe
+forager
 
 # Add a session from CLI
-aoe add /path/to/project
+forager add /path/to/project
 
 # Add a session on a new git branch
-aoe add . -w feat/my-feature -b
+forager add . -w feat/my-feature -b
 
-# Add a sandboxed session
-aoe add --sandbox .
 ```
 
 In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal view, `D` for diff view, `d` to delete, `?` for help.
 
 ## Documentation
 
-- **[Installation](https://njbrake.github.io/agent-of-empires/installation)** -- prerequisites and install methods
-- **[Quick Start](https://njbrake.github.io/agent-of-empires/quick-start)** -- first steps and basic usage
-- **[Workflow Guide](https://njbrake.github.io/agent-of-empires/guides/workflow)** -- recommended setup with bare repos and worktrees
-- **[Docker Sandbox](https://njbrake.github.io/agent-of-empires/guides/sandbox)** -- container isolation for agents
-- **[Repo Config & Hooks](https://njbrake.github.io/agent-of-empires/guides/repo-config)** -- per-project settings and automation
-- **[Configuration Reference](https://njbrake.github.io/agent-of-empires/guides/configuration)** -- all config options
-- **[CLI Reference](https://njbrake.github.io/agent-of-empires/cli/reference)** -- complete command documentation
+- **[Installation](https://kimyoungjin06.github.io/forager-cli/installation)** -- prerequisites and install methods
+- **[Quick Start](https://kimyoungjin06.github.io/forager-cli/quick-start)** -- first steps and basic usage
+- **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/guides/workflow)** -- recommended setup with bare repos and worktrees
+- **[Repo Config & Hooks](https://kimyoungjin06.github.io/forager-cli/guides/repo-config)** -- per-project settings and automation
+- **[Configuration Reference](https://kimyoungjin06.github.io/forager-cli/guides/configuration)** -- all config options
+- **[CLI Reference](https://kimyoungjin06.github.io/forager-cli/cli/reference)** -- complete command documentation
 
 ## FAQ
 
-### What happens when I close aoe?
+### What happens when I close Forager?
 
-Nothing. Sessions are tmux sessions running in the background. Open and close `aoe` as often as you like. Sessions only get removed when you explicitly delete them.
+Nothing. Sessions are tmux sessions running in the background. Open and close `forager` as often as you like. Sessions only get removed when you explicitly delete them.
 
 ### Which AI tools are supported?
 
-Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. AoE auto-detects which are installed on your system.
+Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. Forager auto-detects which are installed on your system.
 
 ## Troubleshooting
 
-### Using aoe with mobile SSH clients (Termius, Blink, etc.)
+### Using Forager with mobile SSH clients (Termius, Blink, etc.)
 
-Run `aoe` inside a tmux session when connecting from mobile:
+Run `forager` inside a tmux session when connecting from mobile:
 
 ```bash
 tmux new-session -s main
-aoe
+forager
 ```
 
-Use `Ctrl+b L` to toggle back to `aoe` after attaching to an agent session.
+Use `Ctrl+b L` to toggle back to Forager after attaching to an agent session.
 
 ### Claude Code is flickering
 
-This is a known Claude Code issue, not an aoe problem: https://github.com/anthropics/claude-code/issues/1913
+This is a known Claude Code issue, not a Forager problem: https://github.com/anthropics/claude-code/issues/1913
 
 ## Development
 
@@ -124,12 +121,12 @@ cargo clippy         # Lint
 cargo build --release  # Release build
 
 # Debug logging
-AGENT_OF_EMPIRES_DEBUG=1 cargo run
+FORAGER_DEBUG=1 cargo run --bin forager
 ```
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=njbrake/agent-of-empires&type=date&legend=top-left)](https://www.star-history.com/#njbrake/agent-of-empires&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=kimyoungjin06/forager-cli&type=date&legend=top-left)](https://www.star-history.com/#kimyoungjin06/forager-cli&type=date&legend=top-left)
 
 ## Acknowledgments
 

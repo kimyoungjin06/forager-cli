@@ -1,4 +1,4 @@
-//! `agent-of-empires worktree` command implementation
+//! `forager worktree` command implementation
 
 use anyhow::{bail, Result};
 use clap::Subcommand;
@@ -88,8 +88,12 @@ async fn show_info(profile: &str, identifier: &str) -> Result<()> {
         println!("  Worktree Path: {}", session.project_path);
         println!("  Main Repo:     {}", wt_info.main_repo_path);
         println!(
-            "  Managed by aoe: {}",
-            if wt_info.managed_by_aoe { "Yes" } else { "No" }
+            "  Managed by Forager: {}",
+            if wt_info.managed_by_forager {
+                "Yes"
+            } else {
+                "No"
+            }
         );
         println!(
             "  Cleanup on delete: {}",
@@ -110,7 +114,7 @@ async fn show_info(profile: &str, identifier: &str) -> Result<()> {
             println!("\n  Status:        ✓ Worktree exists");
         } else {
             println!("\n  Status:        ✗ Worktree missing (orphaned session)");
-            println!("  Tip:           Run 'aoe worktree cleanup' to remove orphaned sessions");
+            println!("  Tip:           Run 'forager worktree cleanup' to remove orphaned sessions");
         }
     } else {
         bail!(
@@ -202,7 +206,10 @@ async fn cleanup_orphaned(profile: &str, force: bool) -> Result<()> {
     use std::io::{self, Write};
 
     print!("\nProceed with cleanup? This will:\n");
-    println!("  - Remove {} sessions from aoe", orphaned_sessions.len());
+    println!(
+        "  - Remove {} sessions from Forager",
+        orphaned_sessions.len()
+    );
     println!(
         "  - Delete {} worktree directories",
         orphaned_worktrees.len()

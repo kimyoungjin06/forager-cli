@@ -1,6 +1,6 @@
-# Contributing to aoe
+# Contributing to Forager
 
-Thanks for your interest in contributing to aoe (Agent of Empires)! This document provides guidelines for contributing to the project.
+Thanks for your interest in contributing to Forager! This document provides guidelines for contributing to the project.
 
 ## Before You Start
 
@@ -20,15 +20,15 @@ Thanks for your interest in contributing to aoe (Agent of Empires)! This documen
 
 ```bash
 # Fork the repo on GitHub, then clone your fork
-git clone https://github.com/YOUR_USERNAME/agent-of-empires.git
-cd agent-of-empires
+git clone https://github.com/YOUR_USERNAME/forager.git
+cd forager
 
 # Add upstream remote
-git remote add upstream https://github.com/ORIGINAL_OWNER/agent-of-empires.git
+git remote add upstream https://github.com/ORIGINAL_OWNER/forager.git
 
 # Build and run
 cargo build --release
-cargo run --release
+cargo run --release --bin forager
 ```
 
 ### Useful Commands
@@ -45,7 +45,7 @@ cargo clippy                   # Lint
 
 For debug logging:
 ```bash
-RUST_LOG=agent_of_empires=debug cargo run
+RUST_LOG=forager=debug cargo run --bin forager
 ```
 
 ## Making Changes
@@ -83,7 +83,7 @@ Example: `feat: add session export command`
 
 - Run `cargo test` before submitting PRs
 - Tests should be deterministic and clean up after themselves
-- tmux-related tests use unique names prefixed with `aoe_test_*`
+- tmux-related tests use unique names prefixed with `forager_test_*`
 - For TUI changes, test manually in a real terminal
 
 ## Submitting Pull Requests

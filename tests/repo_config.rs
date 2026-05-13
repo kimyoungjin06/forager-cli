@@ -16,12 +16,20 @@ fn setup_temp_home(temp: &Path) {
     std::env::set_var("XDG_CONFIG_HOME", temp.join(".config"));
 }
 
-/// Helper to set up a temp dir with `.aoe/config.toml`.
+/// Helper to set up a temp dir with `.forager/config.toml`.
 fn setup_repo_config(content: &str) -> TempDir {
     let tmp = TempDir::new().unwrap();
-    let aoe_dir = tmp.path().join(".aoe");
-    fs::create_dir_all(&aoe_dir).unwrap();
-    fs::write(aoe_dir.join("config.toml"), content).unwrap();
+    let config_dir = tmp.path().join(".forager");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), content).unwrap();
+    tmp
+}
+
+fn setup_legacy_repo_config(content: &str) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let config_dir = tmp.path().join(".aoe");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), content).unwrap();
     tmp
 }
 
@@ -38,7 +46,7 @@ default_tool = "claude"
 "#,
     );
 
-    let config = agent_of_empires::session::repo_config::load_repo_config(tmp.path())
+    let config = forager::session::repo_config::load_repo_config(tmp.path())
         .unwrap()
         .unwrap();
 
@@ -52,16 +60,98 @@ default_tool = "claude"
 }
 
 #[test]
+fn test_load_repo_config_falls_back_to_legacy_aoe_path() {
+    let tmp = setup_legacy_repo_config(
+        r#"
+[hooks]
+on_create = ["echo legacy"]
+"#,
+    );
+
+    let config = forager::session::repo_config::load_repo_config(tmp.path())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(config.hooks.unwrap().on_create, vec!["echo legacy"]);
+}
+
+#[test]
+fn test_load_repo_config_prefers_forager_path_over_legacy_path() {
+    let tmp = setup_legacy_repo_config(
+        r#"
+[hooks]
+on_create = ["echo legacy"]
+"#,
+    );
+    let config_dir = tmp.path().join(".forager");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        r#"
+[hooks]
+on_create = ["echo forager"]
+"#,
+    )
+    .unwrap();
+
+    let config = forager::session::repo_config::load_repo_config(tmp.path())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(config.hooks.unwrap().on_create, vec!["echo forager"]);
+}
+
+#[test]
+fn test_save_repo_config_writes_forager_path_for_new_repo() {
+    let tmp = TempDir::new().unwrap();
+    let config = forager::session::repo_config::RepoConfig {
+        hooks: Some(forager::session::repo_config::HooksConfig {
+            on_create: vec!["echo setup".to_string()],
+            on_launch: vec![],
+        }),
+        ..Default::default()
+    };
+
+    forager::session::repo_config::save_repo_config(tmp.path(), &config).unwrap();
+
+    assert!(tmp.path().join(".forager").join("config.toml").exists());
+    assert!(!tmp.path().join(".aoe").join("config.toml").exists());
+}
+
+#[test]
+fn test_save_repo_config_preserves_existing_legacy_path() {
+    let tmp = setup_legacy_repo_config(
+        r#"
+[hooks]
+on_create = ["echo old"]
+"#,
+    );
+    let config = forager::session::repo_config::RepoConfig {
+        hooks: Some(forager::session::repo_config::HooksConfig {
+            on_create: vec!["echo updated".to_string()],
+            on_launch: vec![],
+        }),
+        ..Default::default()
+    };
+
+    forager::session::repo_config::save_repo_config(tmp.path(), &config).unwrap();
+
+    let legacy_content = fs::read_to_string(tmp.path().join(".aoe").join("config.toml")).unwrap();
+    assert!(legacy_content.contains("echo updated"));
+    assert!(!tmp.path().join(".forager").join("config.toml").exists());
+}
+
+#[test]
 fn test_load_repo_config_empty_file() {
     let tmp = setup_repo_config("");
-    let config = agent_of_empires::session::repo_config::load_repo_config(tmp.path()).unwrap();
+    let config = forager::session::repo_config::load_repo_config(tmp.path()).unwrap();
     assert!(config.is_none());
 }
 
 #[test]
 fn test_load_repo_config_comments_only() {
-    let tmp = setup_repo_config(agent_of_empires::session::repo_config::INIT_TEMPLATE);
-    let config = agent_of_empires::session::repo_config::load_repo_config(tmp.path())
+    let tmp = setup_repo_config(forager::session::repo_config::INIT_TEMPLATE);
+    let config = forager::session::repo_config::load_repo_config(tmp.path())
         .unwrap()
         .unwrap();
     // All-commented template should parse as empty config
@@ -81,30 +171,29 @@ fn test_trust_untrust_cycle() {
 
     // Initially not trusted
     let is_trusted =
-        agent_of_empires::session::repo_config::is_repo_trusted(project_path, hooks_hash).unwrap();
+        forager::session::repo_config::is_repo_trusted(project_path, hooks_hash).unwrap();
     assert!(!is_trusted);
 
     // Trust it
-    agent_of_empires::session::repo_config::trust_repo(project_path, hooks_hash).unwrap();
+    forager::session::repo_config::trust_repo(project_path, hooks_hash).unwrap();
     let is_trusted =
-        agent_of_empires::session::repo_config::is_repo_trusted(project_path, hooks_hash).unwrap();
+        forager::session::repo_config::is_repo_trusted(project_path, hooks_hash).unwrap();
     assert!(is_trusted);
 
     // Different hash should not be trusted
     let is_trusted =
-        agent_of_empires::session::repo_config::is_repo_trusted(project_path, "different_hash")
-            .unwrap();
+        forager::session::repo_config::is_repo_trusted(project_path, "different_hash").unwrap();
     assert!(!is_trusted);
 
     // Re-trust with new hash (simulating hooks changed)
-    agent_of_empires::session::repo_config::trust_repo(project_path, "new_hash").unwrap();
+    forager::session::repo_config::trust_repo(project_path, "new_hash").unwrap();
     // Old hash no longer trusted
     let is_trusted =
-        agent_of_empires::session::repo_config::is_repo_trusted(project_path, hooks_hash).unwrap();
+        forager::session::repo_config::is_repo_trusted(project_path, hooks_hash).unwrap();
     assert!(!is_trusted);
     // New hash is trusted
     let is_trusted =
-        agent_of_empires::session::repo_config::is_repo_trusted(project_path, "new_hash").unwrap();
+        forager::session::repo_config::is_repo_trusted(project_path, "new_hash").unwrap();
     assert!(is_trusted);
 }
 
@@ -114,7 +203,7 @@ fn test_hook_execution_simple_echo() {
     let marker = tmp.path().join("hook_ran");
 
     let cmd = format!("touch {}", marker.display());
-    agent_of_empires::session::repo_config::execute_hooks(&[cmd], tmp.path()).unwrap();
+    forager::session::repo_config::execute_hooks(&[cmd], tmp.path()).unwrap();
 
     assert!(marker.exists());
 }
@@ -122,14 +211,13 @@ fn test_hook_execution_simple_echo() {
 #[test]
 fn test_hook_execution_failure() {
     let tmp = TempDir::new().unwrap();
-    let result =
-        agent_of_empires::session::repo_config::execute_hooks(&["exit 1".to_string()], tmp.path());
+    let result = forager::session::repo_config::execute_hooks(&["exit 1".to_string()], tmp.path());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_changed_hooks_invalidate_trust() {
-    use agent_of_empires::session::repo_config::{compute_hooks_hash, HooksConfig};
+    use forager::session::repo_config::{compute_hooks_hash, HooksConfig};
 
     let hooks_v1 = HooksConfig {
         on_create: vec!["npm install".to_string()],
@@ -151,7 +239,7 @@ fn test_changed_hooks_invalidate_trust() {
 #[test]
 #[serial]
 fn test_hook_trust_invalidated_on_config_change() {
-    use agent_of_empires::session::repo_config::{check_hook_trust, trust_repo, HookTrustStatus};
+    use forager::session::repo_config::{check_hook_trust, trust_repo, HookTrustStatus};
 
     let temp_home = TempDir::new().unwrap();
     setup_temp_home(temp_home.path());
@@ -184,9 +272,10 @@ on_create = ["echo setup"]
     );
 
     // Modify the hooks config
-    let aoe_dir = repo.path().join(".aoe");
+    let config_path =
+        forager::session::repo_config::existing_repo_config_path(repo.path()).unwrap();
     fs::write(
-        aoe_dir.join("config.toml"),
+        config_path,
         r#"
 [hooks]
 on_create = ["echo setup", "echo extra"]
@@ -205,7 +294,7 @@ on_create = ["echo setup", "echo extra"]
 #[test]
 #[serial]
 fn test_hook_re_trust_after_change() {
-    use agent_of_empires::session::repo_config::{check_hook_trust, trust_repo, HookTrustStatus};
+    use forager::session::repo_config::{check_hook_trust, trust_repo, HookTrustStatus};
 
     let temp_home = TempDir::new().unwrap();
     setup_temp_home(temp_home.path());
@@ -224,9 +313,10 @@ on_create = ["echo v1"]
     }
 
     // Modify to v2
-    let aoe_dir = repo.path().join(".aoe");
+    let config_path =
+        forager::session::repo_config::existing_repo_config_path(repo.path()).unwrap();
     fs::write(
-        aoe_dir.join("config.toml"),
+        config_path,
         r#"
 [hooks]
 on_create = ["echo v2"]

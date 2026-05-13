@@ -7,11 +7,11 @@
 
 Add `on_create` and `on_launch` hooks to global and profile config
 levels (currently repo-only), wire them into the settings TUI as a new
-"Hooks" tab, and add a "Repo" tab for editing `.aoe/config.toml` from
+"Hooks" tab, and add a "Repo" tab for editing `.forager/config.toml` from
 the TUI. Hook resolution uses per-field override semantics:
-repo > profile > global. All hooks follow the session's sandbox setting
-for execution location (container vs local). Failure semantics and
-duplicate execution prevention apply uniformly across all config levels.
+repo > profile > global. All hooks execute locally in the host project
+directory. Failure semantics and duplicate execution prevention apply
+uniformly across all config levels.
 
 ## Technical Context
 
@@ -32,9 +32,9 @@ duplicate execution prevention apply uniformly across all config levels.
 | Principle | Status | Notes |
 |-----------|--------|-------|
 | I. Code Quality & Tooling | PASS | All changes follow existing patterns; `cargo fmt`/`clippy` will be run |
-| II. Testing Standards | PASS | Unit tests for hook resolution (all 3 levels, sandbox/local, failure semantics); integration tests for config round-trip |
+| II. Testing Standards | PASS | Unit tests for hook resolution (all 3 levels, host execution, failure semantics); integration tests for config round-trip |
 | III. User Experience Consistency | PASS | New config fields get full TUI wiring (FieldKey, SettingField, apply, clear) in same PR |
-| IV. Performance & Efficiency | PASS | No async operations added; hook execution reuses existing sandbox-aware code paths |
+| IV. Performance & Efficiency | PASS | No async operations added; hook execution reuses existing host-local code paths |
 
 **Post-Phase 1 Re-check**: PASS. No new violations introduced by design.
 
@@ -77,34 +77,34 @@ src/
 │   └── app.rs                 # No change needed (on_launch skip flag already works)
 
 tests/
-├── hooks_config.rs            # New: unit tests for 3-level resolution, sandbox awareness, failure semantics
+├── hooks_config.rs            # New: unit tests for 3-level resolution and failure semantics
 └── repo_config.rs             # Existing: may need updates for new resolution logic
 ```
 
 **Structure Decision**: Single Rust workspace, modifications to existing
 modules. No new modules needed. Hook execution paths in
-`creation_poller.rs` and `instance.rs` already handle sandbox vs local
-branching - global/profile hooks flow through the same code path once
-resolved into `HooksConfig`.
+`creation_poller.rs` and `instance.rs` already run hooks locally -
+global/profile hooks flow through the same code path once resolved into
+`HooksConfig`.
 
 ## Key Design Decisions
 
-### Sandbox Execution (FR-011)
+### Host Execution (FR-011)
 
-All hooks execute in the session's sandbox container when sandboxed, or
-locally when not sandboxed. The config level (global/profile/repo) does
-NOT affect execution location. This works naturally because:
+All hooks execute locally in the host project directory. The config level
+(global/profile/repo) does NOT affect execution location. This works
+naturally because:
 
 1. Global + profile hooks merge into `Config.hooks` via `merge_configs()`
 2. Repo hooks override per-field via `merge_repo_config()`
-3. The resolved `HooksConfig` is passed to `creation_poller.rs` which
-   already branches on `data.sandbox`
+3. The resolved `HooksConfig` is passed to `creation_poller.rs`, which
+   executes hook commands in the project path
 4. No new execution paths are needed
 
 ### Trust Semantics (FR-004)
 
 Global/profile hooks are implicitly trusted (user-authored in app config
-dir). Only repo hooks from `.aoe/config.toml` trigger the trust dialog.
+dir). Only repo hooks from `.forager/config.toml` trigger the trust dialog.
 The hook resolution must happen in two stages:
 
 1. Resolve global + profile hooks (always trusted)

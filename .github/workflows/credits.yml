@@ -188,5 +188,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: item.number,
-              body: `Thanks for the helpful contribution, @${author}! Your ${itemType} has been credited in our [contributors page](https://agent-of-empires.com/docs/credits.html). 🎉`
+              body: `Thanks for the helpful contribution, @${author}! Your ${itemType} has been credited in our [contributors page](https://kimyoungjin06.github.io/forager-cli/credits.html). 🎉`
             });

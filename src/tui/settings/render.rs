@@ -40,11 +40,6 @@ impl SettingsView {
         self.render_header(frame, layout[0], theme);
         self.render_content(frame, layout[1], theme);
         self.render_footer(frame, layout[2], theme);
-
-        // Render custom instruction dialog overlay if active
-        if let Some(ref dialog) = self.custom_instruction_dialog {
-            dialog.render(frame, area, theme);
-        }
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -380,21 +375,7 @@ impl SettingsView {
                 self.render_text_field(frame, value_area, value, index, is_selected, theme);
             }
             FieldValue::OptionalText(value) => {
-                let display = match value.as_deref() {
-                    Some(text) if field.key == super::FieldKey::CustomInstruction => {
-                        let collapsed: String = text
-                            .chars()
-                            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
-                            .collect();
-                        if collapsed.len() > 47 {
-                            format!("{}...", &collapsed[..47])
-                        } else {
-                            collapsed
-                        }
-                    }
-                    Some(text) => text.to_string(),
-                    None => String::new(),
-                };
+                let display = value.as_deref().unwrap_or_default().to_string();
                 self.render_text_field(frame, value_area, &display, index, is_selected, theme);
             }
             FieldValue::Number(value) => {
@@ -717,9 +698,7 @@ impl SettingsView {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let help_text = if self.custom_instruction_dialog.is_some() {
-            "Tab: switch focus | Enter: edit/confirm | Esc: cancel"
-        } else if self.editing_input.is_some() {
+        let help_text = if self.editing_input.is_some() {
             "Enter: confirm | Esc: cancel"
         } else if self.list_edit_state.is_some() {
             "a: add | d: delete | Enter: edit | Esc: close list"

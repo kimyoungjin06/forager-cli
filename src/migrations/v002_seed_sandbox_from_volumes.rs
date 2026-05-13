@@ -66,15 +66,9 @@ fn volume_exists(name: &str) -> bool {
 }
 
 /// Find a container image available locally to use for volume extraction.
-/// Tries the AOE sandbox image first, then small well-known images, then
-/// falls back to whatever is locally available.
+/// Tries small well-known images, then falls back to whatever is locally available.
 fn find_local_image() -> Option<String> {
-    let candidates = [
-        "ghcr.io/njbrake/aoe-sandbox:latest",
-        "alpine",
-        "busybox",
-        "ubuntu",
-    ];
+    let candidates = ["alpine", "busybox", "ubuntu"];
 
     // Check well-known small images first.
     for candidate in candidates {

@@ -1,12 +1,11 @@
-//! `agent-of-empires add` command implementation
+//! `forager add` command implementation
 
 use anyhow::{bail, Result};
 use clap::Args;
 use std::path::{Path, PathBuf};
 
-use crate::containers::{self, ContainerRuntimeInterface};
 use crate::session::repo_config;
-use crate::session::{civilizations, Config, GroupTree, Instance, SandboxInfo, Storage};
+use crate::session::{civilizations, Config, GroupTree, Instance, Storage};
 
 #[derive(Args)]
 pub struct AddArgs {
@@ -42,12 +41,12 @@ pub struct AddArgs {
     #[arg(short = 'b', long = "new-branch")]
     create_branch: bool,
 
-    /// Run session in Docker sandbox
-    #[arg(short = 's', long)]
+    /// Deferred inherited Docker sandbox flag; currently rejected.
+    #[arg(short = 's', long, hide = true)]
     sandbox: bool,
 
-    /// Custom Docker image for sandbox (implies --sandbox)
-    #[arg(long = "sandbox-image")]
+    /// Deferred inherited Docker sandbox image flag; currently rejected.
+    #[arg(long = "sandbox-image", hide = true)]
     sandbox_image: Option<String>,
 
     /// Enable YOLO mode (skip permission prompts)
@@ -60,6 +59,12 @@ pub struct AddArgs {
 }
 
 pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
+    if args.sandbox || args.sandbox_image.is_some() {
+        bail!(
+            "Docker sandbox support is deferred while Forager decides whether to benchmark, reimplement, or remove the inherited sandbox path."
+        );
+    }
+
     let mut path = if args.path.as_os_str() == "." {
         std::env::current_dir()?
     } else {
@@ -102,7 +107,7 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
 
         if worktree_path.exists() {
             bail!(
-                "Worktree already exists at {}\nTip: Use 'aoe add {}' to add the existing worktree",
+                "Worktree already exists at {}\nTip: Use 'forager add {}' to add the existing worktree",
                 worktree_path.display(),
                 worktree_path.display()
             );
@@ -116,7 +121,7 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
         worktree_info_opt = Some(WorktreeInfo {
             branch: branch.to_string(),
             main_repo_path: main_repo_path.to_string_lossy().to_string(),
-            managed_by_aoe: true,
+            managed_by_forager: true,
             created_at: Utc::now(),
             cleanup_on_delete: true,
         });
@@ -177,43 +182,6 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
 
     instance.yolo_mode = args.yolo;
 
-    // Handle sandbox setup
-    let use_sandbox = args.sandbox || args.sandbox_image.is_some();
-    let config = Config::load()?;
-
-    let runtime = containers::get_container_runtime();
-    if use_sandbox || config.sandbox.enabled_by_default {
-        if !runtime.is_available() {
-            if use_sandbox {
-                bail!(
-                    "Container runtime is not installed or not accessible.\n\
-                     Install Docker: https://docs.docker.com/get-docker/\n\
-                     Or on macOS: Apple Container\n\
-                     Tip: Use 'aoe add' without --sandbox to run directly on host"
-                );
-            }
-        } else {
-            let container_name = containers::DockerContainer::generate_name(&instance.id);
-            let image = args
-                .sandbox_image
-                .as_ref()
-                .map(|s| s.trim().to_string())
-                .unwrap_or_else(|| runtime.effective_default_image());
-            instance.sandbox_info = Some(SandboxInfo {
-                enabled: true,
-                container_id: None,
-                image,
-                container_name,
-                created_at: None,
-                extra_env_keys: None,
-                extra_env_values: None,
-                custom_instruction: Config::load()
-                    .ok()
-                    .and_then(|c| c.sandbox.custom_instruction),
-            });
-        }
-    }
-
     // Check for repository hooks
     let hook_result: Result<()> = (|| {
         match repo_config::check_hook_trust(&path) {
@@ -221,7 +189,7 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
                 let should_trust = if args.trust_hooks {
                     true
                 } else {
-                    println!("\nRepository hooks detected in .aoe/config.toml:");
+                    println!("\nRepository hooks detected in repo config:");
                     if !hooks.on_create.is_empty() {
                         println!("  on_create:");
                         for cmd in &hooks.on_create {
@@ -266,7 +234,7 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
     if let Err(e) = hook_result {
         // Clean up worktree if we created one
         if let Some(ref wt_info) = instance.worktree_info {
-            if wt_info.managed_by_aoe {
+            if wt_info.managed_by_forager {
                 if let Ok(git_wt) =
                     crate::git::GitWorktree::new(std::path::PathBuf::from(&wt_info.main_repo_path))
                 {
@@ -278,6 +246,9 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
     }
 
     instances.push(instance.clone());
+
+    let auto_orchestrator =
+        crate::session::auto_orchestrator::maybe_create_for_instance(&mut instances, &instance);
 
     // Rebuild group tree
     let mut group_tree = GroupTree::new_with_groups(&instances, &groups);
@@ -299,10 +270,17 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
         println!("  Parent:  {}", parent);
     }
     if instance.sandbox_info.is_some() {
-        println!("  Sandbox: enabled");
+        println!("  Legacy sandbox metadata: present");
     }
     if instance.yolo_mode {
         println!("  YOLO:    enabled");
+    }
+    if let Some(auto) = &auto_orchestrator {
+        let state = if auto.launched { "started" } else { "created" };
+        println!(
+            "  Orch:    {} ({}, id={})",
+            auto.title, state, auto.session_id
+        );
     }
 
     if args.launch {
@@ -319,10 +297,10 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
         println!();
         println!("Next steps:");
         println!(
-            "  agent-of-empires session start {}   # Start the session",
+            "  forager session start {}   # Start the session",
             final_title
         );
-        println!("  agent-of-empires                         # Open TUI and press Enter to attach");
+        println!("  forager                         # Open TUI and press Enter to attach");
     }
 
     Ok(())

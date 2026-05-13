@@ -29,7 +29,7 @@ impl WelcomeDialog {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accent))
-            .title(" Welcome to Agent of Empires ")
+            .title(" Welcome to Forager ")
             .title_style(Style::default().fg(theme.accent).bold());
 
         let inner = block.inner(dialog_area);
@@ -42,7 +42,7 @@ impl WelcomeDialog {
             .split(inner);
 
         let content = vec![
-            Line::from("When you attach or start an AOE session, "),
+            Line::from("When you attach or start a Forager session, "),
             Line::from("you're working directly in tmux."),
             Line::from("Essential tmux commands:"),
             Line::from(""),

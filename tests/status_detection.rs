@@ -14,8 +14,8 @@
 //! 3. Update detection logic if needed
 //! 4. Re-run tests
 
-use agent_of_empires::agents;
-use agent_of_empires::session::Status;
+use forager::agents;
+use forager::session::Status;
 use std::fs;
 use std::path::PathBuf;
 

@@ -34,4 +34,5 @@
 - All items pass validation. Spec is ready for `/speckit.clarify` or `/speckit.plan`.
 - Key assumption documented in edge cases: global/profile hooks are implicitly trusted (user-authored), only repo-level hooks require trust dialog.
 - The spec references existing codebase patterns (FieldKey, SettingField, etc.) in Key Entities for clarity, but functional requirements remain technology-agnostic.
-- **2026-02-03 update**: Added sandbox execution context (FR-011 through FR-013), expanded US1 acceptance scenarios for sandboxed vs non-sandboxed sessions, and added edge cases for container lifecycle, failure semantics, and duplicate execution prevention.
+- **2026-02-03 update**: Added hook execution context (FR-011 through FR-013), expanded US1 acceptance scenarios for host sessions, and added edge cases for failure semantics and duplicate execution prevention.
+- **2026-05-13 update**: Reclassified sandbox execution text as obsolete because current Forager blocks new sandbox sessions and keeps only legacy cleanup metadata.

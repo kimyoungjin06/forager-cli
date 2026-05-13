@@ -48,7 +48,7 @@ New variants:
 | Variant | Description |
 |---------|-------------|
 | Hooks | Tab for global/profile hook configuration |
-| Repo | Tab for repo-level `.aoe/config.toml` editing |
+| Repo | Tab for repo-level `.forager/config.toml` editing |
 
 ### FieldKey (modified enum)
 
@@ -106,7 +106,7 @@ For each hook field (on_create, on_launch) independently:
 | Tab | Global scope | Profile scope | Notes |
 |-----|-------------|---------------|-------|
 | Hooks | Edits Config.hooks | Edits ProfileConfig.hooks | Standard scope toggle |
-| Repo | N/A (scope ignored) | N/A (scope ignored) | Always edits project .aoe/config.toml |
+| Repo | N/A (scope ignored) | N/A (scope ignored) | Always edits project .forager/config.toml |
 
 ### Repo Tab Availability
 
@@ -118,13 +118,13 @@ For each hook field (on_create, on_launch) independently:
 
 ### Hook Execution Environment
 
-| Session sandbox setting | Execution location | Working directory |
-|------------------------|--------------------|-------------------|
-| Sandbox enabled | Inside Docker container | Container workdir (e.g., `/workspace/{title}`) |
-| Sandbox disabled | Local host | Project directory path |
+| Session type | Execution location | Working directory |
+|--------------|--------------------|-------------------|
+| Normal host session | Local host | Project directory path |
+| Stored legacy sandbox record | Not startable as a new runtime session | N/A |
 
-This applies uniformly to hooks from ALL config levels (global, profile,
-repo). The config level does not affect where hooks execute.
+Active hooks from ALL config levels (global, profile, repo) run locally.
+The config level does not affect where hooks execute.
 
 ### Hook Failure Semantics
 

@@ -3,7 +3,7 @@ import sitemap from '@astrojs/sitemap';
 import tailwind from '@astrojs/tailwind';
 
 export default defineConfig({
-  site: 'https://agent-of-empires.com',
+  site: 'https://kimyoungjin06.github.io/forager-cli',
   integrations: [
     tailwind(),
     sitemap({

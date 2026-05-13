@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-use super::{HomeView, TerminalMode, ViewMode};
+use super::{HomeView, ViewMode};
 use crate::session::{flatten_tree, list_profiles, repo_config, resolve_config, Item, Status};
 use crate::tui::app::Action;
 use crate::tui::dialogs::{
@@ -105,9 +105,6 @@ impl HomeView {
                 DialogResult::Continue => {}
                 DialogResult::Cancel | DialogResult::Submit(_) => {
                     self.info_dialog = None;
-                    if let Some(session_id) = self.pending_attach_after_warning.take() {
-                        return Some(Action::AttachSession(session_id));
-                    }
                 }
             }
             return None;
@@ -302,6 +299,36 @@ impl HomeView {
 
         // Normal mode keybindings
         match key.code {
+            KeyCode::Tab if key.modifiers == KeyModifiers::NONE => {
+                return self.cycle_session_and_attach(1);
+            }
+            KeyCode::Tab if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return self.cycle_session_and_attach(1);
+            }
+            KeyCode::BackTab if key.modifiers == KeyModifiers::SHIFT => {
+                return self.cycle_session_and_attach(-1);
+            }
+            KeyCode::BackTab if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return self.cycle_session_and_attach(-1);
+            }
+            KeyCode::Char(c)
+                if c.is_ascii_digit()
+                    && c != char::from(48)
+                    && !key.modifiers.intersects(
+                        KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                    ) =>
+            {
+                let idx = (c as u8).saturating_sub(49u8) as usize;
+                return self.attach_session_by_shortcut_index(idx);
+            }
+            KeyCode::Char(c)
+                if key.modifiers.contains(KeyModifiers::ALT)
+                    && c.is_ascii_digit()
+                    && c != char::from(48) =>
+            {
+                let idx = (c as u8).saturating_sub(49u8) as usize;
+                return self.attach_session_by_shortcut_index(idx);
+            }
             KeyCode::Char('q') => return Some(Action::Quit),
             KeyCode::Char('?') => {
                 self.show_help = true;
@@ -316,24 +343,6 @@ impl HomeView {
                     ViewMode::Agent => ViewMode::Terminal,
                     ViewMode::Terminal => ViewMode::Agent,
                 };
-            }
-            KeyCode::Char('c') => {
-                // Toggle container/host terminal mode (only in Terminal view for sandboxed sessions)
-                if self.view_mode == ViewMode::Terminal {
-                    if let Some(id) = &self.selected_session {
-                        if let Some(inst) = self.instance_map.get(id) {
-                            if inst.is_sandboxed() {
-                                let id = id.clone();
-                                self.toggle_terminal_mode(&id);
-                            } else {
-                                self.info_dialog = Some(InfoDialog::new(
-                                    "Not Available",
-                                    "Only sandboxed sessions support container terminals. This session runs directly on the host.",
-                                ));
-                            }
-                        }
-                    }
-                }
             }
             KeyCode::Char('/') => {
                 self.search_active = true;
@@ -420,7 +429,7 @@ impl HomeView {
                             worktree_branch: inst
                                 .worktree_info
                                 .as_ref()
-                                .filter(|wt| wt.managed_by_aoe)
+                                .filter(|wt| wt.managed_by_forager)
                                 .map(|wt| wt.branch.clone()),
                             has_sandbox: inst.sandbox_info.as_ref().is_some_and(|s| s.enabled),
                         };
@@ -510,18 +519,7 @@ impl HomeView {
                     }
                     return match self.view_mode {
                         ViewMode::Agent => Some(Action::AttachSession(id.clone())),
-                        ViewMode::Terminal => {
-                            let terminal_mode = if let Some(inst) = self.instance_map.get(id) {
-                                if inst.is_sandboxed() {
-                                    self.get_terminal_mode(id)
-                                } else {
-                                    TerminalMode::Host
-                                }
-                            } else {
-                                TerminalMode::Host
-                            };
-                            Some(Action::AttachTerminal(id.clone(), terminal_mode))
-                        }
+                        ViewMode::Terminal => Some(Action::AttachTerminal(id.clone())),
                     };
                 } else if let Some(Item::Group { path, .. }) = self.flat_items.get(self.cursor) {
                     let path = path.clone();
@@ -560,6 +558,54 @@ impl HomeView {
         }
 
         None
+    }
+
+    fn cycle_session_and_attach(&mut self, delta: i32) -> Option<Action> {
+        let sessions = self.visible_session_ids();
+        if sessions.is_empty() {
+            return None;
+        }
+
+        let current_idx = self
+            .selected_session
+            .as_ref()
+            .and_then(|id| sessions.iter().position(|sid| sid == id))
+            .unwrap_or_else(|| {
+                if delta >= 0 {
+                    sessions.len().saturating_sub(1)
+                } else {
+                    0
+                }
+            });
+
+        let len = sessions.len() as i32;
+        let next_idx = (current_idx as i32 + delta).rem_euclid(len) as usize;
+        self.attach_session_by_shortcut_id(&sessions[next_idx])
+    }
+
+    fn attach_session_by_shortcut_index(&mut self, index: usize) -> Option<Action> {
+        let sessions = self.visible_session_ids();
+        let target = sessions.get(index)?.clone();
+        self.attach_session_by_shortcut_id(&target)
+    }
+
+    fn attach_session_by_shortcut_id(&mut self, session_id: &str) -> Option<Action> {
+        let is_deleting = {
+            let inst = self.instance_map.get(session_id)?;
+            inst.status == Status::Deleting
+        };
+
+        if is_deleting {
+            return None;
+        }
+
+        let action = match self.view_mode {
+            ViewMode::Agent => Some(Action::AttachSession(session_id.to_string())),
+            ViewMode::Terminal => Some(Action::AttachTerminal(session_id.to_string())),
+        };
+
+        self.select_session_by_id_in_current_view(session_id);
+        action
     }
 
     pub(super) fn move_cursor(&mut self, delta: i32) {
@@ -653,7 +699,7 @@ impl HomeView {
 
     /// Create a session with optional hooks. Delegates to the background
     /// `CreationPoller` when hooks are present (to avoid freezing the TUI on
-    /// slow commands like `npm install`) or when the session is sandboxed.
+    /// slow commands like `npm install`).
     fn create_session_with_hooks(
         &mut self,
         data: NewSessionData,
@@ -663,7 +709,7 @@ impl HomeView {
             .as_ref()
             .is_some_and(|h| !h.on_create.is_empty() || !h.on_launch.is_empty());
 
-        if data.sandbox || has_hooks {
+        if has_hooks {
             self.request_creation(data, hooks);
             return None;
         }

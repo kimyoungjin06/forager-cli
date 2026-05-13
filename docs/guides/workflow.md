@@ -1,6 +1,6 @@
 # Workflow Guide
 
-This guide covers the recommended setup and daily workflow for using `aoe` with git worktrees.
+This guide covers the recommended setup and daily workflow for using `forager` with git worktrees.
 
 ## Project Setup: Bare Git Repos
 
@@ -34,17 +34,17 @@ git fetch origin
 git worktree add main main
 ```
 
-Now when you run `aoe` from `my-project/`, new worktrees are created as siblings (e.g., `my-project/feat-api/`) rather than in a separate directory.
+Now when you run `forager` from `my-project/`, new worktrees are created as siblings (e.g., `my-project/feat-api/`) rather than in a separate directory.
 
 ### Why Bare Repos?
 
 - **Clean organization**: Everything lives under one project directory
-- **Sandbox-friendly**: All paths stay within the project root (important for Docker sandboxing)
+- **Predictable paths**: All worktrees stay under the project root
 - **Easy navigation**: Switch between branches by switching directories
 
 ## Single-Window Workflow
 
-Run `aoe` in a single terminal and toggle between views:
+Run `forager` in a single terminal and toggle between views:
 
 | Key | View | Purpose |
 |-----|------|---------|
@@ -57,7 +57,7 @@ Run `aoe` in a single terminal and toggle between views:
 
 ```bash
 cd ~/scm/my-project
-aoe
+forager
 ```
 
 You'll see your sessions in Agent View. Keep one session on `main` for general questions and pulling updates.
@@ -102,7 +102,7 @@ This creates:
 ## Tips
 
 - **Keep one session on main**: Use it for codebase questions and its terminal for `git pull`
-- **One task, one session**: Each worktree maps to one aoe session. Keeps context isolated.
+- **One task, one session**: Each worktree maps to one Forager session. Keeps context isolated.
 - **Pull before creating**: Always update main before creating new sessions so branches start fresh
 - **Let agents stay focused**: Git operations happen in the paired terminal, not in agent sessions
 
@@ -116,11 +116,11 @@ This creates:
 | `n` | Create new session |
 | `d` | Delete session (Agent View only) |
 | `?` | Show help |
-| `Ctrl+b d` | Detach from tmux (return to aoe) |
+| `Ctrl+b d` | Detach from tmux (return to Forager) |
 
 ## Non-Bare Repos
 
-If you're not using a bare repo setup, aoe defaults to creating worktrees in a sibling directory:
+If you're not using a bare repo setup, Forager defaults to creating worktrees in a sibling directory:
 
 ```
 ~/scm/

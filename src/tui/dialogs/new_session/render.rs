@@ -16,38 +16,8 @@ impl NewSessionDialog {
         }
 
         let has_tool_selection = self.available_tools.len() > 1;
-        let has_sandbox = self.docker_available;
         let has_worktree = !self.worktree_branch.value().is_empty();
-        let sandbox_options_visible = has_sandbox && self.sandbox_enabled;
         let dialog_width = 80;
-        // Calculate env list heights based on expanded state and number of items
-        let env_list_height: u16 = if sandbox_options_visible {
-            if self.env_list_expanded {
-                (2 + self.extra_env_keys.len() as u16).clamp(4, 8)
-            } else {
-                2
-            }
-        } else {
-            0
-        };
-        let env_values_list_height: u16 = if sandbox_options_visible {
-            if self.env_values_list_expanded {
-                (2 + self.extra_env_values.len() as u16).clamp(4, 8)
-            } else {
-                2
-            }
-        } else {
-            0
-        };
-        let inherited_height: u16 = if sandbox_options_visible {
-            if self.inherited_expanded {
-                3 + self.inherited_settings.len().max(1) as u16
-            } else {
-                2
-            }
-        } else {
-            0
-        };
 
         // Build constraints dynamically based on visible fields only
         let mut constraints = vec![
@@ -59,15 +29,6 @@ impl NewSessionDialog {
         ];
         if has_worktree {
             constraints.push(Constraint::Length(2)); // New Branch checkbox
-        }
-        if has_sandbox {
-            constraints.push(Constraint::Length(2)); // Sandbox checkbox
-        }
-        if sandbox_options_visible {
-            constraints.push(Constraint::Length(2)); // Image field
-            constraints.push(Constraint::Length(env_list_height)); // Env vars field
-            constraints.push(Constraint::Length(env_values_list_height)); // Env values field
-            constraints.push(Constraint::Length(inherited_height)); // Inherited settings
         }
         constraints.push(Constraint::Length(2)); // Group (always, at the bottom)
         constraints.push(Constraint::Min(1)); // Hints/errors
@@ -259,79 +220,11 @@ impl NewSessionDialog {
             ci += 1;
         }
 
-        // Sandbox checkbox (only when Docker available)
-        let mut next_field_idx = if has_worktree {
+        let next_field_idx = if has_worktree {
             new_branch_field + 1
         } else {
             worktree_field + 1
         };
-        if has_sandbox {
-            let sandbox_field = next_field_idx;
-            next_field_idx += 1;
-            let is_sandbox_focused = self.focused_field == sandbox_field;
-            let sandbox_label_style = if is_sandbox_focused {
-                Style::default().fg(theme.accent).underlined()
-            } else {
-                Style::default().fg(theme.text)
-            };
-
-            let checkbox = if self.sandbox_enabled { "[x]" } else { "[ ]" };
-            let checkbox_style = if self.sandbox_enabled {
-                Style::default().fg(theme.accent).bold()
-            } else {
-                Style::default().fg(theme.dimmed)
-            };
-
-            let sandbox_line = Line::from(vec![
-                Span::styled("Sandbox:", sandbox_label_style),
-                Span::raw(" "),
-                Span::styled(checkbox, checkbox_style),
-                Span::styled(
-                    " Run in Docker container",
-                    if self.sandbox_enabled {
-                        Style::default().fg(theme.accent)
-                    } else {
-                        Style::default().fg(theme.dimmed)
-                    },
-                ),
-            ]);
-            frame.render_widget(Paragraph::new(sandbox_line), chunks[ci]);
-            ci += 1;
-        }
-
-        if sandbox_options_visible {
-            // Image field
-            let sandbox_image_field = next_field_idx;
-            next_field_idx += 1;
-            render_text_field(
-                frame,
-                chunks[ci],
-                "  Image:",
-                &self.sandbox_image,
-                self.focused_field == sandbox_image_field,
-                None,
-                theme,
-            );
-            ci += 1;
-
-            // Environment variables field
-            let env_field = next_field_idx;
-            next_field_idx += 1;
-            self.render_env_field(frame, chunks[ci], env_field, theme);
-            ci += 1;
-
-            // Environment values field (KEY=VALUE)
-            let env_values_field = next_field_idx;
-            next_field_idx += 1;
-            self.render_env_values_field(frame, chunks[ci], env_values_field, theme);
-            ci += 1;
-
-            // Inherited settings (read-only)
-            let inherited_field = next_field_idx;
-            next_field_idx += 1;
-            self.render_inherited_field(frame, chunks[ci], inherited_field, theme);
-            ci += 1;
-        }
 
         // Group (always visible, at the bottom before hints)
         let group_field = next_field_idx;
@@ -407,310 +300,12 @@ impl NewSessionDialog {
         }
     }
 
-    fn render_env_field(&self, frame: &mut Frame, area: Rect, env_field: usize, theme: &Theme) {
-        let is_focused = self.focused_field == env_field;
-        let label_style = if is_focused {
-            Style::default().fg(theme.accent).underlined()
-        } else {
-            Style::default().fg(theme.text)
-        };
-
-        if !self.env_list_expanded {
-            // Collapsed view
-            let count = self.extra_env_keys.len();
-            let summary = if count == 0 {
-                "(empty - press Enter to add)".to_string()
-            } else {
-                format!("[{} items]", count)
-            };
-            let summary_style = if count > 0 {
-                Style::default().fg(theme.accent)
-            } else {
-                Style::default().fg(theme.dimmed)
-            };
-
-            let line = Line::from(vec![
-                Span::styled("  Env Vars:", label_style),
-                Span::raw(" "),
-                Span::styled(summary, summary_style),
-            ]);
-            frame.render_widget(Paragraph::new(line), area);
-        } else {
-            // Expanded view with list
-            let mut lines: Vec<Line> = Vec::new();
-
-            // Header with controls hint
-            let header = Line::from(vec![
-                Span::styled("  Env Vars:", label_style),
-                Span::styled(
-                    " (a)dd (d)el (Enter)edit (Esc)close",
-                    Style::default().fg(theme.dimmed),
-                ),
-            ]);
-            lines.push(header);
-
-            // Check if we're in editing/adding mode
-            if let Some(ref input) = self.env_editing_input {
-                if self.env_adding_new {
-                    // Show existing items
-                    for (i, key) in self.extra_env_keys.iter().enumerate() {
-                        let prefix = if i == self.env_selected_index {
-                            "  > "
-                        } else {
-                            "    "
-                        };
-                        lines.push(Line::from(Span::styled(
-                            format!("{}{}", prefix, key),
-                            Style::default().fg(theme.text),
-                        )));
-                    }
-                    // Show input for new item
-                    let input_line = Line::from(vec![
-                        Span::styled("  + ", Style::default().fg(theme.accent)),
-                        Span::styled(input.value(), Style::default().fg(theme.accent).bold()),
-                        Span::styled("_", Style::default().fg(theme.accent)),
-                    ]);
-                    lines.push(input_line);
-                } else {
-                    // Editing existing item
-                    for (i, key) in self.extra_env_keys.iter().enumerate() {
-                        if i == self.env_selected_index {
-                            // Show editable input
-                            let input_line = Line::from(vec![
-                                Span::styled("  > ", Style::default().fg(theme.accent)),
-                                Span::styled(
-                                    input.value(),
-                                    Style::default().fg(theme.accent).bold(),
-                                ),
-                                Span::styled("_", Style::default().fg(theme.accent)),
-                            ]);
-                            lines.push(input_line);
-                        } else {
-                            let prefix = "    ";
-                            lines.push(Line::from(Span::styled(
-                                format!("{}{}", prefix, key),
-                                Style::default().fg(theme.text),
-                            )));
-                        }
-                    }
-                }
-            } else {
-                // Normal list display
-                if self.extra_env_keys.is_empty() {
-                    lines.push(Line::from(Span::styled(
-                        "    (press 'a' to add)",
-                        Style::default().fg(theme.dimmed),
-                    )));
-                } else {
-                    for (i, key) in self.extra_env_keys.iter().enumerate() {
-                        let is_selected = i == self.env_selected_index;
-                        let prefix = if is_selected { "  > " } else { "    " };
-                        let style = if is_selected {
-                            Style::default().fg(theme.accent).bold()
-                        } else {
-                            Style::default().fg(theme.text)
-                        };
-                        lines.push(Line::from(Span::styled(
-                            format!("{}{}", prefix, key),
-                            style,
-                        )));
-                    }
-                }
-            }
-
-            frame.render_widget(Paragraph::new(lines), area);
-        }
-    }
-
-    fn render_env_values_field(
-        &self,
-        frame: &mut Frame,
-        area: Rect,
-        field_idx: usize,
-        theme: &Theme,
-    ) {
-        let is_focused = self.focused_field == field_idx;
-        let label_style = if is_focused {
-            Style::default().fg(theme.accent).underlined()
-        } else {
-            Style::default().fg(theme.text)
-        };
-
-        if !self.env_values_list_expanded {
-            let count = self.extra_env_values.len();
-            let summary = if count == 0 {
-                "(empty - press Enter to add)".to_string()
-            } else {
-                format!("[{} items]", count)
-            };
-            let summary_style = if count > 0 {
-                Style::default().fg(theme.accent)
-            } else {
-                Style::default().fg(theme.dimmed)
-            };
-
-            let line = Line::from(vec![
-                Span::styled("  Env Values:", label_style),
-                Span::raw(" "),
-                Span::styled(summary, summary_style),
-            ]);
-            frame.render_widget(Paragraph::new(line), area);
-        } else {
-            let mut lines: Vec<Line> = Vec::new();
-
-            let header = Line::from(vec![
-                Span::styled("  Env Values:", label_style),
-                Span::styled(
-                    " (a)dd (d)el (Enter)edit (Esc)close",
-                    Style::default().fg(theme.dimmed),
-                ),
-            ]);
-            lines.push(header);
-
-            if let Some(ref input) = self.env_values_editing_input {
-                if self.env_values_adding_new {
-                    for (i, entry) in self.extra_env_values.iter().enumerate() {
-                        let prefix = if i == self.env_values_selected_index {
-                            "  > "
-                        } else {
-                            "    "
-                        };
-                        lines.push(Line::from(Span::styled(
-                            format!("{}{}", prefix, entry),
-                            Style::default().fg(theme.text),
-                        )));
-                    }
-                    let input_line = Line::from(vec![
-                        Span::styled("  + ", Style::default().fg(theme.accent)),
-                        Span::styled(input.value(), Style::default().fg(theme.accent).bold()),
-                        Span::styled("_", Style::default().fg(theme.accent)),
-                    ]);
-                    lines.push(input_line);
-                } else {
-                    for (i, entry) in self.extra_env_values.iter().enumerate() {
-                        if i == self.env_values_selected_index {
-                            let input_line = Line::from(vec![
-                                Span::styled("  > ", Style::default().fg(theme.accent)),
-                                Span::styled(
-                                    input.value(),
-                                    Style::default().fg(theme.accent).bold(),
-                                ),
-                                Span::styled("_", Style::default().fg(theme.accent)),
-                            ]);
-                            lines.push(input_line);
-                        } else {
-                            lines.push(Line::from(Span::styled(
-                                format!("    {}", entry),
-                                Style::default().fg(theme.text),
-                            )));
-                        }
-                    }
-                }
-            } else if self.extra_env_values.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "    (press 'a' to add KEY=VALUE)",
-                    Style::default().fg(theme.dimmed),
-                )));
-            } else {
-                for (i, entry) in self.extra_env_values.iter().enumerate() {
-                    let is_selected = i == self.env_values_selected_index;
-                    let prefix = if is_selected { "  > " } else { "    " };
-                    let style = if is_selected {
-                        Style::default().fg(theme.accent).bold()
-                    } else {
-                        Style::default().fg(theme.text)
-                    };
-                    lines.push(Line::from(Span::styled(
-                        format!("{}{}", prefix, entry),
-                        style,
-                    )));
-                }
-            }
-
-            frame.render_widget(Paragraph::new(lines), area);
-        }
-    }
-
-    fn render_inherited_field(
-        &self,
-        frame: &mut Frame,
-        area: Rect,
-        field_idx: usize,
-        theme: &Theme,
-    ) {
-        let is_focused = self.focused_field == field_idx;
-        let label_style = if is_focused {
-            Style::default().fg(theme.accent).underlined()
-        } else {
-            Style::default().fg(theme.text)
-        };
-
-        let count = self.inherited_settings.len();
-        let arrow = if self.inherited_expanded {
-            "▾"
-        } else {
-            "▸"
-        };
-        let summary = if count == 0 {
-            "(all defaults)".to_string()
-        } else {
-            format!("({} active)", count)
-        };
-
-        if !self.inherited_expanded {
-            let summary_style = if count > 0 {
-                Style::default().fg(theme.accent)
-            } else {
-                Style::default().fg(theme.dimmed)
-            };
-            let line = Line::from(vec![
-                Span::styled(format!("  {} ", arrow), label_style),
-                Span::styled("Inherited Settings ", label_style),
-                Span::styled(summary, summary_style),
-            ]);
-            frame.render_widget(Paragraph::new(line), area);
-        } else {
-            let mut lines: Vec<Line> = Vec::new();
-
-            let header = Line::from(vec![
-                Span::styled(format!("  {} ", arrow), label_style),
-                Span::styled("Inherited Settings", label_style),
-            ]);
-            lines.push(header);
-            lines.push(Line::from(""));
-
-            if self.inherited_settings.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "    (all defaults)",
-                    Style::default().fg(theme.dimmed),
-                )));
-            } else {
-                for (label, value) in &self.inherited_settings {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("    {}: ", label),
-                            Style::default().fg(theme.dimmed),
-                        ),
-                        Span::styled(value.as_str(), Style::default().fg(theme.accent)),
-                    ]));
-                }
-            }
-
-            frame.render_widget(Paragraph::new(lines), area);
-        }
-    }
-
     fn render_help_overlay(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let has_tool_selection = self.available_tools.len() > 1;
-        let has_sandbox = self.docker_available;
-        let show_sandbox_options_help = has_sandbox && self.sandbox_enabled;
 
         let dialog_width: u16 = HELP_DIALOG_WIDTH;
         let base_height: u16 = 20; // includes YOLO Mode and Group (always visible)
-        let dialog_height: u16 = base_height
-            + if has_tool_selection { 3 } else { 0 }
-            + if has_sandbox { 3 } else { 0 }
-            + if show_sandbox_options_help { 12 } else { 0 }; // Image, Env, Env Values, Inherited
+        let dialog_height: u16 = base_height + if has_tool_selection { 3 } else { 0 };
 
         let dialog_area = crate::tui::dialogs::centered_rect(area, dialog_width, dialog_height);
 
@@ -731,14 +326,6 @@ impl NewSessionDialog {
             if idx == 2 && !has_tool_selection {
                 continue;
             }
-            // idx 3 (YOLO), 4 (Worktree), 5 (New Branch) are always shown
-            if idx == 6 && !has_sandbox {
-                continue;
-            }
-            if (7..=10).contains(&idx) && !show_sandbox_options_help {
-                continue;
-            }
-            // idx 11 (Group) is always shown
 
             lines.push(Line::from(Span::styled(
                 help.name,
@@ -763,22 +350,13 @@ impl NewSessionDialog {
     }
 
     fn render_loading(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let needs_extra_line = self.sandbox_enabled && self.needs_image_pull;
         let show_hook_output = self.has_hooks;
         let max_output_lines: usize = 6;
 
-        let dialog_width: u16 = if show_hook_output {
-            70
-        } else if needs_extra_line {
-            55
-        } else {
-            50
-        };
+        let dialog_width: u16 = if show_hook_output { 70 } else { 50 };
         let dialog_height: u16 = if show_hook_output {
             // spinner line + command line + output lines + cancel hint + padding
             (6 + max_output_lines as u16).min(area.height)
-        } else if needs_extra_line {
-            9
         } else {
             7
         };
@@ -863,16 +441,6 @@ impl NewSessionDialog {
 
             frame.render_widget(Paragraph::new(lines), inner);
         } else {
-            let loading_text = if self.sandbox_enabled {
-                if self.needs_image_pull {
-                    "Pulling sandbox image..."
-                } else {
-                    "Setting up sandbox container..."
-                }
-            } else {
-                "Creating session..."
-            };
-
             let mut lines = vec![
                 Line::from(""),
                 Line::from(vec![
@@ -880,16 +448,9 @@ impl NewSessionDialog {
                         format!("  {} ", spinner),
                         Style::default().fg(theme.accent).bold(),
                     ),
-                    Span::styled(loading_text, Style::default().fg(theme.text)),
+                    Span::styled("Creating session...", Style::default().fg(theme.text)),
                 ]),
             ];
-
-            if needs_extra_line {
-                lines.push(Line::from(Span::styled(
-                    "    (first time may take a few minutes)",
-                    Style::default().fg(theme.dimmed),
-                )));
-            }
 
             lines.push(Line::from(""));
             lines.push(Line::from(vec![

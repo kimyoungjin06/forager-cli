@@ -6,7 +6,7 @@ use ratatui::prelude::*;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::home::{HomeView, TerminalMode};
+use super::home::HomeView;
 use super::styles::Theme;
 use crate::session::{get_update_settings, load_config, save_config, Storage};
 use crate::tmux::AvailableTools;
@@ -293,8 +293,8 @@ impl App {
                 Action::AttachSession(id) => {
                     self.attach_session(&id, terminal)?;
                 }
-                Action::AttachTerminal(id, mode) => {
-                    self.attach_terminal(&id, mode, terminal)?;
+                Action::AttachTerminal(id) => {
+                    self.attach_terminal(&id, terminal)?;
                 }
                 Action::SwitchProfile(profile) => {
                     let storage = Storage::new(&profile)?;
@@ -322,8 +322,8 @@ impl App {
                 Action::AttachSession(id) => {
                     self.attach_session(&id, terminal)?;
                 }
-                Action::AttachTerminal(id, mode) => {
-                    self.attach_terminal(&id, mode, terminal)?;
+                Action::AttachTerminal(id) => {
+                    self.attach_terminal(&id, terminal)?;
                 }
                 Action::SwitchProfile(profile) => {
                     let storage = Storage::new(&profile)?;
@@ -352,41 +352,6 @@ impl App {
         let tmux_session = instance.tmux_session()?;
 
         if !tmux_session.exists() {
-            // Show warning (once) if custom instruction is configured for an unsupported agent
-            if instance.is_sandboxed() {
-                let has_instruction = instance
-                    .sandbox_info
-                    .as_ref()
-                    .and_then(|s| s.custom_instruction.as_ref())
-                    .is_some_and(|i| !i.is_empty());
-
-                if has_instruction
-                    && !crate::agents::get_agent(&instance.tool)
-                        .is_some_and(|a| a.instruction_flag.is_some())
-                {
-                    let config = load_config()?.unwrap_or_default();
-                    if !config.app_state.has_seen_custom_instruction_warning {
-                        self.home.info_dialog = Some(
-                            crate::tui::dialogs::InfoDialog::new(
-                                "Custom Instruction Not Supported",
-                                &format!(
-                                    "'{}' does not support custom instruction injection. The session will launch without the custom instruction.",
-                                    instance.tool
-                                ),
-                            ),
-                        );
-                        self.home.pending_attach_after_warning = Some(session_id.to_string());
-
-                        // Persist the "seen" flag so it only shows once
-                        let mut config = config;
-                        config.app_state.has_seen_custom_instruction_warning = true;
-                        save_config(&config)?;
-
-                        return Ok(());
-                    }
-                }
-            }
-
             // Get terminal size to pass to tmux session creation
             // This ensures the session starts at the correct size instead of 80x24 default
             let size = crate::terminal::get_size();
@@ -420,7 +385,6 @@ impl App {
     fn attach_terminal(
         &mut self,
         session_id: &str,
-        mode: TerminalMode,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         let instance = match self.home.get_instance(session_id) {
@@ -431,39 +395,20 @@ impl App {
         // Get terminal size to pass to tmux session creation
         let size = crate::terminal::get_size();
 
-        // Prepare the tmux session before leaving TUI mode
-        let attach_fn: Box<dyn FnOnce() -> Result<()>> = match mode {
-            TerminalMode::Container if instance.is_sandboxed() => {
-                let container_session = instance.container_terminal_tmux_session()?;
-                if !container_session.exists() {
-                    if let Err(e) = self
-                        .home
-                        .start_container_terminal_for_instance_with_size(session_id, size)
-                    {
-                        self.home
-                            .set_instance_error(session_id, Some(e.to_string()));
-                        return Ok(());
-                    }
-                }
-                Box::new(move || container_session.attach())
+        // Prepare the host paired terminal session before leaving TUI mode.
+        let terminal_session = instance.terminal_tmux_session()?;
+        if !terminal_session.exists() {
+            if let Err(e) = self
+                .home
+                .start_terminal_for_instance_with_size(session_id, size)
+            {
+                self.home
+                    .set_instance_error(session_id, Some(e.to_string()));
+                return Ok(());
             }
-            _ => {
-                let terminal_session = instance.terminal_tmux_session()?;
-                if !terminal_session.exists() {
-                    if let Err(e) = self
-                        .home
-                        .start_terminal_for_instance_with_size(session_id, size)
-                    {
-                        self.home
-                            .set_instance_error(session_id, Some(e.to_string()));
-                        return Ok(());
-                    }
-                }
-                Box::new(move || terminal_session.attach())
-            }
-        };
+        }
 
-        let attach_result = with_raw_mode_disabled(terminal, attach_fn)?;
+        let attach_result = with_raw_mode_disabled(terminal, move || terminal_session.attach())?;
 
         self.needs_redraw = true;
         crate::tmux::refresh_session_cache();
@@ -539,7 +484,7 @@ impl App {
 pub enum Action {
     Quit,
     AttachSession(String),
-    AttachTerminal(String, TerminalMode),
+    AttachTerminal(String),
     SwitchProfile(String),
     EditFile(PathBuf),
 }
@@ -552,14 +497,13 @@ mod tests {
     fn test_action_enum() {
         let quit = Action::Quit;
         let attach = Action::AttachSession("test-id".to_string());
-        let attach_terminal =
-            Action::AttachTerminal("test-id".to_string(), TerminalMode::Container);
+        let attach_terminal = Action::AttachTerminal("test-id".to_string());
 
         assert_eq!(quit, Action::Quit);
         assert_eq!(attach, Action::AttachSession("test-id".to_string()));
         assert_eq!(
             attach_terminal,
-            Action::AttachTerminal("test-id".to_string(), TerminalMode::Container)
+            Action::AttachTerminal("test-id".to_string())
         );
     }
 
@@ -569,7 +513,7 @@ mod tests {
         let cloned = original.clone();
         assert_eq!(original, cloned);
 
-        let terminal_action = Action::AttachTerminal("session-123".to_string(), TerminalMode::Host);
+        let terminal_action = Action::AttachTerminal("session-123".to_string());
         let terminal_cloned = terminal_action.clone();
         assert_eq!(terminal_action, terminal_cloned);
     }

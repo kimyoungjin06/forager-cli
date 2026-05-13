@@ -1,4 +1,4 @@
-//! `agent-of-empires profile` subcommands implementation
+//! `forager profile` subcommands implementation
 
 use anyhow::{bail, Result};
 use clap::Subcommand;
@@ -58,7 +58,7 @@ async fn list_profiles() -> Result<()> {
 
     if profiles.is_empty() {
         println!("No profiles found.");
-        println!("Run 'agent-of-empires' to create the default profile automatically.");
+        println!("Run 'forager' to create the default profile automatically.");
         return Ok(());
     }
 
@@ -78,7 +78,7 @@ async fn list_profiles() -> Result<()> {
 async fn create_profile(name: &str) -> Result<()> {
     session::create_profile(name)?;
     println!("✓ Created profile: {}", name);
-    println!("  Use with: agent-of-empires -p {}", name);
+    println!("  Use with: forager -p {}", name);
     Ok(())
 }
 

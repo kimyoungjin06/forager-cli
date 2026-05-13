@@ -1,5 +1,5 @@
 {
-  "name": "agent-of-empires-website",
+  "name": "forager-website",
   "type": "module",
   "scripts": {
     "dev": "astro dev",

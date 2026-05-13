@@ -7,9 +7,12 @@ use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
 use super::add::AddArgs;
+use super::doctor::DoctorArgs;
 use super::group::GroupCommands;
 use super::init::InitArgs;
 use super::list::ListArgs;
+use super::migrate::MigrateCommands;
+use super::offdesk::OffdeskCommands;
 use super::profile::ProfileCommands;
 use super::remove::RemoveArgs;
 use super::session::SessionCommands;
@@ -22,17 +25,18 @@ use super::worktree::WorktreeCommands;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
-#[command(name = "aoe")]
-#[command(about = "Terminal session manager for AI coding agents")]
+#[command(name = "forager")]
+#[command(about = "Offdesk agent orchestration with approvals, recovery, and audit trails")]
 #[command(version = VERSION)]
 #[command(
-    long_about = "Agent of Empires (aoe) is a terminal session manager that uses tmux to help \
-    you manage and monitor AI coding agents like Claude Code and OpenCode.\n\n\
-    Run without arguments to launch the TUI dashboard."
+    long_about = "Forager is an offdesk agent orchestration tool that uses tmux to help \
+    you manage, monitor, approve, and recover AI coding agent work.\n\n\
+    Run without arguments to launch the TUI dashboard. The legacy `aoe` binary remains available \
+    as a compatibility alias and warns on human-facing commands."
 )]
 pub struct Cli {
     /// Profile to use (separate workspace with its own sessions)
-    #[arg(short = 'p', long, global = true, env = "AGENT_OF_EMPIRES_PROFILE")]
+    #[arg(short = 'p', long, global = true, env = "FORAGER_PROFILE")]
     pub profile: Option<String>,
 
     #[command(subcommand)]
@@ -44,7 +48,7 @@ pub enum Commands {
     /// Add a new session
     Add(AddArgs),
 
-    /// Initialize .aoe/config.toml in a repository
+    /// Initialize .forager/config.toml in a repository
     Init(InitArgs),
 
     /// List all sessions
@@ -57,6 +61,15 @@ pub enum Commands {
 
     /// Show session status summary
     Status(StatusArgs),
+
+    /// Diagnose Forager paths, profile env, and legacy AoE compatibility state
+    Doctor(DoctorArgs),
+
+    /// Migrate legacy AoE compatibility paths
+    Migrate {
+        #[command(subcommand)]
+        command: MigrateCommands,
+    },
 
     /// Manage session lifecycle (start, stop, attach, etc.)
     Session {
@@ -82,6 +95,12 @@ pub enum Commands {
         command: WorktreeCommands,
     },
 
+    /// Manage offdesk approvals and recovery artifacts
+    Offdesk {
+        #[command(subcommand)]
+        command: Box<OffdeskCommands>,
+    },
+
     /// tmux integration utilities
     Tmux {
         #[command(subcommand)]
@@ -94,7 +113,7 @@ pub enum Commands {
         command: SoundsCommands,
     },
 
-    /// Uninstall Agent of Empires
+    /// Uninstall Forager
     Uninstall(UninstallArgs),
 
     /// Generate shell completions

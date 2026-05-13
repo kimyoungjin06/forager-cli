@@ -37,7 +37,7 @@ on_create = ["pip install -r requirements.txt"]
 - Each sub-field is `Option<Vec<String>>`; None = inherit from global
 - If all sub-fields are None, the entire section is omitted
 
-## Repo Config (`.aoe/config.toml`)
+## Repo Config (`.forager/config.toml`)
 
 Existing schema, unchanged:
 
@@ -84,10 +84,10 @@ Note: Repo explicitly setting `on_launch=[]` means "no launch hooks"
 
 ## Execution Context Contract
 
-Hooks execute in the environment determined by the session's sandbox
-setting, NOT by their config level origin.
+Hooks execute locally in the host project directory. Their config level
+origin does not change the execution environment.
 
-### Non-sandboxed session
+### Normal session
 
 ```
 Execution: bash -c "{command}" in project_path
@@ -95,13 +95,16 @@ Working dir: /path/to/project
 Environment: host OS
 ```
 
-### Sandboxed session
+### Deferred sandbox surface
 
 ```
-Execution: docker exec --workdir {container_workdir} {container_name} bash -c "{command}"
-Working dir: /workspace/{session_title} (inside container)
-Environment: Docker container
+forager add --sandbox ...
+forager add --sandbox-image ...
 ```
+
+Both commands are rejected while sandbox support is deferred. Stored legacy
+sandbox metadata remains cleanup-only and does not create a hook execution
+environment.
 
 ### Failure contract
 

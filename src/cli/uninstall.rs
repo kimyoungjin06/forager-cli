@@ -1,4 +1,4 @@
-//! `agent-of-empires uninstall` command implementation
+//! `forager uninstall` command implementation
 
 use anyhow::Result;
 use clap::Args;
@@ -6,6 +6,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
+
+use crate::session::app_dir_candidates;
 
 #[derive(Args)]
 pub struct UninstallArgs {
@@ -33,7 +35,7 @@ struct FoundItem {
 
 pub async fn run(args: UninstallArgs) -> Result<()> {
     println!("╔════════════════════════════════════════╗");
-    println!("║     Agent of Empires Uninstaller       ║");
+    println!("║          Forager Uninstaller           ║");
     println!("╚════════════════════════════════════════╝");
     println!();
 
@@ -44,37 +46,15 @@ pub async fn run(args: UninstallArgs) -> Result<()> {
 
     let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?;
 
-    // Collect all possible data directory locations
-    #[cfg(target_os = "linux")]
-    let data_dirs = {
-        let mut dirs = vec![home_dir.join(".agent-of-empires")];
-        if let Some(config_dir) = dirs::config_dir() {
-            dirs.push(config_dir.join("agent-of-empires"));
-        }
-        dirs
-    };
-    #[cfg(not(target_os = "linux"))]
-    let data_dirs = vec![home_dir.join(".agent-of-empires")];
+    let data_dirs = app_dir_candidates();
 
     let mut found_items: Vec<FoundItem> = Vec::new();
 
-    // Check for Homebrew installation (formula is named "aoe")
-    let homebrew_installed = Command::new("brew")
-        .args(["list", "aoe"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
-
-    if homebrew_installed {
-        found_items.push(FoundItem {
-            item_type: "homebrew".to_string(),
-            path: PathBuf::new(),
-        });
-        println!("Found: Homebrew installation");
-    }
-
-    // Check common binary locations for both "aoe" and "agent-of-empires"
+    // Check common binary locations for both new and legacy binary names.
     let mut binary_locations = vec![
+        home_dir.join(".local/bin/forager"),
+        PathBuf::from("/usr/local/bin/forager"),
+        home_dir.join("bin/forager"),
         home_dir.join(".local/bin/aoe"),
         PathBuf::from("/usr/local/bin/aoe"),
         home_dir.join("bin/aoe"),
@@ -149,7 +129,7 @@ pub async fn run(args: UninstallArgs) -> Result<()> {
     println!();
 
     if found_items.is_empty() {
-        println!("Agent of Empires does not appear to be installed.");
+        println!("Forager does not appear to be installed.");
         return Ok(());
     }
 
@@ -159,7 +139,6 @@ pub async fn run(args: UninstallArgs) -> Result<()> {
 
     for item in &found_items {
         match item.item_type.as_str() {
-            "homebrew" => println!("  • Homebrew package: aoe"),
             "binary" => println!("  • Binary: {}", item.path.display()),
             "data" => {
                 if args.keep_data {
@@ -208,11 +187,6 @@ pub async fn run(args: UninstallArgs) -> Result<()> {
     // Perform uninstall
     for item in &found_items {
         match item.item_type.as_str() {
-            "homebrew" => {
-                println!("Removing Homebrew package...");
-                let _ = Command::new("brew").args(["uninstall", "aoe"]).status();
-                println!("✓ Homebrew package removed");
-            }
             "binary" => {
                 println!("Removing binary at {}...", item.path.display());
                 if fs::remove_file(&item.path).is_ok() {
@@ -281,8 +255,8 @@ pub async fn run(args: UninstallArgs) -> Result<()> {
     }
 
     println!();
-    println!("Thank you for using Agent of Empires!");
-    println!("Feedback: https://github.com/njbrake/agent-of-empires/issues");
+    println!("Thank you for using Forager!");
+    println!("Feedback: https://github.com/kimyoungjin06/forager-cli/issues");
 
     Ok(())
 }

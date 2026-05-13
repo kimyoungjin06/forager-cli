@@ -14,6 +14,28 @@ fn tmux_available() -> bool {
         .unwrap_or(false)
 }
 
+fn create_detached_session(session_name: &str) {
+    let _ = Command::new("tmux")
+        .args(["kill-session", "-t", session_name])
+        .output();
+
+    let create = Command::new("tmux")
+        .args(["new-session", "-d", "-s", session_name])
+        .output()
+        .expect("Failed to create tmux session");
+
+    assert!(create.status.success(), "Failed to create test session");
+    forager::tmux::refresh_session_cache();
+}
+
+fn tmux_session_exists(session_name: &str) -> bool {
+    Command::new("tmux")
+        .args(["has-session", "-t", session_name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Test that tmux sessions can be created and killed
 #[test]
 fn test_tmux_session_lifecycle() {
@@ -22,24 +44,14 @@ fn test_tmux_session_lifecycle() {
         return;
     }
 
-    let session_name = "aoe_test_lifecycle_12345678";
+    let session_name = "forager_test_lifecycle_12345678";
 
     // Create a detached session
-    let create = Command::new("tmux")
-        .args(["new-session", "-d", "-s", session_name])
-        .output()
-        .expect("Failed to create tmux session");
-
-    assert!(create.status.success(), "Failed to create test session");
+    create_detached_session(session_name);
 
     // Verify session exists
-    let check = Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .output()
-        .expect("Failed to check session");
-
     assert!(
-        check.status.success(),
+        tmux_session_exists(session_name),
         "Session should exist after creation"
     );
 
@@ -52,21 +64,73 @@ fn test_tmux_session_lifecycle() {
     assert!(kill.status.success(), "Failed to kill test session");
 
     // Verify session no longer exists
-    let check_after = Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .output()
-        .expect("Failed to check session");
+    assert!(
+        !tmux_session_exists(session_name),
+        "Session should not exist after kill"
+    );
+}
+
+/// Test that the Forager tmux wrapper still finds and kills legacy AoE agent sessions.
+#[test]
+fn test_forager_session_detects_legacy_aoe_session() {
+    if !tmux_available() {
+        eprintln!("Skipping test: tmux not available");
+        return;
+    }
+
+    let id = format!("{:08x}legacy", std::process::id());
+    let title = "Legacy Fallback Agent";
+    let legacy_name = forager::tmux::Session::generate_legacy_name(&id, title);
+    create_detached_session(&legacy_name);
+
+    let session =
+        forager::tmux::Session::new(&id, title).expect("Failed to construct Forager tmux session");
 
     assert!(
-        !check_after.status.success(),
-        "Session should not exist after kill"
+        session.exists(),
+        "Forager session should detect legacy tmux session"
+    );
+    session
+        .kill()
+        .expect("Failed to kill legacy session through Forager wrapper");
+    assert!(
+        !tmux_session_exists(&legacy_name),
+        "Legacy session should be killed by Forager wrapper"
+    );
+}
+
+/// Test that paired terminal wrappers still find and kill legacy AoE terminal sessions.
+#[test]
+fn test_forager_terminal_sessions_detect_legacy_aoe_sessions() {
+    if !tmux_available() {
+        eprintln!("Skipping test: tmux not available");
+        return;
+    }
+
+    let id = format!("{:08x}term", std::process::id());
+    let title = "Legacy Fallback Terminal";
+
+    let legacy_terminal_name = forager::tmux::TerminalSession::generate_legacy_name(&id, title);
+    create_detached_session(&legacy_terminal_name);
+    let terminal = forager::tmux::TerminalSession::new(&id, title)
+        .expect("Failed to construct Forager terminal session");
+    assert!(
+        terminal.exists(),
+        "Forager terminal should detect legacy tmux session"
+    );
+    terminal
+        .kill()
+        .expect("Failed to kill legacy terminal session through Forager wrapper");
+    assert!(
+        !tmux_session_exists(&legacy_terminal_name),
+        "Legacy terminal session should be killed by Forager wrapper"
     );
 }
 
 /// Test that session names are properly sanitized
 #[test]
 fn test_session_name_format() {
-    let prefix = "aoe_";
+    let prefix = "forager_";
 
     // Valid session names should start with our prefix
     let session_name = format!("{}my_project_abc12345", prefix);

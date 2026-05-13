@@ -4,8 +4,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-use crate::tui::dialogs::{CustomInstructionDialog, DialogResult};
-
 use super::{FieldKey, FieldValue, ListEditState, SettingsFocus, SettingsScope, SettingsView};
 
 /// Result of handling a key event in the settings view
@@ -22,28 +20,6 @@ impl SettingsView {
     pub fn handle_key(&mut self, key: KeyEvent) -> SettingsAction {
         // Clear transient messages on any key
         self.success_message = None;
-
-        // Handle custom instruction dialog
-        if let Some(ref mut dialog) = self.custom_instruction_dialog {
-            match dialog.handle_key(key) {
-                DialogResult::Submit(value) => {
-                    let field = &mut self.fields[self.selected_field];
-                    if let FieldValue::OptionalText(ref mut v) = field.value {
-                        *v = value;
-                    }
-                    self.apply_field_to_config(self.selected_field);
-                    self.custom_instruction_dialog = None;
-                    return SettingsAction::Continue;
-                }
-                DialogResult::Cancel => {
-                    self.custom_instruction_dialog = None;
-                    return SettingsAction::Continue;
-                }
-                DialogResult::Continue => {
-                    return SettingsAction::Continue;
-                }
-            }
-        }
 
         // Handle text editing mode
         if self.editing_input.is_some() {
@@ -179,13 +155,8 @@ impl SettingsView {
                             self.editing_input = Some(Input::new(value.clone()));
                         }
                         FieldValue::OptionalText(value) => {
-                            if field.key == FieldKey::CustomInstruction {
-                                self.custom_instruction_dialog =
-                                    Some(CustomInstructionDialog::new(value.clone()));
-                            } else {
-                                self.editing_input =
-                                    Some(Input::new(value.clone().unwrap_or_default()));
-                            }
+                            self.editing_input =
+                                Some(Input::new(value.clone().unwrap_or_default()));
                         }
                         FieldValue::Number(value) => {
                             self.editing_input = Some(Input::new(value.to_string()));
@@ -451,27 +422,6 @@ impl SettingsView {
                     w.delete_branch_on_cleanup = None;
                 }
             }
-            // Sandbox
-            FieldKey::DefaultImage => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.default_image = None;
-                }
-            }
-            FieldKey::Environment => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.environment = None;
-                }
-            }
-            FieldKey::EnvironmentValues => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.environment_values = None;
-                }
-            }
-            FieldKey::SandboxAutoCleanup => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.auto_cleanup = None;
-                }
-            }
             // Tmux
             FieldKey::StatusBar => {
                 if let Some(ref mut t) = config.tmux {
@@ -489,54 +439,9 @@ impl SettingsView {
                     s.default_tool = None;
                 }
             }
-            FieldKey::SandboxEnabledByDefault => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.enabled_by_default = None;
-                }
-            }
             FieldKey::YoloModeDefault => {
                 if let Some(ref mut s) = config.session {
                     s.yolo_mode_default = None;
-                }
-            }
-            FieldKey::DefaultTerminalMode => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.default_terminal_mode = None;
-                }
-            }
-            FieldKey::ExtraVolumes => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.extra_volumes = None;
-                }
-            }
-            FieldKey::VolumeIgnores => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.volume_ignores = None;
-                }
-            }
-            FieldKey::MountSsh => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.mount_ssh = None;
-                }
-            }
-            FieldKey::CpuLimit => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.cpu_limit = None;
-                }
-            }
-            FieldKey::MemoryLimit => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.memory_limit = None;
-                }
-            }
-            FieldKey::CustomInstruction => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.custom_instruction = None;
-                }
-            }
-            FieldKey::ContainerRuntime => {
-                if let Some(ref mut s) = config.sandbox {
-                    s.container_runtime = None;
                 }
             }
             // Sound

@@ -29,7 +29,7 @@ fixtures/
 
 ### Step 1: Get the tool into the desired state
 
-Start the tool (Claude Code or OpenCode) in a tmux session managed by `aoe`, and get it into the state you want to capture:
+Start the tool (Claude Code or OpenCode) in a tmux session managed by `forager`, and get it into the state you want to capture:
 - `idle`: Tool is waiting for user input
 - `running`: Tool is actively processing (thinking, generating, etc.)
 - `waiting_permission`: Tool is waiting for user approval
@@ -46,17 +46,17 @@ Run the capture script:
 **Arguments:**
 - `tool`: `claude` or `opencode`
 - `state`: `idle`, `running`, `waiting_permission`, or `waiting_question`
-- `tmux_session`: Name of the tmux session (e.g., `aoe_myproject_abc12345`)
+- `tmux_session`: Name of the tmux session (e.g., `forager_myproject_abc12345`)
 - `description`: Optional description for the filename (e.g., `bug_report_123`)
 
 **Examples:**
 ```bash
 # Basic capture
-./scripts/capture-fixtures.sh claude running aoe_myproject_abc12345
+./scripts/capture-fixtures.sh claude running forager_myproject_abc12345
 
 # With description
-./scripts/capture-fixtures.sh claude running aoe_myproject_abc12345 "tool_call"
-./scripts/capture-fixtures.sh opencode waiting_permission aoe_task_def67890 "file_edit"
+./scripts/capture-fixtures.sh claude running forager_myproject_abc12345 "tool_call"
+./scripts/capture-fixtures.sh opencode waiting_permission forager_task_def67890 "file_edit"
 ```
 
 The script will:

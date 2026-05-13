@@ -62,7 +62,7 @@ impl Preview {
         if let Some(sandbox) = &instance.sandbox_info {
             if sandbox.enabled {
                 info_lines.push(Line::from(vec![
-                    Span::styled("Sandbox: ", Style::default().fg(theme.dimmed)),
+                    Span::styled("Legacy sandbox: ", Style::default().fg(theme.dimmed)),
                     Span::styled(&sandbox.container_name, Style::default().fg(Color::Magenta)),
                 ]));
             }
@@ -203,8 +203,8 @@ impl Preview {
                 ),
             ]));
 
-            let managed_text = if wt_info.managed_by_aoe {
-                "Yes (delete branch on aoe session delete)"
+            let managed_text = if wt_info.managed_by_forager {
+                "Yes (delete branch on Forager session delete)"
             } else {
                 "No (manual worktree)"
             };
@@ -212,7 +212,7 @@ impl Preview {
                 Span::styled("Managed: ", Style::default().fg(theme.dimmed)),
                 Span::styled(
                     managed_text,
-                    Style::default().fg(if wt_info.managed_by_aoe {
+                    Style::default().fg(if wt_info.managed_by_forager {
                         Color::Green
                     } else {
                         Color::Yellow

@@ -64,7 +64,7 @@ fn setup_temp_home() -> tempfile::TempDir {
 }
 ```
 
-Tests call library functions from `agent_of_empires::session::*` directly rather than spawning the `aoe` binary. This avoids tmux dependencies and tests the actual logic paths that the CLI commands use.
+Tests call library functions from `forager::session::*` directly rather than spawning the `forager` binary. This avoids tmux dependencies and tests the actual logic paths that the CLI commands use.
 
 ---
 
@@ -72,7 +72,7 @@ Tests call library functions from `agent_of_empires::session::*` directly rather
 
 **Maps to**: User Story 1 (P1)
 
-Tests the core CRUD flow that `aoe add`, `aoe list`, and `aoe remove` use internally.
+Tests the core CRUD flow that `forager add`, `forager list`, and `forager remove` use internally.
 
 | Test | What it verifies |
 |------|-----------------|
@@ -92,7 +92,7 @@ Tests the core CRUD flow that `aoe add`, `aoe list`, and `aoe remove` use intern
 
 **Maps to**: User Story 2 (P1)
 
-Tests the profile lifecycle that `aoe profile create/delete/list/default` uses.
+Tests the profile lifecycle that `forager profile create/delete/list/default` uses.
 
 | Test | What it verifies |
 |------|-----------------|
@@ -135,7 +135,7 @@ Tests the real TOML file pipeline: write global config, write profile override, 
 
 | Test | What it verifies |
 |------|-----------------|
-| `test_merge_overrides_global` | Profile sets `sandbox.auto_cleanup = false`; merged result is `false` |
+| `test_merge_overrides_global` | Profile sets legacy `sandbox.auto_cleanup = false`; merged result is `false` |
 | `test_merge_inherits_unset_fields` | Profile only sets `theme`; all other fields come from global |
 | `test_config_toml_round_trip` | `save_config()` then `load_config()` preserves all fields |
 | `test_profile_config_toml_round_trip` | `save_profile_config()` then `load_profile_config()` preserves all override fields |
@@ -161,7 +161,7 @@ Tests the migration runner's behavior with the `.schema_version` file.
 
 **API calls**: `migrations::run_migrations()`, file I/O for `.schema_version`
 
-**Note**: The migration tests need HOME set to a temp dir so `get_app_dir()` resolves there. On Linux, also set `XDG_CONFIG_HOME`. The v001 migration moves data from `~/.agent-of-empires` to `$XDG_CONFIG_HOME/agent-of-empires` on Linux, so Linux-specific tests should verify this path change.
+**Note**: The migration tests need HOME set to a temp dir so `get_app_dir()` resolves there. On Linux, also set `XDG_CONFIG_HOME`. The v001 migration preserves the legacy AoE app-data transition from `~/.agent-of-empires` to `$XDG_CONFIG_HOME/agent-of-empires`, so Linux-specific tests should verify this compatibility path.
 
 ---
 

@@ -5,7 +5,7 @@ import Footer from '../../components/Footer.astro';
 ---
 
 <Base
-  title="Git Worktrees for Parallel AI Development - Agent of Empires"
+  title="Git Worktrees for Parallel AI Development - Forager"
   description="Use git worktrees to run multiple AI coding agents on different branches simultaneously. Automatic worktree creation, cleanup, and the bare repo pattern."
 >
   <Nav />
@@ -48,21 +48,21 @@ import Footer from '../../components/Footer.astro';
       <section>
         <h2>The Bare Repo Pattern</h2>
         <p>
-          For the best experience with multiple worktrees, aoe supports the bare repo pattern. Instead of having a "main" clone with worktrees branching off it, you start with a bare repository (no working directory) and create all checkouts as worktrees:
+          For the best experience with multiple worktrees, Forager supports the bare repo pattern. Instead of having a "main" clone with worktrees branching off it, you start with a bare repository (no working directory) and create all checkouts as worktrees:
         </p>
         <pre><code>git clone --bare git@github.com:user/repo.git repo.git
 cd repo.git
 git worktree add ../repo-main main
 git worktree add ../repo-feature feature</code></pre>
         <p>
-          This avoids the confusion of having a "special" main directory. All worktrees are equal peers, and the bare repo is just the shared object store. aoe automates this setup for you.
+          This avoids the confusion of having a "special" main directory. All worktrees are equal peers, and the bare repo is just the shared object store. Forager automates this setup for you.
         </p>
       </section>
 
       <section>
-        <h2>How aoe Automates Worktrees</h2>
+        <h2>How Forager Automates Worktrees</h2>
         <p>
-          When you add a session in <a href="/">Agent of Empires</a> with worktree mode enabled, aoe handles the full lifecycle:
+          When you add a session in <a href="/">Forager</a> with worktree mode enabled, Forager handles the full lifecycle:
         </p>
         <ol>
           <li>Creates the worktree from your configured base repository</li>
@@ -71,7 +71,7 @@ git worktree add ../repo-feature feature</code></pre>
           <li>Cleans up the worktree when the session is removed</li>
         </ol>
         <p>
-          Combined with <a href="/guides/docker-sandbox-ai-agents/">Docker sandboxing</a>, each agent gets its own isolated branch in its own container. This is the most robust setup for parallel AI development.
+          Each agent gets its own branch and working directory. This is the core isolation model Forager currently supports for parallel AI development.
         </p>
       </section>
 
@@ -81,23 +81,22 @@ git worktree add ../repo-feature feature</code></pre>
           A typical day with worktree-based AI development looks like:
         </p>
         <ol>
-          <li>Open <code>aoe</code> and review your agent sessions in the TUI dashboard</li>
+          <li>Open <code>forager</code> and review your agent sessions in the TUI dashboard</li>
           <li>Add a new session for a feature branch: the worktree is created automatically</li>
           <li>Start your AI agent in the session and give it the task</li>
           <li>Meanwhile, another agent is working on a different branch in a different worktree</li>
           <li>Review and merge completed work from any worktree</li>
-          <li>Remove finished sessions, and aoe cleans up the worktrees</li>
+          <li>Remove finished sessions, and Forager cleans up the worktrees</li>
         </ol>
       </section>
 
       <section>
         <h2>Getting Started</h2>
         <p>
-          Enable worktree mode in the aoe settings and configure your base repository. See the <a href="/docs/">documentation</a> for detailed setup instructions. Related guides:
+          Enable worktree mode in the Forager settings and configure your base repository. See the <a href="/docs/">documentation</a> for detailed setup instructions. Related guides:
         </p>
         <ul>
           <li><a href="/guides/manage-ai-coding-agents/">Managing multiple AI coding agents</a></li>
-          <li><a href="/guides/docker-sandbox-ai-agents/">Docker sandboxing for AI agents</a></li>
           <li><a href="/guides/claude-code-session-manager/">AI coding agent session manager</a></li>
           <li><a href="/guides/tmux-ai-coding-workflow/">tmux workflow for AI coding</a></li>
         </ul>

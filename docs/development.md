@@ -8,14 +8,15 @@ cargo build --release          # Release build (with LTO)
 cargo build --profile dev-release  # Optimized build without LTO (faster compile)
 ```
 
-The release binary is at `target/release/aoe`.
+The primary release binary is at `target/release/forager`; `target/release/aoe`
+is kept as a legacy compatibility alias.
 
 ## Running
 
 ```bash
 cargo run --release            # Run from source
-AGENT_OF_EMPIRES_DEBUG=1 cargo run  # With debug logging
-RUST_LOG=agent_of_empires=debug cargo run  # With env_logger debug output
+FORAGER_DEBUG=1 cargo run --bin forager  # With debug logging
+RUST_LOG=forager=debug cargo run  # With env_logger debug output
 ```
 
 Requires `tmux` to be installed.
@@ -40,7 +41,7 @@ The demo GIF in the docs is created using [VHS](https://github.com/charmbracelet
 brew install vhs
 
 # Clear the demo profile
-rm -rf ~/.agent-of-empires/profiles/demo
+rm -rf ~/.forager/profiles/demo
 
 # Ensure demo directories exist
 mkdir -p /tmp/demo-projects/api-server /tmp/demo-projects/web-app

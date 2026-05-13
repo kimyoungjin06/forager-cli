@@ -1,7 +1,7 @@
 //! Background session creation handler for TUI responsiveness
 //!
-//! This handles the potentially slow Docker operations (image pull, container creation)
-//! in a background thread so the UI remains responsive.
+//! This handles worktree setup and repository hooks in a background thread so
+//! the UI remains responsive.
 
 use std::sync::mpsc;
 use std::thread;
@@ -103,11 +103,7 @@ impl CreationPoller {
             tool: data.tool,
             worktree_branch: data.worktree_branch,
             create_new_branch: data.create_new_branch,
-            sandbox: data.sandbox,
-            sandbox_image: data.sandbox_image,
             yolo_mode: data.yolo_mode,
-            extra_env_keys: data.extra_env_keys,
-            extra_env_values: data.extra_env_values,
         };
 
         let build_result = match builder::build_instance(params, &existing_titles) {
@@ -115,38 +111,16 @@ impl CreationPoller {
             Err(e) => return CreationResult::Error(format!("{:#}", e)),
         };
 
-        let mut instance = build_result.instance;
+        let instance = build_result.instance;
         let created_worktree = build_result.created_worktree;
 
         let has_on_create = hooks.as_ref().is_some_and(|h| !h.on_create.is_empty());
         let has_on_launch = hooks.as_ref().is_some_and(|h| !h.on_launch.is_empty());
-        let mut container_started = false;
 
         // Execute on_create hooks after worktree setup, before starting
         if has_on_create {
             let hooks = hooks.as_ref().unwrap();
-            if data.sandbox {
-                // Ensure the container is running so we can exec hooks inside it.
-                // Don't create the tmux session yet -- that happens at attach time
-                // where the terminal size is available.
-                if let Err(e) = instance.get_container_for_instance() {
-                    builder::cleanup_instance(&instance, created_worktree.as_ref());
-                    return CreationResult::Error(format!("{:#}", e));
-                }
-                container_started = true;
-                if let Some(ref sandbox) = instance.sandbox_info {
-                    let workdir = instance.container_workdir();
-                    if let Err(e) = repo_config::execute_hooks_in_container_streamed(
-                        &hooks.on_create,
-                        &sandbox.container_name,
-                        &workdir,
-                        progress_tx,
-                    ) {
-                        tracing::warn!("on_create hook failed in container: {:#}", e);
-                        return CreationResult::Error(format!("on_create hook failed: {:#}", e));
-                    }
-                }
-            } else if let Err(e) = repo_config::execute_hooks_streamed(
+            if let Err(e) = repo_config::execute_hooks_streamed(
                 &hooks.on_create,
                 std::path::Path::new(&instance.project_path),
                 progress_tx,
@@ -160,45 +134,12 @@ impl CreationPoller {
         // This prevents blocking the UI thread when the session is first attached.
         if has_on_launch {
             let hooks = hooks.as_ref().unwrap();
-            if data.sandbox {
-                if !container_started {
-                    if let Err(e) = instance.get_container_for_instance() {
-                        let msg = format!("Container startup warning: {:#}", e);
-                        tracing::warn!("{}", msg);
-                        let _ = progress_tx.send(HookProgress::Output(msg));
-                    } else {
-                        container_started = true;
-                    }
-                }
-                if container_started {
-                    if let Some(ref sandbox) = instance.sandbox_info {
-                        let workdir = instance.container_workdir();
-                        if let Err(e) = repo_config::execute_hooks_in_container_streamed(
-                            &hooks.on_launch,
-                            &sandbox.container_name,
-                            &workdir,
-                            progress_tx,
-                        ) {
-                            tracing::warn!("on_launch hook failed in container: {}", e);
-                        }
-                    }
-                }
-            } else if let Err(e) = repo_config::execute_hooks_streamed(
+            if let Err(e) = repo_config::execute_hooks_streamed(
                 &hooks.on_launch,
                 std::path::Path::new(&instance.project_path),
                 progress_tx,
             ) {
                 tracing::warn!("on_launch hook failed: {}", e);
-            }
-        }
-
-        if data.sandbox && !container_started {
-            // Only ensure the container is running here if hooks didn't already
-            // start it. Don't create the tmux session yet -- that happens at attach time
-            // where the terminal size is available.
-            if let Err(e) = instance.get_container_for_instance() {
-                builder::cleanup_instance(&instance, created_worktree.as_ref());
-                return CreationResult::Error(format!("{:#}", e));
             }
         }
 

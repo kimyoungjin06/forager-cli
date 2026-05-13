@@ -1,4 +1,4 @@
-# Agent of Empires Demo
+# Forager Demo
 Output docs/assets/demo.gif
 
 Set FontSize 16
@@ -6,9 +6,9 @@ Set Width 1200
 Set Height 700
 Set Padding 20
 
-# Launch aoe with demo profile
+# Launch Forager with demo profile
 Set TypingSpeed 1ms
-Type "./target/release/aoe -p demo"
+Type "./target/release/forager -p demo"
 Set TypingSpeed 50ms
 Enter
 Sleep 3000ms
@@ -125,7 +125,7 @@ Sleep 50ms
 Type "d"
 Sleep 1000ms
 
-# === Create third session with sandbox enabled ===
+# === Create third session ===
 # Open new session dialog
 Type "n"
 Sleep 1000ms
@@ -140,24 +140,6 @@ Tab
 Set TypingSpeed 50ms
 Sleep 1000ms
 
-# Skip group field, tool field, worktree field to reach sandbox
-Tab
-Tab
-Space
-Space
-Tab
-Tab
-Sleep 500ms
-
-# Toggle sandbox ON (space to toggle)
-Space
-Sleep 500ms
-Tab # skip custom image
-Tab
-Sleep 100ms
-Space
-Sleep 100ms
-
 # Submit
 Enter
 Sleep 2000ms
@@ -168,7 +150,7 @@ Sleep 1500ms
 
 # Type a prompt
 Set TypingSpeed 10ms
-Type "Write me a poem about sandboxes and containers."
+Type "Write me a short checklist for reviewing a chat app feature."
 Set TypingSpeed 50ms
 Enter
 Sleep 500ms
@@ -183,6 +165,6 @@ Sleep 3000ms
 Type "k"
 Sleep 3000ms
 
-# Exit aoe
+# Exit Forager
 
 Type "q"

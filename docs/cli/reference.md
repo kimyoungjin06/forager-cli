@@ -1,68 +1,91 @@
-# Command-Line Help for `aoe`
+# Command-Line Help for `forager`
 
-This document contains the help content for the `aoe` command-line program.
+This document contains the help content for the `forager` command-line program.
 
 **Command Overview:**
 
-* [`aoe`↴](#aoe)
-* [`aoe add`↴](#aoe-add)
-* [`aoe init`↴](#aoe-init)
-* [`aoe list`↴](#aoe-list)
-* [`aoe remove`↴](#aoe-remove)
-* [`aoe status`↴](#aoe-status)
-* [`aoe session`↴](#aoe-session)
-* [`aoe session start`↴](#aoe-session-start)
-* [`aoe session stop`↴](#aoe-session-stop)
-* [`aoe session restart`↴](#aoe-session-restart)
-* [`aoe session attach`↴](#aoe-session-attach)
-* [`aoe session show`↴](#aoe-session-show)
-* [`aoe session rename`↴](#aoe-session-rename)
-* [`aoe session current`↴](#aoe-session-current)
-* [`aoe group`↴](#aoe-group)
-* [`aoe group list`↴](#aoe-group-list)
-* [`aoe group create`↴](#aoe-group-create)
-* [`aoe group delete`↴](#aoe-group-delete)
-* [`aoe group move`↴](#aoe-group-move)
-* [`aoe profile`↴](#aoe-profile)
-* [`aoe profile list`↴](#aoe-profile-list)
-* [`aoe profile create`↴](#aoe-profile-create)
-* [`aoe profile delete`↴](#aoe-profile-delete)
-* [`aoe profile default`↴](#aoe-profile-default)
-* [`aoe worktree`↴](#aoe-worktree)
-* [`aoe worktree list`↴](#aoe-worktree-list)
-* [`aoe worktree info`↴](#aoe-worktree-info)
-* [`aoe worktree cleanup`↴](#aoe-worktree-cleanup)
-* [`aoe tmux`↴](#aoe-tmux)
-* [`aoe tmux status`↴](#aoe-tmux-status)
-* [`aoe sounds`↴](#aoe-sounds)
-* [`aoe sounds install`↴](#aoe-sounds-install)
-* [`aoe sounds list`↴](#aoe-sounds-list)
-* [`aoe sounds test`↴](#aoe-sounds-test)
-* [`aoe uninstall`↴](#aoe-uninstall)
-* [`aoe completion`↴](#aoe-completion)
+* [`forager`↴](#forager)
+* [`forager add`↴](#forager-add)
+* [`forager init`↴](#forager-init)
+* [`forager list`↴](#forager-list)
+* [`forager remove`↴](#forager-remove)
+* [`forager status`↴](#forager-status)
+* [`forager doctor`↴](#forager-doctor)
+* [`forager migrate`↴](#forager-migrate)
+* [`forager migrate aoe`↴](#forager-migrate-aoe)
+* [`forager session`↴](#forager-session)
+* [`forager session start`↴](#forager-session-start)
+* [`forager session stop`↴](#forager-session-stop)
+* [`forager session restart`↴](#forager-session-restart)
+* [`forager session attach`↴](#forager-session-attach)
+* [`forager session show`↴](#forager-session-show)
+* [`forager session rename`↴](#forager-session-rename)
+* [`forager session current`↴](#forager-session-current)
+* [`forager group`↴](#forager-group)
+* [`forager group list`↴](#forager-group-list)
+* [`forager group create`↴](#forager-group-create)
+* [`forager group delete`↴](#forager-group-delete)
+* [`forager group move`↴](#forager-group-move)
+* [`forager profile`↴](#forager-profile)
+* [`forager profile list`↴](#forager-profile-list)
+* [`forager profile create`↴](#forager-profile-create)
+* [`forager profile delete`↴](#forager-profile-delete)
+* [`forager profile default`↴](#forager-profile-default)
+* [`forager worktree`↴](#forager-worktree)
+* [`forager worktree list`↴](#forager-worktree-list)
+* [`forager worktree info`↴](#forager-worktree-info)
+* [`forager worktree cleanup`↴](#forager-worktree-cleanup)
+* [`forager offdesk`↴](#forager-offdesk)
+* [`forager offdesk pending`↴](#forager-offdesk-pending)
+* [`forager offdesk gate`↴](#forager-offdesk-gate)
+* [`forager offdesk launch`↴](#forager-offdesk-launch)
+* [`forager offdesk enqueue`↴](#forager-offdesk-enqueue)
+* [`forager offdesk tick`↴](#forager-offdesk-tick)
+* [`forager offdesk tasks`↴](#forager-offdesk-tasks)
+* [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
+* [`forager offdesk retry-task`↴](#forager-offdesk-retry-task)
+* [`forager offdesk resume-task`↴](#forager-offdesk-resume-task)
+* [`forager offdesk abandon-task`↴](#forager-offdesk-abandon-task)
+* [`forager offdesk poll`↴](#forager-offdesk-poll)
+* [`forager offdesk ok`↴](#forager-offdesk-ok)
+* [`forager offdesk cancel`↴](#forager-offdesk-cancel)
+* [`forager offdesk resume`↴](#forager-offdesk-resume)
+* [`forager offdesk background`↴](#forager-offdesk-background)
+* [`forager offdesk capabilities`↴](#forager-offdesk-capabilities)
+* [`forager tmux`↴](#forager-tmux)
+* [`forager tmux status`↴](#forager-tmux-status)
+* [`forager sounds`↴](#forager-sounds)
+* [`forager sounds install`↴](#forager-sounds-install)
+* [`forager sounds list`↴](#forager-sounds-list)
+* [`forager sounds test`↴](#forager-sounds-test)
+* [`forager uninstall`↴](#forager-uninstall)
+* [`forager completion`↴](#forager-completion)
 
-## `aoe`
+## `forager`
 
-Agent of Empires (aoe) is a terminal session manager that uses tmux to help you manage and monitor AI coding agents like Claude Code and OpenCode.
+Forager is an offdesk agent orchestration tool that uses tmux to help you manage, monitor, approve, and recover AI coding agent work.
 
-Run without arguments to launch the TUI dashboard.
+Run without arguments to launch the TUI dashboard. The legacy `aoe` binary remains available as a compatibility alias and warns on human-facing commands.
 
-**Usage:** `aoe [OPTIONS] [COMMAND]`
+**Usage:** `forager [OPTIONS] [COMMAND]`
 
 ###### **Subcommands:**
 
 * `add` — Add a new session
-* `init` — Initialize .aoe/config.toml in a repository
+* `init` — Initialize .forager/config.toml in a repository
 * `list` — List all sessions
 * `remove` — Remove a session
 * `status` — Show session status summary
+* `doctor` — Diagnose Forager paths, profile env, and legacy AoE compatibility state
+* `migrate` — Migrate legacy AoE compatibility paths
 * `session` — Manage session lifecycle (start, stop, attach, etc.)
 * `group` — Manage groups for organizing sessions
 * `profile` — Manage profiles (separate workspaces)
 * `worktree` — Manage git worktrees for parallel development
+* `offdesk` — Manage offdesk approvals and recovery artifacts
 * `tmux` — tmux integration utilities
 * `sounds` — Manage sound effects for agent state transitions
-* `uninstall` — Uninstall Agent of Empires
+* `uninstall` — Uninstall Forager
 * `completion` — Generate shell completions
 
 ###### **Options:**
@@ -71,11 +94,11 @@ Run without arguments to launch the TUI dashboard.
 
 
 
-## `aoe add`
+## `forager add`
 
 Add a new session
 
-**Usage:** `aoe add [OPTIONS] [PATH]`
+**Usage:** `forager add [OPTIONS] [PATH]`
 
 ###### **Arguments:**
 
@@ -92,17 +115,16 @@ Add a new session
 * `-l`, `--launch` — Launch the session immediately after creating
 * `-w`, `--worktree <WORKTREE_BRANCH>` — Create session in a git worktree for the specified branch
 * `-b`, `--new-branch` — Create a new branch (use with --worktree)
-* `-s`, `--sandbox` — Run session in Docker sandbox
-* `--sandbox-image <SANDBOX_IMAGE>` — Custom Docker image for sandbox (implies --sandbox)
+* `-y`, `--yolo` — Enable YOLO mode (skip permission prompts)
 * `--trust-hooks` — Automatically trust repository hooks without prompting
 
 
 
-## `aoe init`
+## `forager init`
 
-Initialize .aoe/config.toml in a repository
+Initialize .forager/config.toml in a repository
 
-**Usage:** `aoe init [PATH]`
+**Usage:** `forager init [PATH]`
 
 ###### **Arguments:**
 
@@ -112,11 +134,11 @@ Initialize .aoe/config.toml in a repository
 
 
 
-## `aoe list`
+## `forager list`
 
 List all sessions
 
-**Usage:** `aoe list [OPTIONS]`
+**Usage:** `forager list [OPTIONS]`
 
 ###### **Options:**
 
@@ -125,11 +147,11 @@ List all sessions
 
 
 
-## `aoe remove`
+## `forager remove`
 
 Remove a session
 
-**Usage:** `aoe remove [OPTIONS] <IDENTIFIER>`
+**Usage:** `forager remove [OPTIONS] <IDENTIFIER>`
 
 ###### **Arguments:**
 
@@ -138,15 +160,16 @@ Remove a session
 ###### **Options:**
 
 * `--delete-worktree` — Delete worktree directory (default: keep worktree)
-* `--keep-container` — Keep container instead of deleting it (default: delete per config)
+* `--force` — Force worktree removal even with untracked/modified files
+* `--keep-container` — Keep legacy sandbox container instead of deleting it (default: delete per config)
 
 
 
-## `aoe status`
+## `forager status`
 
 Show session status summary
 
-**Usage:** `aoe status [OPTIONS]`
+**Usage:** `forager status [OPTIONS]`
 
 ###### **Options:**
 
@@ -156,11 +179,54 @@ Show session status summary
 
 
 
-## `aoe session`
+## `forager doctor`
+
+Diagnose Forager paths, profile env, and legacy AoE compatibility state
+
+**Usage:** `forager doctor [OPTIONS]`
+
+###### **Options:**
+
+* `--project <PATH>` — Repository path to inspect for .forager/.aoe config
+
+  Default value: `.`
+* `--json` — Output as JSON
+
+
+
+## `forager migrate`
+
+Migrate legacy AoE compatibility paths
+
+**Usage:** `forager migrate <COMMAND>`
+
+###### **Subcommands:**
+
+* `aoe` — Copy legacy AoE paths into Forager primary paths
+
+
+
+## `forager migrate aoe`
+
+Copy legacy AoE paths into Forager primary paths
+
+**Usage:** `forager migrate aoe [OPTIONS]`
+
+###### **Options:**
+
+* `--project <PATH>` — Repository path to inspect for .aoe/.forager config
+
+  Default value: `.`
+* `--dry-run` — Show the migration plan without copying files
+* `--json` — Output as JSON
+
+
+
+## `forager session`
 
 Manage session lifecycle (start, stop, attach, etc.)
 
-**Usage:** `aoe session <COMMAND>`
+**Usage:** `forager session <COMMAND>`
 
 ###### **Subcommands:**
 
@@ -174,11 +240,11 @@ Manage session lifecycle (start, stop, attach, etc.)
 
 
 
-## `aoe session start`
+## `forager session start`
 
 Start a session's tmux process
 
-**Usage:** `aoe session start <IDENTIFIER>`
+**Usage:** `forager session start <IDENTIFIER>`
 
 ###### **Arguments:**
 
@@ -186,11 +252,11 @@ Start a session's tmux process
 
 
 
-## `aoe session stop`
+## `forager session stop`
 
 Stop session process
 
-**Usage:** `aoe session stop <IDENTIFIER>`
+**Usage:** `forager session stop <IDENTIFIER>`
 
 ###### **Arguments:**
 
@@ -198,11 +264,11 @@ Stop session process
 
 
 
-## `aoe session restart`
+## `forager session restart`
 
 Restart session
 
-**Usage:** `aoe session restart <IDENTIFIER>`
+**Usage:** `forager session restart <IDENTIFIER>`
 
 ###### **Arguments:**
 
@@ -210,11 +276,11 @@ Restart session
 
 
 
-## `aoe session attach`
+## `forager session attach`
 
 Attach to session interactively
 
-**Usage:** `aoe session attach <IDENTIFIER>`
+**Usage:** `forager session attach <IDENTIFIER>`
 
 ###### **Arguments:**
 
@@ -222,11 +288,11 @@ Attach to session interactively
 
 
 
-## `aoe session show`
+## `forager session show`
 
 Show session details
 
-**Usage:** `aoe session show [OPTIONS] [IDENTIFIER]`
+**Usage:** `forager session show [OPTIONS] [IDENTIFIER]`
 
 ###### **Arguments:**
 
@@ -238,11 +304,11 @@ Show session details
 
 
 
-## `aoe session rename`
+## `forager session rename`
 
 Rename a session
 
-**Usage:** `aoe session rename [OPTIONS] [IDENTIFIER]`
+**Usage:** `forager session rename [OPTIONS] [IDENTIFIER]`
 
 ###### **Arguments:**
 
@@ -255,11 +321,11 @@ Rename a session
 
 
 
-## `aoe session current`
+## `forager session current`
 
 Auto-detect current session
 
-**Usage:** `aoe session current [OPTIONS]`
+**Usage:** `forager session current [OPTIONS]`
 
 ###### **Options:**
 
@@ -268,11 +334,11 @@ Auto-detect current session
 
 
 
-## `aoe group`
+## `forager group`
 
 Manage groups for organizing sessions
 
-**Usage:** `aoe group <COMMAND>`
+**Usage:** `forager group <COMMAND>`
 
 ###### **Subcommands:**
 
@@ -283,11 +349,11 @@ Manage groups for organizing sessions
 
 
 
-## `aoe group list`
+## `forager group list`
 
 List all groups
 
-**Usage:** `aoe group list [OPTIONS]`
+**Usage:** `forager group list [OPTIONS]`
 
 ###### **Options:**
 
@@ -295,11 +361,11 @@ List all groups
 
 
 
-## `aoe group create`
+## `forager group create`
 
 Create a new group
 
-**Usage:** `aoe group create [OPTIONS] <NAME>`
+**Usage:** `forager group create [OPTIONS] <NAME>`
 
 ###### **Arguments:**
 
@@ -311,11 +377,11 @@ Create a new group
 
 
 
-## `aoe group delete`
+## `forager group delete`
 
 Delete a group
 
-**Usage:** `aoe group delete [OPTIONS] <NAME>`
+**Usage:** `forager group delete [OPTIONS] <NAME>`
 
 ###### **Arguments:**
 
@@ -327,11 +393,11 @@ Delete a group
 
 
 
-## `aoe group move`
+## `forager group move`
 
 Move session to group
 
-**Usage:** `aoe group move <IDENTIFIER> <GROUP>`
+**Usage:** `forager group move <IDENTIFIER> <GROUP>`
 
 ###### **Arguments:**
 
@@ -340,11 +406,11 @@ Move session to group
 
 
 
-## `aoe profile`
+## `forager profile`
 
 Manage profiles (separate workspaces)
 
-**Usage:** `aoe profile [COMMAND]`
+**Usage:** `forager profile [COMMAND]`
 
 ###### **Subcommands:**
 
@@ -355,19 +421,19 @@ Manage profiles (separate workspaces)
 
 
 
-## `aoe profile list`
+## `forager profile list`
 
 List all profiles
 
-**Usage:** `aoe profile list`
+**Usage:** `forager profile list`
 
 
 
-## `aoe profile create`
+## `forager profile create`
 
 Create a new profile
 
-**Usage:** `aoe profile create <NAME>`
+**Usage:** `forager profile create <NAME>`
 
 ###### **Arguments:**
 
@@ -375,11 +441,11 @@ Create a new profile
 
 
 
-## `aoe profile delete`
+## `forager profile delete`
 
 Delete a profile
 
-**Usage:** `aoe profile delete <NAME>`
+**Usage:** `forager profile delete <NAME>`
 
 ###### **Arguments:**
 
@@ -387,11 +453,11 @@ Delete a profile
 
 
 
-## `aoe profile default`
+## `forager profile default`
 
 Show or set default profile
 
-**Usage:** `aoe profile default [NAME]`
+**Usage:** `forager profile default [NAME]`
 
 ###### **Arguments:**
 
@@ -399,11 +465,11 @@ Show or set default profile
 
 
 
-## `aoe worktree`
+## `forager worktree`
 
 Manage git worktrees for parallel development
 
-**Usage:** `aoe worktree <COMMAND>`
+**Usage:** `forager worktree <COMMAND>`
 
 ###### **Subcommands:**
 
@@ -413,19 +479,19 @@ Manage git worktrees for parallel development
 
 
 
-## `aoe worktree list`
+## `forager worktree list`
 
 List all worktrees in current repository
 
-**Usage:** `aoe worktree list`
+**Usage:** `forager worktree list`
 
 
 
-## `aoe worktree info`
+## `forager worktree info`
 
 Show worktree information for a session
 
-**Usage:** `aoe worktree info <IDENTIFIER>`
+**Usage:** `forager worktree info <IDENTIFIER>`
 
 ###### **Arguments:**
 
@@ -433,11 +499,11 @@ Show worktree information for a session
 
 
 
-## `aoe worktree cleanup`
+## `forager worktree cleanup`
 
 Cleanup orphaned worktrees
 
-**Usage:** `aoe worktree cleanup [OPTIONS]`
+**Usage:** `forager worktree cleanup [OPTIONS]`
 
 ###### **Options:**
 
@@ -445,11 +511,352 @@ Cleanup orphaned worktrees
 
 
 
-## `aoe tmux`
+## `forager offdesk`
+
+Manage offdesk approvals and recovery artifacts
+
+**Usage:** `forager offdesk <COMMAND>`
+
+###### **Subcommands:**
+
+* `pending` — List pending action approvals
+* `gate` — Evaluate whether an offdesk capability may execute now
+* `launch` — Gate and record a background runner launch
+* `enqueue` — Enqueue a durable offdesk task
+* `tick` — Run one offdesk control-loop pass
+* `tasks` — Show durable offdesk tasks
+* `cancel-task` — Mark a durable task cancelled without stopping its background runner
+* `retry-task` — Requeue a failed, resume-pending, or cancelled durable task
+* `resume-task` — Accept recovery for a resume-pending task and requeue it
+* `abandon-task` — Discard a failed or resume-pending task
+* `poll` — Poll background runner probes and persist phase transitions
+* `ok` — Approve the oldest or targeted pending action
+* `cancel` — Deny the oldest or targeted pending action
+* `resume` — Show task resume artifacts
+* `background` — Show background runner recovery probes
+* `capabilities` — Show Task Team capability metadata
+
+
+
+## `forager offdesk pending`
+
+List pending action approvals
+
+**Usage:** `forager offdesk pending [OPTIONS]`
+
+###### **Options:**
+
+* `--all` — Include resolved and expired approvals
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk gate`
+
+Evaluate whether an offdesk capability may execute now
+
+**Usage:** `forager offdesk gate [OPTIONS] --project-key <PROJECT_KEY> --request-id <REQUEST_ID> --task-id <TASK_ID> <CAPABILITY_ID>`
+
+###### **Arguments:**
+
+* `<CAPABILITY_ID>` — Capability ID from `forager offdesk capabilities`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Project key for approval and audit correlation
+* `--request-id <REQUEST_ID>` — Request ID for approval and audit correlation
+* `--task-id <TASK_ID>` — Task ID for approval and audit correlation
+* `--mutation-class <MUTATION_CLASS>` — Mutation class to match against an ExecutionBrief envelope
+* `--brief <BRIEF>` — JSON file containing an ExecutionBrief
+* `--preview <PREVIEW>` — Operator-safe action preview
+
+  Default value: ``
+* `--reason <REASON>` — Reason shown when approval is required
+
+  Default value: ``
+* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on generated approval rows
+
+  Default value: `cli`
+* `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
+
+  Default value: `30`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk launch`
+
+Gate and record a background runner launch
+
+**Usage:** `forager offdesk launch [OPTIONS] --runner <RUNNER> --project-key <PROJECT_KEY> --request-id <REQUEST_ID> --task-id <TASK_ID> <CAPABILITY_ID>`
+
+###### **Arguments:**
+
+* `<CAPABILITY_ID>` — Capability ID from `forager offdesk capabilities`
+
+###### **Options:**
+
+* `--runner <RUNNER>` — Runner backend to record: local-tmux, local-background, github-runner, remote-worker
+* `--project-key <PROJECT_KEY>` — Project key for approval and audit correlation
+* `--request-id <REQUEST_ID>` — Request ID for approval and audit correlation
+* `--task-id <TASK_ID>` — Task ID for approval and audit correlation
+* `--mutation-class <MUTATION_CLASS>` — Mutation class to match against an ExecutionBrief envelope
+* `--brief <BRIEF>` — JSON file containing an ExecutionBrief
+* `--ticket-id <TICKET_ID>` — Stable ticket ID. Generated if omitted
+* `--launch-spec <LAUNCH_SPEC>` — Redacted launch spec summary to store with the ticket
+* `--cmd <COMMAND>` — Shell command to execute for local-background or local-tmux runners
+* `--workdir <WORKDIR>` — Working directory for --cmd. Defaults to the current directory
+* `--log-artifact <LOG_ARTIFACT>` — Log artifact path for --cmd stdout and stderr
+* `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path used by poll to mark the ticket completed
+* `--runtime-alive` — Whether a local runtime handle is alive immediately after launch
+
+  Default value: `true`
+* `--provider-launch-spec-reconstructable` — Whether a local_background launch spec can be reconstructed after restart
+* `--ack-timeout-sec <ACK_TIMEOUT_SEC>` — External ack timeout in seconds
+
+  Default value: `300`
+* `--preview <PREVIEW>` — Operator-safe action preview
+
+  Default value: ``
+* `--reason <REASON>` — Reason shown when approval is required
+
+  Default value: ``
+* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on generated approval rows
+
+  Default value: `cli`
+* `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
+
+  Default value: `30`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk enqueue`
+
+Enqueue a durable offdesk task
+
+**Usage:** `forager offdesk enqueue [OPTIONS] --runner <RUNNER> --project-key <PROJECT_KEY> --request-id <REQUEST_ID> --cmd <COMMAND> <CAPABILITY_ID>`
+
+###### **Arguments:**
+
+* `<CAPABILITY_ID>` — Capability ID from `forager offdesk capabilities`
+
+###### **Options:**
+
+* `--runner <RUNNER>` — Runner backend to use: local-tmux or local-background
+* `--project-key <PROJECT_KEY>` — Project key for approval and audit correlation
+* `--request-id <REQUEST_ID>` — Request ID for approval and audit correlation
+* `--task-id <TASK_ID>` — Task ID. Generated if omitted
+* `--cmd <COMMAND>` — Shell command to execute when the task is dispatched
+* `--workdir <WORKDIR>` — Working directory for --cmd. Defaults to the current directory
+* `--brief <BRIEF>` — JSON file containing an ExecutionBrief to store with the task
+* `--mutation-class <MUTATION_CLASS>` — Mutation class to match against an ExecutionBrief envelope
+* `--preview <PREVIEW>` — Operator-safe action preview
+
+  Default value: ``
+* `--reason <REASON>` — Reason shown when approval is required
+
+  Default value: ``
+* `--not-before <NOT_BEFORE>` — Do not dispatch before this RFC3339 timestamp
+* `--log-artifact <LOG_ARTIFACT>` — Log artifact path for command stdout and stderr
+* `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path used by tick to mark the task completed
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk tick`
+
+Run one offdesk control-loop pass
+
+**Usage:** `forager offdesk tick [OPTIONS]`
+
+###### **Options:**
+
+* `--limit <LIMIT>` — Maximum queued tasks to dispatch in this tick
+
+  Default value: `10`
+* `--lock-stale-minutes <LOCK_STALE_MINUTES>` — Treat previous free lock metadata as stale after this many minutes
+
+  Default value: `30`
+* `--notify-cooldown-minutes <NOTIFY_COOLDOWN_MINUTES>` — Record notification cooldown state in minutes while polling background runs
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk tasks`
+
+Show durable offdesk tasks
+
+**Usage:** `forager offdesk tasks [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk cancel-task`
+
+Mark a durable task cancelled without stopping its background runner
+
+**Usage:** `forager offdesk cancel-task [OPTIONS] <TASK_ID>`
+
+###### **Arguments:**
+
+* `<TASK_ID>` — Offdesk task ID to cancel
+
+###### **Options:**
+
+* `--reason <REASON>` — Operator reason to store on the task
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk retry-task`
+
+Requeue a failed, resume-pending, or cancelled durable task
+
+**Usage:** `forager offdesk retry-task [OPTIONS] <TASK_ID>`
+
+###### **Arguments:**
+
+* `<TASK_ID>` — Offdesk task ID to retry
+
+###### **Options:**
+
+* `--new-approval` — Supersede matching denied approval rows so the next tick creates a new approval
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk resume-task`
+
+Accept recovery for a resume-pending task and requeue it
+
+**Usage:** `forager offdesk resume-task [OPTIONS] <TASK_ID>`
+
+###### **Arguments:**
+
+* `<TASK_ID>` — Offdesk task ID to update
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk abandon-task`
+
+Discard a failed or resume-pending task
+
+**Usage:** `forager offdesk abandon-task [OPTIONS] <TASK_ID>`
+
+###### **Arguments:**
+
+* `<TASK_ID>` — Offdesk task ID to update
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk poll`
+
+Poll background runner probes and persist phase transitions
+
+**Usage:** `forager offdesk poll [OPTIONS] [TICKET_ID]`
+
+###### **Arguments:**
+
+* `<TICKET_ID>` — Ticket ID to poll. Defaults to all tickets
+
+###### **Options:**
+
+* `--notify-cooldown-minutes <NOTIFY_COOLDOWN_MINUTES>` — Record notification cooldown state in minutes
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk ok`
+
+Approve the oldest or targeted pending action
+
+**Usage:** `forager offdesk ok [OPTIONS] [APPROVAL_ID]`
+
+###### **Arguments:**
+
+* `<APPROVAL_ID>` — Approval ID to resolve. Defaults to the oldest pending approval
+
+###### **Options:**
+
+* `--by <BY>` — Operator or surface resolving this approval
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk cancel`
+
+Deny the oldest or targeted pending action
+
+**Usage:** `forager offdesk cancel [OPTIONS] [APPROVAL_ID]`
+
+###### **Arguments:**
+
+* `<APPROVAL_ID>` — Approval ID to resolve. Defaults to the oldest pending approval
+
+###### **Options:**
+
+* `--by <BY>` — Operator or surface resolving this approval
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk resume`
+
+Show task resume artifacts
+
+**Usage:** `forager offdesk resume [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk background`
+
+Show background runner recovery probes
+
+**Usage:** `forager offdesk background [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk capabilities`
+
+Show Task Team capability metadata
+
+**Usage:** `forager offdesk capabilities [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager tmux`
 
 tmux integration utilities
 
-**Usage:** `aoe tmux <COMMAND>`
+**Usage:** `forager tmux <COMMAND>`
 
 ###### **Subcommands:**
 
@@ -457,13 +864,13 @@ tmux integration utilities
 
 
 
-## `aoe tmux status`
+## `forager tmux status`
 
 Output session info for use in custom tmux status bar
 
-Add this to your ~/.tmux.conf: set -g status-right "#(aoe tmux status)"
+Add this to your ~/.tmux.conf: set -g status-right "#(forager tmux status)"
 
-**Usage:** `aoe tmux status [OPTIONS]`
+**Usage:** `forager tmux status [OPTIONS]`
 
 ###### **Options:**
 
@@ -473,11 +880,11 @@ Add this to your ~/.tmux.conf: set -g status-right "#(aoe tmux status)"
 
 
 
-## `aoe sounds`
+## `forager sounds`
 
 Manage sound effects for agent state transitions
 
-**Usage:** `aoe sounds <COMMAND>`
+**Usage:** `forager sounds <COMMAND>`
 
 ###### **Subcommands:**
 
@@ -487,27 +894,27 @@ Manage sound effects for agent state transitions
 
 
 
-## `aoe sounds install`
+## `forager sounds install`
 
 Install bundled sound effects
 
-**Usage:** `aoe sounds install`
+**Usage:** `forager sounds install`
 
 
 
-## `aoe sounds list`
+## `forager sounds list`
 
 List currently installed sounds
 
-**Usage:** `aoe sounds list`
+**Usage:** `forager sounds list`
 
 
 
-## `aoe sounds test`
+## `forager sounds test`
 
 Test a sound by playing it
 
-**Usage:** `aoe sounds test <NAME>`
+**Usage:** `forager sounds test <NAME>`
 
 ###### **Arguments:**
 
@@ -515,11 +922,11 @@ Test a sound by playing it
 
 
 
-## `aoe uninstall`
+## `forager uninstall`
 
-Uninstall Agent of Empires
+Uninstall Forager
 
-**Usage:** `aoe uninstall [OPTIONS]`
+**Usage:** `forager uninstall [OPTIONS]`
 
 ###### **Options:**
 
@@ -530,11 +937,11 @@ Uninstall Agent of Empires
 
 
 
-## `aoe completion`
+## `forager completion`
 
 Generate shell completions
 
-**Usage:** `aoe completion <SHELL>`
+**Usage:** `forager completion <SHELL>`
 
 ###### **Arguments:**
 

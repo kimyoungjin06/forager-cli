@@ -36,7 +36,7 @@ After saving and exiting, the diff view refreshes automatically to show your cha
 
 ## Configuration
 
-In your config file (`~/.config/agent-of-empires/config.toml` on Linux, `~/.agent-of-empires/config.toml` on macOS):
+In your config file (`~/.config/forager/config.toml` on Linux, `~/.forager/config.toml` on macOS):
 
 ```toml
 [diff]

@@ -49,16 +49,20 @@ jobs:
         include:
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: aoe-darwin-amd64
+            name: forager-darwin-amd64
+            legacy_name: aoe-darwin-amd64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: aoe-darwin-arm64
+            name: forager-darwin-arm64
+            legacy_name: aoe-darwin-arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: aoe-linux-amd64
+            name: forager-linux-amd64
+            legacy_name: aoe-linux-amd64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: aoe-linux-arm64
+            name: forager-linux-arm64
+            legacy_name: aoe-linux-arm64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -84,10 +88,13 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/aoe dist/${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/forager dist/${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/aoe dist/${{ matrix.legacy_name }}
           cd dist
           tar -czvf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          tar -czvf ${{ matrix.legacy_name }}.tar.gz ${{ matrix.legacy_name }}
+          shasum -a 256 ${{ matrix.legacy_name }}.tar.gz > ${{ matrix.legacy_name }}.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -96,6 +103,8 @@ jobs:
           path: |
             dist/${{ matrix.name }}.tar.gz
             dist/${{ matrix.name }}.tar.gz.sha256
+            dist/${{ matrix.legacy_name }}.tar.gz
+            dist/${{ matrix.legacy_name }}.tar.gz.sha256
 
   release:
     name: Create Release
@@ -132,114 +141,10 @@ jobs:
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: Agent of Empires ${{ steps.version.outputs.version }}
+          name: Forager ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
           files: |
             artifacts/*.tar.gz
             artifacts/*.tar.gz.sha256
           generate_release_notes: true
-
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-
-  update-homebrew:
-    name: Update Homebrew Formula
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Calculate SHA256 hashes
-        id: hashes
-        run: |
-          cd artifacts
-          echo "darwin_arm64=$(sha256sum aoe-darwin-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-          echo "darwin_amd64=$(sha256sum aoe-darwin-amd64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-          echo "linux_arm64=$(sha256sum aoe-linux-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-          echo "linux_amd64=$(sha256sum aoe-linux-amd64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-
-      - name: Update Homebrew formula
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          VERSION: ${{ needs.release.outputs.version }}
-        run: |
-          VERSION_NUM="${VERSION#v}"
-
-          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/njbrake/homebrew-aoe.git
-          cd homebrew-aoe
-
-          cat > Formula/aoe.rb << 'FORMULA'
-          class Aoe < Formula
-            desc "Terminal session manager for AI coding agents"
-            homepage "https://github.com/njbrake/agent-of-empires"
-            version "VERSION_PLACEHOLDER"
-            license "MIT"
-
-            on_macos do
-              on_arm do
-                url "https://github.com/njbrake/agent-of-empires/releases/download/vVERSION_PLACEHOLDER/aoe-darwin-arm64.tar.gz"
-                sha256 "DARWIN_ARM64_SHA"
-              end
-              on_intel do
-                url "https://github.com/njbrake/agent-of-empires/releases/download/vVERSION_PLACEHOLDER/aoe-darwin-amd64.tar.gz"
-                sha256 "DARWIN_AMD64_SHA"
-              end
-            end
-
-            on_linux do
-              on_arm do
-                url "https://github.com/njbrake/agent-of-empires/releases/download/vVERSION_PLACEHOLDER/aoe-linux-arm64.tar.gz"
-                sha256 "LINUX_ARM64_SHA"
-              end
-              on_intel do
-                url "https://github.com/njbrake/agent-of-empires/releases/download/vVERSION_PLACEHOLDER/aoe-linux-amd64.tar.gz"
-                sha256 "LINUX_AMD64_SHA"
-              end
-            end
-
-            depends_on "tmux"
-
-            livecheck do
-              url :stable
-              strategy :github_latest
-            end
-
-            def install
-              if OS.mac?
-                if Hardware::CPU.arm?
-                  bin.install "aoe-darwin-arm64" => "aoe"
-                else
-                  bin.install "aoe-darwin-amd64" => "aoe"
-                end
-              else
-                if Hardware::CPU.arm?
-                  bin.install "aoe-linux-arm64" => "aoe"
-                else
-                  bin.install "aoe-linux-amd64" => "aoe"
-                end
-              end
-            end
-
-            test do
-              assert_match "session manager", shell_output("#{bin}/aoe --help")
-            end
-          end
-          FORMULA
-
-          sed -i "s/VERSION_PLACEHOLDER/${VERSION_NUM}/g" Formula/aoe.rb
-          sed -i "s/DARWIN_ARM64_SHA/${{ steps.hashes.outputs.darwin_arm64 }}/g" Formula/aoe.rb
-          sed -i "s/DARWIN_AMD64_SHA/${{ steps.hashes.outputs.darwin_amd64 }}/g" Formula/aoe.rb
-          sed -i "s/LINUX_ARM64_SHA/${{ steps.hashes.outputs.linux_arm64 }}/g" Formula/aoe.rb
-          sed -i "s/LINUX_AMD64_SHA/${{ steps.hashes.outputs.linux_amd64 }}/g" Formula/aoe.rb
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/aoe.rb
-          git commit -m "Update aoe to ${VERSION}"
-          git push
-

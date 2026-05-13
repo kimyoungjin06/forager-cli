@@ -3,7 +3,7 @@
 **Input**: Design documents from `/specs/002-hooks-settings-tui/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: Included where they validate core resolution logic, sandbox execution, and failure semantics.
+**Tests**: Included where they validate core resolution logic, host execution, and failure semantics.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -46,22 +46,22 @@
 
 ## Phase 3: User Story 1 - Configure Global Default Hooks (Priority: P1)
 
-**Goal**: Global hooks execute for sessions when no repo-level hooks exist. Hooks follow the session's sandbox setting for execution location (FR-011). `on_create` failures abort creation; `on_launch` failures are non-fatal (FR-012). Duplicate `on_launch` execution is prevented (FR-013).
+**Goal**: Global hooks execute for sessions when no repo-level hooks exist. Hooks execute locally in the host project directory (FR-011). `on_create` failures abort creation; `on_launch` failures are non-fatal (FR-012). Duplicate `on_launch` execution is prevented (FR-013).
 
-**Independent Test**: Create a session for a repo without `.aoe/config.toml` and verify global hooks run in the correct environment (local or container).
+**Independent Test**: Create a session for a repo without `.forager/config.toml` and verify global hooks run in the host project directory.
 
 ### Implementation for User Story 1
 
 - [ ] T010 [US1] Update hook resolution in `src/tui/home/input.rs` to use hooks from the merged `Config` (global+profile) when repo-level hooks are absent. Currently hooks are only sourced from `check_hook_trust()` on the repo config. After this change: (1) Resolve the full config via `resolve_config()` for the active profile. (2) Call `check_hook_trust()` for repo hooks. (3) If repo has trusted hooks, merge them per-field onto the resolved config hooks. (4) If repo has no hooks (`NoHooks`), use global+profile hooks directly. (5) If repo hooks need trust and user skips, fall back to global+profile hooks. Global/profile hooks skip the trust dialog entirely (FR-004).
-- [ ] T011 [US1] Update `src/tui/creation_poller.rs` to accept the resolved `HooksConfig` (which now may come from global+profile instead of only repo). No structural change should be needed - the `CreationRequest.hooks` field already carries the hooks, and the sandbox-aware execution paths (`execute_hooks_in_container_streamed` vs `execute_hooks_streamed`) already branch on `data.sandbox`. Verify the existing sandbox branching works correctly for global/profile-sourced hooks (FR-011).
-- [ ] T012 [US1] Update `src/session/instance.rs` `start_with_size_opts()` to resolve hooks from the merged config (global+profile) when `check_hook_trust()` returns `NoHooks`. Currently on_launch hooks for existing sessions only come from repo config. After this change, if no repo hooks exist, use `Config.hooks.on_launch` from the resolved config. Ensure sandbox-aware execution applies (FR-011).
+- [ ] T011 [US1] Update `src/tui/creation_poller.rs` to accept the resolved `HooksConfig` (which now may come from global+profile instead of only repo). No structural change should be needed - the `CreationRequest.hooks` field already carries the hooks and uses the shared host-local execution path.
+- [ ] T012 [US1] Update `src/session/instance.rs` `start_with_size_opts()` to resolve hooks from the merged config (global+profile) when `check_hook_trust()` returns `NoHooks`. Currently on_launch hooks for existing sessions only come from repo config. After this change, if no repo hooks exist, use `Config.hooks.on_launch` from the resolved config and execute it locally in the project path (FR-011).
 - [ ] T013 [US1] Verify that the existing `on_launch_hooks_ran` flag in `CreationResult::Success` and the skip logic in `src/tui/app.rs` `attach_session()` correctly prevents duplicate `on_launch` execution for global/profile-sourced hooks (FR-013). This should work without modification since hooks flow through the same `CreationRequest.hooks` path.
 - [ ] T014 [P] [US1] Add unit test in `tests/hooks_config.rs`: global hooks resolve when no repo config exists. Create a global config with hooks via `tempfile`, verify `resolve_config()` returns the hooks.
 - [ ] T015 [P] [US1] Add unit test in `tests/hooks_config.rs`: repo hooks override global hooks per-field. Set global `on_create=["global"]` and `on_launch=["global"]`, repo `on_create=["repo"]` only. Verify resolved `on_create=["repo"]` and `on_launch=["global"]`.
 - [ ] T016 [P] [US1] Add unit test in `tests/hooks_config.rs`: verify that global/profile hooks are NOT subject to trust checking. Only repo hooks should go through `check_hook_trust()`.
 - [ ] T017 [US1] Run `cargo fmt`, `cargo clippy`, and `cargo test` to validate US1.
 
-**Checkpoint**: Global default hooks work. Sessions without `.aoe/config.toml` use global hooks. Hooks execute in the correct environment (sandbox or local). Failure semantics and duplicate prevention work correctly.
+**Checkpoint**: Global default hooks work. Sessions without `.forager/config.toml` use global hooks. Hooks execute locally in the project path. Failure semantics and duplicate prevention work correctly.
 
 ---
 
@@ -92,7 +92,7 @@
 
 - [ ] T022 [US3] Add `Hooks` variant to `SettingsCategory` enum in `src/tui/settings/fields.rs`. Add display name mapping.
 - [ ] T023 [US3] Add `HookOnCreate` and `HookOnLaunch` variants to `FieldKey` enum in `src/tui/settings/fields.rs`.
-- [ ] T024 [US3] Implement `build_hooks_fields()` function in `src/tui/settings/fields.rs`. Create two `SettingField` entries with `FieldValue::List` type. Use `resolve_value()` pattern for global/profile resolution. Labels: "On Create" and "On Launch". Descriptions: "Commands run once when a session is first created" and "Commands run every time a session starts". Note in description that hooks run inside the sandbox container when sandbox is enabled.
+- [ ] T024 [US3] Implement `build_hooks_fields()` function in `src/tui/settings/fields.rs`. Create two `SettingField` entries with `FieldValue::List` type. Use `resolve_value()` pattern for global/profile resolution. Labels: "On Create" and "On Launch". Descriptions: "Commands run once when a session is first created" and "Commands run every time a session starts".
 - [ ] T025 [US3] Add `SettingsCategory::Hooks` case to `build_fields_for_category()` dispatcher in `src/tui/settings/fields.rs`.
 - [ ] T026 [US3] Add `FieldKey::HookOnCreate` and `FieldKey::HookOnLaunch` cases to `apply_field_to_global()` in `src/tui/settings/fields.rs`. Map `FieldValue::List` to `config.hooks.on_create` / `config.hooks.on_launch`.
 - [ ] T027 [US3] Add `FieldKey::HookOnCreate` and `FieldKey::HookOnLaunch` cases to `apply_field_to_profile()` in `src/tui/settings/fields.rs`. Use `set_or_clear_override()` pattern with `config.hooks` section and `HooksConfigOverride` fields.
@@ -106,26 +106,26 @@
 
 ## Phase 6: User Story 4 - Edit Repo-Level Settings in TUI (Priority: P4)
 
-**Goal**: Users can view and edit `.aoe/config.toml` from a "Repo" tab in settings TUI.
+**Goal**: Users can view and edit `.forager/config.toml` from a "Repo" tab in settings TUI.
 
-**Independent Test**: Select session, open settings, edit repo hooks in Repo tab, save, verify `.aoe/config.toml` updated.
+**Independent Test**: Select session, open settings, edit repo hooks in Repo tab, save, verify `.forager/config.toml` updated.
 
 ### Implementation for User Story 4
 
 - [ ] T031 [US4] Add `Repo` variant to `SettingsCategory` enum in `src/tui/settings/fields.rs`. Add display name mapping.
 - [ ] T032 [US4] Add `RepoHookOnCreate` and `RepoHookOnLaunch` variants to `FieldKey` enum in `src/tui/settings/fields.rs`.
 - [ ] T033 [US4] Add `project_path: Option<String>` and `repo_config: Option<RepoConfig>` fields to `SettingsView` struct in `src/tui/settings/mod.rs`.
-- [ ] T034 [US4] Update `SettingsView::new()` in `src/tui/settings/mod.rs` to accept `project_path: Option<String>` parameter. If Some, load `RepoConfig` from `.aoe/config.toml` at that path (use `load_repo_config()`). Add `SettingsCategory::Repo` to categories list.
+- [ ] T034 [US4] Update `SettingsView::new()` in `src/tui/settings/mod.rs` to accept `project_path: Option<String>` parameter. If Some, load `RepoConfig` from `.forager/config.toml` at that path (use `load_repo_config()`). Add `SettingsCategory::Repo` to categories list.
 - [ ] T035 [US4] Implement `build_repo_fields()` function in `src/tui/settings/fields.rs`. Create `SettingField` entries for repo-level `on_create` and `on_launch` using `FieldValue::List`. Source values from `RepoConfig.hooks` (or empty defaults). These fields do NOT use the global/profile scope toggle.
 - [ ] T036 [US4] Add `SettingsCategory::Repo` case to `build_fields_for_category()` dispatcher in `src/tui/settings/fields.rs`. When `repo_config` is None (no project path), return empty fields.
 - [ ] T037 [US4] Add `FieldKey::RepoHookOnCreate` and `FieldKey::RepoHookOnLaunch` cases to field apply logic. These should update `self.repo_config` rather than global/profile config. Add a dedicated `apply_field_to_repo()` function or handle in the existing dispatcher.
-- [ ] T038 [US4] Update `save()` in `src/tui/settings/mod.rs` to also save `repo_config` changes. If `repo_config` has changes, serialize to `.aoe/config.toml` at `project_path`. Create `.aoe/` directory if it does not exist. Implement `save_repo_config()` function in `src/session/repo_config.rs` if one does not already exist.
+- [ ] T038 [US4] Update `save()` in `src/tui/settings/mod.rs` to also save `repo_config` changes. If `repo_config` has changes, serialize to `.forager/config.toml` at `project_path`. Create `.forager/` directory if it does not exist. Implement `save_repo_config()` function in `src/session/repo_config.rs` if one does not already exist.
 - [ ] T039 [US4] Handle Repo tab disabled state in `src/tui/settings/render.rs`. When `project_path` is None, render a placeholder message in the fields area (e.g., "No session selected - select a session to edit repo settings"). Prevent field editing when disabled.
 - [ ] T040 [US4] Update the call site that opens SettingsView (in `src/tui/home/input.rs` or wherever settings are opened) to pass the currently selected session's `project_path` to `SettingsView::new()`.
 - [ ] T041 [US4] Handle scope toggle behavior: when Repo tab is selected, hide or disable the Global/Profile scope tabs since repo settings are scope-independent. Restore normal scope toggle when switching back to other tabs.
 - [ ] T042 [US4] Run `cargo fmt`, `cargo clippy`, and `cargo test` to validate US4.
 
-**Checkpoint**: Repo tab works. Users can edit `.aoe/config.toml` from the TUI.
+**Checkpoint**: Repo tab works. Users can edit `.forager/config.toml` from the TUI.
 
 ---
 
@@ -135,10 +135,10 @@
 
 - [ ] T043 Run full `cargo fmt`, `cargo clippy`, and `cargo test` suite.
 - [ ] T044 Manual verification: follow `quickstart.md` scenarios end-to-end (global hooks, profile override, repo tab, override hierarchy, disabled state).
-- [ ] T045 Manual verification: sandbox execution scenarios from `quickstart.md` - verify hooks run in container for sandboxed sessions and locally for non-sandboxed sessions.
+- [ ] T045 Manual verification: deferred sandbox scenarios from `quickstart.md` - verify `forager add --sandbox` and `--sandbox-image` are rejected and hook execution remains host-local.
 - [ ] T046 Manual verification: failure semantics from `quickstart.md` - verify `on_create` failure aborts creation and `on_launch` failure allows session to start.
 - [ ] T047 Manual verification: duplicate `on_launch` prevention from `quickstart.md` - verify hooks do not run twice when attaching to a newly created session.
-- [ ] T048 Verify no regressions in existing repo hook behavior (trust system, Docker execution, streamed output).
+- [ ] T048 Verify no regressions in existing repo hook behavior (trust system, host execution, streamed output).
 
 ---
 
@@ -177,9 +177,9 @@
 
 1. Complete Phase 1: Setup
 2. Complete Phase 2: Foundational (config struct changes)
-3. Complete Phase 3: User Story 1 (global hooks execute with sandbox awareness)
+3. Complete Phase 3: User Story 1 (global hooks execute locally)
 4. **STOP and VALIDATE**: Test with `cargo test` and manual verification
-5. Global hooks work in both sandboxed and non-sandboxed sessions
+5. Global hooks work in normal host sessions
 
 ### Incremental Delivery
 
@@ -199,5 +199,5 @@
 - Each user story should be independently completable and testable
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
-- FR-011 (sandbox execution) is primarily validated in US1 since the existing execution code paths already handle sandbox branching
+- FR-011 (host execution) is primarily validated in US1 since the existing execution code paths already run hooks locally
 - FR-012 (failure semantics) and FR-013 (duplicate prevention) leverage existing mechanisms and are validated via tests and manual verification

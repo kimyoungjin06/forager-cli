@@ -1,6 +1,6 @@
 # Sound Effects
 
-Agent of Empires can play sound effects when agent sessions change state, providing audio feedback for transitions like starting, running, waiting, idle, and error states.
+Forager can play sound effects when agent sessions change state, providing audio feedback for transitions like starting, running, waiting, idle, and error states.
 
 ## Features
 
@@ -15,12 +15,12 @@ Agent of Empires can play sound effects when agent sessions change state, provid
 
 1. **Install sounds**:
    ```bash
-   aoe sounds install
+   forager sounds install
    ```
    This downloads and installs CC0 fantasy/RPG sounds from GitHub to your config directory.
 
 2. **Enable sounds in settings**:
-   - Launch `aoe` (TUI mode)
+   - Launch `forager` (TUI mode)
    - Press `s` to open Settings
    - Navigate to the Sound category
    - Enable sounds
@@ -29,7 +29,7 @@ Agent of Empires can play sound effects when agent sessions change state, provid
 
 ## Available Sounds
 
-Agent of Empires can download 10 CC0 (public domain) fantasy/RPG sound effects from GitHub:
+Forager can download 10 CC0 (public domain) fantasy/RPG sound effects from GitHub:
 
 ### Default State Transition Sounds
 - `start.wav` - Spell fire sound (session starting)
@@ -52,26 +52,26 @@ All sounds are from the [80 CC0 RPG SFX](https://opengameart.org/content/80-cc0-
 ### Install Sounds from GitHub
 
 ```bash
-aoe sounds install
+forager sounds install
 ```
 
 This downloads and installs 10 CC0 (public domain) fantasy/RPG sounds from the GitHub repository to:
-- Linux: `~/.config/agent-of-empires/sounds/`
-- macOS: `~/.agent-of-empires/sounds/`
+- Linux: `~/.config/forager/sounds/`
+- macOS: `~/.forager/sounds/`
 
 **Note:** Requires an internet connection for the initial download. Sounds are downloaded from:
-`https://github.com/njbrake/agent-of-empires/tree/main/bundled_sounds`
+`https://github.com/kimyoungjin06/forager-cli/tree/main/bundled_sounds`
 
 ### Useful Commands
 
 **Check installed sounds:**
 ```bash
-aoe sounds list
+forager sounds list
 ```
 
 **Test a sound:**
 ```bash
-aoe sounds test start
+forager sounds test start
 ```
 
 ## Sound Modes
@@ -86,7 +86,7 @@ Always plays the same sound file. Useful if you want one signature sound for all
 
 ### Global Settings
 Configure sounds for all profiles:
-1. Launch `aoe` TUI
+1. Launch `forager` TUI
 2. Press `s` for Settings
 3. Select "Sound" category
 4. Configure:
@@ -103,7 +103,7 @@ Override sound settings per profile:
 
 You can also edit configuration files directly:
 
-**Global**: `~/.config/agent-of-empires/config.toml` (Linux) or `~/.agent-of-empires/config.toml` (macOS)
+**Global**: `~/.config/forager/config.toml` (Linux) or `~/.forager/config.toml` (macOS)
 
 ```toml
 [sound]
@@ -112,7 +112,7 @@ mode = "random"
 on_error = "error"  # Use specific sound for errors
 ```
 
-**Profile**: `~/.config/agent-of-empires/profiles/<profile>/config.toml`
+**Profile**: `~/.config/forager/profiles/<profile>/config.toml`
 
 ```toml
 [sound]
@@ -124,7 +124,7 @@ on_error = "error"
 
 ## Custom Sounds
 
-Add your own sounds to `~/.config/agent-of-empires/sounds/`:
+Add your own sounds to `~/.config/forager/sounds/`:
 
 1. **Supported formats**: `.wav`, `.ogg`
 2. **File naming**: Use descriptive names (e.g., `wololo.wav`, `rogan.ogg`)
@@ -133,7 +133,7 @@ Add your own sounds to `~/.config/agent-of-empires/sounds/`:
 Example:
 ```bash
 # Linux
-cp ~/Downloads/wololo.wav ~/.config/agent-of-empires/sounds/
+cp ~/Downloads/wololo.wav ~/.config/forager/sounds/
 
 # Then in settings, set "On Start" to "wololo"
 ```
@@ -157,13 +157,13 @@ sudo pacman -S alsa-utils pulseaudio
 
 **Sounds not playing?**
 - **SSH Session**: Audio doesn't work over SSH - you need a local terminal with speakers/headphones
-- Check that sound files exist in `~/.config/agent-of-empires/sounds/`
+- Check that sound files exist in `~/.config/forager/sounds/`
 - Verify sounds are enabled in Settings
-- Test audio with: `aplay ~/.config/agent-of-empires/sounds/start.wav` (Linux)
-- Check logs: `AGENT_OF_EMPIRES_DEBUG=1 aoe`
+- Test audio with: `aplay ~/.config/forager/sounds/start.wav` (Linux)
+- Check logs: `FORAGER_DEBUG=1 forager`
 
 **Want Age of Empires II sounds?**
-If you own AoE II, manually copy the taunt files to your sounds directory.
+If you own Age of Empires II, manually copy the taunt files to your sounds directory.
 
 **Custom sounds aren't listed?**
 - Ensure files have `.wav` or `.ogg` extension

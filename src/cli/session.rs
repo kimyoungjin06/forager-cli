@@ -1,4 +1,4 @@
-//! `agent-of-empires session` subcommands implementation
+//! `forager session` subcommands implementation
 
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
@@ -85,6 +85,11 @@ struct SessionDetails {
     profile: String,
 }
 
+fn tmux_session_name_matches(inst: &crate::session::Instance, session_name: &str) -> bool {
+    crate::tmux::Session::generate_name(&inst.id, &inst.title) == session_name
+        || crate::tmux::Session::generate_legacy_name(&inst.id, &inst.title) == session_name
+}
+
 pub async fn run(profile: &str, command: SessionCommands) -> Result<()> {
     match command {
         SessionCommands::Start(args) => start_session(profile, args).await,
@@ -169,7 +174,7 @@ async fn attach_session(profile: &str, args: SessionIdArgs) -> Result<()> {
 
     if !tmux_session.exists() {
         bail!(
-            "Session is not running. Start it first with: agent-of-empires session start {}",
+            "Session is not running. Start it first with: forager session start {}",
             args.identifier
         );
     }
@@ -193,13 +198,8 @@ async fn show_session(profile: &str, args: ShowArgs) -> Result<()> {
         if let Some(session_name) = current_session {
             instances
                 .iter()
-                .find(|i| {
-                    let tmux_name = crate::tmux::Session::generate_name(&i.id, &i.title);
-                    tmux_name == session_name
-                })
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Current tmux session is not an Agent of Empires session")
-                })?
+                .find(|i| tmux_session_name_matches(i, &session_name))
+                .ok_or_else(|| anyhow::anyhow!("Current tmux session is not a Forager session"))?
         } else {
             bail!("Not in a tmux session. Specify a session ID or run inside tmux.");
         }
@@ -254,13 +254,8 @@ async fn rename_session(profile: &str, args: RenameArgs) -> Result<()> {
         if let Some(session_name) = current_session {
             instances
                 .iter()
-                .find(|i| {
-                    let tmux_name = crate::tmux::Session::generate_name(&i.id, &i.title);
-                    tmux_name == session_name
-                })
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Current tmux session is not an Agent of Empires session")
-                })?
+                .find(|i| tmux_session_name_matches(i, &session_name))
+                .ok_or_else(|| anyhow::anyhow!("Current tmux session is not a Forager session"))?
         } else {
             bail!("Not in a tmux session. Specify a session ID or run inside tmux.");
         }
@@ -325,10 +320,10 @@ async fn current_session(args: CurrentArgs) -> Result<()> {
     for profile_name in &profiles {
         if let Ok(storage) = Storage::new(profile_name) {
             if let Ok((instances, _)) = storage.load_with_groups() {
-                if let Some(inst) = instances.iter().find(|i| {
-                    let tmux_name = crate::tmux::Session::generate_name(&i.id, &i.title);
-                    tmux_name == session_name
-                }) {
+                if let Some(inst) = instances
+                    .iter()
+                    .find(|i| tmux_session_name_matches(i, &session_name))
+                {
                     if args.json {
                         #[derive(Serialize)]
                         struct CurrentInfo {
@@ -355,5 +350,5 @@ async fn current_session(args: CurrentArgs) -> Result<()> {
         }
     }
 
-    bail!("Current tmux session is not an Agent of Empires session")
+    bail!("Current tmux session is not a Forager session")
 }

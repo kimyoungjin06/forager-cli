@@ -1,7 +1,7 @@
 //! Integration tests for the core session lifecycle: create, persist, load, remove.
 
-use agent_of_empires::session::{GroupTree, Instance, Storage};
 use anyhow::Result;
+use forager::session::{GroupTree, Instance, Storage};
 use serial_test::serial;
 use std::fs;
 
@@ -124,7 +124,7 @@ fn test_session_backup_created() -> Result<()> {
     storage.save(&instances2)?;
 
     // Verify backup exists by checking the profile directory
-    let profile_dir = agent_of_empires::session::get_profile_dir("default")?;
+    let profile_dir = forager::session::get_profile_dir("default")?;
     let backup_path = profile_dir.join("sessions.json.bak");
     assert!(backup_path.exists());
 

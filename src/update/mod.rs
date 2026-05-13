@@ -9,9 +9,9 @@ use tracing::warn;
 use crate::session::{get_app_dir, get_update_settings};
 
 const GITHUB_API_LATEST: &str =
-    "https://api.github.com/repos/njbrake/agent-of-empires/releases/latest";
+    "https://api.github.com/repos/kimyoungjin06/forager-cli/releases/latest";
 const GITHUB_API_RELEASES: &str =
-    "https://api.github.com/repos/njbrake/agent-of-empires/releases?per_page=20";
+    "https://api.github.com/repos/kimyoungjin06/forager-cli/releases?per_page=20";
 
 #[derive(Debug, Clone)]
 pub struct UpdateInfo {
@@ -84,7 +84,7 @@ pub async fn check_for_update(current_version: &str, force: bool) -> Result<Upda
     }
 
     let client = reqwest::Client::builder()
-        .user_agent("agent-of-empires")
+        .user_agent("forager")
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
 
@@ -218,7 +218,7 @@ pub async fn print_update_notice() {
     if let Ok(info) = check_for_update(version, false).await {
         if info.available {
             eprintln!(
-                "\n💡 Update available: v{} → v{} (run: brew update && brew upgrade aoe)",
+                "\nUpdate available: v{} -> v{} (download: https://github.com/kimyoungjin06/forager-cli/releases/latest)",
                 info.current_version, info.latest_version
             );
         }

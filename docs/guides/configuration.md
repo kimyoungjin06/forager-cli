@@ -1,10 +1,21 @@
 # Configuration Reference
 
-AoE uses a layered configuration system. Settings are resolved in this order:
+Forager uses a layered configuration system. Settings are resolved in this order:
 
-1. **Global config** -- `~/.agent-of-empires/config.toml` (or `~/.config/agent-of-empires/config.toml` on Linux)
-2. **Profile config** -- `~/.agent-of-empires/profiles/<name>/config.toml`
-3. **Repo config** -- `.aoe/config.toml` in the project root
+1. **Global config** -- `~/.forager/config.toml` (or `~/.config/forager/config.toml` on Linux)
+2. **Profile config** -- `~/.forager/profiles/<name>/config.toml`
+3. **Repo config** -- `.forager/config.toml` in the project root
+
+Forager still reads and writes the existing legacy paths when they
+already exist: `~/.agent-of-empires`, `~/.config/agent-of-empires`, and
+`.aoe/config.toml`.
+
+Run `forager doctor` to see which global data path, repo config path, and
+profile environment source are active on the current machine.
+
+Run `forager migrate aoe` to copy existing legacy global data and the
+current repo's `.aoe/config.toml` into the new Forager paths. The migration keeps
+legacy paths as backups and refuses to overwrite existing Forager targets.
 
 Later layers override earlier ones. Only explicitly set fields override; unset fields inherit from the previous layer.
 
@@ -14,11 +25,11 @@ All settings below can also be edited from the TUI settings screen (press `s` or
 
 | Platform | Global Config |
 |----------|--------------|
-| Linux | `$XDG_CONFIG_HOME/agent-of-empires/config.toml` (defaults to `~/.config/agent-of-empires/`) |
-| macOS | `~/.agent-of-empires/config.toml` |
+| Linux | `$XDG_CONFIG_HOME/forager/config.toml` (defaults to `~/.config/forager/`) |
+| macOS | `~/.forager/config.toml` |
 
 ```
-~/.agent-of-empires/
+~/.forager/
   config.toml              # Global configuration
   trusted_repos.toml       # Hook trust decisions (auto-managed)
   .schema_version          # Migration tracking (auto-managed)
@@ -34,8 +45,10 @@ All settings below can also be edited from the TUI settings screen (press `s` or
 
 | Variable | Description |
 |----------|-------------|
-| `AGENT_OF_EMPIRES_PROFILE` | Default profile to use |
-| `AGENT_OF_EMPIRES_DEBUG` | Enable debug logging (`1` to enable) |
+| `FORAGER_PROFILE` | Default profile to use |
+| `FORAGER_DEBUG` | Enable debug logging (`1` to enable) |
+| `AGENT_OF_EMPIRES_PROFILE` | Legacy fallback for `FORAGER_PROFILE` |
+| `AGENT_OF_EMPIRES_DEBUG` | Legacy fallback for `FORAGER_DEBUG` |
 
 ## Session
 
@@ -48,7 +61,7 @@ yolo_mode_default = false
 | Option | Default | Description |
 |--------|---------|-------------|
 | `default_tool` | (auto-detect) | Default agent for new sessions. Falls back to the first available tool if unset or unavailable. |
-| `yolo_mode_default` | `false` | Enable YOLO mode by default for new sessions (skip permission prompts). Works with or without sandbox. |
+| `yolo_mode_default` | `false` | Enable YOLO mode by default for new sessions (skip permission prompts). |
 
 ## Worktree
 
@@ -79,40 +92,6 @@ delete_branch_on_cleanup = false
 | `{branch}` | Branch name (slashes converted to hyphens) |
 | `{session-id}` | First 8 characters of session UUID |
 
-## Sandbox (Docker)
-
-```toml
-[sandbox]
-enabled_by_default = false
-default_image = "ghcr.io/njbrake/aoe-sandbox:latest"
-cpu_limit = "4"
-memory_limit = "8g"
-environment = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
-environment_values = { GH_TOKEN = "$AOE_GH_TOKEN" }
-extra_volumes = []
-volume_ignores = ["node_modules", "target"]
-auto_cleanup = true
-default_terminal_mode = "host"
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled_by_default` | `false` | Auto-enable sandbox for new sessions |
-| `default_image` | `ghcr.io/njbrake/aoe-sandbox:latest` | Docker image for containers |
-| `cpu_limit` | (none) | CPU limit (e.g., `"4"`) |
-| `memory_limit` | (none) | Memory limit (e.g., `"8g"`) |
-| `environment` | `["TERM", "COLORTERM", "FORCE_COLOR", "NO_COLOR"]` | Host env var names to pass through |
-| `environment_values` | `{}` | Env vars with explicit values (see below) |
-| `extra_volumes` | `[]` | Additional Docker volume mounts |
-| `volume_ignores` | `[]` | Directories to exclude from the project mount via anonymous volumes |
-| `auto_cleanup` | `true` | Remove containers when sessions are deleted |
-| `default_terminal_mode` | `"host"` | Paired terminal location: `"host"` or `"container"` |
-
-### environment vs environment_values
-
-- **`environment`** passes host env vars by name. The host value is read at container start.
-- **`environment_values`** injects fixed values. Values starting with `$` reference a host env var (e.g., `"$AOE_GH_TOKEN"` reads `AOE_GH_TOKEN` from the host). Use `$$` for a literal `$`.
-
 ## tmux
 
 ```toml
@@ -124,7 +103,7 @@ mouse = "auto"
 | Option | Default | Description |
 |--------|---------|-------------|
 | `status_bar` | `"auto"` | `"auto"`: apply if no `~/.tmux.conf`; `"enabled"`: always apply; `"disabled"`: never apply |
-| `mouse` | `"auto"` | Same modes as `status_bar`. Controls mouse support in aoe tmux sessions. |
+| `mouse` | `"auto"` | Same modes as `status_bar`. Controls mouse support in Forager tmux sessions. |
 
 ## Diff
 
@@ -172,19 +151,19 @@ config_dir = "~/.claude"
 Profiles provide separate workspaces with their own sessions and groups. Each profile can override any of the settings above.
 
 ```bash
-aoe                 # Uses "default" profile
-aoe -p work         # Uses "work" profile
-aoe profile create client-xyz
-aoe profile list
-aoe profile default work   # Set "work" as default
+forager                 # Uses "default" profile
+forager -p work         # Uses "work" profile
+forager profile create client-xyz
+forager profile list
+forager profile default work   # Set "work" as default
 ```
 
-Profile overrides go in `~/.agent-of-empires/profiles/<name>/config.toml` and use the same format as the global config.
+Profile overrides go in `~/.forager/profiles/<name>/config.toml` and use the same format as the global config.
 
 ## Repo Config
 
-Per-repo settings go in `.aoe/config.toml` at your project root. Run `aoe init` to generate a template.
+Per-repo settings go in `.forager/config.toml` at your project root. Run `forager init` to generate a template. Existing `.aoe/config.toml` files are still honored.
 
-Repo config supports: `[hooks]`, `[session]`, `[sandbox]`, and `[worktree]` sections. It does not support `[tmux]`, `[updates]`, `[claude]`, or `[diff]` -- those are personal settings.
+Repo config supports: `[hooks]`, `[session]`, and `[worktree]` sections. It does not support `[tmux]`, `[updates]`, `[claude]`, or `[diff]` -- those are personal settings.
 
 See [Repo Config & Hooks](repo-config.md) for details.

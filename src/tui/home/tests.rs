@@ -1,11 +1,14 @@
 //! Tests for HomeView
 
+use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde_json::json;
 use serial_test::serial;
+use std::fs;
 use tempfile::TempDir;
 use tui_input::Input;
 
-use super::{HomeView, ViewMode};
+use super::{HomeView, OffdeskResumeSummary, ViewMode};
 use crate::session::{Instance, Item, Storage};
 use crate::tmux::AvailableTools;
 use crate::tui::app::Action;
@@ -13,6 +16,10 @@ use crate::tui::dialogs::{InfoDialog, NewSessionDialog};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn key_with_mod(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
 }
 
 fn setup_test_home(temp: &TempDir) {
@@ -75,6 +82,80 @@ fn create_test_env_with_groups() -> TestEnv {
     let tools = AvailableTools::with_tools(&["claude"]);
     let view = HomeView::new(storage, tools).unwrap();
     TestEnv { _temp: temp, view }
+}
+
+#[test]
+#[serial]
+fn load_offdesk_summary_counts_recovery_tasks() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "failed-task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "failed",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_background",
+                "command": "true",
+                "workdir": "/tmp",
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "task_id": "resume-task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "resume_pending",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_background",
+                "command": "true",
+                "workdir": "/tmp",
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "task_id": "cancelled-task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "cancelled",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_background",
+                "command": "true",
+                "workdir": "/tmp",
+                "created_at": now,
+                "updated_at": now
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let summary = super::load_offdesk_summary("test");
+
+    assert_eq!(summary.failed_tasks, 1);
+    assert_eq!(summary.resume_pending_tasks, 1);
+    assert_eq!(summary.cancelled_tasks, 1);
+    assert!(summary.needs_operator_attention());
+}
+
+#[test]
+fn offdesk_attention_includes_failed_and_resume_pending_tasks() {
+    assert!(OffdeskResumeSummary {
+        failed_tasks: 1,
+        ..OffdeskResumeSummary::default()
+    }
+    .needs_operator_attention());
+    assert!(OffdeskResumeSummary {
+        resume_pending_tasks: 1,
+        ..OffdeskResumeSummary::default()
+    }
+    .needs_operator_attention());
 }
 
 #[test]
@@ -238,6 +319,120 @@ fn test_page_down_clamps_to_end() {
     env.view.cursor = 0;
     env.view.handle_key(key(KeyCode::PageDown));
     assert_eq!(env.view.cursor, 4);
+}
+
+#[test]
+#[serial]
+fn test_ctrl_tab_cycles_to_next_session_and_attaches() {
+    let mut env = create_test_env_with_sessions(3);
+    let sessions = env.view.visible_session_ids();
+    assert_eq!(sessions.len(), 3);
+
+    let action = env
+        .view
+        .handle_key(key_with_mod(KeyCode::Tab, KeyModifiers::CONTROL));
+
+    assert_eq!(action, Some(Action::AttachSession(sessions[1].clone())));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(sessions[1].as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn test_ctrl_backtab_cycles_to_previous_session_and_attaches() {
+    let mut env = create_test_env_with_sessions(3);
+    let sessions = env.view.visible_session_ids();
+    assert_eq!(sessions.len(), 3);
+
+    let action = env
+        .view
+        .handle_key(key_with_mod(KeyCode::BackTab, KeyModifiers::CONTROL));
+
+    assert_eq!(action, Some(Action::AttachSession(sessions[2].clone())));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(sessions[2].as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn test_tab_cycles_to_next_session_and_attaches() {
+    let mut env = create_test_env_with_sessions(3);
+    let sessions = env.view.visible_session_ids();
+
+    let action = env.view.handle_key(key(KeyCode::Tab));
+
+    assert_eq!(action, Some(Action::AttachSession(sessions[1].clone())));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(sessions[1].as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn test_shift_backtab_cycles_to_previous_session_and_attaches() {
+    let mut env = create_test_env_with_sessions(3);
+    let sessions = env.view.visible_session_ids();
+
+    let action = env
+        .view
+        .handle_key(key_with_mod(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+    assert_eq!(action, Some(Action::AttachSession(sessions[2].clone())));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(sessions[2].as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn test_number_jumps_to_session_and_attaches() {
+    let mut env = create_test_env_with_sessions(3);
+    let sessions = env.view.visible_session_ids();
+
+    let action = env.view.handle_key(key(KeyCode::Char(char::from(50))));
+
+    assert_eq!(action, Some(Action::AttachSession(sessions[1].clone())));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(sessions[1].as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn test_alt_number_jumps_to_session_and_attaches() {
+    let mut env = create_test_env_with_sessions(3);
+    let sessions = env.view.visible_session_ids();
+
+    let action = env
+        .view
+        .handle_key(key_with_mod(KeyCode::Char('2'), KeyModifiers::ALT));
+
+    assert_eq!(action, Some(Action::AttachSession(sessions[1].clone())));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(sessions[1].as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn test_alt_number_attaches_terminal_in_terminal_view() {
+    let mut env = create_test_env_with_sessions(2);
+    env.view.view_mode = ViewMode::Terminal;
+    let sessions = env.view.visible_session_ids();
+
+    let action = env
+        .view
+        .handle_key(key_with_mod(KeyCode::Char('1'), KeyModifiers::ALT));
+
+    assert_eq!(action, Some(Action::AttachTerminal(sessions[0].clone())));
 }
 
 #[test]
@@ -658,7 +853,7 @@ fn test_enter_returns_attach_terminal_in_terminal_view() {
 
     // In Terminal view, Enter returns AttachTerminal
     let action = view.handle_key(key(KeyCode::Enter));
-    assert!(matches!(action, Some(Action::AttachTerminal(_, _))));
+    assert!(matches!(action, Some(Action::AttachTerminal(_))));
 }
 
 #[test]
@@ -742,7 +937,6 @@ fn create_test_env_with_group_sessions() -> TestEnv {
         created_at: None,
         extra_env_keys: None,
         extra_env_values: None,
-        custom_instruction: None,
     });
     instances.push(inst3);
 
@@ -775,7 +969,7 @@ fn test_group_has_managed_worktrees() {
     inst1.worktree_info = Some(WorktreeInfo {
         branch: "feature-branch".to_string(),
         main_repo_path: "/tmp/main".to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: Utc::now(),
         cleanup_on_delete: true,
     });
@@ -811,7 +1005,6 @@ fn test_group_has_containers() {
         created_at: None,
         extra_env_keys: None,
         extra_env_values: None,
-        custom_instruction: None,
     });
 
     let mut inst2 = Instance::new("other-session", "/tmp/other");
@@ -928,7 +1121,7 @@ fn test_delete_group_with_sessions_respects_worktree_option() {
     inst1.worktree_info = Some(WorktreeInfo {
         branch: "feature".to_string(),
         main_repo_path: "/tmp/main".to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: Utc::now(),
         cleanup_on_delete: true,
     });
@@ -978,7 +1171,6 @@ fn test_delete_group_with_sessions_respects_container_option() {
         created_at: None,
         extra_env_keys: None,
         extra_env_values: None,
-        custom_instruction: None,
     });
 
     storage.save(&[inst1]).unwrap();

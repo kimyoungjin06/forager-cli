@@ -5,9 +5,9 @@
 #   ./scripts/capture-fixtures.sh <tool> <state> <tmux_session> [description]
 #
 # Examples:
-#   ./scripts/capture-fixtures.sh claude running aoe_myproject_abc12345
-#   ./scripts/capture-fixtures.sh claude running aoe_myproject_abc12345 "tool_call"
-#   ./scripts/capture-fixtures.sh opencode waiting_question aoe_task_def67890 "clarification"
+#   ./scripts/capture-fixtures.sh claude running forager_myproject_abc12345
+#   ./scripts/capture-fixtures.sh claude running forager_myproject_abc12345 "tool_call"
+#   ./scripts/capture-fixtures.sh opencode waiting_question forager_task_def67890 "clarification"
 #
 # States: running, waiting_question, waiting_permission, idle
 #
@@ -35,14 +35,14 @@ usage() {
     echo "  description   Optional description for the fixture filename (e.g., 'tool_call')"
     echo ""
     echo "Examples:"
-    echo "  $0 claude running aoe_myproject_abc12345"
-    echo "  $0 claude running aoe_myproject_abc12345 tool_call"
-    echo "  $0 opencode waiting_question aoe_task_def67890 clarification"
+    echo "  $0 claude running forager_myproject_abc12345"
+    echo "  $0 claude running forager_myproject_abc12345 tool_call"
+    echo "  $0 opencode waiting_question forager_task_def67890 clarification"
     echo ""
     echo "Output filename format: NNN_description.txt (e.g., 001_capture.txt, 002_tool_call.txt)"
     echo ""
     echo "Steps to capture a fixture:"
-    echo "  1. Start the tool in a tmux session managed by aoe"
+    echo "  1. Start the tool in a tmux session managed by Forager"
     echo "  2. Get the tool into the desired state (running, waiting, etc.)"
     echo "  3. Run this script with the appropriate arguments"
     echo "  4. Verify the captured output looks correct"

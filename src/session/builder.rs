@@ -3,16 +3,15 @@
 //! This module provides shared logic for building new session instances,
 //! used by both synchronous (TUI operations) and asynchronous (background poller) code paths.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use chrono::Utc;
 
-use crate::containers::{self, ContainerRuntimeInterface};
+use crate::containers;
 use crate::git::GitWorktree;
 
-use super::{civilizations, Config, Instance, SandboxInfo, WorktreeInfo};
+use super::{civilizations, Config, Instance, WorktreeInfo};
 
 /// Parameters for creating a new session instance.
 #[derive(Debug, Clone)]
@@ -23,20 +22,13 @@ pub struct InstanceParams {
     pub tool: String,
     pub worktree_branch: Option<String>,
     pub create_new_branch: bool,
-    pub sandbox: bool,
-    /// The sandbox image to use. Required when sandbox is true.
-    pub sandbox_image: String,
     pub yolo_mode: bool,
-    /// Additional environment variable keys to pass from host to container.
-    pub extra_env_keys: Vec<String>,
-    /// Additional KEY=VALUE environment variables to inject into the container.
-    pub extra_env_values: Vec<String>,
 }
 
 /// Result of building an instance, tracking what was created for cleanup purposes.
 pub struct BuildResult {
     pub instance: Instance,
-    /// Path to worktree if one was created and managed by aoe
+    /// Path to worktree if one was created and managed by Forager
     pub created_worktree: Option<CreatedWorktree>,
 }
 
@@ -46,22 +38,11 @@ pub struct CreatedWorktree {
     pub main_repo_path: PathBuf,
 }
 
-/// Build an instance with all setup (worktree resolution, sandbox config).
+/// Build an instance with all setup that is active for new Forager sessions.
 ///
-/// This does NOT start the instance or create Docker containers - that happens
-/// separately via `instance.start()`. This separation allows for proper cleanup
-/// if starting fails.
+/// This does NOT start the instance. New Docker sandbox creation is blocked here
+/// because new-session parameters no longer carry inherited sandbox fields.
 pub fn build_instance(params: InstanceParams, existing_titles: &[&str]) -> Result<BuildResult> {
-    if params.sandbox {
-        let runtime = containers::get_container_runtime();
-        if !runtime.is_available() {
-            bail!("Container runtime is not installed. Please install Docker or Apple Container to use sandbox mode.");
-        }
-        if !runtime.is_daemon_running() {
-            bail!("Container runtime daemon is not running. Please start Docker or Apple Container to use sandbox mode.");
-        }
-    }
-
     let mut final_path = PathBuf::from(&params.path)
         .canonicalize()
         .map(|p| p.to_string_lossy().to_string())
@@ -100,7 +81,7 @@ pub fn build_instance(params: InstanceParams, existing_titles: &[&str]) -> Resul
                 worktree_info = Some(WorktreeInfo {
                     branch: branch.clone(),
                     main_repo_path: main_repo_path.to_string_lossy().to_string(),
-                    managed_by_aoe: false,
+                    managed_by_forager: false,
                     created_at: Utc::now(),
                     cleanup_on_delete: false,
                 });
@@ -118,7 +99,7 @@ pub fn build_instance(params: InstanceParams, existing_titles: &[&str]) -> Resul
                 worktree_info = Some(WorktreeInfo {
                     branch: branch.clone(),
                     main_repo_path: main_repo_path.to_string_lossy().to_string(),
-                    managed_by_aoe: true,
+                    managed_by_forager: true,
                     created_at: Utc::now(),
                     cleanup_on_delete: true,
                 });
@@ -141,7 +122,7 @@ pub fn build_instance(params: InstanceParams, existing_titles: &[&str]) -> Resul
             worktree_info = Some(WorktreeInfo {
                 branch: branch.clone(),
                 main_repo_path: main_repo_path.to_string_lossy().to_string(),
-                managed_by_aoe: true,
+                managed_by_forager: true,
                 created_at: Utc::now(),
                 cleanup_on_delete: true,
             });
@@ -164,40 +145,6 @@ pub fn build_instance(params: InstanceParams, existing_titles: &[&str]) -> Resul
     instance.worktree_info = worktree_info;
     instance.yolo_mode = params.yolo_mode;
 
-    if params.sandbox {
-        instance.sandbox_info = Some(SandboxInfo {
-            enabled: true,
-            container_id: None,
-            image: params.sandbox_image.clone(),
-            container_name: containers::DockerContainer::generate_name(&instance.id),
-            created_at: None,
-            extra_env_keys: if params.extra_env_keys.is_empty() {
-                None
-            } else {
-                Some(params.extra_env_keys.clone())
-            },
-            extra_env_values: {
-                let map: HashMap<String, String> = params
-                    .extra_env_values
-                    .iter()
-                    .filter_map(|entry| {
-                        entry
-                            .split_once('=')
-                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                    })
-                    .collect();
-                if map.is_empty() {
-                    None
-                } else {
-                    Some(map)
-                }
-            },
-            custom_instruction: Config::load()
-                .ok()
-                .and_then(|c| c.sandbox.custom_instruction),
-        });
-    }
-
     Ok(BuildResult {
         instance,
         created_worktree,
@@ -207,7 +154,7 @@ pub fn build_instance(params: InstanceParams, existing_titles: &[&str]) -> Resul
 /// Clean up resources created during a failed or cancelled instance build.
 ///
 /// This handles:
-/// - Removing worktrees created by aoe
+/// - Removing worktrees created by Forager
 /// - Removing Docker containers
 /// - Killing tmux sessions
 pub fn cleanup_instance(instance: &Instance, created_worktree: Option<&CreatedWorktree>) {
@@ -221,7 +168,11 @@ pub fn cleanup_instance(instance: &Instance, created_worktree: Option<&CreatedWo
 
     if let Some(sandbox) = &instance.sandbox_info {
         if sandbox.enabled {
-            let container = containers::DockerContainer::from_session_id(&instance.id);
+            let container = containers::DockerContainer::from_stored_name(
+                &instance.id,
+                &sandbox.image,
+                &sandbox.container_name,
+            );
             if container.exists().unwrap_or(false) {
                 if let Err(e) = container.remove(true) {
                     tracing::warn!("Failed to clean up container: {}", e);

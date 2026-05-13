@@ -3,6 +3,9 @@
 **Date**: 2026-02-03
 **Feature Branch**: `002-hooks-settings-tui`
 
+**Current Forager note**: This research note predates sandbox removal. Current
+Forager hook execution is host-local; legacy sandbox state is cleanup-only.
+
 ## R1: Where to Place HooksConfig in Global Config
 
 **Decision**: Add `pub hooks: HooksConfig` (with `#[serde(default)]`) to
@@ -10,7 +13,7 @@ the `Config` struct in `src/session/config.rs`. Default is empty lists
 for both `on_create` and `on_launch`.
 
 **Rationale**: The existing `Config` struct already contains all
-user-preference sections (worktree, sandbox, tmux, session, sound). Hooks
+user-preference sections (worktree, tmux, session, sound). Hooks
 at the global level are user preferences - not security-sensitive repo
 artifacts. The `HooksConfig` struct already exists in
 `src/session/repo_config.rs` and can be reused directly.
@@ -19,7 +22,7 @@ artifacts. The `HooksConfig` struct already exists in
 - Separate global hooks config file: Rejected. Would break the
   single-file convention for global config and add unnecessary I/O.
 - Nested within an existing section: Rejected. Hooks are orthogonal to
-  sandbox/session/worktree concerns.
+  session/worktree concerns.
 
 ## R2: Profile Override Pattern for Hooks
 
@@ -46,10 +49,10 @@ global+profile config. The existing chain (global -> profile -> repo)
 remains; hooks now participate at all three levels.
 
 **Rationale**: `resolve_config_with_repo()` already calls
-`merge_repo_config()`. That function already merges sandbox, session,
-and worktree overrides from `RepoConfig`. Adding hooks follows the same
-pattern. Since `Config` will now carry hooks, repo hooks simply override
-the resolved global+profile hooks.
+`merge_repo_config()`. That function already merges session, worktree,
+and legacy cleanup-policy overrides from `RepoConfig`. Adding hooks
+follows the same pattern. Since `Config` will now carry hooks, repo hooks
+simply override the resolved global+profile hooks.
 
 **Alternatives considered**:
 - Separate resolution function for hooks: Rejected. Would duplicate the
@@ -59,12 +62,12 @@ the resolved global+profile hooks.
 
 **Decision**: Global and profile hooks are implicitly trusted. The trust
 check in `check_hook_trust()` only applies to repo-level hooks from
-`.aoe/config.toml`. No changes to the trust system are needed.
+`.forager/config.toml`. No changes to the trust system are needed.
 
 **Rationale**: Global/profile hooks are written by the user in their own
 config directory (which they control). Repo hooks come from cloned
 repositories and may contain untrusted commands. This distinction already
-exists - the trust system only reads `.aoe/config.toml`.
+exists - the trust system only reads `.forager/config.toml`.
 
 **Alternatives considered**:
 - Trust all hooks: Rejected. Repo hooks from untrusted repos must still
@@ -76,7 +79,7 @@ exists - the trust system only reads `.aoe/config.toml`.
 
 **Decision**: Add `SettingsCategory::Repo` as a new tab. This tab
 operates differently from other tabs: it does NOT use the Global/Profile
-scope toggle. Instead, it loads/saves `.aoe/config.toml` from the
+scope toggle. Instead, it loads/saves `.forager/config.toml` from the
 currently selected session's project path. The tab is only available when
 a session with a project path is selected.
 
@@ -96,10 +99,10 @@ makes this distinction clear in the UI.
 
 **Decision**: The Repo tab will:
 1. Accept a `project_path: Option<String>` in `SettingsView::new()`.
-2. Load `RepoConfig` from `.aoe/config.toml` at that path (or empty
+2. Load `RepoConfig` from `.forager/config.toml` at that path (or empty
    defaults if file doesn't exist).
 3. Store it as `repo_config: Option<RepoConfig>` on `SettingsView`.
-4. On save, serialize and write to `.aoe/config.toml`, creating the
+4. On save, serialize and write to `.forager/config.toml`, creating the
    directory if needed.
 5. If `project_path` is None, the Repo tab shows a disabled placeholder.
 
@@ -112,29 +115,22 @@ which can cover repo changes too.
   simpler. The save function can dispatch to the appropriate backend
   based on which fields changed.
 
-## R7: Sandbox Execution Semantics for Global/Profile Hooks
+## R7: Host Execution Semantics for Global/Profile Hooks
 
-**Decision**: Global and profile hooks follow the same execution model
-as repo hooks. The session's sandbox setting determines where hooks
-run - not which config level they came from. Sandboxed sessions run all
-hooks inside the container; non-sandboxed sessions run hooks locally.
-Failure semantics (`on_create` = fatal, `on_launch` = non-fatal) apply
-uniformly regardless of config level.
+**Decision**: Global and profile hooks follow the same host-local
+execution model as repo hooks. Hooks run in the project directory. Failure
+semantics (`on_create` = fatal, `on_launch` = non-fatal) apply uniformly
+regardless of config level.
 
 **Rationale**: The existing hook execution code in `creation_poller.rs`
-and `instance.rs` already branches on `data.sandbox` / sandbox presence.
-Since global/profile hooks are resolved into the same `HooksConfig`
+and `instance.rs` already accepts a resolved `HooksConfig` and executes
+local hook commands. Since global/profile hooks are resolved into the same
 struct as repo hooks (via the merge chain), they naturally flow through
 the same execution path. No special-casing is needed.
 
 **Alternatives considered**:
-- Per-hook sandbox override (run some hooks locally, others in
-  container): Rejected. Adds complexity with minimal benefit. Users who
-  need host-side commands can use repo-level hooks or run them outside
-  aoe.
-- Always run global/profile hooks locally: Rejected. Would break
-  the principle that hooks prepare the session's working environment.
-  In sandboxed sessions, the working environment IS the container.
+- Per-hook execution-location override: Rejected. Adds complexity with
+  minimal benefit while the product has no active sandbox runtime.
 
 ## R8: Duplicate on_launch Prevention for Global/Profile Hooks
 

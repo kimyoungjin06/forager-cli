@@ -343,172 +343,6 @@ fn test_new_branch_field_hidden_without_worktree() {
 }
 
 #[test]
-fn test_sandbox_disabled_by_default() {
-    let dialog = multi_tool_dialog();
-    assert!(!dialog.sandbox_enabled);
-}
-
-#[test]
-fn test_sandbox_image_initialized_with_effective_default() {
-    use crate::containers;
-    let dialog = multi_tool_dialog();
-    // The sandbox image input is initialized with the effective default
-    assert_eq!(
-        dialog.sandbox_image.value(),
-        containers::get_container_runtime().effective_default_image()
-    );
-}
-
-#[test]
-fn test_tab_includes_sandbox_options_when_sandbox_enabled() {
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
-
-    // Tab through all fields:
-    // 0: title, 1: path, 2: tool, 3: yolo, 4: worktree, 5: sandbox, 6: image, 7: env keys, 8: env values, 9: inherited, 10: group
-    for _ in 0..5 {
-        dialog.handle_key(key(KeyCode::Tab));
-    }
-    assert_eq!(dialog.focused_field, 5); // sandbox field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 6); // sandbox image field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 7); // env keys field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 8); // env values field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 9); // inherited settings field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 10); // group field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 0); // wrap to start
-}
-
-#[test]
-fn test_tab_skips_sandbox_image_when_sandbox_disabled() {
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = false;
-
-    // Tab through all fields - should not include sandbox image
-    // 0: title, 1: path, 2: tool, 3: yolo, 4: worktree, 5: sandbox, 6: group
-    for _ in 0..5 {
-        dialog.handle_key(key(KeyCode::Tab));
-    }
-    assert_eq!(dialog.focused_field, 5); // sandbox field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 6); // group field
-
-    dialog.handle_key(key(KeyCode::Tab));
-    assert_eq!(dialog.focused_field, 0); // wrap to start
-}
-
-#[test]
-fn test_submit_with_custom_sandbox_image() {
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
-    dialog.sandbox_image = Input::new("custom/image:tag".to_string());
-    dialog.title = Input::new("Test".to_string());
-
-    let result = dialog.handle_key(key(KeyCode::Enter));
-    match result {
-        DialogResult::Submit(data) => {
-            assert!(data.sandbox);
-            assert_eq!(data.sandbox_image, "custom/image:tag");
-        }
-        _ => panic!("Expected Submit"),
-    }
-}
-
-#[test]
-fn test_submit_with_default_image_passes_through() {
-    use crate::containers;
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
-    dialog.title = Input::new("Test".to_string());
-
-    let result = dialog.handle_key(key(KeyCode::Enter));
-    match result {
-        DialogResult::Submit(data) => {
-            assert!(data.sandbox);
-            // The image value from the input field is always passed through
-            assert_eq!(
-                data.sandbox_image,
-                containers::get_container_runtime().effective_default_image()
-            );
-        }
-        _ => panic!("Expected Submit"),
-    }
-}
-
-#[test]
-fn test_submit_with_empty_image() {
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
-    dialog.sandbox_image = Input::new("".to_string());
-    dialog.title = Input::new("Test".to_string());
-
-    let result = dialog.handle_key(key(KeyCode::Enter));
-    match result {
-        DialogResult::Submit(data) => {
-            assert!(data.sandbox);
-            // Empty string is passed through as-is
-            assert_eq!(data.sandbox_image, "");
-        }
-        _ => panic!("Expected Submit"),
-    }
-}
-
-#[test]
-fn test_submit_sandbox_image_always_included() {
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = false;
-    dialog.sandbox_image = Input::new("custom/image:tag".to_string());
-    dialog.title = Input::new("Test".to_string());
-
-    let result = dialog.handle_key(key(KeyCode::Enter));
-    match result {
-        DialogResult::Submit(data) => {
-            assert!(!data.sandbox);
-            // sandbox_image is always included (it's a String, not Option)
-            assert_eq!(data.sandbox_image, "custom/image:tag");
-        }
-        _ => panic!("Expected Submit"),
-    }
-}
-
-#[test]
-fn test_sandbox_image_input_works() {
-    use crate::containers;
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
-    dialog.focused_field = 6; // sandbox image field (yolo=3, worktree=4, sandbox=5, image=6)
-
-    dialog.handle_key(key(KeyCode::Char('a')));
-    dialog.handle_key(key(KeyCode::Char('b')));
-    dialog.handle_key(key(KeyCode::Char('c')));
-
-    let expected = format!(
-        "{}abc",
-        containers::get_container_runtime().effective_default_image()
-    );
-    assert_eq!(dialog.sandbox_image.value(), expected);
-}
-
-#[test]
 fn test_yolo_mode_disabled_by_default() {
     let dialog = multi_tool_dialog();
     assert!(!dialog.yolo_mode);
@@ -517,8 +351,6 @@ fn test_yolo_mode_disabled_by_default() {
 #[test]
 fn test_yolo_mode_toggle() {
     let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
     dialog.focused_field = 3; // yolo mode field (tool=2, yolo=3)
     assert!(!dialog.yolo_mode);
 
@@ -532,15 +364,12 @@ fn test_yolo_mode_toggle() {
 #[test]
 fn test_submit_with_yolo_mode_enabled() {
     let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
     dialog.yolo_mode = true;
     dialog.title = Input::new("Test".to_string());
 
     let result = dialog.handle_key(key(KeyCode::Enter));
     match result {
         DialogResult::Submit(data) => {
-            assert!(data.sandbox);
             assert!(data.yolo_mode);
         }
         _ => panic!("Expected Submit"),
@@ -548,34 +377,18 @@ fn test_submit_with_yolo_mode_enabled() {
 }
 
 #[test]
-fn test_yolo_independent_of_sandbox() {
+fn test_yolo_mode_submission_without_sandbox_fields() {
     let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = false;
     dialog.yolo_mode = true;
     dialog.title = Input::new("Test".to_string());
 
     let result = dialog.handle_key(key(KeyCode::Enter));
     match result {
         DialogResult::Submit(data) => {
-            assert!(!data.sandbox);
             assert!(data.yolo_mode);
         }
         _ => panic!("Expected Submit"),
     }
-}
-
-#[test]
-fn test_disabling_sandbox_does_not_reset_yolo_mode() {
-    let mut dialog = multi_tool_dialog();
-    dialog.docker_available = true;
-    dialog.sandbox_enabled = true;
-    dialog.yolo_mode = true;
-    dialog.focused_field = 5; // sandbox field (yolo=3, worktree=4, sandbox=5)
-
-    dialog.handle_key(key(KeyCode::Char(' ')));
-    assert!(!dialog.sandbox_enabled);
-    assert!(dialog.yolo_mode);
 }
 
 #[test]
@@ -604,6 +417,7 @@ fn test_profile_override_sets_default_tool() {
         session: Some(SessionConfigOverride {
             default_tool: Some("opencode".to_string()),
             yolo_mode_default: None,
+            ..Default::default()
         }),
         ..Default::default()
     };
@@ -631,6 +445,7 @@ fn test_profile_override_beats_global_default_tool() {
         session: Some(SessionConfigOverride {
             default_tool: Some("opencode".to_string()),
             yolo_mode_default: None,
+            ..Default::default()
         }),
         ..Default::default()
     };

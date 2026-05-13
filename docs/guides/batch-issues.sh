@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to fetch GitHub issues from a repository and launch aoe sessions for each
+# Script to fetch GitHub issues from a repository and launch Forager sessions for each
 
 set -e
 
@@ -9,26 +9,24 @@ REPO=""
 REPO_PATH=""
 PROFILE=""
 GROUP=""
-SANDBOX_IMAGE=""
 DRY_RUN=false
 LIMIT=0  # 0 means no limit
 
-AOE_CMD="./target/release/aoe"
+FORAGER_CMD="${FORAGER_CMD:-./target/release/forager}"
 
 # Parse command line arguments
 usage() {
     echo "Usage: $0 --repo OWNER/REPO --path PATH [OPTIONS]"
     echo ""
-    echo "Fetch GitHub issues from a repository and launch aoe sessions for each."
+    echo "Fetch GitHub issues from a repository and launch Forager sessions for each."
     echo ""
     echo "Required:"
     echo "  --repo OWNER/REPO   GitHub repository (e.g., mozilla-ai/any-llm)"
     echo "  --path PATH         Path to the local repository clone"
     echo ""
     echo "Options:"
-    echo "  -p, --profile NAME  aoe profile to use (default: derived from repo name)"
+    echo "  -p, --profile NAME  Forager profile to use (default: derived from repo name)"
     echo "  -g, --group NAME    Session group name (default: derived from repo name)"
-    echo "  -s, --sandbox IMG   Docker sandbox image (optional, runs without sandbox if not set)"
     echo "  -n, --dry-run       Show what would be done without creating sessions"
     echo "  -l, --limit NUM     Limit the number of issues to process (default: all)"
     echo "  -h, --help          Show this help message"
@@ -36,7 +34,6 @@ usage() {
     echo "Examples:"
     echo "  $0 --repo mozilla-ai/any-llm --path ~/scm/any-llm"
     echo "  $0 --repo myorg/myrepo --path ./myrepo --profile myprofile --limit 5"
-    echo "  $0 --repo myorg/myrepo --path ./myrepo --sandbox my-sandbox:latest"
     exit 0
 }
 
@@ -56,10 +53,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         -g|--group)
             GROUP="$2"
-            shift 2
-            ;;
-        -s|--sandbox)
-            SANDBOX_IMAGE="$2"
             shift 2
             ;;
         -n|--dry-run)
@@ -113,9 +106,6 @@ echo "GitHub repo:     $REPO"
 echo "Local path:      $REPO_PATH"
 echo "Profile:         $PROFILE"
 echo "Group:           $GROUP"
-if [ -n "$SANDBOX_IMAGE" ]; then
-    echo "Sandbox:         $SANDBOX_IMAGE"
-fi
 if [ "$DRY_RUN" = true ]; then
     echo "DRY RUN MODE - no sessions will be created"
 fi
@@ -141,8 +131,8 @@ if [ "$LIMIT" -gt 0 ]; then
 fi
 
 # Get existing sessions to check for duplicates
-echo "Checking for existing aoe sessions..."
-existing_sessions=$($AOE_CMD list --profile "$PROFILE" --json 2>/dev/null || echo "[]")
+echo "Checking for existing Forager sessions..."
+existing_sessions=$($FORAGER_CMD list --profile "$PROFILE" --json 2>/dev/null || echo "[]")
 
 # Function to check if a session already exists
 session_exists() {
@@ -191,9 +181,6 @@ echo "$issues" | jq -c '.[]' | while read -r issue; do
         echo "    Worktree: issue_$number"
         echo "    Profile:  $PROFILE"
         echo "    Group:    $GROUP"
-        if [ -n "$SANDBOX_IMAGE" ]; then
-            echo "    Sandbox:  $SANDBOX_IMAGE"
-        fi
         echo "    Command:  claude --dangerously-skip-permissions --permission-mode plan \"...\""
         echo ""
         echo $(( $(cat "$launched_file") + 1 )) > "$launched_file"
@@ -207,28 +194,23 @@ echo "$issues" | jq -c '.[]' | while read -r issue; do
             new_branch_flag="--new-branch"
         fi
 
-        # Build sandbox flag if specified
-        sandbox_flag=""
-        if [ -n "$SANDBOX_IMAGE" ]; then
-            sandbox_flag="--sandbox-image $SANDBOX_IMAGE"
-        fi
-
-        # Create aoe session with worktree and Claude in plan mode
-        if $AOE_CMD add "$REPO_PATH" \
+        # Create Forager session with worktree and Claude in plan mode
+        if $FORAGER_CMD add "$REPO_PATH" \
             --worktree "$branch_name" \
             $new_branch_flag \
             --profile "$PROFILE" \
             --title "$session_name" \
-            --sandbox \
-            $sandbox_flag \
             --group "$GROUP" \
             --cmd "claude --dangerously-skip-permissions --permission-mode plan \"$prompt\""; then
             # Start the session (without attaching)
-            if $AOE_CMD -p "$PROFILE" session start "$session_name"; then
+            if $FORAGER_CMD -p "$PROFILE" session start "$session_name"; then
                 # Wait for the confirmation prompt to appear, then send Enter to accept
                 sleep 2
                 # Find the actual tmux session name (includes a random ID suffix)
-                tmux_session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^aoe_${session_name}" | head -1)
+                tmux_session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^forager_${session_name}" | head -1)
+                if [ -z "$tmux_session" ]; then
+                    tmux_session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^aoe_${session_name}" | head -1)
+                fi
                 if [ -n "$tmux_session" ]; then
                     # Select "Yes, I accept" (option 2) then confirm
                     tmux send-keys -t "$tmux_session" Down Enter
@@ -258,5 +240,5 @@ echo ""
 if [ "$DRY_RUN" = true ]; then
     echo "DRY RUN complete. Run without --dry-run to actually create sessions."
 else
-    echo "Done! View sessions with: $AOE_CMD -p $PROFILE"
+    echo "Done! View sessions with: $FORAGER_CMD -p $PROFILE"
 fi

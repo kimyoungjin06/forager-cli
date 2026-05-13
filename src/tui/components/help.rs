@@ -5,8 +5,8 @@ use ratatui::widgets::*;
 
 use crate::tui::styles::Theme;
 
-const DIALOG_WIDTH: u16 = 50;
-const DIALOG_HEIGHT: u16 = 30;
+const DIALOG_WIDTH: u16 = 64;
+const DIALOG_HEIGHT: u16 = 36;
 #[cfg(test)]
 const BORDER_HEIGHT: u16 = 2;
 #[cfg(test)]
@@ -25,6 +25,8 @@ fn shortcuts() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("l/→", "Expand group"),
                 ("g/G", "Go to top / bottom"),
                 ("PgUp/Dn", "Move 10 items up / down"),
+                ("Tab/C-Tab", "Next session + attach"),
+                ("1..9/M-1..9", "Jump to session + attach"),
             ],
         ),
         (
@@ -40,7 +42,6 @@ fn shortcuts() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
             "Views",
             vec![
                 ("t", "Toggle Agent/Terminal view"),
-                ("c", "Toggle container/host (sandbox)"),
                 ("D", "Diff view (git changes)"),
                 ("H/L", "Resize list panel"),
             ],
@@ -53,6 +54,14 @@ fn shortcuts() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("P", "Next profile"),
                 ("?", "Toggle help"),
                 ("q", "Quit"),
+            ],
+        ),
+        (
+            "Offdesk",
+            vec![
+                ("p/q/a", "approval, queued, active task counts"),
+                ("r/f", "resume_pending and failed task counts"),
+                ("CLI", "forager offdesk tasks shows recovery commands"),
             ],
         ),
     ]
@@ -133,6 +142,25 @@ mod tests {
         assert!(
             keys.iter().any(|(k, _)| *k == "H/L"),
             "Views section should contain H/L resize shortcut"
+        );
+    }
+
+    #[test]
+    fn help_contains_offdesk_recovery_hint() {
+        let all = shortcuts();
+        let offdesk_section = all.iter().find(|(name, _)| *name == "Offdesk");
+        assert!(offdesk_section.is_some(), "Offdesk section should exist");
+        let (_, keys) = offdesk_section.unwrap();
+        assert!(
+            keys.iter().any(|(k, desc)| {
+                *k == "r/f" && desc.contains("resume_pending") && desc.contains("failed")
+            }),
+            "Offdesk section should describe r/f counts"
+        );
+        assert!(
+            keys.iter()
+                .any(|(_, desc)| desc.contains("forager offdesk tasks")),
+            "Offdesk section should point to the CLI recovery command"
         );
     }
 

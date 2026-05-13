@@ -14,7 +14,7 @@ use tui_input::Input;
 
 use crate::session::{
     config::{load_config, save_config},
-    flatten_tree, resolve_config, DefaultTerminalMode, Group, GroupTree, Instance, Item, Storage,
+    flatten_tree, get_profile_dir, resolve_config, Group, GroupTree, Instance, Item, Storage,
 };
 use crate::tmux::AvailableTools;
 
@@ -34,14 +34,6 @@ pub enum ViewMode {
     #[default]
     Agent,
     Terminal,
-}
-
-/// Terminal mode for sandboxed sessions (container vs host)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TerminalMode {
-    #[default]
-    Host,
-    Container,
 }
 
 /// Cached preview content to avoid subprocess calls on every frame
@@ -89,6 +81,40 @@ pub(super) const ICON_DELETING: &str = "✗";
 pub(super) const ICON_COLLAPSED: &str = "▶";
 pub(super) const ICON_EXPANDED: &str = "▼";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct OffdeskResumeSummary {
+    pub(super) fresh_pending: usize,
+    pub(super) stale_pending: usize,
+    pub(super) pending_approvals: usize,
+    pub(super) queued_tasks: usize,
+    pub(super) active_tasks: usize,
+    pub(super) failed_tasks: usize,
+    pub(super) resume_pending_tasks: usize,
+    pub(super) cancelled_tasks: usize,
+    pub(super) stale_background: usize,
+    pub(super) failed_background: usize,
+}
+
+impl OffdeskResumeSummary {
+    pub(super) fn has_offdesk_activity(&self) -> bool {
+        self.pending_approvals > 0
+            || self.queued_tasks > 0
+            || self.active_tasks > 0
+            || self.failed_tasks > 0
+            || self.resume_pending_tasks > 0
+            || self.stale_background > 0
+            || self.failed_background > 0
+    }
+
+    pub(super) fn needs_operator_attention(&self) -> bool {
+        self.pending_approvals > 0
+            || self.failed_tasks > 0
+            || self.resume_pending_tasks > 0
+            || self.stale_background > 0
+            || self.failed_background > 0
+    }
+}
+
 pub struct HomeView {
     pub(super) storage: Storage,
     pub(super) instances: Vec<Instance>,
@@ -116,9 +142,6 @@ pub struct HomeView {
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     pub(super) changelog_dialog: Option<ChangelogDialog>,
     pub(super) info_dialog: Option<InfoDialog>,
-    /// Session to attach after the custom instruction warning dialog is dismissed
-    pub(super) pending_attach_after_warning: Option<String>,
-
     // Search
     pub(super) search_active: bool,
     pub(super) search_query: Input,
@@ -134,7 +157,7 @@ pub struct HomeView {
     // Performance: background deletion
     pub(super) deletion_poller: DeletionPoller,
 
-    // Performance: background session creation (for sandbox)
+    // Performance: background session creation for slow hook execution
     pub(super) creation_poller: CreationPoller,
     /// Set to true if user cancelled while creation was pending
     pub(super) creation_cancelled: bool,
@@ -144,12 +167,6 @@ pub struct HomeView {
     // Performance: preview caching
     pub(super) preview_cache: PreviewCache,
     pub(super) terminal_preview_cache: PreviewCache,
-    pub(super) container_terminal_preview_cache: PreviewCache,
-
-    // Terminal mode for sandboxed sessions (per-session, ephemeral)
-    pub(super) terminal_modes: HashMap<String, TerminalMode>,
-    // Default terminal mode from config
-    pub(super) default_terminal_mode: TerminalMode,
 
     // Sound config for state transition sounds
     pub(super) sound_config: crate::sound::SoundConfig,
@@ -164,6 +181,9 @@ pub struct HomeView {
 
     // Resizable list column width (percentage-like units)
     pub(super) list_width: u16,
+
+    // Offdesk durable artifact status
+    pub(super) offdesk_resume: OffdeskResumeSummary,
 }
 
 impl HomeView {
@@ -174,6 +194,14 @@ impl HomeView {
             inst.update_search_cache();
         }
 
+        // Backfill orchestrator sessions for profiles created before this feature existed.
+        let created =
+            crate::session::auto_orchestrator::ensure_for_existing_sessions(&mut instances);
+        if created > 0 {
+            let group_tree = GroupTree::new_with_groups(&instances, &groups);
+            storage.save_with_groups(&instances, &group_tree)?;
+        }
+
         let instance_map: HashMap<String, Instance> = instances
             .iter()
             .map(|i| (i.id.clone(), i.clone()))
@@ -181,19 +209,13 @@ impl HomeView {
         let group_tree = GroupTree::new_with_groups(&instances, &groups);
         let flat_items = flatten_tree(&group_tree, &instances);
 
-        // Load the resolved config to get the default terminal mode and sound config
+        // Load the resolved config to get sound config
         let resolved = resolve_config(storage.profile());
-        let default_terminal_mode = resolved
-            .as_ref()
-            .map(|config| match config.sandbox.default_terminal_mode {
-                DefaultTerminalMode::Host => TerminalMode::Host,
-                DefaultTerminalMode::Container => TerminalMode::Container,
-            })
-            .unwrap_or_default();
         let sound_config = resolved
             .as_ref()
             .map(|config| config.sound.clone())
             .unwrap_or_default();
+        let offdesk_resume = load_offdesk_summary(storage.profile());
 
         let mut view = Self {
             storage,
@@ -217,7 +239,6 @@ impl HomeView {
             welcome_dialog: None,
             changelog_dialog: None,
             info_dialog: None,
-            pending_attach_after_warning: None,
             search_active: false,
             search_query: Input::default(),
             filtered_items: None,
@@ -230,9 +251,6 @@ impl HomeView {
             on_launch_hooks_ran: HashSet::new(),
             preview_cache: PreviewCache::default(),
             terminal_preview_cache: PreviewCache::default(),
-            container_terminal_preview_cache: PreviewCache::default(),
-            terminal_modes: HashMap::new(),
-            default_terminal_mode,
             sound_config,
             settings_view: None,
             settings_close_confirm: false,
@@ -242,6 +260,7 @@ impl HomeView {
                 .flatten()
                 .and_then(|c| c.app_state.home_list_width)
                 .unwrap_or(35),
+            offdesk_resume,
         };
 
         view.update_selected();
@@ -261,6 +280,14 @@ impl HomeView {
             inst.update_search_cache();
         }
 
+        // Backfill orchestrator sessions for pre-existing project sessions when enabled.
+        let created =
+            crate::session::auto_orchestrator::ensure_for_existing_sessions(&mut instances);
+        if created > 0 {
+            let group_tree = GroupTree::new_with_groups(&instances, &groups);
+            self.storage.save_with_groups(&instances, &group_tree)?;
+        }
+
         self.instances = instances;
         self.instance_map = self
             .instances
@@ -270,6 +297,7 @@ impl HomeView {
         self.groups = groups;
         self.group_tree = GroupTree::new_with_groups(&self.instances, &self.groups);
         self.flat_items = flatten_tree(&self.group_tree, &self.instances);
+        self.offdesk_resume = load_offdesk_summary(self.storage.profile());
 
         if self.cursor >= self.flat_items.len() && !self.flat_items.is_empty() {
             self.cursor = self.flat_items.len() - 1;
@@ -358,7 +386,7 @@ impl HomeView {
         false
     }
 
-    /// Request background session creation. Used for sandbox sessions to avoid blocking UI.
+    /// Request background session creation. Used for slow hooks to avoid blocking UI.
     pub fn request_creation(
         &mut self,
         data: NewSessionData,
@@ -425,6 +453,10 @@ impl HomeView {
             } => {
                 let instance = *instance;
                 self.instances.push(instance.clone());
+                let _ = crate::session::auto_orchestrator::maybe_create_for_instance(
+                    &mut self.instances,
+                    &instance,
+                );
                 self.group_tree = GroupTree::new_with_groups(&self.instances, &self.groups);
                 if !instance.group_path.is_empty() {
                     self.group_tree.create_group(&instance.group_path);
@@ -549,6 +581,26 @@ impl HomeView {
         }
     }
 
+    /// Session IDs in current list display order.
+    ///
+    /// If search is active, returns only sessions in the filtered list order.
+    /// Otherwise returns sessions in the normal flattened tree order.
+    pub(super) fn visible_session_ids(&self) -> Vec<String> {
+        let indices: Vec<usize> = if let Some(ref filtered) = self.filtered_items {
+            filtered.clone()
+        } else {
+            (0..self.flat_items.len()).collect()
+        };
+
+        indices
+            .iter()
+            .filter_map(|&idx| match self.flat_items.get(idx) {
+                Some(Item::Session { id, .. }) => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn start_terminal_for_instance_with_size(
         &mut self,
         id: &str,
@@ -577,51 +629,61 @@ impl HomeView {
         }
     }
 
-    /// Get the terminal mode for a session (uses config default if not set)
-    pub fn get_terminal_mode(&self, session_id: &str) -> TerminalMode {
-        self.terminal_modes
-            .get(session_id)
-            .copied()
-            .unwrap_or(self.default_terminal_mode)
+    /// Select a session by ID while respecting the active filtered view.
+    pub(super) fn select_session_by_id_in_current_view(&mut self, session_id: &str) {
+        if let Some(ref filtered) = self.filtered_items {
+            for (display_idx, &item_idx) in filtered.iter().enumerate() {
+                if let Some(Item::Session { id, .. }) = self.flat_items.get(item_idx) {
+                    if id == session_id {
+                        self.cursor = display_idx;
+                        self.update_selected();
+                        return;
+                    }
+                }
+            }
+        }
+
+        self.select_session_by_id(session_id);
     }
 
     /// Refresh all config-dependent state from the current profile's config.
     /// Call this after settings are saved to pick up any changes.
     pub fn refresh_from_config(&mut self) {
         if let Ok(config) = resolve_config(self.storage.profile()) {
-            // Refresh default terminal mode for sandboxed sessions
-            self.default_terminal_mode = match config.sandbox.default_terminal_mode {
-                DefaultTerminalMode::Host => TerminalMode::Host,
-                DefaultTerminalMode::Container => TerminalMode::Container,
-            };
-
             // Refresh sound config
             self.sound_config = config.sound.clone();
         }
     }
+}
 
-    /// Toggle terminal mode between Container and Host for a session
-    pub fn toggle_terminal_mode(&mut self, session_id: &str) {
-        let current = self.get_terminal_mode(session_id);
-        let new_mode = match current {
-            TerminalMode::Container => TerminalMode::Host,
-            TerminalMode::Host => TerminalMode::Container,
-        };
-        self.terminal_modes.insert(session_id.to_string(), new_mode);
+fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
+    let Ok(profile_dir) = get_profile_dir(profile) else {
+        return OffdeskResumeSummary::default();
+    };
+    let Ok(states) = crate::offdesk::TaskResumeStore::new(&profile_dir).load() else {
+        return OffdeskResumeSummary::default();
+    };
+    let now = chrono::Utc::now();
+    let mut summary = states
+        .iter()
+        .filter(|state| state.status == crate::offdesk::ResumeStatus::ResumePending)
+        .fold(OffdeskResumeSummary::default(), |mut summary, state| {
+            if state.is_fresh_at(now) {
+                summary.fresh_pending += 1;
+            } else {
+                summary.stale_pending += 1;
+            }
+            summary
+        });
+    if let Ok(offdesk) = crate::offdesk::load_offdesk_status_summary(profile_dir, now) {
+        summary.pending_approvals = offdesk.pending_approvals;
+        summary.queued_tasks = offdesk.tasks.queued;
+        summary.active_tasks = offdesk.tasks.active + offdesk.tasks.pending_approval;
+        summary.failed_tasks = offdesk.tasks.failed;
+        summary.resume_pending_tasks = offdesk.tasks.resume_pending;
+        summary.cancelled_tasks = offdesk.tasks.cancelled;
+        summary.stale_background = offdesk.background_stale;
+        summary.failed_background = offdesk.background_failed;
     }
-
-    pub fn start_container_terminal_for_instance_with_size(
-        &mut self,
-        id: &str,
-        size: Option<(u16, u16)>,
-    ) -> anyhow::Result<()> {
-        if let Some(inst) = self.instances.iter_mut().find(|i| i.id == id) {
-            inst.start_container_terminal_with_size(size)?;
-        }
-        if let Some(inst) = self.instance_map.get_mut(id) {
-            inst.start_container_terminal_with_size(size)?;
-        }
-        // Don't save terminal info for container terminals - it's ephemeral
-        Ok(())
-    }
+    summary
 }

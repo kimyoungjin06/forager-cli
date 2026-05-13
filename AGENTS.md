@@ -4,14 +4,16 @@
 
 ## Project Structure & Module Organization
 
-- `src/main.rs`: binary entrypoint (`aoe`).
+- `src/bin/forager.rs`: primary binary entrypoint.
+- `src/bin/aoe.rs`: legacy compatibility binary entrypoint.
+- `src/entrypoint.rs`: shared CLI/TUI entrypoint logic.
 - `src/lib.rs`: shared library code used by the CLI/TUI.
 - `src/cli/`: clap command handlers (e.g., `src/cli/add.rs`, `src/cli/session.rs`).
 - `src/tui/`: ratatui UI and input handling.
 - `src/session/`: session storage, configuration, and group management.
 - `src/tmux/`: tmux integration and status detection.
 - `src/process/`: OS-specific process handling (`macos.rs`, `linux.rs`).
-- `src/docker/`: Docker sandboxing and container management.
+- `src/containers/`: legacy container cleanup helpers and deferred sandbox audit surface.
 - `src/git/`: git worktree operations and template resolution.
 - `src/update/`: version checking against GitHub releases.
 - `src/migrations/`: versioned data migrations for breaking changes (see below).
@@ -22,23 +24,23 @@
 
 ## Build, Test, and Development Commands
 
-- `cargo build` / `cargo build --release`: compile (release binary at `target/release/aoe`).
+- `cargo build` / `cargo build --release`: compile (primary release binary at `target/release/forager`; legacy alias binary at `target/release/aoe`).
 - `cargo build --profile dev-release`: faster optimized builds for local development. Skips LTO for quicker compile times while still producing an optimized binary. Use `--release` for final/CI builds.
 - `cargo run --release`: run from source; requires `tmux` installed.
 - `cargo check`: fast type-checking during development.
 - `cargo test`: run unit + integration tests (some tests skip if `tmux` is unavailable).
 - `cargo fmt`: format with rustfmt (run before pushing).
 - `cargo clippy`: lint (fix warnings unless there’s a strong reason not to).
-- Debug logging: `RUST_LOG=agent_of_empires=debug cargo run` (or `AGENT_OF_EMPIRES_DEBUG=1 cargo run`).
+- Debug logging: `RUST_LOG=forager=debug cargo run` (or `FORAGER_DEBUG=1 cargo run`).
 
 ## Settings & Configuration
 
-- **Every configurable field must be editable in the settings TUI.** When adding a new config field to `SandboxConfig`, `WorktreeConfig`, etc., you must also:
+- **Every active user-facing configurable field must be editable in the settings TUI.** When adding a new config field to `WorktreeConfig`, `SessionConfig`, etc., you must also:
   1. Add a `FieldKey` variant in `src/tui/settings/fields.rs`
   2. Add a `SettingField` entry in the corresponding `build_*_fields()` function
   3. Wire up `apply_field_to_global()` and `apply_field_to_profile()`
   4. Add a `clear_profile_override()` case in `src/tui/settings/input.rs`
-- Profile overrides (`*ConfigOverride` structs in `profile_config.rs`) must also include the new field with merge logic in `merge_configs()`.
+- Profile overrides (`*ConfigOverride` structs in `profile_config.rs`) must also include the new field with merge logic in `merge_configs()`. The retired sandbox surface is intentionally limited to legacy cleanup policy unless the product decision changes.
 
 ## Coding Style & Naming Conventions
 
@@ -54,7 +56,7 @@
 ## Testing Guidelines
 
 - Use unit tests in-module (`#[cfg(test)]`) for pure logic; use `tests/*.rs` for end-to-end behavior.
-- Tests must be deterministic and clean up after themselves (tmux tests should use unique names like `aoe_test_*`).
+- Tests must be deterministic and clean up after themselves (tmux tests should use unique names like `forager_test_*`).
 - Avoid reading/writing real user state; prefer temp dirs (see `tempfile` usage in `src/session/storage.rs`).
 
 ## Commit & Pull Request Guidelines
@@ -66,9 +68,10 @@
 ## Local Data & Configuration Tips
 
 - Runtime config/data location:
-  - **Linux**: `$XDG_CONFIG_HOME/agent-of-empires/` (defaults to `~/.config/agent-of-empires/`)
-  - **macOS/Windows**: `~/.agent-of-empires/`
-- Keep user data out of commits. For repo-local experiments, use ignored paths like `./.agent-of-empires/`, `.env`, and `.mcp.json`.
+  - **Linux**: `$XDG_CONFIG_HOME/forager/` (defaults to `~/.config/forager/`)
+  - **macOS/Windows**: `~/.forager/`
+  - Legacy AoE paths are still compatibility fallbacks.
+- Keep user data out of commits. For repo-local experiments, use ignored paths like `./.forager/`, `.env`, and `.mcp.json`.
 
 ## Data Migrations
 

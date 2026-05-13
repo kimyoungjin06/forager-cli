@@ -1,6 +1,6 @@
 # Bundled Sound Effects
 
-This directory contains CC0 (public domain) sound effects bundled with Agent of Empires.
+This directory contains CC0 (public domain) sound effects bundled with Forager.
 
 ## Source
 
@@ -34,9 +34,9 @@ You are free to:
 
 ## Installation
 
-Run `aoe sounds install` to download these sounds from GitHub to your config directory:
-- **Linux**: `~/.config/agent-of-empires/sounds/`
-- **macOS**: `~/.agent-of-empires/sounds/`
+Run `forager sounds install` to download these sounds from GitHub to your config directory:
+- **Linux**: `~/.config/forager/sounds/`
+- **macOS**: `~/.forager/sounds/`
 
 The sounds are downloaded from this repository at runtime, not bundled with the binary.
 

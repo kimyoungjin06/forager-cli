@@ -1,10 +1,10 @@
 // Integration tests for git worktree functionality
 // These tests verify end-to-end worktree workflows
 
-use agent_of_empires::git::error::GitError;
-use agent_of_empires::git::GitWorktree;
-use agent_of_empires::session::{Instance, Storage, WorktreeInfo};
 use chrono::Utc;
+use forager::git::error::GitError;
+use forager::git::GitWorktree;
+use forager::session::{Instance, Storage, WorktreeInfo};
 use tempfile::TempDir;
 
 fn setup_test_environment() -> (TempDir, git2::Repository, TempDir) {
@@ -46,7 +46,7 @@ fn test_add_session_with_worktree_flag() {
     instance.worktree_info = Some(WorktreeInfo {
         branch: "test-feature".to_string(),
         main_repo_path: repo_dir.path().to_string_lossy().to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: Utc::now(),
         cleanup_on_delete: true,
     });
@@ -55,7 +55,7 @@ fn test_add_session_with_worktree_flag() {
     assert!(instance.worktree_info.is_some());
     let info = instance.worktree_info.as_ref().unwrap();
     assert_eq!(info.branch, "test-feature");
-    assert!(info.managed_by_aoe);
+    assert!(info.managed_by_forager);
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn test_session_has_worktree_info_after_creation() {
     instance.worktree_info = Some(WorktreeInfo {
         branch: "test-feature".to_string(),
         main_repo_path: repo_dir.path().to_string_lossy().to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: now,
         cleanup_on_delete: true,
     });
@@ -79,7 +79,7 @@ fn test_session_has_worktree_info_after_creation() {
         info.main_repo_path,
         repo_dir.path().to_string_lossy().to_string()
     );
-    assert!(info.managed_by_aoe);
+    assert!(info.managed_by_forager);
     assert_eq!(info.created_at, now);
     assert!(info.cleanup_on_delete);
 }
@@ -95,7 +95,7 @@ fn test_worktree_info_persists_across_save_load() {
     instance.worktree_info = Some(WorktreeInfo {
         branch: "feature-branch".to_string(),
         main_repo_path: "/original/repo".to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: Utc::now(),
         cleanup_on_delete: false,
     });
@@ -108,7 +108,7 @@ fn test_worktree_info_persists_across_save_load() {
     let loaded_info = loaded[0].worktree_info.as_ref().unwrap();
     assert_eq!(loaded_info.branch, "feature-branch");
     assert_eq!(loaded_info.main_repo_path, "/original/repo");
-    assert!(loaded_info.managed_by_aoe);
+    assert!(loaded_info.managed_by_forager);
     assert!(!loaded_info.cleanup_on_delete);
 }
 
@@ -163,7 +163,7 @@ fn test_worktree_cleanup_on_session_removal() {
     instance.worktree_info = Some(WorktreeInfo {
         branch: "test-feature".to_string(),
         main_repo_path: repo_dir.path().to_string_lossy().to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: Utc::now(),
         cleanup_on_delete: true,
     });
@@ -190,7 +190,7 @@ fn test_worktree_preserved_when_keep_flag_used() {
     instance.worktree_info = Some(WorktreeInfo {
         branch: "test-feature".to_string(),
         main_repo_path: repo_dir.path().to_string_lossy().to_string(),
-        managed_by_aoe: true,
+        managed_by_forager: true,
         created_at: Utc::now(),
         cleanup_on_delete: false,
     });

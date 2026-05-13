@@ -2,8 +2,8 @@
 //!
 //! Plays AoE II-style sounds when agent sessions change state.
 //! Users place .wav/.ogg files in the sounds directory:
-//!   - Linux: ~/.config/agent-of-empires/sounds/
-//!   - macOS: ~/.agent-of-empires/sounds/
+//!   - Linux: ~/.config/forager/sounds/
+//!   - macOS: ~/.forager/sounds/
 //!
 //! Expected filenames (any .wav/.ogg file works):
 //!   wololo.wav, rogan.wav, allhail.wav, monk.wav,
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::session::{get_app_dir, Status};
 
 const GITHUB_SOUNDS_BASE_URL: &str =
-    "https://raw.githubusercontent.com/njbrake/agent-of-empires/main/bundled_sounds";
+    "https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/bundled_sounds";
 
 /// How to select which sound file to play
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -114,7 +114,7 @@ pub async fn install_bundled_sounds() -> anyhow::Result<()> {
     }
 
     let client = reqwest::Client::builder()
-        .user_agent("agent-of-empires")
+        .user_agent("forager")
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
@@ -219,7 +219,7 @@ pub fn validate_sound_exists(filename: &str) -> Result<(), String> {
     let available = list_available_sounds();
     if available.is_empty() {
         return Err(
-            "No sounds installed. Run 'aoe sounds install' or add your own .wav/.ogg files."
+            "No sounds installed. Run 'forager sounds install' or add your own .wav/.ogg files."
                 .to_string(),
         );
     }

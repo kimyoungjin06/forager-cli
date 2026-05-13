@@ -1,10 +1,10 @@
 //! Integration tests for hooks config resolution across global, profile, and repo levels.
 
-use agent_of_empires::session::{
+use anyhow::Result;
+use forager::session::{
     merge_configs, merge_repo_config, resolve_config, save_config, save_profile_config, Config,
     HooksConfig, HooksConfigOverride, ProfileConfig, RepoConfig,
 };
-use anyhow::Result;
 use serial_test::serial;
 
 fn setup_temp_home() -> tempfile::TempDir {
@@ -94,7 +94,7 @@ fn test_repo_hooks_override_both_fields() -> Result<()> {
 }
 
 // T016: Global/profile hooks are NOT subject to trust checking.
-// This is a design invariant: check_hook_trust() only reads .aoe/config.toml,
+// This is a design invariant: check_hook_trust() only reads repo config,
 // so global/profile hooks never enter the trust pipeline. We verify that
 // resolve_config returns hooks without any trust gate.
 #[test]

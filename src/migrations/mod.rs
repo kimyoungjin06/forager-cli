@@ -96,18 +96,7 @@ fn set_version(version: u32) -> Result<()> {
 
 /// Returns all directories where app data might exist (for migration discovery).
 fn get_all_possible_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-
-    if let Some(home) = dirs::home_dir() {
-        dirs.push(home.join(".agent-of-empires"));
-    }
-
-    #[cfg(target_os = "linux")]
-    if let Some(config_dir) = dirs::config_dir() {
-        dirs.push(config_dir.join("agent-of-empires"));
-    }
-
-    dirs
+    crate::session::app_dir_candidates()
 }
 
 #[cfg(test)]

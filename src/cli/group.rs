@@ -1,4 +1,4 @@
-//! `agent-of-empires group` subcommands implementation
+//! `forager group` subcommands implementation
 
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
@@ -99,7 +99,7 @@ async fn list_groups(profile: &str, args: GroupListArgs) -> Result<()> {
         let all_groups = group_tree.get_all_groups();
         if all_groups.is_empty() {
             println!("No groups found.");
-            println!("Create one with: agent-of-empires group create <name>");
+            println!("Create one with: forager group create <name>");
             return Ok(());
         }
 

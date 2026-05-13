@@ -2,9 +2,12 @@
 
 pub mod add;
 pub mod definition;
+pub mod doctor;
 pub mod group;
 pub mod init;
 pub mod list;
+pub mod migrate;
+pub mod offdesk;
 pub mod profile;
 pub mod remove;
 pub mod session;
@@ -18,6 +21,22 @@ pub use definition::{Cli, Commands};
 
 use crate::session::Instance;
 use anyhow::{bail, Result};
+use std::path::Path;
+
+pub const PRIMARY_BINARY_NAME: &str = "forager";
+pub const LEGACY_BINARY_NAME: &str = "aoe";
+
+pub fn invoked_binary_name() -> String {
+    std::env::args()
+        .next()
+        .and_then(|path| {
+            Path::new(&path)
+                .file_stem()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| PRIMARY_BINARY_NAME.to_string())
+}
 
 pub fn resolve_session<'a>(identifier: &str, instances: &'a [Instance]) -> Result<&'a Instance> {
     // Try exact ID match

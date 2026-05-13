@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the full Agent of Empires website
+# Build the full Forager website
 # Output: dist/ directory ready for deployment
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 
-echo "Building Agent of Empires website..."
+echo "Building Forager website..."
 
 # Clean previous build
 rm -rf "$DIST_DIR"
@@ -64,13 +64,13 @@ cat > "$DIST_DIR/404.html" << 'EOF'
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Page Not Found - Agent of Empires</title>
+  <title>Page Not Found - Forager</title>
   <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-gray-100 min-h-screen flex items-center justify-center">
   <div class="text-center px-6">
-    <img src="/assets/logo.svg" alt="Agent of Empires" class="w-16 h-16 mx-auto mb-6 opacity-50">
+    <img src="/assets/logo.svg" alt="Forager" class="w-16 h-16 mx-auto mb-6 opacity-50">
     <h1 class="text-4xl font-bold mb-4">404</h1>
     <p class="text-gray-400 mb-8">Page not found</p>
     <a href="/" class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
@@ -80,9 +80,6 @@ cat > "$DIST_DIR/404.html" << 'EOF'
 </body>
 </html>
 EOF
-
-# 8. Create CNAME file for GitHub Pages (if using custom domain)
-echo "agent-of-empires.com" > "$DIST_DIR/CNAME"
 
 echo ""
 echo "Build complete! Output in: $DIST_DIR"

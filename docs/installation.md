@@ -3,9 +3,8 @@
 ## Prerequisites
 
 - [tmux](https://github.com/tmux/tmux/wiki) (required)
-- [Docker](https://www.docker.com/) (optional, for sandboxing agents in containers)
 
-## Install Agent of Empires
+## Install Forager
 
 ### Quick Install (Recommended)
 
@@ -13,38 +12,33 @@ Run the install script:
 
 ```bash
 curl -fsSL \
-  https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh \
+  https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/scripts/install.sh \
   | bash
-```
-
-### Homebrew
-
-```bash
-brew install aoe
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/njbrake/agent-of-empires
-cd agent-of-empires
+git clone https://github.com/kimyoungjin06/forager-cli
+cd forager
 cargo build --release
 ```
 
-The binary will be at `target/release/aoe`.
+The primary binary will be at `target/release/forager`; `target/release/aoe`
+is also built as a legacy compatibility alias.
 
 ## Verify Installation
 
 ```bash
-aoe --version
+forager --version
 ```
 
 ## Uninstall
 
-To remove Agent of Empires:
+To remove Forager:
 
 ```bash
-aoe uninstall
+forager uninstall
 ```
 
 This will guide you through removing the binary, configuration, and tmux settings.

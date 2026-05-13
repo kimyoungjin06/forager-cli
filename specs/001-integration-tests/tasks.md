@@ -72,7 +72,7 @@
 **Independent Test**: Run `cargo test --test config_merge` -- all tests pass in isolation.
 
 - [ ] T023 [P] [US4] Create `tests/config_merge.rs` with `setup_temp_home()` helper and `use serial_test::serial`
-- [ ] T024 [US4] Implement `test_merge_overrides_global`: save global config with `sandbox.auto_cleanup = true`, save profile override with `sandbox.auto_cleanup = false`, call `merge_configs()`, assert result is `false`
+- [ ] T024 [US4] Implement `test_merge_overrides_global`: save global config with legacy `sandbox.auto_cleanup = true`, save profile override with `sandbox.auto_cleanup = false`, call `merge_configs()`, assert result is `false`
 - [ ] T025 [US4] Implement `test_merge_inherits_unset_fields`: save profile override with only `theme` set, merge with global, assert all other fields match global defaults
 - [ ] T026 [US4] Implement `test_config_toml_round_trip`: create a `Config` with non-default values, `save_config()`, `load_config()`, assert all fields preserved
 - [ ] T027 [US4] Implement `test_profile_config_toml_round_trip`: create a `ProfileConfig` with several overrides, `save_profile_config()`, `load_profile_config()`, assert all override fields preserved
@@ -104,7 +104,7 @@
 
 **Independent Test**: Run `cargo test --test repo_config` -- all tests (old and new) pass.
 
-- [ ] T034 [US6] Implement `test_hook_trust_invalidated_on_change` in `tests/repo_config.rs`: trust hooks, modify `.aoe/config.toml` hook content, call `check_hook_trust()`, assert untrusted
+- [ ] T034 [US6] Implement `test_hook_trust_invalidated_on_change` in `tests/repo_config.rs`: trust hooks, modify `.forager/config.toml` hook content, call `check_hook_trust()`, assert untrusted
 - [ ] T035 [US6] Implement `test_hook_re_trust_after_change` in `tests/repo_config.rs`: after invalidation, re-trust, assert `check_hook_trust()` returns trusted and `execute_hooks()` succeeds
 
 **Checkpoint**: `cargo test --test repo_config` passes. Full hook trust lifecycle verified.

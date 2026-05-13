@@ -1,4 +1,4 @@
-//! Repository-level configuration (`.aoe/config.toml`)
+//! Repository-level configuration (`.forager/config.toml`, with `.aoe/config.toml` fallback)
 //!
 //! Allows repos to define hooks and override session/sandbox/worktree settings.
 //! Settings that are personal/global (theme, updates, tmux, claude config_dir) are
@@ -26,7 +26,7 @@ use super::profile_config::{
     TmuxConfigOverride, UpdatesConfigOverride, WorktreeConfigOverride,
 };
 
-/// Repository-level configuration loaded from `.aoe/config.toml`.
+/// Repository-level configuration loaded from `.forager/config.toml` or `.aoe/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RepoConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,16 +75,40 @@ impl HooksConfig {
     }
 }
 
-/// Path to the repo config file relative to the project root.
-const REPO_CONFIG_PATH: &str = ".aoe/config.toml";
+pub const REPO_CONFIG_DIR: &str = ".forager";
+pub const LEGACY_REPO_CONFIG_DIR: &str = ".aoe";
+const REPO_CONFIG_FILE: &str = "config.toml";
 
-/// Load repo config from `<project_path>/.aoe/config.toml`.
+pub fn primary_repo_config_path(project_path: &Path) -> PathBuf {
+    project_path.join(REPO_CONFIG_DIR).join(REPO_CONFIG_FILE)
+}
+
+pub fn legacy_repo_config_path(project_path: &Path) -> PathBuf {
+    project_path
+        .join(LEGACY_REPO_CONFIG_DIR)
+        .join(REPO_CONFIG_FILE)
+}
+
+pub fn existing_repo_config_path(project_path: &Path) -> Option<PathBuf> {
+    let primary = primary_repo_config_path(project_path);
+    if primary.exists() {
+        return Some(primary);
+    }
+
+    let legacy = legacy_repo_config_path(project_path);
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    None
+}
+
+/// Load repo config from `<project_path>/.forager/config.toml`, falling back to `.aoe/config.toml`.
 /// Returns `None` if the file doesn't exist.
 pub fn load_repo_config(project_path: &Path) -> Result<Option<RepoConfig>> {
-    let config_path = project_path.join(REPO_CONFIG_PATH);
-    if !config_path.exists() {
+    let Some(config_path) = existing_repo_config_path(project_path) else {
         return Ok(None);
-    }
+    };
 
     let content = fs::read_to_string(&config_path)
         .with_context(|| format!("Failed to read {}", config_path.display()))?;
@@ -99,16 +123,19 @@ pub fn load_repo_config(project_path: &Path) -> Result<Option<RepoConfig>> {
     Ok(Some(config))
 }
 
-/// Save repo config to `<project_path>/.aoe/config.toml`.
-/// Creates the `.aoe/` directory if it does not exist.
+/// Save repo config, preserving an existing `.forager` or `.aoe` config path.
+/// Creates `.forager/` for new repo configs.
 pub fn save_repo_config(project_path: &Path, config: &RepoConfig) -> Result<()> {
-    let aoe_dir = project_path.join(".aoe");
-    if !aoe_dir.exists() {
-        fs::create_dir_all(&aoe_dir)
-            .with_context(|| format!("Failed to create {}", aoe_dir.display()))?;
+    let config_path = existing_repo_config_path(project_path)
+        .unwrap_or_else(|| primary_repo_config_path(project_path));
+    let config_dir = config_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Invalid repo config path: {}", config_path.display()))?;
+    if !config_dir.exists() {
+        fs::create_dir_all(config_dir)
+            .with_context(|| format!("Failed to create {}", config_dir.display()))?;
     }
 
-    let config_path = project_path.join(REPO_CONFIG_PATH);
     let content = toml::to_string_pretty(config)
         .with_context(|| "Failed to serialize repo config".to_string())?;
 
@@ -395,11 +422,6 @@ pub fn check_hook_trust(project_path: &Path) -> Result<HookTrustStatus> {
 enum HookTarget<'a> {
     /// Run locally in the given project directory.
     Local { project_path: &'a Path },
-    /// Run inside a Docker container.
-    Container {
-        container_name: &'a str,
-        workdir: &'a str,
-    },
 }
 
 /// Build a `Command` for running a hook via `bash -c`.
@@ -416,42 +438,13 @@ fn build_hook_command(cmd: &str, target: &HookTarget, merge_stderr: bool) -> std
             command.arg("-c").arg(shell_cmd).current_dir(project_path);
             command
         }
-        HookTarget::Container {
-            container_name,
-            workdir,
-        } => {
-            let binary = crate::containers::runtime_binary();
-            let mut command = std::process::Command::new(binary);
-            command.args([
-                "exec",
-                "--workdir",
-                workdir,
-                container_name,
-                "bash",
-                "-c",
-                &shell_cmd,
-            ]);
-            command
-        }
     }
 }
 
 /// Format a hook failure error message from captured output.
-fn format_hook_error(
-    cmd: &str,
-    exit_code: Option<i32>,
-    stderr: &str,
-    stdout: &str,
-    in_container: bool,
-) -> String {
-    let prefix = if in_container {
-        "Hook command failed in container"
-    } else {
-        "Hook command failed"
-    };
+fn format_hook_error(cmd: &str, exit_code: Option<i32>, stderr: &str, stdout: &str) -> String {
     let mut detail = format!(
-        "{} with exit code {}: {}",
-        prefix,
+        "Hook command failed with exit code {}: {}",
         exit_code.unwrap_or(-1),
         cmd
     );
@@ -466,8 +459,6 @@ fn format_hook_error(
 
 /// Run hook commands with captured output (non-streamed).
 fn run_hooks_captured(commands: &[String], target: &HookTarget) -> Result<()> {
-    let in_container = matches!(target, HookTarget::Container { .. });
-
     for cmd in commands {
         tracing::info!("Running hook: {}", cmd);
         let mut command = build_hook_command(cmd, target, false);
@@ -484,8 +475,7 @@ fn run_hooks_captured(commands: &[String], target: &HookTarget) -> Result<()> {
                 cmd,
                 output.status.code(),
                 &stderr,
-                &stdout,
-                in_container
+                &stdout
             ));
         }
 
@@ -507,8 +497,6 @@ fn run_hooks_streamed(
 ) -> Result<()> {
     use std::io::BufRead;
 
-    let in_container = matches!(target, HookTarget::Container { .. });
-
     for cmd in commands {
         tracing::info!("Running hook (streamed): {}", cmd);
         let _ = progress_tx.send(HookProgress::Started(cmd.clone()));
@@ -529,7 +517,7 @@ fn run_hooks_streamed(
 
         let status = child.wait()?;
         if !status.success() {
-            let detail = format_hook_error(cmd, status.code(), "", "", in_container);
+            let detail = format_hook_error(cmd, status.code(), "", "");
             let _ = progress_tx.send(HookProgress::Output(detail.clone()));
             anyhow::bail!(detail);
         }
@@ -544,21 +532,6 @@ pub fn execute_hooks(commands: &[String], project_path: &Path) -> Result<()> {
     run_hooks_captured(commands, &HookTarget::Local { project_path })
 }
 
-/// Execute hooks inside a Docker container.
-pub fn execute_hooks_in_container(
-    commands: &[String],
-    container_name: &str,
-    workdir: &str,
-) -> Result<()> {
-    run_hooks_captured(
-        commands,
-        &HookTarget::Container {
-            container_name,
-            workdir,
-        },
-    )
-}
-
 /// Execute a list of hook commands with streamed output.
 pub fn execute_hooks_streamed(
     commands: &[String],
@@ -568,27 +541,10 @@ pub fn execute_hooks_streamed(
     run_hooks_streamed(commands, &HookTarget::Local { project_path }, progress_tx)
 }
 
-/// Execute hooks inside a Docker container with streamed output.
-pub fn execute_hooks_in_container_streamed(
-    commands: &[String],
-    container_name: &str,
-    workdir: &str,
-    progress_tx: &mpsc::Sender<HookProgress>,
-) -> Result<()> {
-    run_hooks_streamed(
-        commands,
-        &HookTarget::Container {
-            container_name,
-            workdir,
-        },
-        progress_tx,
-    )
-}
-
-/// Template content for `aoe init`.
-pub const INIT_TEMPLATE: &str = r#"# Agent of Empires - Repository Configuration
-# This file configures aoe behavior for this repository.
-# See: https://github.com/njbrake/agent-of-empires
+/// Template content for `forager init`.
+pub const INIT_TEMPLATE: &str = r#"# Forager - Repository Configuration
+# This file configures Forager behavior for this repository.
+# See: https://github.com/kimyoungjin06/forager-cli
 
 # [hooks]
 # Commands run once when a session is first created
@@ -599,12 +555,8 @@ pub const INIT_TEMPLATE: &str = r#"# Agent of Empires - Repository Configuration
 # [session]
 # default_tool = "claude"
 
-# [sandbox]
-# enabled_by_default = true
-# default_image = "ghcr.io/njbrake/aoe-dev-sandbox:0.10"
-# List fields below replace (not append to) global settings when set:
-# environment = ["NODE_ENV", "DATABASE_URL"]
-# volume_ignores = ["node_modules", ".next"]
+# Legacy sandbox settings are intentionally omitted from the default repo
+# template while sandbox support is deferred.
 
 # [worktree]
 # enabled = true
@@ -688,7 +640,7 @@ mod tests {
 
             [sandbox]
             enabled_by_default = true
-            volume_ignores = ["node_modules"]
+            auto_cleanup = false
 
             [worktree]
             enabled = true
@@ -702,7 +654,7 @@ mod tests {
             config.session.unwrap().default_tool,
             Some("opencode".to_string())
         );
-        assert_eq!(config.sandbox.unwrap().enabled_by_default, Some(true));
+        assert_eq!(config.sandbox.unwrap().auto_cleanup, Some(false));
         assert_eq!(config.worktree.unwrap().enabled, Some(true));
     }
 
@@ -722,6 +674,7 @@ mod tests {
             session: Some(SessionConfigOverride {
                 default_tool: Some("opencode".to_string()),
                 yolo_mode_default: None,
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -734,15 +687,12 @@ mod tests {
         let config = Config::default();
         let repo = RepoConfig {
             sandbox: Some(SandboxConfigOverride {
-                enabled_by_default: Some(true),
-                volume_ignores: Some(vec!["node_modules".to_string()]),
-                ..Default::default()
+                auto_cleanup: Some(false),
             }),
             ..Default::default()
         };
         let merged = merge_repo_config(config, &repo);
-        assert!(merged.sandbox.enabled_by_default);
-        assert_eq!(merged.sandbox.volume_ignores, vec!["node_modules"]);
+        assert!(!merged.sandbox.auto_cleanup);
     }
 
     #[test]
@@ -767,10 +717,7 @@ mod tests {
         let repo = RepoConfig::default();
         let merged = merge_repo_config(config.clone(), &repo);
         assert_eq!(merged.worktree.enabled, config.worktree.enabled);
-        assert_eq!(
-            merged.sandbox.enabled_by_default,
-            config.sandbox.enabled_by_default
-        );
+        assert_eq!(merged.sandbox.auto_cleanup, config.sandbox.auto_cleanup);
     }
 
     #[test]
@@ -852,20 +799,8 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_hooks_in_container_fails_gracefully() {
-        let result = execute_hooks_in_container(
-            &["echo test".to_string()],
-            "nonexistent_container",
-            "/workspace/myproject",
-        );
-        // Should fail because docker/container doesn't exist, but should not panic
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_merge_repo_config_preserves_unset_fields() {
         let mut config = Config::default();
-        config.sandbox.enabled_by_default = true;
         config.sandbox.auto_cleanup = true;
         config.worktree.enabled = true;
         config.worktree.auto_cleanup = true;
@@ -873,8 +808,7 @@ mod tests {
         // Only override one field per section
         let repo = RepoConfig {
             sandbox: Some(SandboxConfigOverride {
-                enabled_by_default: Some(false),
-                ..Default::default()
+                auto_cleanup: Some(false),
             }),
             worktree: Some(WorktreeConfigOverride {
                 enabled: Some(false),
@@ -885,10 +819,9 @@ mod tests {
 
         let merged = merge_repo_config(config, &repo);
         // Overridden fields should change
-        assert!(!merged.sandbox.enabled_by_default);
+        assert!(!merged.sandbox.auto_cleanup);
         assert!(!merged.worktree.enabled);
         // Non-overridden fields should be preserved
-        assert!(merged.sandbox.auto_cleanup);
         assert!(merged.worktree.auto_cleanup);
     }
 }

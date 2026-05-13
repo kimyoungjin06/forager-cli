@@ -46,8 +46,8 @@ jobs:
       - name: Update Cargo.lock version
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          # Update the version for the agent-of-empires package (always first in lockfile)
-          sed -i '/^name = "agent-of-empires"/{n;s/^version = ".*"/version = "'"${VERSION}"'"/}' Cargo.lock
+          # Update the version for the forager package.
+          sed -i '/^name = "forager"/{n;s/^version = ".*"/version = "'"${VERSION}"'"/}' Cargo.lock
           echo "Cargo.lock updated:"
           head -8 Cargo.lock
 

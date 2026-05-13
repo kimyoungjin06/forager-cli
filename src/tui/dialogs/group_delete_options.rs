@@ -367,7 +367,7 @@ impl GroupDeleteOptionsDialog {
             let ct_line = Line::from(vec![
                 Span::raw("    "),
                 Span::styled(ct_checkbox, ct_style),
-                Span::styled(" Also delete containers", ct_style),
+                Span::styled(" Also delete legacy containers", ct_style),
             ]);
             frame.render_widget(Paragraph::new(ct_line), chunks[next_chunk]);
             next_chunk += 1;

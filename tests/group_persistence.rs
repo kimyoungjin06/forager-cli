@@ -1,7 +1,7 @@
 //! Integration tests for group management with disk persistence.
 
-use agent_of_empires::session::{GroupTree, Instance, Storage};
 use anyhow::Result;
+use forager::session::{GroupTree, Instance, Storage};
 use serial_test::serial;
 
 fn setup_temp_home() -> tempfile::TempDir {

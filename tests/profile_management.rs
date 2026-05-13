@@ -1,9 +1,9 @@
 //! Integration tests for profile management: create, delete, list, default, and isolation.
 
-use agent_of_empires::session::{
+use anyhow::Result;
+use forager::session::{
     create_profile, delete_profile, list_profiles, set_default_profile, Config, Instance, Storage,
 };
-use anyhow::Result;
 use serial_test::serial;
 
 fn setup_temp_home() -> tempfile::TempDir {
@@ -114,7 +114,7 @@ fn test_profile_session_isolation() -> Result<()> {
 #[test]
 #[serial]
 fn test_profile_config_isolation() -> Result<()> {
-    use agent_of_empires::session::{
+    use forager::session::{
         load_profile_config, save_profile_config, ProfileConfig, UpdatesConfigOverride,
     };
 

@@ -1,4 +1,4 @@
-//! `agent-of-empires remove` command implementation
+//! `forager remove` command implementation
 
 use anyhow::{bail, Result};
 use clap::Args;
@@ -19,7 +19,7 @@ pub struct RemoveArgs {
     #[arg(long)]
     force: bool,
 
-    /// Keep container instead of deleting it (default: delete per config)
+    /// Keep legacy sandbox container instead of deleting it (default: delete per config)
     #[arg(long = "keep-container")]
     keep_container: bool,
 }
@@ -27,7 +27,7 @@ pub struct RemoveArgs {
 fn needs_worktree_cleanup(inst: &Instance, args: &RemoveArgs) -> bool {
     inst.worktree_info
         .as_ref()
-        .is_some_and(|wt| wt.managed_by_aoe && args.delete_worktree)
+        .is_some_and(|wt| wt.managed_by_forager && args.delete_worktree)
 }
 
 pub async fn run(profile: &str, args: RemoveArgs) -> Result<()> {
@@ -101,7 +101,7 @@ pub async fn run(profile: &str, args: RemoveArgs) -> Result<()> {
                 }
             } else if let Some(wt_info) = &inst.worktree_info {
                 // Worktree exists but not scheduled for deletion (user didn't use --delete-worktree)
-                if wt_info.managed_by_aoe {
+                if wt_info.managed_by_forager {
                     println!(
                         "Worktree preserved at: {} (use --delete-worktree to remove)",
                         inst.project_path
@@ -114,34 +114,42 @@ pub async fn run(profile: &str, args: RemoveArgs) -> Result<()> {
                 if tmux_session.exists() {
                     if let Err(e) = tmux_session.kill() {
                         eprintln!("Warning: failed to kill tmux session: {}", e);
-                        eprintln!(
-                            "Session removed from Agent of Empires but may still be running in tmux"
-                        );
+                        eprintln!("Session removed from Forager but may still be running in tmux");
                     }
                 }
             }
 
-            // Container cleanup (if config allows and user didn't request --keep-container)
+            // Legacy sandbox container cleanup (if config allows and user didn't request --keep-container)
             if let Some(sandbox) = &inst.sandbox_info {
                 if sandbox.enabled && !args.keep_container {
                     let config = Config::load().ok().unwrap_or_default();
                     if config.sandbox.auto_cleanup {
-                        let container = containers::DockerContainer::from_session_id(&inst.id);
+                        let container = containers::DockerContainer::from_stored_name(
+                            &inst.id,
+                            &sandbox.image,
+                            &sandbox.container_name,
+                        );
                         if container.exists().unwrap_or(false) {
                             if let Err(e) = container.remove(true) {
-                                eprintln!("Warning: failed to remove container: {}", e);
+                                eprintln!(
+                                    "Warning: failed to remove legacy sandbox container: {}",
+                                    e
+                                );
                             } else {
-                                println!("✓ Container removed");
+                                println!("✓ Legacy sandbox container removed");
                             }
                         }
                     } else {
                         println!(
-                            "Container preserved: {} (auto_cleanup disabled in config)",
+                            "Legacy sandbox container preserved: {} (auto_cleanup disabled in config)",
                             sandbox.container_name
                         );
                     }
                 } else if args.keep_container {
-                    println!("Container preserved: {}", sandbox.container_name);
+                    println!(
+                        "Legacy sandbox container preserved: {}",
+                        sandbox.container_name
+                    );
                 }
             }
         } else {

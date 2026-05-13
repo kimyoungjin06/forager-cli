@@ -18,11 +18,7 @@ impl HomeView {
             tool: data.tool,
             worktree_branch: data.worktree_branch,
             create_new_branch: data.create_new_branch,
-            sandbox: data.sandbox,
-            sandbox_image: data.sandbox_image,
             yolo_mode: data.yolo_mode,
-            extra_env_keys: data.extra_env_keys,
-            extra_env_values: data.extra_env_values,
         };
 
         let build_result = builder::build_instance(params, &existing_titles)?;
@@ -30,6 +26,10 @@ impl HomeView {
 
         let session_id = instance.id.clone();
         self.instances.push(instance.clone());
+        let _ = crate::session::auto_orchestrator::maybe_create_for_instance(
+            &mut self.instances,
+            &instance,
+        );
         self.group_tree = GroupTree::new_with_groups(&self.instances, &self.groups);
         if !instance.group_path.is_empty() {
             self.group_tree.create_group(&instance.group_path);
@@ -117,12 +117,12 @@ impl HomeView {
                         && inst
                             .worktree_info
                             .as_ref()
-                            .is_some_and(|wt| wt.managed_by_aoe);
+                            .is_some_and(|wt| wt.managed_by_forager);
                     let delete_branch = options.delete_branches
                         && inst
                             .worktree_info
                             .as_ref()
-                            .is_some_and(|wt| wt.managed_by_aoe);
+                            .is_some_and(|wt| wt.managed_by_forager);
                     let delete_sandbox = options.delete_containers
                         && inst.sandbox_info.as_ref().is_some_and(|s| s.enabled);
                     let request = DeletionRequest {
@@ -149,7 +149,9 @@ impl HomeView {
     pub(super) fn group_has_managed_worktrees(&self, group_path: &str, prefix: &str) -> bool {
         self.instances.iter().any(|i| {
             (i.group_path == group_path || i.group_path.starts_with(prefix))
-                && i.worktree_info.as_ref().is_some_and(|wt| wt.managed_by_aoe)
+                && i.worktree_info
+                    .as_ref()
+                    .is_some_and(|wt| wt.managed_by_forager)
         })
     }
 

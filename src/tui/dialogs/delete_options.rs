@@ -325,7 +325,7 @@ impl UnifiedDeleteDialog {
                     frame,
                     chunks[chunk_idx],
                     theme,
-                    "Delete container",
+                    "Delete legacy container",
                     None,
                     self.options.delete_sandbox,
                     focused,

@@ -1,6 +1,6 @@
 # Contributors
 
-Thank you to everyone who has helped improve Agent of Empires! Contributors earn a spot on this page by opening issues that receive the **"helpful contribution"** label -- bug reports, feature ideas, and documentation improvements all count.
+Thank you to everyone who has helped improve Forager! Contributors earn a spot on this page by opening issues that receive the **"helpful contribution"** label -- bug reports, feature ideas, and documentation improvements all count.
 
 <!-- This page is auto-generated at build time from credits.json on the credit branch. -->
 <!-- The content below is a placeholder for local development. -->
@@ -17,4 +17,4 @@ Thank you to everyone who has helped improve Agent of Empires! Contributors earn
 
 </div>
 
-*Want to contribute? Open an issue on [GitHub](https://github.com/njbrake/agent-of-empires/issues) -- bug reports, feature requests, and docs improvements are all welcome.*
+*Want to contribute? Open an issue on [GitHub](https://github.com/kimyoungjin06/forager-cli/issues) -- bug reports, feature requests, and docs improvements are all welcome.*

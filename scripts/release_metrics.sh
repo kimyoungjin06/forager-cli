@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # GitHub Release Download Metrics Report
-# Analyzes download statistics for njbrake/agent-of-empires releases
+# Analyzes download statistics for Forager releases
 #
 
-REPO="njbrake/agent-of-empires"
+REPO="kimyoungjin06/forager-cli"
 API_URL="https://api.github.com/repos/${REPO}/releases"
 
 echo "Fetching release data from GitHub..."

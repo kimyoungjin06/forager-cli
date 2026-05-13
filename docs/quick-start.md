@@ -3,7 +3,7 @@
 ## Launch the TUI
 
 ```bash
-aoe
+forager
 ```
 
 This opens the dashboard. You'll see an empty session list on first run.
@@ -15,7 +15,7 @@ This opens the dashboard. You'll see an empty session list on first run.
 **From the CLI:**
 
 ```bash
-aoe add /path/to/project
+forager add /path/to/project
 ```
 
 The session appears in the dashboard with status **Idle**.
@@ -40,34 +40,22 @@ To work on a new branch with its own directory:
 
 ```bash
 # CLI
-aoe add . -w feat/my-feature -b
+forager add . -w feat/my-feature -b
 
 # TUI: press n, fill in the worktree branch field
 ```
 
-This creates a new git branch, a worktree directory, and a session pointing at it. When you delete the session, AoE offers to clean up the worktree too.
-
-## Create a Sandboxed Session
-
-To run an agent inside a Docker container:
-
-```bash
-aoe add --sandbox .
-```
-
-In the TUI, toggle the sandbox checkbox when creating a session. The agent runs in an isolated container with your project mounted at `/workspace` and authentication credentials shared via persistent Docker volumes.
-
-Requires Docker to be installed.
+This creates a new git branch, a worktree directory, and a session pointing at it. When you delete the session, Forager offers to clean up the worktree too.
 
 ## Choose a Different Agent
 
-By default, AoE uses Claude Code. To use a different tool:
+By default, Forager uses Claude Code. To use a different tool:
 
 ```bash
-aoe add -c opencode .
-aoe add -c vibe .
-aoe add -c codex .
-aoe add -c gemini .
+forager add -c opencode .
+forager add -c vibe .
+forager add -c codex .
+forager add -c gemini .
 ```
 
 In the TUI, select the tool from the dropdown in the new session dialog.
@@ -89,6 +77,5 @@ In the TUI, select the tool from the dropdown in the new session dialog.
 ## Next Steps
 
 - [Workflow Guide](guides/workflow.md) -- recommended setup with bare repos and parallel agents
-- [Docker Sandbox](guides/sandbox.md) -- container configuration and custom images
 - [Repo Config & Hooks](guides/repo-config.md) -- per-project settings
 - [CLI Reference](cli/reference.md) -- every command and flag

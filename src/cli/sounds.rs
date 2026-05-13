@@ -1,4 +1,4 @@
-//! `agent-of-empires sounds` subcommands implementation
+//! `forager sounds` subcommands implementation
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -45,7 +45,7 @@ async fn install_bundled() -> Result<()> {
                 }
 
                 println!("\n💡 Next steps:");
-                println!("  1. Launch the TUI: aoe");
+                println!("  1. Launch the TUI: forager");
                 println!("  2. Press 's' to open Settings");
                 println!("  3. Navigate to Sound category");
                 println!("  4. Enable sounds and configure transitions");
@@ -65,7 +65,7 @@ async fn install_bundled() -> Result<()> {
             eprintln!("  • Check your internet connection");
             eprintln!("  • Try again later if GitHub is unavailable");
             eprintln!("  • You can manually download sounds from:");
-            eprintln!("    https://github.com/njbrake/agent-of-empires/tree/main/bundled_sounds");
+            eprintln!("    https://github.com/kimyoungjin06/forager-cli/tree/main/bundled_sounds");
             Err(e)
         }
     }
@@ -76,7 +76,7 @@ fn list_sounds() -> Result<()> {
 
     if sounds.is_empty() {
         println!("No sounds installed yet.");
-        println!("\nRun 'aoe sounds install' to get started.");
+        println!("\nRun 'forager sounds install' to get started.");
         return Ok(());
     }
 
@@ -90,7 +90,7 @@ fn list_sounds() -> Result<()> {
         println!("\nLocation: {}", sounds_dir.display());
     }
 
-    println!("\n💡 Test a sound: aoe sounds test <name>");
+    println!("\n💡 Test a sound: forager sounds test <name>");
 
     Ok(())
 }

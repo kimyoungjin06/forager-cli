@@ -1,17 +1,24 @@
-//! tmux status bar configuration for aoe sessions
+//! tmux status bar configuration for Forager sessions
 
 use anyhow::Result;
 use std::process::Command;
 
-/// Information about a sandboxed session for status bar display.
+const TITLE_OPTION: &str = "@forager_title";
+const BRANCH_OPTION: &str = "@forager_branch";
+const SANDBOX_OPTION: &str = "@forager_sandbox";
+const LEGACY_TITLE_OPTION: &str = "@aoe_title";
+const LEGACY_BRANCH_OPTION: &str = "@aoe_branch";
+const LEGACY_SANDBOX_OPTION: &str = "@aoe_sandbox";
+
+/// Legacy sandbox metadata for status bar display.
 pub struct SandboxDisplay {
     pub container_name: String,
 }
 
-/// Apply aoe-styled status bar configuration to a tmux session.
+/// Apply Forager-styled status bar configuration to a tmux session.
 ///
-/// Sets tmux user options (@aoe_title, @aoe_branch, @aoe_sandbox) and configures
-/// the status-right to display session information.
+/// Sets tmux user options and configures the status-right to display session
+/// information. Legacy @aoe_* options are also set during the rename transition.
 pub fn apply_status_bar(
     session_name: &str,
     title: &str,
@@ -19,38 +26,45 @@ pub fn apply_status_bar(
     sandbox: Option<&SandboxDisplay>,
 ) -> Result<()> {
     // Set the session title as a tmux user option
-    set_session_option(session_name, "@aoe_title", title)?;
+    set_session_option(session_name, TITLE_OPTION, title)?;
+    set_session_option(session_name, LEGACY_TITLE_OPTION, title)?;
 
     // Set branch if provided (for worktree sessions)
     if let Some(branch_name) = branch {
-        set_session_option(session_name, "@aoe_branch", branch_name)?;
+        set_session_option(session_name, BRANCH_OPTION, branch_name)?;
+        set_session_option(session_name, LEGACY_BRANCH_OPTION, branch_name)?;
     }
 
-    // Set sandbox info if running in docker container
+    // Preserve legacy sandbox metadata if the stored session has it.
     if let Some(sandbox_info) = sandbox {
-        set_session_option(session_name, "@aoe_sandbox", &sandbox_info.container_name)?;
+        set_session_option(session_name, SANDBOX_OPTION, &sandbox_info.container_name)?;
+        set_session_option(
+            session_name,
+            LEGACY_SANDBOX_OPTION,
+            &sandbox_info.container_name,
+        )?;
     }
 
-    // Configure the status bar format using aoe's phosphor green theme
-    // colour46 = bright green (matches aoe accent), colour48 = cyan (matches running)
+    // Configure the status bar format using Forager's phosphor green theme
+    // colour46 = bright green (matches Forager accent), colour48 = cyan (matches running)
     // colour235 = dark background
     //
-    // Format: "aoe: Title | branch | [container] | 14:30"
-    // - #{@aoe_title}: session title
-    // - #{?#{@aoe_branch}, | #{@aoe_branch},}: conditional branch display
-    // - #{?#{@aoe_sandbox}, [#{@aoe_sandbox}],}: conditional sandbox container display
+    // Format: "forager: Title | branch | [legacy container] | 14:30"
+    // - #{@forager_title}: session title
+    // - #{?#{@forager_branch}, | #{@forager_branch},}: conditional branch display
+    // - #{?#{@forager_sandbox}, [#{@forager_sandbox}],}: conditional sandbox display
     let status_format = concat!(
-        " #[fg=colour46,bold]aoe#[fg=colour252,nobold]: ",
-        "#{@aoe_title}",
-        "#{?#{@aoe_branch}, #[fg=colour48]| #{@aoe_branch}#[fg=colour252],}",
-        "#{?#{@aoe_sandbox}, #[fg=colour214]⬡ #{@aoe_sandbox}#[fg=colour252],}",
+        " #[fg=colour46,bold]forager#[fg=colour252,nobold]: ",
+        "#{@forager_title}",
+        "#{?#{@forager_branch}, #[fg=colour48]| #{@forager_branch}#[fg=colour252],}",
+        "#{?#{@forager_sandbox}, #[fg=colour214]⬡ #{@forager_sandbox}#[fg=colour252],}",
         " | %H:%M "
     );
 
     set_session_option(session_name, "status-right", status_format)?;
     set_session_option(session_name, "status-right-length", "80")?;
 
-    // Dark background with light text - matches aoe phosphor theme
+    // Dark background with light text - matches Forager phosphor theme
     set_session_option(session_name, "status-style", "bg=colour235,fg=colour252")?;
     set_session_option(
         session_name,
@@ -114,32 +128,34 @@ pub struct SessionInfo {
     pub sandbox: Option<String>,
 }
 
-/// Get session info for the current tmux session (used by `aoe tmux-status` command).
+/// Get session info for the current tmux session (used by `forager tmux status`).
 /// Returns structured session info for use in user's custom tmux status bar.
 pub fn get_session_info_for_current() -> Option<SessionInfo> {
     let session_name = crate::tmux::get_current_session_name()?;
 
-    // Check if this is an aoe session
-    if !session_name.starts_with(crate::tmux::SESSION_PREFIX) {
+    // Check if this is a Forager session
+    if !crate::tmux::is_forager_session_name(&session_name) {
         return None;
     }
 
-    // Try to get the aoe title from tmux user option
-    let title = get_session_option(&session_name, "@aoe_title").unwrap_or_else(|| {
-        // Fallback: extract title from session name
-        // Session names are: aoe_<title>_<id>
-        let name_without_prefix = session_name
-            .strip_prefix(crate::tmux::SESSION_PREFIX)
-            .unwrap_or(&session_name);
-        if let Some(last_underscore) = name_without_prefix.rfind('_') {
-            name_without_prefix[..last_underscore].to_string()
-        } else {
-            name_without_prefix.to_string()
-        }
-    });
+    // Try to get the Forager title from tmux user option
+    let title = get_session_option(&session_name, TITLE_OPTION)
+        .or_else(|| get_session_option(&session_name, LEGACY_TITLE_OPTION))
+        .unwrap_or_else(|| {
+            // Fallback: extract title from session name
+            // Session names are: forager_<title>_<id> or legacy aoe_<title>_<id>
+            let name_without_prefix = crate::tmux::strip_forager_session_prefix(&session_name);
+            if let Some(last_underscore) = name_without_prefix.rfind('_') {
+                name_without_prefix[..last_underscore].to_string()
+            } else {
+                name_without_prefix.to_string()
+            }
+        });
 
-    let branch = get_session_option(&session_name, "@aoe_branch");
-    let sandbox = get_session_option(&session_name, "@aoe_sandbox");
+    let branch = get_session_option(&session_name, BRANCH_OPTION)
+        .or_else(|| get_session_option(&session_name, LEGACY_BRANCH_OPTION));
+    let sandbox = get_session_option(&session_name, SANDBOX_OPTION)
+        .or_else(|| get_session_option(&session_name, LEGACY_SANDBOX_OPTION));
 
     Some(SessionInfo {
         title,
@@ -149,11 +165,11 @@ pub fn get_session_info_for_current() -> Option<SessionInfo> {
 }
 
 /// Get formatted status string for the current tmux session.
-/// Returns a plain text string like "aoe: Title | branch | [container]"
+/// Returns a plain text string like "forager: Title | branch | [legacy container]"
 pub fn get_status_for_current_session() -> Option<String> {
     let info = get_session_info_for_current()?;
 
-    let mut result = format!("aoe: {}", info.title);
+    let mut result = format!("forager: {}", info.title);
 
     if let Some(b) = &info.branch {
         result.push_str(" | ");

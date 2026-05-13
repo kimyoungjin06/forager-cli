@@ -1,10 +1,10 @@
 //! Integration tests for the config merge pipeline: global + profile overrides with real TOML files.
 
-use agent_of_empires::session::{
+use anyhow::Result;
+use forager::session::{
     load_profile_config, merge_configs, save_config, save_profile_config, Config, ProfileConfig,
     SandboxConfigOverride, ThemeConfigOverride, UpdatesConfigOverride, WorktreeConfigOverride,
 };
-use anyhow::Result;
 use serial_test::serial;
 
 fn setup_temp_home() -> tempfile::TempDir {
@@ -29,7 +29,6 @@ fn test_merge_overrides_global() -> Result<()> {
     let profile = ProfileConfig {
         sandbox: Some(SandboxConfigOverride {
             auto_cleanup: Some(false),
-            ..Default::default()
         }),
         ..Default::default()
     };
@@ -96,7 +95,6 @@ fn test_config_toml_round_trip() -> Result<()> {
     config.updates.check_interval_hours = 72;
     config.worktree.enabled = true;
     config.worktree.auto_cleanup = false;
-    config.sandbox.enabled_by_default = true;
     config.sandbox.auto_cleanup = false;
 
     save_config(&config)?;
@@ -107,7 +105,6 @@ fn test_config_toml_round_trip() -> Result<()> {
     assert_eq!(loaded.updates.check_interval_hours, 72);
     assert!(loaded.worktree.enabled);
     assert!(!loaded.worktree.auto_cleanup);
-    assert!(loaded.sandbox.enabled_by_default);
     assert!(!loaded.sandbox.auto_cleanup);
 
     Ok(())
@@ -131,7 +128,6 @@ fn test_profile_config_toml_round_trip() -> Result<()> {
         }),
         sandbox: Some(SandboxConfigOverride {
             auto_cleanup: Some(false),
-            ..Default::default()
         }),
         ..Default::default()
     };

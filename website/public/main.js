@@ -1,5 +1,5 @@
 function copyInstall() {
-  const cmd = 'curl -fsSL https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh | bash';
+  const cmd = 'curl -fsSL https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/scripts/install.sh | bash';
   navigator.clipboard.writeText(cmd).then(() => {
     const btn = document.getElementById('copy-btn');
     btn.innerHTML = '<svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
@@ -10,7 +10,7 @@ function copyInstall() {
 }
 
 // Fetch GitHub star count
-fetch('https://api.github.com/repos/njbrake/agent-of-empires')
+fetch('https://api.github.com/repos/kimyoungjin06/forager-cli')
   .then(res => res.json())
   .then(data => {
     const count = data.stargazers_count;
