@@ -654,6 +654,12 @@ async fn poll(profile: &str, args: PollArgs) -> Result<()> {
             outcome.decision.phase,
             outcome.decision.evidence
         );
+        if let Some(observed_at) = outcome.probe.last_observed_at {
+            println!("  observed_at: {observed_at}");
+        }
+        if let Some(tail) = outcome.probe.last_log_tail.as_deref() {
+            println!("  tail: {tail}");
+        }
     }
     Ok(())
 }
@@ -757,6 +763,12 @@ async fn background(profile: &str, args: JsonArgs) -> Result<()> {
             status.decision.phase,
             status.decision.evidence
         );
+        if let Some(observed_at) = status.probe.last_observed_at {
+            println!("  observed_at: {observed_at}");
+        }
+        if let Some(tail) = status.probe.last_log_tail.as_deref() {
+            println!("  tail: {tail}");
+        }
     }
     Ok(())
 }

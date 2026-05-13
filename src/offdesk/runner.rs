@@ -149,7 +149,7 @@ pub fn launch_background_command_with_gate_outcome(
         BackgroundRunnerKind::GithubRunner | BackgroundRunnerKind::RemoteWorker => unreachable!(),
     }
 
-    refresh_probe_runtime_evidence(&mut probe)?;
+    refresh_probe_runtime_evidence(&mut probe, now)?;
     store.upsert(probe.clone())?;
 
     Ok(BackgroundLaunchOutcome {
@@ -202,9 +202,12 @@ pub fn poll_background_runs(
             continue;
         }
 
-        refresh_probe_runtime_evidence(probe)?;
+        refresh_probe_runtime_evidence(probe, now)?;
         let decision = probe.evaluate(now);
         probe.phase = decision.phase;
+        probe.last_observed_at = Some(now);
+        probe.last_recovery_evidence = Some(decision.evidence.clone());
+        probe.last_recovery_terminal = Some(decision.terminal);
         let notification =
             notification_cooldown.map(|cooldown| probe.record_notification_attempt(now, cooldown));
         outcomes.push(BackgroundPollOutcome {
@@ -298,7 +301,7 @@ fn spawn_local_tmux_command(
     Ok(())
 }
 
-fn refresh_probe_runtime_evidence(probe: &mut BackgroundProbe) -> Result<()> {
+fn refresh_probe_runtime_evidence(probe: &mut BackgroundProbe, now: DateTime<Utc>) -> Result<()> {
     if let Some(pid) = probe.runtime_pid {
         probe.runtime_handle_alive = process_alive(pid);
     }
@@ -314,6 +317,10 @@ fn refresh_probe_runtime_evidence(probe: &mut BackgroundProbe) -> Result<()> {
 
     if let Some(result_path) = probe.result_artifact_path.as_deref() {
         probe.result_artifact_present = Path::new(result_path).is_file();
+    }
+    if let Some(heartbeat_at) = probe.worker_heartbeat_at {
+        let timeout = Duration::seconds(probe.heartbeat_timeout_sec.max(1));
+        probe.worker_heartbeat_stale = heartbeat_at + timeout <= now;
     }
 
     Ok(())
@@ -493,15 +500,51 @@ mod tests {
     fn poll_updates_phase_and_persists_decision() -> Result<()> {
         let temp = tempdir()?;
         let store = BackgroundRunStore::new(temp.path());
+        let now = Utc::now();
         let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
         probe.result_artifact_present = true;
         store.upsert(probe)?;
 
-        let outcomes = poll_background_runs(&store, Some("ticket"), Utc::now(), None)?;
+        let outcomes = poll_background_runs(&store, Some("ticket"), now, None)?;
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].decision.phase, BackgroundRunnerPhase::Completed);
-        assert_eq!(store.load()?[0].phase, BackgroundRunnerPhase::Completed);
+        let stored = store.load()?.remove(0);
+        assert_eq!(stored.phase, BackgroundRunnerPhase::Completed);
+        assert_eq!(stored.last_observed_at, Some(now));
+        assert_eq!(
+            stored.last_recovery_evidence.as_deref(),
+            Some("local background result artifact present")
+        );
+        assert_eq!(stored.last_recovery_terminal, Some(true));
+        Ok(())
+    }
+
+    #[test]
+    fn poll_marks_heartbeat_stale_from_timestamp() -> Result<()> {
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let now = Utc::now();
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.runtime_handle_alive = true;
+        probe.worker_heartbeat_at = Some(now - Duration::minutes(20));
+        probe.heartbeat_timeout_sec = 300;
+        store.upsert(probe)?;
+
+        let outcomes = poll_background_runs(&store, Some("ticket"), now, None)?;
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            outcomes[0].decision.phase,
+            BackgroundRunnerPhase::StaleLostCallback
+        );
+        let stored = store.load()?.remove(0);
+        assert!(stored.worker_heartbeat_stale);
+        assert_eq!(stored.last_recovery_terminal, Some(false));
+        assert!(stored
+            .last_recovery_evidence
+            .as_deref()
+            .is_some_and(|evidence| evidence.contains("heartbeat is stale")));
         Ok(())
     }
 }

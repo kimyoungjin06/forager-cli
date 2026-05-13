@@ -24,7 +24,7 @@ review note, `aoe_orch_control/docs/HERMES_AGENT_BENCHMARK_20260512.md`.
 |---|---|---|---|---|
 | 1 | Approval rail | `offdesk` pending action approvals | Can runtime/canonical mutation pause on a bounded action object with id, TTL, result, and audit trail? | First pass active |
 | 2 | Session and resume durability | task transcript and resume artifacts | Can restart recovery explain the next safe task step without treating chat history as truth? | First pass active |
-| 3 | Background process recovery | background run tickets and sidecars | Can stale local/tmux/background runners be reconciled with better tail and heartbeat evidence? | Planned |
+| 3 | Background process recovery | background run tickets and sidecars | Can stale local/tmux/background runners be reconciled with better tail and heartbeat evidence? | First pass active |
 | 4 | Provider profile and error classifier | provider routing and capacity memory | Can provider errors become structured retry/compress/fallback reasons before scheduler policy? | Planned |
 | 5 | Checkpoint and rollback | pre-mutation evidence artifacts | Can canonical mutations require rollback evidence without copying Hermes shadow git wholesale? | Planned |
 | 6 | Tool registry | Task Team capability registry | Can capabilities be declared with risk, scope, backend, approval, and offdesk eligibility? | Partially present |
@@ -94,3 +94,30 @@ redaction policy, and retention boundary.
 - Log tails and evidence summaries are operator-safe redacted.
 - Legacy `task_resume_state.json` rows still load and render through both JSON
   and human CLI output.
+
+## Third Pass: Background Process Recovery
+
+Hermes' useful shape is fast, low-cost observation of long-running work. Forager
+keeps the backend-specific state in `background_runs.json` and records the last
+poll evidence directly on each probe:
+
+- every poll updates `last_observed_at`, `last_recovery_evidence`, and
+  `last_recovery_terminal`;
+- background probes can carry `worker_heartbeat_at` plus `heartbeat_timeout_sec`;
+- local background probes with an alive process but stale heartbeat become
+  `stale_lost_callback` instead of staying silently running;
+- `forager offdesk poll` and `forager offdesk background` show observed time and
+  redacted log tail in human output when available.
+
+This does not introduce a new worker runtime. Heartbeat fields are durable
+evidence that current and future runners can write into the existing Forager
+probe record.
+
+## Background Recovery Acceptance Checks
+
+- Polling a completed run persists the recovery evidence and terminal flag.
+- A stale heartbeat timestamp turns an otherwise alive local background probe
+  into `stale_lost_callback`.
+- Legacy background probe rows without heartbeat or observation fields still
+  load and poll normally.
+- Human and JSON poll output expose enough evidence to explain the phase change.

@@ -515,6 +515,56 @@ fn offdesk_poll_persists_background_phase_transition() -> Result<()> {
         profile_dir.join("background_runs.json"),
     )?)?;
     assert_eq!(runs[0]["phase"], "completed");
+    assert_eq!(
+        runs[0]["last_recovery_evidence"],
+        "local background result artifact present"
+    );
+    assert_eq!(runs[0]["last_recovery_terminal"], true);
+    assert!(runs[0]["last_observed_at"].as_str().is_some());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_poll_marks_stale_background_heartbeat() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "ticket_id": "ticket",
+                "runner_kind": "local_background",
+                "phase": "launched",
+                "runtime_handle_alive": true,
+                "worker_heartbeat_at": now - Duration::minutes(20),
+                "heartbeat_timeout_sec": 300
+            }
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "poll", "ticket", "--json"])
+        .output()?;
+
+    assert!(output.status.success());
+    let outcomes: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(outcomes[0]["decision"]["phase"], "stale_lost_callback");
+    assert_eq!(outcomes[0]["probe"]["worker_heartbeat_stale"], true);
+
+    let runs: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir.join("background_runs.json"),
+    )?)?;
+    assert_eq!(runs[0]["phase"], "stale_lost_callback");
+    assert_eq!(runs[0]["worker_heartbeat_stale"], true);
+    assert_eq!(
+        runs[0]["last_recovery_evidence"],
+        "local background heartbeat is stale"
+    );
+    assert_eq!(runs[0]["last_recovery_terminal"], false);
+    assert!(runs[0]["last_observed_at"].as_str().is_some());
     Ok(())
 }
 
@@ -607,6 +657,11 @@ fn offdesk_launch_executes_local_background_command_and_poll_completes() -> Resu
     assert!(runs[0]["result_artifact_present"]
         .as_bool()
         .unwrap_or(false));
+    assert_eq!(
+        runs[0]["last_recovery_evidence"],
+        "local background result artifact present"
+    );
+    assert!(runs[0]["last_observed_at"].as_str().is_some());
     Ok(())
 }
 
