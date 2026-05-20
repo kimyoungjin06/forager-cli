@@ -2104,11 +2104,11 @@ impl AdaptiveWikiStore {
             .filter(|event| event.occurred_at >= promotion_at)
             .count();
         let recurrence_numerator = post_promotion_correction_events + post_promotion_failure_events;
-        let post_promotion_recurrence_per_1000 = if post_promotion_usage_events == 0 {
-            0
-        } else {
-            ((recurrence_numerator * 1000) / post_promotion_usage_events) as u32
-        };
+        let post_promotion_recurrence_per_1000 = recurrence_numerator
+            .saturating_mul(1000)
+            .checked_div(post_promotion_usage_events)
+            .map(|value| u32::try_from(value).unwrap_or(u32::MAX))
+            .unwrap_or(0);
         let assessment = if entry.is_none() || post_promotion_usage_events == 0 {
             AdaptiveWikiCorrectionRecurrenceAssessment::InsufficientEvidence
         } else if recurrence_numerator == 0 {
