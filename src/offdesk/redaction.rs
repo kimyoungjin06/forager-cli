@@ -1,6 +1,7 @@
 //! Redaction and context-fencing helpers for operator-facing output.
 
 use regex::{Captures, Regex};
+use serde::Serialize;
 use std::sync::OnceLock;
 
 fn private_key_re() -> &'static Regex {
@@ -72,7 +73,7 @@ fn url_userinfo_re() -> &'static Regex {
 fn token_query_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)([?&](?:access_token|api[_-]?key|apikey|password|secret|token)=)[^&\s]+")
+        Regex::new(r"(?i)([?&](?:access_token|api[_-]?key|apikey|password|secret|token)=)([^&\s]+)")
             .expect("valid token query regex")
     })
 }
@@ -97,55 +98,159 @@ fn runner_context_res() -> &'static [Regex] {
     })
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct RedactionOutcome {
+    pub text: String,
+    pub changed: bool,
+    pub runner_context_removed: usize,
+    pub secrets_redacted: usize,
+}
+
+impl RedactionOutcome {
+    fn from_text(text: String) -> Self {
+        Self {
+            text,
+            changed: false,
+            runner_context_removed: 0,
+            secrets_redacted: 0,
+        }
+    }
+
+    fn add_runner_context(&mut self, count: usize) {
+        self.runner_context_removed += count;
+        self.changed |= count > 0;
+    }
+
+    fn add_secret_redactions(&mut self, count: usize) {
+        self.secrets_redacted += count;
+        self.changed |= count > 0;
+    }
+}
+
 /// Remove runner-only context blocks before text is shown to an operator.
 pub fn strip_runner_context(input: &str) -> String {
+    strip_runner_context_with_report(input).text
+}
+
+/// Remove runner-only context blocks and report how much context was removed.
+pub fn strip_runner_context_with_report(input: &str) -> RedactionOutcome {
     let mut output = input.to_string();
+    let mut removed = 0;
     for re in runner_context_res() {
+        let count = re.find_iter(&output).count();
+        removed += count;
         output = re
             .replace_all(&output, "[internal context omitted]")
             .to_string();
     }
-    output
+    let mut outcome = RedactionOutcome::from_text(output);
+    outcome.add_runner_context(removed);
+    outcome
 }
 
 /// Force-redact known secret formats in audit rows, notifications, logs, and errors.
 pub fn force_redact(input: &str) -> String {
+    force_redact_with_report(input).text
+}
+
+/// Force-redact known secret formats and report how many replacements were made.
+pub fn force_redact_with_report(input: &str) -> RedactionOutcome {
     let mut output = input.to_string();
-    output = private_key_re()
-        .replace_all(&output, "[REDACTED_PRIVATE_KEY]")
-        .to_string();
-    output = telegram_token_re()
-        .replace_all(&output, "[REDACTED_TELEGRAM_TOKEN]")
-        .to_string();
-    output = bearer_re()
-        .replace_all(&output, "Bearer [REDACTED]")
-        .to_string();
-    output = api_key_prefix_re()
-        .replace_all(&output, "[REDACTED_API_KEY]")
-        .to_string();
-    output = assignment_re()
-        .replace_all(&output, |caps: &Captures| {
+    let mut redacted = 0;
+
+    (output, redacted) =
+        replace_counted(output, private_key_re(), "[REDACTED_PRIVATE_KEY]", redacted);
+    (output, redacted) = replace_counted(
+        output,
+        telegram_token_re(),
+        "[REDACTED_TELEGRAM_TOKEN]",
+        redacted,
+    );
+    (output, redacted) = replace_counted(output, bearer_re(), "Bearer [REDACTED]", redacted);
+    (output, redacted) =
+        replace_counted(output, api_key_prefix_re(), "[REDACTED_API_KEY]", redacted);
+    (output, redacted) = replace_assignments(output, redacted);
+    (output, redacted) = replace_counted(output, db_url_re(), "[REDACTED_DB_URL]", redacted);
+    (output, redacted) = replace_counted(output, jwt_re(), "[REDACTED_JWT]", redacted);
+    (output, redacted) = replace_counted(output, url_userinfo_re(), "$1[REDACTED]@", redacted);
+    (output, redacted) = replace_token_queries(output, redacted);
+
+    let mut outcome = RedactionOutcome::from_text(output);
+    outcome.add_secret_redactions(redacted);
+    outcome
+}
+
+/// Apply context fencing and secret redaction for operator-facing text.
+pub fn operator_safe_text(input: &str) -> String {
+    operator_safe_report(input).text
+}
+
+/// Apply context fencing and secret redaction, returning a report for audit surfaces.
+pub fn operator_safe_report(input: &str) -> RedactionOutcome {
+    let stripped = strip_runner_context_with_report(input);
+    let redacted = force_redact_with_report(&stripped.text);
+    RedactionOutcome {
+        text: redacted.text,
+        changed: stripped.changed || redacted.changed,
+        runner_context_removed: stripped.runner_context_removed,
+        secrets_redacted: redacted.secrets_redacted,
+    }
+}
+
+fn replace_counted(
+    input: String,
+    re: &Regex,
+    replacement: &str,
+    prior_count: usize,
+) -> (String, usize) {
+    let count = re.find_iter(&input).count();
+    if count == 0 {
+        return (input, prior_count);
+    }
+    (
+        re.replace_all(&input, replacement).to_string(),
+        prior_count + count,
+    )
+}
+
+fn replace_assignments(input: String, prior_count: usize) -> (String, usize) {
+    let mut count = 0;
+    let output = assignment_re()
+        .replace_all(&input, |caps: &Captures| {
+            let value = caps.get(2).map_or("", |m| m.as_str());
+            if value == "[REDACTED]" || value == "\"[REDACTED]\"" || value == "'[REDACTED]'" {
+                return caps
+                    .get(0)
+                    .map_or_else(String::new, |m| m.as_str().to_string());
+            }
+            count += 1;
             format!(
                 "{}=[REDACTED]",
                 caps.get(1).map_or("secret", |m| m.as_str())
             )
         })
         .to_string();
-    output = db_url_re()
-        .replace_all(&output, "[REDACTED_DB_URL]")
-        .to_string();
-    output = jwt_re().replace_all(&output, "[REDACTED_JWT]").to_string();
-    output = url_userinfo_re()
-        .replace_all(&output, "$1[REDACTED]@")
-        .to_string();
-    token_query_re()
-        .replace_all(&output, "$1[REDACTED]")
-        .to_string()
+    (output, prior_count + count)
 }
 
-/// Apply context fencing and secret redaction for operator-facing text.
-pub fn operator_safe_text(input: &str) -> String {
-    force_redact(&strip_runner_context(input))
+fn replace_token_queries(input: String, prior_count: usize) -> (String, usize) {
+    let mut count = 0;
+    let output = token_query_re()
+        .replace_all(&input, |caps: &Captures| {
+            let value = caps.get(2).map_or("", |m| m.as_str());
+            if value == "[REDACTED]" {
+                return caps
+                    .get(0)
+                    .map_or_else(String::new, |m| m.as_str().to_string());
+            }
+            count += 1;
+            format!(
+                "{}[REDACTED]",
+                caps.get(1).map_or("?token=", |m| m.as_str())
+            )
+        })
+        .to_string();
+    (output, prior_count + count)
 }
 
 #[cfg(test)]
@@ -189,5 +294,34 @@ mod tests {
         assert!(output.contains("visible"));
         assert!(output.contains("shown"));
         assert!(!output.contains("hidden"));
+    }
+
+    #[test]
+    fn reports_context_and_secret_redactions() {
+        let input = "visible\n<!-- FORAGER:RUNNER_CONTEXT_BEGIN -->hidden<!-- FORAGER:RUNNER_CONTEXT_END -->\n\
+            token=sk-secretsecretsecretsecret\n\
+            https://example.com/path?access_token=secret123";
+
+        let output = operator_safe_report(input);
+
+        assert!(output.changed);
+        assert_eq!(output.runner_context_removed, 1);
+        assert!(output.secrets_redacted >= 2);
+        assert!(!output.text.contains("hidden"));
+        assert!(!output.text.contains("sk-secret"));
+        assert!(!output.text.contains("secret123"));
+    }
+
+    #[test]
+    fn redaction_report_is_idempotent_for_sanitized_text() {
+        let input = "token=sk-secretsecretsecretsecret https://example.com?token=secret";
+        let first = operator_safe_report(input);
+        let second = operator_safe_report(&first.text);
+
+        assert!(first.changed);
+        assert!(!second.changed);
+        assert_eq!(second.runner_context_removed, 0);
+        assert_eq!(second.secrets_redacted, 0);
+        assert_eq!(first.text, second.text);
     }
 }

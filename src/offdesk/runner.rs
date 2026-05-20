@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::tmux::{self, Session};
 
+use super::adaptive_wiki::{build_runtime_projection, AdaptiveWikiProjectionPolicy};
 use super::approval::ExecutionBrief;
 use super::background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind,
@@ -28,6 +29,10 @@ pub struct BackgroundLaunchRequest {
     pub runtime_handle_alive: bool,
     pub provider_launch_spec_reconstructable: bool,
     pub ack_timeout_sec: i64,
+    pub adaptive_wiki_runtime_enabled: bool,
+    pub adaptive_wiki_context: Option<String>,
+    pub adaptive_wiki_entry_ids: Vec<String>,
+    pub adaptive_wiki_runtime_policy: Option<AdaptiveWikiProjectionPolicy>,
 }
 
 impl BackgroundLaunchRequest {
@@ -40,6 +45,10 @@ impl BackgroundLaunchRequest {
             runtime_handle_alive: true,
             provider_launch_spec_reconstructable: false,
             ack_timeout_sec: 300,
+            adaptive_wiki_runtime_enabled: true,
+            adaptive_wiki_context: None,
+            adaptive_wiki_entry_ids: Vec::new(),
+            adaptive_wiki_runtime_policy: None,
         }
     }
 }
@@ -86,6 +95,7 @@ pub fn launch_background_run(
     now: DateTime<Utc>,
 ) -> Result<BackgroundLaunchOutcome> {
     let gate_outcome = gate.evaluate(request.gate_request.clone(), brief, now)?;
+    let request = with_adaptive_wiki_runtime_context(request, &gate_outcome);
     if !gate_outcome.can_execute_requested_action() {
         return Ok(BackgroundLaunchOutcome {
             gate: gate_outcome,
@@ -121,6 +131,7 @@ pub fn launch_background_command_with_gate_outcome(
     now: DateTime<Utc>,
     command_spec: LocalCommandLaunchSpec,
 ) -> Result<BackgroundLaunchOutcome> {
+    let request = with_adaptive_wiki_runtime_context(request, &gate_outcome);
     if matches!(
         request.runner_kind,
         BackgroundRunnerKind::GithubRunner | BackgroundRunnerKind::RemoteWorker
@@ -169,6 +180,7 @@ fn build_background_probe(request: BackgroundLaunchRequest, now: DateTime<Utc>) 
     probe.project_key = Some(request.gate_request.project_key);
     probe.request_id = Some(request.gate_request.request_id);
     probe.task_id = Some(request.gate_request.task_id);
+    probe.agent_mode = request.gate_request.agent_mode;
     probe.launch_spec_summary = request
         .launch_spec_summary
         .as_deref()
@@ -176,6 +188,15 @@ fn build_background_probe(request: BackgroundLaunchRequest, now: DateTime<Utc>) 
     probe.runtime_handle_alive = request.runtime_handle_alive;
     probe.provider_launch_spec_reconstructable = request.provider_launch_spec_reconstructable;
     probe.ack_timeout_sec = request.ack_timeout_sec.max(1);
+    if let Some(context) = request.adaptive_wiki_context.as_deref() {
+        probe.adaptive_wiki_context = Some(operator_safe_text(context));
+    }
+    probe.adaptive_wiki_entry_ids = request
+        .adaptive_wiki_entry_ids
+        .into_iter()
+        .map(|entry_id| operator_safe_text(&entry_id))
+        .collect();
+    probe.adaptive_wiki_runtime_policy = request.adaptive_wiki_runtime_policy;
 
     if matches!(
         probe.runner_kind,
@@ -186,6 +207,36 @@ fn build_background_probe(request: BackgroundLaunchRequest, now: DateTime<Utc>) 
     }
 
     probe
+}
+
+fn with_adaptive_wiki_runtime_context(
+    mut request: BackgroundLaunchRequest,
+    gate_outcome: &SchedulerGateOutcome,
+) -> BackgroundLaunchRequest {
+    if !request.adaptive_wiki_runtime_enabled
+        || !adaptive_wiki_runtime_context_enabled()
+        || !gate_outcome.can_execute_requested_action()
+    {
+        return request;
+    }
+    let Some(projection) = build_runtime_projection(&gate_outcome.adaptive_wiki_runtime) else {
+        return request;
+    };
+    request.adaptive_wiki_entry_ids = projection.entry_ids;
+    request.adaptive_wiki_runtime_policy = Some(gate_outcome.adaptive_wiki_runtime_policy);
+    request.adaptive_wiki_context = Some(projection.context);
+    request
+}
+
+fn adaptive_wiki_runtime_context_enabled() -> bool {
+    std::env::var("FORAGER_ADAPTIVE_WIKI_RUNTIME")
+        .map(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no" | "disabled"
+            )
+        })
+        .unwrap_or(true)
 }
 
 pub fn poll_background_runs(
@@ -438,7 +489,11 @@ fn tmux_session_alive(session_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offdesk::{ApprovalLedger, SchedulerGateStatus};
+    use crate::offdesk::{
+        AdaptiveWikiActivationMode, AdaptiveWikiAiProjection, AdaptiveWikiConfidence,
+        AdaptiveWikiKind, AdaptiveWikiProjectionPolicy, AdaptiveWikiScope, ApprovalLedger,
+        ApprovalMode, SchedulerGateStatus,
+    };
     use tempfile::tempdir;
 
     fn brief(now: DateTime<Utc>) -> ExecutionBrief {
@@ -460,6 +515,43 @@ mod tests {
             BackgroundLaunchRequest::new(gate_request, BackgroundRunnerKind::LocalBackground);
         request.ticket_id = Some("ticket".to_string());
         request
+    }
+
+    fn wiki_projection(id: &str, instruction: &str) -> AdaptiveWikiAiProjection {
+        AdaptiveWikiAiProjection {
+            id: id.to_string(),
+            kind: AdaptiveWikiKind::Procedure,
+            scope: AdaptiveWikiScope::Project,
+            scope_ref: "project".to_string(),
+            activation_mode: AdaptiveWikiActivationMode::Confirm,
+            agent_modes: Vec::new(),
+            instruction: instruction.to_string(),
+            confidence: AdaptiveWikiConfidence::Explicit,
+            evidence_count: 1,
+        }
+    }
+
+    fn proceed_outcome(
+        adaptive_wiki: Vec<AdaptiveWikiAiProjection>,
+        adaptive_wiki_runtime: Vec<AdaptiveWikiAiProjection>,
+    ) -> SchedulerGateOutcome {
+        SchedulerGateOutcome {
+            status: SchedulerGateStatus::Proceed,
+            capability_id: "background.launch".to_string(),
+            risk_level: "runtime_mutation".to_string(),
+            approval_mode: ApprovalMode::EnvelopeAuto,
+            approval: None,
+            artifact_check: None,
+            provider_capacity: None,
+            provider_fallback: None,
+            retry_at: None,
+            adaptive_wiki,
+            adaptive_wiki_runtime,
+            adaptive_wiki_runtime_policy: AdaptiveWikiProjectionPolicy::default(),
+            adaptive_wiki_runtime_decision: None,
+            reason: "capability gate passed".to_string(),
+            scheduler_may_continue_other_work: true,
+        }
     }
 
     #[test]
@@ -494,6 +586,29 @@ mod tests {
         assert_eq!(probe.phase, BackgroundRunnerPhase::Launched);
         assert_eq!(store.load()?.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn runtime_context_uses_runtime_projection_not_preflight_projection() {
+        let request = launch_request();
+        let outcome = proceed_outcome(
+            vec![wiki_projection("wiki_preflight", "Preflight only")],
+            vec![wiki_projection("wiki_runtime", "Runtime only")],
+        );
+
+        let request = with_adaptive_wiki_runtime_context(request, &outcome);
+
+        assert_eq!(request.adaptive_wiki_entry_ids, vec!["wiki_runtime"]);
+        let context = request
+            .adaptive_wiki_context
+            .as_deref()
+            .expect("runtime context");
+        assert!(context.contains("wiki_runtime"));
+        assert!(!context.contains("wiki_preflight"));
+        assert_eq!(
+            request.adaptive_wiki_runtime_policy,
+            Some(AdaptiveWikiProjectionPolicy::default())
+        );
     }
 
     #[test]

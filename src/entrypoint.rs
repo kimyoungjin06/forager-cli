@@ -14,6 +14,10 @@ pub async fn run_cli() -> Result<()> {
 
     let cli = Cli::parse();
     let explicit_profile = cli.profile.clone();
+    let profile = explicit_profile
+        .clone()
+        .or_else(|| std::env::var("AGENT_OF_EMPIRES_PROFILE").ok())
+        .unwrap_or_default();
     maybe_warn_legacy_alias(&cli);
 
     // Handle commands that don't need app data or migrations.
@@ -36,15 +40,18 @@ pub async fn run_cli() -> Result<()> {
                 TmuxCommands::Status(args) => cli::tmux::run_status(args),
             };
         }
+        Some(Commands::Offdesk { command })
+            if matches!(
+                command.as_ref(),
+                cli::offdesk::OffdeskCommands::DebugBundle(_)
+            ) =>
+        {
+            return cli::offdesk::run(&profile, *command).await;
+        }
         Some(Commands::Sounds { command }) => return cli::sounds::run(command).await,
         Some(Commands::Uninstall(args)) => return cli::uninstall::run(args).await,
         _ => {}
     }
-
-    let profile = cli
-        .profile
-        .or_else(|| std::env::var("AGENT_OF_EMPIRES_PROFILE").ok())
-        .unwrap_or_default();
 
     // TUI mode handles migrations with a spinner; CLI runs them silently.
     if cli.command.is_some() {

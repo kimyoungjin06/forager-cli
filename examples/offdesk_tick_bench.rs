@@ -109,6 +109,7 @@ struct TickReportSummary {
     completed: usize,
     failed: usize,
     resume_pending: usize,
+    provider_deferred: usize,
     skipped: usize,
     stale_lock_replaced: bool,
     updated_task_ids: usize,
@@ -124,6 +125,7 @@ impl From<&OffdeskTickReport> for TickReportSummary {
             completed: report.completed,
             failed: report.failed,
             resume_pending: report.resume_pending,
+            provider_deferred: report.provider_deferred,
             skipped: report.skipped,
             stale_lock_replaced: report.stale_lock_replaced,
             updated_task_ids: report.updated_task_ids.len(),
@@ -300,6 +302,11 @@ fn seed_tasks(root: &Path, task_count: usize, now: DateTime<Utc>) -> Result<()> 
                     execution_brief: None,
                     not_before: None,
                     mutation_class: None,
+                    artifact_refs: Vec::new(),
+                    artifact_kind: None,
+                    agent_mode: None,
+                    provider_id: None,
+                    model: None,
                     preview: String::new(),
                     reason: String::new(),
                     log_artifact_path: None,
@@ -371,6 +378,7 @@ fn approval(
             Some("bench".to_string())
         },
         source_surface: "offdesk.tick.bench".to_string(),
+        metadata: None,
     }
 }
 

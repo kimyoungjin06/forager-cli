@@ -316,8 +316,10 @@ fn shorten_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_shorten_path_with_home() {
         if let Some(home) = dirs::home_dir() {
             if let Some(home_str) = home.to_str() {
@@ -329,6 +331,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_shorten_path_without_home_prefix() {
         let path = "/tmp/some/path";
         let shortened = shorten_path(path);
@@ -336,6 +339,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_shorten_path_exact_home() {
         if let Some(home) = dirs::home_dir() {
             if let Some(home_str) = home.to_str() {
@@ -346,6 +350,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_shorten_path_relative() {
         let path = "relative/path";
         let shortened = shorten_path(path);
@@ -353,6 +358,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_shorten_path_empty() {
         let path = "";
         let shortened = shorten_path(path);
@@ -360,6 +366,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_shorten_path_similar_prefix_not_home() {
         if let Some(home) = dirs::home_dir() {
             if let Some(home_str) = home.to_str() {
@@ -371,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_shorten_path_preserves_trailing_slash() {
         if let Some(home) = dirs::home_dir() {
             if let Some(home_str) = home.to_str() {

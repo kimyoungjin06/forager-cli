@@ -6,19 +6,34 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::approval::{ApprovalLedger, ApprovalLedgerSession, ApprovalStatus};
+use super::adaptive_wiki::{
+    build_usage_records_with_policy, AdaptiveWikiStore, AdaptiveWikiUsageContext,
+};
+use super::approval::{
+    ActionApprovalMetadata, ActionApprovalRequest, ApprovalLedger, ApprovalLedgerSession,
+    ApprovalStatus, ProviderFallbackApprovalMetadata, RiskLevel,
+};
 use super::background::{BackgroundProbe, BackgroundRunStore, BackgroundRunnerPhase};
 use super::redaction::operator_safe_text;
 use super::resume::{ResumeEvidence, ResumePendingInput, TaskResumeState, TaskResumeStore};
 use super::runner::{
-    launch_background_command_with_gate_outcome, poll_background_runs, BackgroundLaunchRequest,
-    BackgroundPollOutcome, LocalCommandLaunchSpec,
+    launch_background_command_with_gate_outcome, poll_background_runs, BackgroundLaunchOutcome,
+    BackgroundLaunchRequest, BackgroundPollOutcome, LocalCommandLaunchSpec,
 };
-use super::scheduler::{SchedulerGate, SchedulerGateRequest, SchedulerGateStatus};
+use super::scheduler::{
+    is_provider_capacity_block, SchedulerGate, SchedulerGateRequest, SchedulerGateStatus,
+};
 use super::task_queue::{
     count_tasks, OffdeskTask, OffdeskTaskCounts, OffdeskTaskStatus, OffdeskTaskStore,
 };
 use super::tick_lock::OffdeskTickLockGuard;
+use super::{
+    recommend_provider_fallback, ProviderCapacityStore, ProviderFallbackCandidate,
+    ProviderFallbackRecommendation,
+};
+
+const PROVIDER_FALLBACK_ACTION: &str = "dispatch.provider_fallback";
+const PROVIDER_FALLBACK_CANDIDATE_LIMIT: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct OffdeskTickOptions {
@@ -48,6 +63,8 @@ pub struct OffdeskTickReport {
     pub completed: usize,
     pub failed: usize,
     pub resume_pending: usize,
+    pub provider_deferred: usize,
+    pub provider_retargeted: usize,
     pub skipped: usize,
     pub stale_lock_replaced: bool,
     pub updated_task_ids: Vec<String>,
@@ -73,7 +90,13 @@ pub fn run_offdesk_tick(
     let background_store = BackgroundRunStore::new(profile_dir);
     let task_store = OffdeskTaskStore::new(profile_dir);
     let resume_store = TaskResumeStore::new(profile_dir);
-    let gate = SchedulerGate::new(approval_ledger.clone());
+    let provider_capacity_store = ProviderCapacityStore::new(profile_dir);
+    let adaptive_wiki_store = AdaptiveWikiStore::new(profile_dir);
+    let gate = SchedulerGate::with_provider_capacity(
+        approval_ledger.clone(),
+        provider_capacity_store.clone(),
+    )
+    .with_adaptive_wiki(adaptive_wiki_store.clone());
     let (mut approval_session, expired) = approval_ledger.begin_session(options.now)?;
     let background_outcomes = poll_background_runs(
         &background_store,
@@ -103,6 +126,13 @@ pub fn run_offdesk_tick(
             &mut report,
         )?;
     }
+    apply_approved_provider_fallbacks(
+        &mut tasks,
+        &mut approval_session,
+        &provider_capacity_store,
+        options.now,
+        &mut report,
+    )?;
 
     let mut dispatched = 0usize;
     for task in tasks.iter_mut() {
@@ -122,6 +152,7 @@ pub fn run_offdesk_tick(
             &gate,
             &mut approval_session,
             &background_store,
+            &adaptive_wiki_store,
             options.now,
             &mut report,
         ) {
@@ -233,11 +264,139 @@ fn apply_background_outcome(
     Ok(())
 }
 
+fn apply_approved_provider_fallbacks(
+    tasks: &mut [OffdeskTask],
+    approvals: &mut ApprovalLedgerSession,
+    provider_capacity_store: &ProviderCapacityStore,
+    now: DateTime<Utc>,
+    report: &mut OffdeskTickReport,
+) -> Result<()> {
+    for approval in approvals.approved_provider_fallbacks(now) {
+        if approval.action != PROVIDER_FALLBACK_ACTION {
+            continue;
+        }
+        let Some(metadata) = approval
+            .metadata
+            .as_ref()
+            .and_then(ActionApprovalMetadata::as_provider_fallback)
+        else {
+            continue;
+        };
+        let recommendation = recommend_provider_fallback(
+            provider_capacity_store,
+            &metadata.current_provider_id,
+            metadata.current_model.as_deref(),
+            "approved provider fallback revalidation",
+            &metadata.runner_role,
+            now,
+        )?;
+        let Some(candidate) =
+            select_approved_provider_fallback_candidate(metadata, &recommendation)
+        else {
+            continue;
+        };
+
+        let mut applied = 0usize;
+        for task in tasks
+            .iter_mut()
+            .filter(|task| provider_fallback_task_matches_scope(task, &approval, metadata))
+        {
+            task.provider_id = Some(candidate.provider_id.clone());
+            task.model = candidate.model.clone();
+            task.not_before = None;
+            task.last_provider_fallback = Some(recommendation.clone());
+            task.updated_at = now;
+            applied += 1;
+            report.updated_task_ids.push(task.task_id.clone());
+        }
+
+        if applied > 0 {
+            report.provider_retargeted += applied;
+            approvals.supersede_approval(&approval.approval_id, "provider_fallback_applied");
+        }
+    }
+
+    Ok(())
+}
+
+fn select_approved_provider_fallback_candidate(
+    metadata: &ProviderFallbackApprovalMetadata,
+    recommendation: &ProviderFallbackRecommendation,
+) -> Option<ProviderFallbackCandidate> {
+    metadata.candidates.iter().find_map(|approved| {
+        recommendation
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.recommended
+                    && candidate.provider_id == approved.provider_id
+                    && candidate.model == approved.model
+            })
+            .cloned()
+    })
+}
+
+fn provider_fallback_task_matches_scope(
+    task: &OffdeskTask,
+    approval: &super::approval::PendingActionApproval,
+    metadata: &ProviderFallbackApprovalMetadata,
+) -> bool {
+    matches!(
+        task.status,
+        OffdeskTaskStatus::Queued | OffdeskTaskStatus::PendingApproval
+    ) && task.project_key == approval.project_key
+        && task.request_id == approval.request_id
+        && task.provider_id.as_deref() == Some(metadata.current_provider_id.as_str())
+        && task.model.as_deref() == metadata.current_model.as_deref()
+}
+
+fn ensure_provider_fallback_approval(
+    task: &OffdeskTask,
+    fallback: Option<&ProviderFallbackRecommendation>,
+    approvals: &mut ApprovalLedgerSession,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let Some(fallback) = fallback else {
+        return Ok(());
+    };
+    let Some(metadata) = ActionApprovalMetadata::provider_fallback_from_recommendation(
+        fallback,
+        "worker",
+        PROVIDER_FALLBACK_CANDIDATE_LIMIT,
+    ) else {
+        return Ok(());
+    };
+
+    let mut request = ActionApprovalRequest::new(
+        &task.project_key,
+        &task.request_id,
+        &task.task_id,
+        PROVIDER_FALLBACK_ACTION,
+        RiskLevel::RuntimeMutation,
+    );
+    request.mutation_class = Some(PROVIDER_FALLBACK_ACTION.to_string());
+    request.preview = format!(
+        "Retarget provider/model for request {} from {} {} using an approved fallback candidate",
+        task.request_id,
+        fallback.current_provider_id,
+        fallback.current_model.as_deref().unwrap_or("-")
+    );
+    request.reason =
+        "provider capacity cooldown active; provider/model fallback needs operator approval"
+            .to_string();
+    request.source_surface = "offdesk.tick".to_string();
+    request.metadata = Some(metadata);
+
+    approvals.ensure_pending_without_consuming_grant(request, now)?;
+    Ok(())
+}
+
 fn dispatch_task(
     task: &mut OffdeskTask,
     gate: &SchedulerGate,
     approvals: &mut ApprovalLedgerSession,
     background_store: &BackgroundRunStore,
+    adaptive_wiki_store: &AdaptiveWikiStore,
     now: DateTime<Utc>,
     report: &mut OffdeskTickReport,
 ) -> Result<()> {
@@ -251,6 +410,7 @@ fn dispatch_task(
         .mutation_class
         .clone()
         .or_else(|| Some(task.capability_id.clone()));
+    gate_request.artifact_refs = task.artifact_refs.clone();
     gate_request.preview = if task.preview.trim().is_empty() {
         task.command.clone()
     } else {
@@ -262,6 +422,10 @@ fn dispatch_task(
         task.reason.clone()
     };
     gate_request.source_surface = "offdesk.tick".to_string();
+    gate_request.provider_id = task.provider_id.clone();
+    gate_request.model = task.model.clone();
+    gate_request.artifact_kind = task.artifact_kind.clone();
+    gate_request.agent_mode = task.agent_mode;
 
     let mut launch_request = BackgroundLaunchRequest::new(gate_request, task.runner_kind);
     launch_request.ticket_id = task.background_ticket_id.clone();
@@ -288,11 +452,14 @@ fn dispatch_task(
     task.last_gate_status = Some(outcome.gate.status);
     match outcome.gate.status {
         SchedulerGateStatus::Proceed => {
-            if let Some(probe) = outcome.probe {
+            if let Some(probe) = outcome.probe.as_ref() {
                 task.status = OffdeskTaskStatus::Launched;
-                task.background_ticket_id = Some(probe.ticket_id);
+                task.background_ticket_id = Some(probe.ticket_id.clone());
                 task.attempt_count += 1;
                 task.last_error = None;
+                task.last_provider_fallback = None;
+                task.last_adaptive_wiki_entry_ids = probe.adaptive_wiki_entry_ids.clone();
+                append_adaptive_wiki_usage_for_task(task, &outcome, adaptive_wiki_store, now)?;
                 task.updated_at = now;
                 report.launched += 1;
                 report.updated_task_ids.push(task.task_id.clone());
@@ -300,19 +467,65 @@ fn dispatch_task(
         }
         SchedulerGateStatus::PendingApproval => {
             task.status = OffdeskTaskStatus::PendingApproval;
+            task.last_provider_fallback = None;
+            task.last_adaptive_wiki_entry_ids.clear();
             task.updated_at = now;
             report.pending_approval += 1;
             report.updated_task_ids.push(task.task_id.clone());
         }
         SchedulerGateStatus::Denied | SchedulerGateStatus::Blocked => {
-            task.status = OffdeskTaskStatus::Failed;
-            task.last_error = Some(outcome.gate.reason);
-            task.updated_at = now;
-            report.failed += 1;
-            report.updated_task_ids.push(task.task_id.clone());
+            if is_provider_capacity_block(&outcome.gate) {
+                let fallback = outcome.gate.provider_fallback.clone();
+                task.status = OffdeskTaskStatus::Queued;
+                task.not_before = outcome.gate.retry_at;
+                task.last_error = Some(outcome.gate.reason);
+                task.last_provider_fallback = fallback.clone();
+                task.last_adaptive_wiki_entry_ids.clear();
+                task.updated_at = now;
+                ensure_provider_fallback_approval(task, fallback.as_ref(), approvals, now)?;
+                report.provider_deferred += 1;
+                report.updated_task_ids.push(task.task_id.clone());
+            } else {
+                task.status = OffdeskTaskStatus::Failed;
+                task.last_error = Some(outcome.gate.reason);
+                task.last_provider_fallback = None;
+                task.last_adaptive_wiki_entry_ids.clear();
+                task.updated_at = now;
+                report.failed += 1;
+                report.updated_task_ids.push(task.task_id.clone());
+            }
         }
     }
 
+    Ok(())
+}
+
+fn append_adaptive_wiki_usage_for_task(
+    task: &OffdeskTask,
+    outcome: &BackgroundLaunchOutcome,
+    adaptive_wiki_store: &AdaptiveWikiStore,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let Some(probe) = outcome.probe.as_ref() else {
+        return Ok(());
+    };
+    if probe.adaptive_wiki_entry_ids.is_empty() {
+        return Ok(());
+    }
+    let records = build_usage_records_with_policy(
+        &outcome.gate.adaptive_wiki_runtime,
+        AdaptiveWikiUsageContext {
+            task_id: &task.task_id,
+            request_id: &task.request_id,
+            project_key: &task.project_key,
+            artifact_kind: task.artifact_kind.as_deref(),
+            agent_mode: task.agent_mode,
+            projection_kind: "runtime_probe",
+            projection_policy: Some(outcome.gate.adaptive_wiki_runtime_policy),
+            now,
+        },
+    );
+    adaptive_wiki_store.append_usage_records(&records)?;
     Ok(())
 }
 
@@ -397,8 +610,37 @@ fn resume_evidence_from_background(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offdesk::{BackgroundProbe, BackgroundRunnerKind, ExecutionBrief, OffdeskTaskInput};
+    use crate::offdesk::{
+        ApprovalMode, ApprovalScope, BackgroundProbe, BackgroundRunnerKind, ExecutionBrief,
+        OffdeskTaskInput, PendingActionApproval, ProviderCapacityState, ProviderCapacityStatus,
+        ProviderErrorReason, ProviderFallbackApplyScope, ProviderFallbackAuthStatus,
+        ProviderFallbackSource,
+    };
+    use serial_test::serial;
     use tempfile::tempdir;
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.as_ref() {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     fn task_input(now: DateTime<Utc>, command: &str) -> OffdeskTaskInput {
         OffdeskTaskInput {
@@ -420,10 +662,60 @@ mod tests {
             }),
             not_before: None,
             mutation_class: None,
+            artifact_refs: Vec::new(),
+            artifact_kind: None,
+            agent_mode: None,
+            provider_id: None,
+            model: None,
             preview: String::new(),
             reason: String::new(),
             log_artifact_path: None,
             result_artifact_path: None,
+        }
+    }
+
+    fn fallback_candidate() -> ProviderFallbackCandidate {
+        ProviderFallbackCandidate {
+            provider_id: "openai".to_string(),
+            model: Some("gpt-4.1-mini".to_string()),
+            source: ProviderFallbackSource::SameProviderModel,
+            auth_status: ProviderFallbackAuthStatus::Available,
+            capacity_status: ProviderCapacityStatus::Available,
+            recommended: true,
+            reason: "same provider fallback model".to_string(),
+        }
+    }
+
+    fn approved_provider_fallback(now: DateTime<Utc>) -> PendingActionApproval {
+        PendingActionApproval {
+            approval_id: "approval_provider_fallback".to_string(),
+            action_id: "action_provider_fallback".to_string(),
+            status: ApprovalStatus::Approved,
+            scope: ApprovalScope::Once,
+            project_key: "project".to_string(),
+            request_id: "request".to_string(),
+            task_id: "task".to_string(),
+            action: PROVIDER_FALLBACK_ACTION.to_string(),
+            risk_level: RiskLevel::RuntimeMutation,
+            approval_mode: ApprovalMode::OperatorRequired,
+            preview: String::new(),
+            reason: String::new(),
+            created_at: now,
+            expires_at: now + Duration::minutes(10),
+            resolved_at: Some(now),
+            resolved_by: Some("operator".to_string()),
+            source_surface: "test".to_string(),
+            metadata: Some(ActionApprovalMetadata::ProviderFallback(
+                ProviderFallbackApprovalMetadata {
+                    current_provider_id: "openai".to_string(),
+                    current_model: Some("gpt-4.1".to_string()),
+                    runner_role: "worker".to_string(),
+                    generated_at: now,
+                    candidate_limit: 3,
+                    candidates: vec![fallback_candidate()],
+                    apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+                },
+            )),
         }
     }
 
@@ -449,6 +741,166 @@ mod tests {
             TaskResumeStore::new(temp.path()).load()?[0].status,
             crate::offdesk::ResumeStatus::ResumePending
         );
+        Ok(())
+    }
+
+    #[test]
+    fn tick_defers_provider_capacity_block_without_failing_task() -> Result<()> {
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let retry_at = now + Duration::minutes(3);
+        ProviderCapacityStore::new(temp.path()).upsert(ProviderCapacityState {
+            provider_id: "openai".to_string(),
+            model: Some("gpt-4.1".to_string()),
+            status: ProviderCapacityStatus::CoolingDown,
+            reason: ProviderErrorReason::RateLimit,
+            cooldown_until: Some(retry_at),
+            last_error_summary: Some("rate limit".to_string()),
+            updated_at: now,
+        })?;
+        ProviderCapacityStore::new(temp.path()).upsert(ProviderCapacityState {
+            provider_id: "openai".to_string(),
+            model: Some("gpt-4.1-mini".to_string()),
+            status: ProviderCapacityStatus::Blocked,
+            reason: ProviderErrorReason::RateLimit,
+            cooldown_until: None,
+            last_error_summary: Some("blocked".to_string()),
+            updated_at: now,
+        })?;
+        ProviderCapacityStore::new(temp.path()).upsert(ProviderCapacityState {
+            provider_id: "anthropic".to_string(),
+            model: None,
+            status: ProviderCapacityStatus::Blocked,
+            reason: ProviderErrorReason::RateLimit,
+            cooldown_until: None,
+            last_error_summary: Some("blocked".to_string()),
+            updated_at: now,
+        })?;
+
+        let store = OffdeskTaskStore::new(temp.path());
+        let mut task = OffdeskTask::new(task_input(now, "true"), now);
+        task.provider_id = Some("openai".to_string());
+        task.model = Some("gpt-4.1".to_string());
+        store.enqueue(task)?;
+
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        let task = store.load()?.remove(0);
+
+        assert_eq!(report.provider_deferred, 1);
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.pending_approval, 0);
+        assert_eq!(task.status, OffdeskTaskStatus::Queued);
+        assert_eq!(task.not_before, Some(retry_at));
+        assert_eq!(task.last_gate_status, Some(SchedulerGateStatus::Blocked));
+        let fallback = task.last_provider_fallback.as_ref().expect("fallback");
+        assert_eq!(fallback.current_provider_id, "openai");
+        assert_eq!(fallback.current_model.as_deref(), Some("gpt-4.1"));
+        assert_eq!(ApprovalLedger::new(temp.path()).load()?.len(), 0);
+        assert!(BackgroundRunStore::new(temp.path()).load()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn approved_provider_fallback_retargets_only_provider_fields_before_dispatch() -> Result<()> {
+        let _openai_auth = EnvGuard::set("OPENAI_API_KEY", "sk-test-provider-fallback");
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let retry_at = now + Duration::minutes(3);
+        ProviderCapacityStore::new(temp.path()).upsert(ProviderCapacityState {
+            provider_id: "openai".to_string(),
+            model: Some("gpt-4.1".to_string()),
+            status: ProviderCapacityStatus::CoolingDown,
+            reason: ProviderErrorReason::RateLimit,
+            cooldown_until: Some(retry_at),
+            last_error_summary: Some("rate limit".to_string()),
+            updated_at: now,
+        })?;
+        let store = OffdeskTaskStore::new(temp.path());
+        let mut task = OffdeskTask::new(task_input(now, "true"), now);
+        task.provider_id = Some("openai".to_string());
+        task.model = Some("gpt-4.1".to_string());
+        task.not_before = Some(retry_at);
+        task.last_error = Some("provider capacity cooldown active".to_string());
+        task.last_gate_status = Some(SchedulerGateStatus::Blocked);
+        store.enqueue(task)?;
+        ApprovalLedger::new(temp.path()).save(&[approved_provider_fallback(now)])?;
+
+        let mut options = OffdeskTickOptions::new(now);
+        options.limit = 0;
+        let report = run_offdesk_tick(temp.path(), options)?;
+        let task = store.load()?.remove(0);
+        let approvals = ApprovalLedger::new(temp.path()).load()?;
+
+        assert_eq!(report.provider_retargeted, 1);
+        assert_eq!(report.launched, 0);
+        assert_eq!(task.provider_id.as_deref(), Some("openai"));
+        assert_eq!(task.model.as_deref(), Some("gpt-4.1-mini"));
+        assert!(task.not_before.is_none());
+        assert_eq!(
+            task.last_error.as_deref(),
+            Some("provider capacity cooldown active")
+        );
+        assert_eq!(task.last_gate_status, Some(SchedulerGateStatus::Blocked));
+        assert_eq!(task.command, "true");
+        assert_eq!(task.workdir, "/tmp");
+        assert!(task.last_provider_fallback.is_some());
+        assert_eq!(approvals[0].status, ApprovalStatus::Superseded);
+        Ok(())
+    }
+
+    #[test]
+    fn approved_provider_fallback_keeps_approval_when_revalidation_has_no_valid_candidate(
+    ) -> Result<()> {
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let retry_at = now + Duration::minutes(3);
+        let capacity_store = ProviderCapacityStore::new(temp.path());
+        capacity_store.upsert(ProviderCapacityState {
+            provider_id: "openai".to_string(),
+            model: Some("gpt-4.1".to_string()),
+            status: ProviderCapacityStatus::CoolingDown,
+            reason: ProviderErrorReason::RateLimit,
+            cooldown_until: Some(retry_at),
+            last_error_summary: Some("rate limit".to_string()),
+            updated_at: now,
+        })?;
+        capacity_store.upsert(ProviderCapacityState {
+            provider_id: "openai".to_string(),
+            model: Some("gpt-4.1-mini".to_string()),
+            status: ProviderCapacityStatus::Blocked,
+            reason: ProviderErrorReason::RateLimit,
+            cooldown_until: None,
+            last_error_summary: Some("blocked".to_string()),
+            updated_at: now,
+        })?;
+        let store = OffdeskTaskStore::new(temp.path());
+        let mut task = OffdeskTask::new(task_input(now, "true"), now);
+        task.provider_id = Some("openai".to_string());
+        task.model = Some("gpt-4.1".to_string());
+        task.not_before = Some(retry_at);
+        task.last_error = Some("provider capacity cooldown active".to_string());
+        task.last_gate_status = Some(SchedulerGateStatus::Blocked);
+        store.enqueue(task)?;
+        ApprovalLedger::new(temp.path()).save(&[approved_provider_fallback(now)])?;
+
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        let task = store.load()?.remove(0);
+        let approvals = ApprovalLedger::new(temp.path()).load()?;
+
+        assert_eq!(report.provider_retargeted, 0);
+        assert_eq!(report.launched, 0);
+        assert_eq!(task.provider_id.as_deref(), Some("openai"));
+        assert_eq!(task.model.as_deref(), Some("gpt-4.1"));
+        assert_eq!(task.not_before, Some(retry_at));
+        assert_eq!(
+            task.last_error.as_deref(),
+            Some("provider capacity cooldown active")
+        );
+        assert_eq!(task.last_gate_status, Some(SchedulerGateStatus::Blocked));
+        assert_eq!(task.command, "true");
+        assert_eq!(task.workdir, "/tmp");
+        assert_eq!(approvals[0].status, ApprovalStatus::Approved);
         Ok(())
     }
 }

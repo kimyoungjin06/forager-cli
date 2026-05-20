@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use super::adaptive_wiki::{AdaptiveWikiAgentMode, AdaptiveWikiProjectionPolicy};
 use super::redaction::operator_safe_text;
 
 const BACKGROUND_RUNS_FILE: &str = "background_runs.json";
@@ -59,6 +60,8 @@ pub struct BackgroundProbe {
     pub request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<AdaptiveWikiAgentMode>,
     pub runner_kind: BackgroundRunnerKind,
     pub phase: BackgroundRunnerPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +110,12 @@ pub struct BackgroundProbe {
     pub handoff_emitted_at: Option<DateTime<Utc>>,
     #[serde(default = "default_ack_timeout_sec")]
     pub ack_timeout_sec: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adaptive_wiki_entry_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_wiki_runtime_policy: Option<AdaptiveWikiProjectionPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_wiki_context: Option<String>,
 }
 
 impl BackgroundProbe {
@@ -117,6 +126,7 @@ impl BackgroundProbe {
             project_key: None,
             request_id: None,
             task_id: None,
+            agent_mode: None,
             runner_kind,
             phase: BackgroundRunnerPhase::Launched,
             launch_spec_summary: None,
@@ -142,6 +152,9 @@ impl BackgroundProbe {
             provider_launch_spec_reconstructable: false,
             handoff_emitted_at: None,
             ack_timeout_sec: default_ack_timeout_sec(),
+            adaptive_wiki_entry_ids: Vec::new(),
+            adaptive_wiki_runtime_policy: None,
+            adaptive_wiki_context: None,
         }
     }
 

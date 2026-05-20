@@ -106,6 +106,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_storage_roundtrip() -> Result<()> {
         let temp = tempdir()?;
         setup_test_home(temp.path());
