@@ -197,14 +197,13 @@ paths remain compatibility surfaces during the transition.
 - tmux status bar docs now describe `@forager_sandbox` as stored legacy metadata
   rather than a normal new-session field.
 
-## Planned Phase 22
+## Completed Phase 22
 
-- Rename local development checkouts from `agent-of-empires` to `forager-cli`
-  after the current Offdesk stabilization tree is committed or otherwise
-  checkpointed.
-- Keep a temporary compatibility symlink from `agent-of-empires` to
-  `forager-cli` for local scripts, old shell history, and already-recorded
-  Offdesk artifact paths.
+- The local development checkout was moved under the harness workspace:
+  `/home/kimyoungjin06/Desktop/Workspace/98.Harness/forager-cli`.
+- No compatibility symlink is kept for `agent-of-empires` or the previous
+  top-level `forager-cli` path. Active scripts should use the new physical
+  checkout path directly.
 - Do not rename compatibility storage paths, the `aoe` binary alias, or legacy
   env fallbacks in this phase.
 - Keep `aoe_orch_control` as a separate control-plane repository. If it is
@@ -216,17 +215,18 @@ paths remain compatibility surfaces during the transition.
   truth; an orchestrator may observe or request work through Forager surfaces
   but must not become the canonical Offdesk state store.
 
-Suggested local sequence after the stabilization patch is checkpointed:
+Local sequence used after the stabilization patch was checkpointed:
 
 ```bash
 cd /home/kimyoungjin06/Desktop/Workspace
-mv agent-of-empires forager-cli
-ln -s forager-cli agent-of-empires
+mkdir -p 98.Harness
+mv forager-cli 98.Harness/forager-cli
+rm agent-of-empires
 ```
 
-Only run the sequence when no `forager-cli` directory already exists and no
-process is using the old checkout path. Existing references inside historical
-reports and memory artifacts can remain as archival evidence.
+Only run the sequence when no `98.Harness/forager-cli` directory already exists
+and no process is using the old checkout path. Existing references inside
+historical reports and memory artifacts can remain as archival evidence.
 
 ## Compatibility Retirement Policy
 

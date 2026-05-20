@@ -69,14 +69,15 @@ Disallowed integration paths:
 The recommended checkout names are:
 
 ```text
-/home/kimyoungjin06/Desktop/Workspace/forager-cli
+/home/kimyoungjin06/Desktop/Workspace/98.Harness/forager-cli
 /home/kimyoungjin06/Desktop/Workspace/forager-control      # possible future rename
 ```
 
-During transition, keep compatibility where useful:
+No checkout-level compatibility symlink is kept after the harness move:
 
 ```text
-/home/kimyoungjin06/Desktop/Workspace/agent-of-empires -> forager-cli
+/home/kimyoungjin06/Desktop/Workspace/agent-of-empires     # removed local path
+/home/kimyoungjin06/Desktop/Workspace/forager-cli          # removed local path
 /home/kimyoungjin06/Desktop/Workspace/aoe_orch_control     # unchanged until separately renamed
 ```
 
@@ -101,9 +102,9 @@ Before renaming the local checkout:
 
 - checkpoint or commit the current Offdesk stabilization patch set;
 - verify no running tmux/offdesk task is using the old checkout as its workdir;
-- check that no `forager-cli` directory already exists;
-- keep a temporary compatibility symlink from `agent-of-empires` to
-  `forager-cli`;
+- check that no `98.Harness/forager-cli` directory already exists;
+- remove the previous `agent-of-empires` symlink instead of preserving checkout
+  path compatibility;
 - run `cargo test --test offdesk_cli` and one `forager offdesk status` or
   equivalent smoke after the rename;
 - update local notes/scripts only when they are active operational surfaces, not
