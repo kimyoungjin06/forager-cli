@@ -42,6 +42,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk enqueue`↴](#forager-offdesk-enqueue)
 * [`forager offdesk tick`↴](#forager-offdesk-tick)
 * [`forager offdesk tasks`↴](#forager-offdesk-tasks)
+* [`forager offdesk provider-capacity`↴](#forager-offdesk-provider-capacity)
+* [`forager offdesk provider-fallback`↴](#forager-offdesk-provider-fallback)
 * [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
 * [`forager offdesk retry-task`↴](#forager-offdesk-retry-task)
 * [`forager offdesk resume-task`↴](#forager-offdesk-resume-task)
@@ -52,6 +54,41 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk resume`↴](#forager-offdesk-resume)
 * [`forager offdesk background`↴](#forager-offdesk-background)
 * [`forager offdesk capabilities`↴](#forager-offdesk-capabilities)
+* [`forager offdesk snapshots`↴](#forager-offdesk-snapshots)
+* [`forager offdesk snapshot`↴](#forager-offdesk-snapshot)
+* [`forager offdesk restore-plan`↴](#forager-offdesk-restore-plan)
+* [`forager offdesk debug-bundle`↴](#forager-offdesk-debug-bundle)
+* [`forager offdesk wiki`↴](#forager-offdesk-wiki)
+* [`forager offdesk wiki corrections`↴](#forager-offdesk-wiki-corrections)
+* [`forager offdesk wiki proposal-events`↴](#forager-offdesk-wiki-proposal-events)
+* [`forager offdesk wiki record-proposal-event`↴](#forager-offdesk-wiki-record-proposal-event)
+* [`forager offdesk wiki accept-proposal`↴](#forager-offdesk-wiki-accept-proposal)
+* [`forager offdesk wiki reject-proposal`↴](#forager-offdesk-wiki-reject-proposal)
+* [`forager offdesk wiki supersede-proposal`↴](#forager-offdesk-wiki-supersede-proposal)
+* [`forager offdesk wiki proposal-handoff`↴](#forager-offdesk-wiki-proposal-handoff)
+* [`forager offdesk wiki proposal-receipt`↴](#forager-offdesk-wiki-proposal-receipt)
+* [`forager offdesk wiki candidates`↴](#forager-offdesk-wiki-candidates)
+* [`forager offdesk wiki entries`↴](#forager-offdesk-wiki-entries)
+* [`forager offdesk wiki show`↴](#forager-offdesk-wiki-show)
+* [`forager offdesk wiki projection`↴](#forager-offdesk-wiki-projection)
+* [`forager offdesk wiki runtime-policy-acks`↴](#forager-offdesk-wiki-runtime-policy-acks)
+* [`forager offdesk wiki runtime-policy-ack-report`↴](#forager-offdesk-wiki-runtime-policy-ack-report)
+* [`forager offdesk wiki review-after-report`↴](#forager-offdesk-wiki-review-after-report)
+* [`forager offdesk wiki ack-runtime-policy`↴](#forager-offdesk-wiki-ack-runtime-policy)
+* [`forager offdesk wiki lint`↴](#forager-offdesk-wiki-lint)
+* [`forager offdesk wiki export-markdown`↴](#forager-offdesk-wiki-export-markdown)
+* [`forager offdesk wiki review`↴](#forager-offdesk-wiki-review)
+* [`forager offdesk wiki evaluate-episode`↴](#forager-offdesk-wiki-evaluate-episode)
+* [`forager offdesk wiki episode-trace`↴](#forager-offdesk-wiki-episode-trace)
+* [`forager offdesk wiki evaluate-recurrence`↴](#forager-offdesk-wiki-evaluate-recurrence)
+* [`forager offdesk wiki promotion-chain`↴](#forager-offdesk-wiki-promotion-chain)
+* [`forager offdesk wiki promote`↴](#forager-offdesk-wiki-promote)
+* [`forager offdesk wiki reject`↴](#forager-offdesk-wiki-reject)
+* [`forager offdesk wiki rescope`↴](#forager-offdesk-wiki-rescope)
+* [`forager offdesk wiki deprecate`↴](#forager-offdesk-wiki-deprecate)
+* [`forager offdesk wiki renew-review-after`↴](#forager-offdesk-wiki-renew-review-after)
+* [`forager offdesk wiki add-counterexample`↴](#forager-offdesk-wiki-add-counterexample)
+* [`forager offdesk wiki update-runbook`↴](#forager-offdesk-wiki-update-runbook)
 * [`forager tmux`↴](#forager-tmux)
 * [`forager tmux status`↴](#forager-tmux-status)
 * [`forager sounds`↴](#forager-sounds)
@@ -525,6 +562,8 @@ Manage offdesk approvals and recovery artifacts
 * `enqueue` — Enqueue a durable offdesk task
 * `tick` — Run one offdesk control-loop pass
 * `tasks` — Show durable offdesk tasks
+* `provider-capacity` — Show provider capacity cooldown state
+* `provider-fallback` — Recommend provider/model fallbacks without retargeting tasks
 * `cancel-task` — Mark a durable task cancelled without stopping its background runner
 * `retry-task` — Requeue a failed, resume-pending, or cancelled durable task
 * `resume-task` — Accept recovery for a resume-pending task and requeue it
@@ -535,6 +574,11 @@ Manage offdesk approvals and recovery artifacts
 * `resume` — Show task resume artifacts
 * `background` — Show background runner recovery probes
 * `capabilities` — Show Task Team capability metadata
+* `snapshots` — List pre-mutation checkpoint snapshots
+* `snapshot` — Show and verify a pre-mutation checkpoint snapshot
+* `restore-plan` — Show a dry-run rollback plan without modifying files
+* `debug-bundle` — Emit a sanitized read-only debug bundle
+* `wiki` — Inspect adaptive wiki candidates, entries, projections, and lint
 
 
 
@@ -568,6 +612,11 @@ Evaluate whether an offdesk capability may execute now
 * `--task-id <TASK_ID>` — Task ID for approval and audit correlation
 * `--mutation-class <MUTATION_CLASS>` — Mutation class to match against an ExecutionBrief envelope
 * `--brief <BRIEF>` — JSON file containing an ExecutionBrief
+* `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state
+* `--model <MODEL>` — Provider model to check against provider capacity cooldown state
+* `--artifact <ARTIFACT_REFS>` — Artifact reference in ARTIFACT_ID=PATH form
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind used to match adaptive wiki entries
+* `--agent-mode <AGENT_MODE>` — Agent work mode used to match adaptive wiki entries
 * `--preview <PREVIEW>` — Operator-safe action preview
 
   Default value: ``
@@ -602,6 +651,11 @@ Gate and record a background runner launch
 * `--task-id <TASK_ID>` — Task ID for approval and audit correlation
 * `--mutation-class <MUTATION_CLASS>` — Mutation class to match against an ExecutionBrief envelope
 * `--brief <BRIEF>` — JSON file containing an ExecutionBrief
+* `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state
+* `--model <MODEL>` — Provider model to check against provider capacity cooldown state
+* `--artifact <ARTIFACT_REFS>` — Artifact reference in ARTIFACT_ID=PATH form
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind used to match adaptive wiki entries
+* `--agent-mode <AGENT_MODE>` — Agent work mode used to match adaptive wiki entries
 * `--ticket-id <TICKET_ID>` — Stable ticket ID. Generated if omitted
 * `--launch-spec <LAUNCH_SPEC>` — Redacted launch spec summary to store with the ticket
 * `--cmd <COMMAND>` — Shell command to execute for local-background or local-tmux runners
@@ -651,6 +705,11 @@ Enqueue a durable offdesk task
 * `--workdir <WORKDIR>` — Working directory for --cmd. Defaults to the current directory
 * `--brief <BRIEF>` — JSON file containing an ExecutionBrief to store with the task
 * `--mutation-class <MUTATION_CLASS>` — Mutation class to match against an ExecutionBrief envelope
+* `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state when dispatched
+* `--model <MODEL>` — Provider model to check against provider capacity cooldown state when dispatched
+* `--artifact <ARTIFACT_REFS>` — Artifact reference in ARTIFACT_ID=PATH form
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind used to match adaptive wiki entries
+* `--agent-mode <AGENT_MODE>` — Agent work mode used to match adaptive wiki entries
 * `--preview <PREVIEW>` — Operator-safe action preview
 
   Default value: ``
@@ -691,6 +750,35 @@ Show durable offdesk tasks
 
 ###### **Options:**
 
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk provider-capacity`
+
+Show provider capacity cooldown state
+
+**Usage:** `forager offdesk provider-capacity [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk provider-fallback`
+
+Recommend provider/model fallbacks without retargeting tasks
+
+**Usage:** `forager offdesk provider-fallback [OPTIONS] --provider-id <PROVIDER_ID>`
+
+###### **Options:**
+
+* `--provider-id <PROVIDER_ID>` — Current provider ID that is blocked or under review
+* `--model <MODEL>` — Current provider model to exclude from fallback candidates
+* `--runner-role <RUNNER_ROLE>` — Runner role used to filter compatible cross-provider candidates
+
+  Default value: `worker`
 * `--json` — Output as JSON
 
 
@@ -848,6 +936,699 @@ Show Task Team capability metadata
 
 ###### **Options:**
 
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk snapshots`
+
+List pre-mutation checkpoint snapshots
+
+**Usage:** `forager offdesk snapshots [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk snapshot`
+
+Show and verify a pre-mutation checkpoint snapshot
+
+**Usage:** `forager offdesk snapshot [OPTIONS] <MUTATION_ID>`
+
+###### **Arguments:**
+
+* `<MUTATION_ID>` — Mutation snapshot ID
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk restore-plan`
+
+Show a dry-run rollback plan without modifying files
+
+**Usage:** `forager offdesk restore-plan [OPTIONS] <MUTATION_ID>`
+
+###### **Arguments:**
+
+* `<MUTATION_ID>` — Mutation snapshot ID
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk debug-bundle`
+
+Emit a sanitized read-only debug bundle
+
+**Usage:** `forager offdesk debug-bundle [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+* `--export` — Write the sanitized bundle JSON to a diagnostics file
+* `--output <OUTPUT>` — Write the sanitized bundle JSON to this path
+
+
+
+## `forager offdesk wiki`
+
+Inspect adaptive wiki candidates, entries, projections, and lint
+
+**Usage:** `forager offdesk wiki <COMMAND>`
+
+###### **Subcommands:**
+
+* `corrections` — List first-class adaptive wiki correction records
+* `proposal-events` — List adaptive wiki review proposal lifecycle events
+* `record-proposal-event` — Record an operator decision for a curator review proposal
+* `accept-proposal` — Accept a current curator review proposal and copy its metadata into the event
+* `reject-proposal` — Reject a current curator review proposal and copy its metadata into the event
+* `supersede-proposal` — Mark a current curator review proposal superseded and copy its metadata into the event
+* `proposal-handoff` — Preview the governed mutation handoff command for a current proposal
+* `proposal-receipt` — Link a handoff preview, mutation audit, and lifecycle event without mutating state
+* `candidates` — List adaptive wiki candidates
+* `entries` — List adaptive wiki entries
+* `show` — Show one adaptive wiki entry or candidate
+* `projection` — Show the AI projection for a scope
+* `runtime-policy-acks` — List strict runtime projection policy acknowledgements
+* `runtime-policy-ack-report` — Report strict runtime projection acknowledgements that need attention
+* `review-after-report` — Report promoted entries whose review_after needs attention
+* `ack-runtime-policy` — Acknowledge strict review_after exclusion for runtime projection
+* `lint` — Lint adaptive wiki state
+* `export-markdown` — Export adaptive wiki state as a one-way markdown vault
+* `review` — Generate a recommendation-only adaptive wiki review report
+* `evaluate-episode` — Evaluate one adaptive wiki entry across in-scope and out-of-scope projections
+* `episode-trace` — Trace live task/probe/wiki evidence for adaptive behavior review
+* `evaluate-recurrence` — Evaluate whether corrections recur after an entry is promoted
+* `promotion-chain` — Reconstruct the evidence chain captured at promotion time
+* `promote` — Promote a candidate into a scoped wiki entry
+* `reject` — Reject a candidate without creating an entry
+* `rescope` — Change an entry scope
+* `deprecate` — Deprecate an entry so it no longer appears in AI projection
+* `renew-review-after` — Renew an entry review_after timestamp without changing scope or instruction
+* `add-counterexample` — Add a counterexample evidence ref to an entry
+* `update-runbook` — Attach governed runbook support refs to a procedure entry
+
+
+
+## `forager offdesk wiki corrections`
+
+List first-class adaptive wiki correction records
+
+**Usage:** `forager offdesk wiki corrections [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki proposal-events`
+
+List adaptive wiki review proposal lifecycle events
+
+**Usage:** `forager offdesk wiki proposal-events [OPTIONS]`
+
+###### **Options:**
+
+* `--proposal-id <PROPOSAL_ID>` — Filter lifecycle events by proposal id
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki record-proposal-event`
+
+Record an operator decision for a curator review proposal
+
+**Usage:** `forager offdesk wiki record-proposal-event [OPTIONS] --decision <DECISION> --reason <REASON> <PROPOSAL_ID>`
+
+###### **Arguments:**
+
+* `<PROPOSAL_ID>` — Curator review proposal id
+
+###### **Options:**
+
+* `--decision <DECISION>` — Operator decision for the proposal
+* `--proposal-action <PROPOSAL_ACTION>` — Proposal action that was reviewed
+* `--subject-kind <SUBJECT_KIND>` — Proposal subject kind, such as entry or candidate
+
+  Default value: ``
+* `--subject-id <SUBJECT_ID>` — Proposal subject id
+
+  Default value: ``
+* `--by <BY>` — Operator or surface recording the decision
+
+  Default value: `cli`
+* `--reason <REASON>` — Required reason for accepting, rejecting, or superseding the proposal
+* `--evidence-ref <EVIDENCE_REFS>` — Evidence ref that supports this proposal decision
+* `--supersedes <SUPERSEDES>` — Previous proposal id superseded by this decision
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki accept-proposal`
+
+Accept a current curator review proposal and copy its metadata into the event
+
+**Usage:** `forager offdesk wiki accept-proposal [OPTIONS] --reason <REASON> <PROPOSAL_ID>`
+
+###### **Arguments:**
+
+* `<PROPOSAL_ID>` — Current curator review proposal id
+
+###### **Options:**
+
+* `--by <BY>` — Operator or surface recording the decision
+
+  Default value: `cli`
+* `--reason <REASON>` — Required reason for accepting, rejecting, or superseding the proposal
+* `--evidence-ref <EVIDENCE_REFS>` — Extra evidence ref that supports this proposal decision
+* `--supersedes <SUPERSEDES>` — Previous proposal id superseded by this decision
+* `--allow-decided` — Allow recording a new lifecycle event for a non-stale decided proposal
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki reject-proposal`
+
+Reject a current curator review proposal and copy its metadata into the event
+
+**Usage:** `forager offdesk wiki reject-proposal [OPTIONS] --reason <REASON> <PROPOSAL_ID>`
+
+###### **Arguments:**
+
+* `<PROPOSAL_ID>` — Current curator review proposal id
+
+###### **Options:**
+
+* `--by <BY>` — Operator or surface recording the decision
+
+  Default value: `cli`
+* `--reason <REASON>` — Required reason for accepting, rejecting, or superseding the proposal
+* `--evidence-ref <EVIDENCE_REFS>` — Extra evidence ref that supports this proposal decision
+* `--supersedes <SUPERSEDES>` — Previous proposal id superseded by this decision
+* `--allow-decided` — Allow recording a new lifecycle event for a non-stale decided proposal
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki supersede-proposal`
+
+Mark a current curator review proposal superseded and copy its metadata into the event
+
+**Usage:** `forager offdesk wiki supersede-proposal [OPTIONS] --reason <REASON> <PROPOSAL_ID>`
+
+###### **Arguments:**
+
+* `<PROPOSAL_ID>` — Current curator review proposal id
+
+###### **Options:**
+
+* `--by <BY>` — Operator or surface recording the decision
+
+  Default value: `cli`
+* `--reason <REASON>` — Required reason for accepting, rejecting, or superseding the proposal
+* `--evidence-ref <EVIDENCE_REFS>` — Extra evidence ref that supports this proposal decision
+* `--supersedes <SUPERSEDES>` — Previous proposal id superseded by this decision
+* `--allow-decided` — Allow recording a new lifecycle event for a non-stale decided proposal
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki proposal-handoff`
+
+Preview the governed mutation handoff command for a current proposal
+
+**Usage:** `forager offdesk wiki proposal-handoff [OPTIONS] <PROPOSAL_ID>`
+
+###### **Arguments:**
+
+* `<PROPOSAL_ID>` — Current curator review proposal id
+
+###### **Options:**
+
+* `--mutation <MUTATION>` — Operator-selected mutation path to preview when the proposal is manual
+* `--scope <SCOPE>` — Scope for a parameterized rescope handoff
+* `--scope-ref <SCOPE_REF>` — Scope reference for a parameterized rescope handoff
+* `--evidence-ref <EVIDENCE_REF>` — Evidence ref for a parameterized counterexample handoff
+* `--deprecated-entry-id <DEPRECATED_ENTRY_ID>` — Entry to deprecate for a parameterized merge cleanup or conflict handoff
+* `--reason <REASON>` — Operator rationale to include in the previewed mutation command
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki proposal-receipt`
+
+Link a handoff preview, mutation audit, and lifecycle event without mutating state
+
+**Usage:** `forager offdesk wiki proposal-receipt [OPTIONS] --audit-id <AUDIT_ID> --event-id <EVENT_ID> --command <COMMAND> <PROPOSAL_ID>`
+
+###### **Arguments:**
+
+* `<PROPOSAL_ID>` — Curator review proposal id that the receipt should link
+
+###### **Options:**
+
+* `--audit-id <AUDIT_ID>` — Adaptive wiki mutation audit id produced by the executed mutation command
+* `--event-id <EVENT_ID>` — Proposal lifecycle event id recorded for the operator decision
+* `--command <COMMAND>` — Previewed handoff command that the operator executed or reviewed
+* `--export` — Write the sanitized receipt JSON to an audit artifact file
+* `--output <OUTPUT>` — Write the sanitized receipt JSON to this path
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki candidates`
+
+List adaptive wiki candidates
+
+**Usage:** `forager offdesk wiki candidates [OPTIONS]`
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — Session/request scope to match
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode scope to match
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki entries`
+
+List adaptive wiki entries
+
+**Usage:** `forager offdesk wiki entries [OPTIONS]`
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — Session/request scope to match
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode scope to match
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki show`
+
+Show one adaptive wiki entry or candidate
+
+**Usage:** `forager offdesk wiki show [OPTIONS] <ID>`
+
+###### **Arguments:**
+
+* `<ID>` — Adaptive wiki entry or candidate id
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki projection`
+
+Show the AI projection for a scope
+
+**Usage:** `forager offdesk wiki projection [OPTIONS]`
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — Session/request scope to match
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode scope to match
+* `--report` — Return the projection policy report instead of only selected entries
+* `--compare-review-expired-policy` — Compare default warn policy with strict review_after exclusion
+* `--max-entries <MAX_ENTRIES>` — Maximum selected projection entries
+* `--max-context-chars <MAX_CONTEXT_CHARS>` — Maximum estimated runtime context characters
+* `--max-instruction-chars <MAX_INSTRUCTION_CHARS>` — Maximum characters kept per projected instruction; 0 disables truncation
+* `--exclude-review-expired` — Exclude entries that are past review_after from the projection report
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki runtime-policy-acks`
+
+List strict runtime projection policy acknowledgements
+
+**Usage:** `forager offdesk wiki runtime-policy-acks [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki runtime-policy-ack-report`
+
+Report strict runtime projection acknowledgements that need attention
+
+**Usage:** `forager offdesk wiki runtime-policy-ack-report [OPTIONS]`
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — Session/request scope to evaluate for query-specific ack applicability
+* `--project-key <PROJECT_KEY>` — Project key scope to evaluate for query-specific ack applicability
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to evaluate for query-specific ack applicability
+* `--agent-mode <AGENT_MODE>` — Agent work mode scope to evaluate for query-specific ack applicability
+* `--max-entries <MAX_ENTRIES>` — Maximum selected projection entries
+* `--max-context-chars <MAX_CONTEXT_CHARS>` — Maximum estimated runtime context characters
+* `--max-instruction-chars <MAX_INSTRUCTION_CHARS>` — Maximum characters kept per projected instruction; 0 disables truncation
+* `--near-expiry-hours <NEAR_EXPIRY_HOURS>` — Mark active acknowledgements expiring within this many hours
+
+  Default value: `6`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki review-after-report`
+
+Report promoted entries whose review_after needs attention
+
+**Usage:** `forager offdesk wiki review-after-report [OPTIONS]`
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — Session/request scope to match
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode scope to match
+* `--near-expiry-hours <NEAR_EXPIRY_HOURS>` — Mark entries needing review within this many hours
+
+  Default value: `168`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki ack-runtime-policy`
+
+Acknowledge strict review_after exclusion for runtime projection
+
+**Usage:** `forager offdesk wiki ack-runtime-policy [OPTIONS]`
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — Session/request scope to match exactly
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode scope to match
+* `--scope-mode <SCOPE_MODE>` — Acknowledgement scope: exact-query or project-artifact
+
+  Default value: `exact-query`
+* `--max-entries <MAX_ENTRIES>` — Maximum selected projection entries
+* `--max-context-chars <MAX_CONTEXT_CHARS>` — Maximum estimated runtime context characters
+* `--max-instruction-chars <MAX_INSTRUCTION_CHARS>` — Maximum characters kept per projected instruction; 0 disables truncation
+* `--ttl-hours <TTL_HOURS>` — Acknowledgement TTL in hours
+
+  Default value: `24`
+* `--reason <REASON>` — Operator reason for enabling strict runtime projection in this scope
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki lint`
+
+Lint adaptive wiki state
+
+**Usage:** `forager offdesk wiki lint [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki export-markdown`
+
+Export adaptive wiki state as a one-way markdown vault
+
+**Usage:** `forager offdesk wiki export-markdown [OPTIONS] --output <OUTPUT>`
+
+###### **Options:**
+
+* `--output <OUTPUT>` — Directory to write the markdown vault into
+* `--dry-run` — Preview export files without writing them
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki review`
+
+Generate a recommendation-only adaptive wiki review report
+
+**Usage:** `forager offdesk wiki review [OPTIONS]`
+
+###### **Options:**
+
+* `--dry-run` — Preview recommendations without writing report files
+* `--active-only` — Show proposals that are open or have stale lifecycle decisions
+* `--decided-only` — Show proposals with non-stale accepted, rejected, or superseded decisions
+* `--stale-only` — Show proposals whose latest lifecycle decision is stale
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki evaluate-episode`
+
+Evaluate one adaptive wiki entry across in-scope and out-of-scope projections
+
+**Usage:** `forager offdesk wiki evaluate-episode [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Promoted adaptive wiki entry id expected to appear only in the in-scope projection
+
+###### **Options:**
+
+* `--session-id <SESSION_ID>` — In-scope session/request id to match
+* `--project-key <PROJECT_KEY>` — In-scope project key to match
+* `--artifact-kind <ARTIFACT_KIND>` — In-scope artifact kind to match
+* `--agent-mode <AGENT_MODE>` — In-scope agent work mode to match
+* `--out-session-id <OUT_SESSION_ID>` — Out-of-scope session/request id. Defaults to a generated non-matching value
+* `--out-project-key <OUT_PROJECT_KEY>` — Out-of-scope project key. Defaults to a generated non-matching value
+* `--out-artifact-kind <OUT_ARTIFACT_KIND>` — Out-of-scope artifact kind. Defaults to a generated non-matching value
+* `--out-agent-mode <OUT_AGENT_MODE>` — Out-of-scope agent work mode. Defaults to a generated non-matching mode when possible
+* `--dry-run` — Preview the report without writing report files
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki episode-trace`
+
+Trace live task/probe/wiki evidence for adaptive behavior review
+
+**Usage:** `forager offdesk wiki episode-trace [OPTIONS]`
+
+###### **Options:**
+
+* `--request-id <REQUEST_ID>` — Filter trace events by request id
+* `--task-id <TASK_ID>` — Filter trace events by task id
+* `--project-key <PROJECT_KEY>` — Filter trace events by project key
+* `--artifact-kind <ARTIFACT_KIND>` — Filter trace events by artifact kind
+* `--entry-id <ENTRY_ID>` — Filter trace events by adaptive wiki entry id
+* `--dry-run` — Preview the trace without writing report files
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki evaluate-recurrence`
+
+Evaluate whether corrections recur after an entry is promoted
+
+**Usage:** `forager offdesk wiki evaluate-recurrence [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Promoted adaptive wiki entry id to evaluate
+
+###### **Options:**
+
+* `--dry-run` — Preview the report without writing report files
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki promotion-chain`
+
+Reconstruct the evidence chain captured at promotion time
+
+**Usage:** `forager offdesk wiki promotion-chain [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Promoted adaptive wiki entry id to reconstruct
+
+###### **Options:**
+
+* `--dry-run` — Preview the report without writing report files
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki promote`
+
+Promote a candidate into a scoped wiki entry
+
+**Usage:** `forager offdesk wiki promote [OPTIONS] <CANDIDATE_ID>`
+
+###### **Arguments:**
+
+* `<CANDIDATE_ID>` — Adaptive wiki candidate id
+
+###### **Options:**
+
+* `--scope <SCOPE>` — Scope for the promoted entry. Defaults to the candidate scope
+* `--scope-ref <SCOPE_REF>` — Scope reference for the promoted entry. Required when --scope is used
+* `--activation-mode <ACTIVATION_MODE>` — Activation mode for the promoted entry
+
+  Default value: `confirm`
+* `--agent-mode <AGENT_MODES>` — Agent work mode this promoted entry should apply to. Repeat for multiple modes; omit to keep candidate modes
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
+* `--reason <REASON>` — Optional promotion reason for audit
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki reject`
+
+Reject a candidate without creating an entry
+
+**Usage:** `forager offdesk wiki reject [OPTIONS] --reason <REASON> <CANDIDATE_ID>`
+
+###### **Arguments:**
+
+* `<CANDIDATE_ID>` — Adaptive wiki candidate id
+
+###### **Options:**
+
+* `--reason <REASON>` — Reason for rejecting the candidate
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki rescope`
+
+Change an entry scope
+
+**Usage:** `forager offdesk wiki rescope [OPTIONS] --scope <SCOPE> --scope-ref <SCOPE_REF> <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--scope <SCOPE>` — New entry scope
+* `--scope-ref <SCOPE_REF>` — New entry scope reference
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
+* `--reason <REASON>` — Optional rescope reason for audit
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki deprecate`
+
+Deprecate an entry so it no longer appears in AI projection
+
+**Usage:** `forager offdesk wiki deprecate [OPTIONS] --reason <REASON> <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--reason <REASON>` — Reason for deprecating the entry
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki renew-review-after`
+
+Renew an entry review_after timestamp without changing scope or instruction
+
+**Usage:** `forager offdesk wiki renew-review-after [OPTIONS] --review-after <REVIEW_AFTER> --reason <REASON> <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--review-after <REVIEW_AFTER>` — New review_after timestamp in RFC3339 format
+* `--reason <REASON>` — Reason for renewing the review timestamp
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki add-counterexample`
+
+Add a counterexample evidence ref to an entry
+
+**Usage:** `forager offdesk wiki add-counterexample [OPTIONS] --evidence-ref <EVIDENCE_REF> --reason <REASON> <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--evidence-ref <EVIDENCE_REF>` — Evidence ref that contradicts or limits the entry
+* `--reason <REASON>` — Reason for recording the counterexample
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki update-runbook`
+
+Attach governed runbook support refs to a procedure entry
+
+**Usage:** `forager offdesk wiki update-runbook [OPTIONS] --reason <REASON> <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki procedure entry id
+
+###### **Options:**
+
+* `--support-ref <SUPPORT_REF>` — Human/export support ref such as references/foo.md, templates/foo.md, or scripts/foo.sh
+* `--capability-id <CAPABILITY_ID>` — Capability id this procedure is relevant to
+* `--required-artifact-kind <REQUIRED_ARTIFACT_KIND>` — Required artifact kind this procedure depends on
+* `--reason <REASON>` — Reason for updating the runbook metadata
+* `--by <BY>` — Operator or surface performing the review
+
+  Default value: `cli`
 * `--json` — Output as JSON
 
 

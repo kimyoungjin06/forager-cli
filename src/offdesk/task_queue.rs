@@ -7,8 +7,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+use super::adaptive_wiki::AdaptiveWikiAgentMode;
 use super::approval::ExecutionBrief;
 use super::background::BackgroundRunnerKind;
+use super::capability::CapabilityArtifactRef;
+use super::provider::{ProviderFallbackCandidate, ProviderFallbackRecommendation};
 use super::redaction::operator_safe_text;
 use super::resume::TaskResumeStore;
 use super::scheduler::SchedulerGateStatus;
@@ -54,6 +57,20 @@ pub struct OffdeskTask {
     pub not_before: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mutation_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_refs: Vec<CapabilityArtifactRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<AdaptiveWikiAgentMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_provider_fallback: Option<ProviderFallbackRecommendation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_adaptive_wiki_entry_ids: Vec<String>,
     #[serde(default)]
     pub preview: String,
     #[serde(default)]
@@ -87,6 +104,13 @@ impl OffdeskTask {
             updated_at: now,
             not_before: input.not_before,
             mutation_class: input.mutation_class,
+            artifact_refs: input.artifact_refs,
+            artifact_kind: input.artifact_kind,
+            agent_mode: input.agent_mode,
+            provider_id: input.provider_id,
+            model: input.model,
+            last_provider_fallback: None,
+            last_adaptive_wiki_entry_ids: Vec::new(),
             preview: input.preview,
             reason: input.reason,
             log_artifact_path: input.log_artifact_path,
@@ -123,6 +147,24 @@ impl OffdeskTask {
             updated_at: self.updated_at,
             not_before: self.not_before,
             mutation_class: self.mutation_class.clone(),
+            artifact_refs: self
+                .artifact_refs
+                .iter()
+                .map(operator_safe_artifact_ref)
+                .collect(),
+            artifact_kind: self.artifact_kind.as_deref().map(operator_safe_text),
+            agent_mode: self.agent_mode,
+            provider_id: self.provider_id.as_deref().map(operator_safe_text),
+            model: self.model.as_deref().map(operator_safe_text),
+            last_provider_fallback: self
+                .last_provider_fallback
+                .as_ref()
+                .map(operator_safe_provider_fallback),
+            last_adaptive_wiki_entry_ids: self
+                .last_adaptive_wiki_entry_ids
+                .iter()
+                .map(|entry_id| operator_safe_text(entry_id))
+                .collect(),
             preview: operator_safe_text(&self.preview),
             reason: operator_safe_text(&self.reason),
             log_artifact_path: self.log_artifact_path.clone(),
@@ -143,6 +185,11 @@ pub struct OffdeskTaskInput {
     pub execution_brief: Option<ExecutionBrief>,
     pub not_before: Option<DateTime<Utc>>,
     pub mutation_class: Option<String>,
+    pub artifact_refs: Vec<CapabilityArtifactRef>,
+    pub artifact_kind: Option<String>,
+    pub agent_mode: Option<AdaptiveWikiAgentMode>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
     pub preview: String,
     pub reason: String,
     pub log_artifact_path: Option<String>,
@@ -172,12 +219,67 @@ pub struct OffdeskTaskView {
     pub not_before: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mutation_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_refs: Vec<CapabilityArtifactRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<AdaptiveWikiAgentMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_provider_fallback: Option<ProviderFallbackRecommendation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_adaptive_wiki_entry_ids: Vec<String>,
     pub preview: String,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_artifact_path: Option<String>,
+}
+
+fn operator_safe_artifact_ref(artifact_ref: &CapabilityArtifactRef) -> CapabilityArtifactRef {
+    CapabilityArtifactRef {
+        artifact_id: operator_safe_text(&artifact_ref.artifact_id),
+        path: artifact_ref.path.as_deref().map(operator_safe_text),
+        present: artifact_ref.present,
+    }
+}
+
+fn operator_safe_provider_fallback(
+    recommendation: &ProviderFallbackRecommendation,
+) -> ProviderFallbackRecommendation {
+    ProviderFallbackRecommendation {
+        current_provider_id: operator_safe_text(&recommendation.current_provider_id),
+        current_model: recommendation
+            .current_model
+            .as_deref()
+            .map(operator_safe_text),
+        trigger_reason: operator_safe_text(&recommendation.trigger_reason),
+        generated_at: recommendation.generated_at,
+        candidates: recommendation
+            .candidates
+            .iter()
+            .map(operator_safe_provider_fallback_candidate)
+            .collect(),
+    }
+}
+
+fn operator_safe_provider_fallback_candidate(
+    candidate: &ProviderFallbackCandidate,
+) -> ProviderFallbackCandidate {
+    ProviderFallbackCandidate {
+        provider_id: operator_safe_text(&candidate.provider_id),
+        model: candidate.model.as_deref().map(operator_safe_text),
+        source: candidate.source,
+        auth_status: candidate.auth_status,
+        capacity_status: candidate.capacity_status,
+        recommended: candidate.recommended,
+        reason: operator_safe_text(&candidate.reason),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -475,6 +577,7 @@ fn requeue_task(task: &mut OffdeskTask, now: DateTime<Utc>) {
     task.background_ticket_id = None;
     task.last_gate_status = None;
     task.last_error = None;
+    task.last_provider_fallback = None;
     task.updated_at = now;
 }
 
@@ -514,6 +617,11 @@ mod tests {
             execution_brief: None,
             not_before: None,
             mutation_class: None,
+            artifact_refs: Vec::new(),
+            artifact_kind: None,
+            agent_mode: None,
+            provider_id: None,
+            model: None,
             preview: "preview".to_string(),
             reason: "reason".to_string(),
             log_artifact_path: None,
@@ -530,6 +638,50 @@ mod tests {
         store.enqueue(task.clone())?;
 
         assert_eq!(store.load()?, vec![task]);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_task_without_optional_dispatch_fields_still_loads() -> Result<()> {
+        let temp = tempdir()?;
+        let store = OffdeskTaskStore::new(temp.path());
+        let now = Utc::now();
+        fs::create_dir_all(temp.path())?;
+        fs::write(
+            store.path(),
+            serde_json::to_string_pretty(&serde_json::json!([
+                {
+                    "task_id": "task",
+                    "request_id": "request",
+                    "project_key": "project",
+                    "status": "queued",
+                    "capability_id": "dispatch.runtime",
+                    "runner_kind": "local_background",
+                    "command": "true",
+                    "workdir": "/tmp",
+                    "created_at": now,
+                    "updated_at": now
+                }
+            ]))?,
+        )?;
+
+        let task = store.load()?.remove(0);
+
+        assert_eq!(task.attempt_count, 0);
+        assert!(task.execution_brief.is_none());
+        assert!(task.background_ticket_id.is_none());
+        assert!(task.last_gate_status.is_none());
+        assert!(task.last_error.is_none());
+        assert!(task.not_before.is_none());
+        assert!(task.mutation_class.is_none());
+        assert!(task.artifact_refs.is_empty());
+        assert!(task.provider_id.is_none());
+        assert!(task.model.is_none());
+        assert!(task.last_provider_fallback.is_none());
+        assert!(task.preview.is_empty());
+        assert!(task.reason.is_empty());
+        assert!(task.log_artifact_path.is_none());
+        assert!(task.result_artifact_path.is_none());
         Ok(())
     }
 
@@ -601,6 +753,13 @@ mod tests {
         task.attempt_count = 2;
         task.last_gate_status = Some(SchedulerGateStatus::Denied);
         task.last_error = Some("denied".to_string());
+        task.last_provider_fallback = Some(ProviderFallbackRecommendation {
+            current_provider_id: "openai".to_string(),
+            current_model: Some("gpt-4.1".to_string()),
+            trigger_reason: "provider capacity cooldown active".to_string(),
+            generated_at: now,
+            candidates: Vec::new(),
+        });
         store.enqueue(task)?;
 
         let report = store.retry_task("task", now + Duration::seconds(1))?;
@@ -612,6 +771,7 @@ mod tests {
         assert!(updated.background_ticket_id.is_none());
         assert!(updated.last_gate_status.is_none());
         assert!(updated.last_error.is_none());
+        assert!(updated.last_provider_fallback.is_none());
         Ok(())
     }
 

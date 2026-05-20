@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+use super::provider::{ProviderFallbackCandidate, ProviderFallbackRecommendation};
 use super::redaction::operator_safe_text;
 
 const APPROVALS_FILE: &str = "pending_action_approvals.json";
@@ -52,6 +53,8 @@ pub enum ApprovalMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingActionApproval {
     pub approval_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub action_id: String,
     pub status: ApprovalStatus,
     pub scope: ApprovalScope,
     pub project_key: String,
@@ -69,6 +72,81 @@ pub struct PendingActionApproval {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_by: Option<String>,
     pub source_surface: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ActionApprovalMetadata>,
+}
+
+impl PendingActionApproval {
+    pub fn action_id(&self) -> &str {
+        if self.action_id.is_empty() {
+            &self.approval_id
+        } else {
+            &self.action_id
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActionApprovalMetadata {
+    ProviderFallback(ProviderFallbackApprovalMetadata),
+}
+
+impl ActionApprovalMetadata {
+    pub fn provider_fallback_from_recommendation(
+        recommendation: &ProviderFallbackRecommendation,
+        runner_role: &str,
+        candidate_limit: usize,
+    ) -> Option<Self> {
+        let candidates = recommendation
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.recommended)
+            .take(candidate_limit)
+            .map(operator_safe_provider_fallback_candidate)
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return None;
+        }
+
+        Some(Self::ProviderFallback(ProviderFallbackApprovalMetadata {
+            current_provider_id: operator_safe_text(&recommendation.current_provider_id),
+            current_model: recommendation
+                .current_model
+                .as_deref()
+                .map(operator_safe_text),
+            runner_role: operator_safe_text(runner_role),
+            generated_at: recommendation.generated_at,
+            candidate_limit,
+            candidates,
+            apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+        }))
+    }
+
+    pub fn as_provider_fallback(&self) -> Option<&ProviderFallbackApprovalMetadata> {
+        match self {
+            Self::ProviderFallback(metadata) => Some(metadata),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderFallbackApprovalMetadata {
+    pub current_provider_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_model: Option<String>,
+    pub runner_role: String,
+    pub generated_at: DateTime<Utc>,
+    pub candidate_limit: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<ProviderFallbackCandidate>,
+    pub apply_scope: ProviderFallbackApplyScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderFallbackApplyScope {
+    RequestMatchingProviderModel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +210,7 @@ pub struct ActionApprovalRequest {
     pub reason: String,
     pub source_surface: String,
     pub ttl: Duration,
+    pub metadata: Option<ActionApprovalMetadata>,
 }
 
 impl ActionApprovalRequest {
@@ -153,6 +232,7 @@ impl ActionApprovalRequest {
             reason: String::new(),
             source_surface: "offdesk".to_string(),
             ttl: Duration::minutes(30),
+            metadata: None,
         }
     }
 
@@ -165,13 +245,23 @@ impl ActionApprovalRequest {
 struct ActionAuditEntry<'a> {
     transition: &'a str,
     approval_id: &'a str,
+    action_id: &'a str,
     status: ApprovalStatus,
+    result: ApprovalStatus,
+    scope: ApprovalScope,
     project_key: &'a str,
     request_id: &'a str,
     task_id: &'a str,
     action: &'a str,
     risk_level: RiskLevel,
     approval_mode: ApprovalMode,
+    source_surface: &'a str,
+    preview: &'a str,
+    reason: &'a str,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    resolved_at: Option<DateTime<Utc>>,
+    resolved_by: Option<&'a str>,
     detail: &'a str,
     recorded_at: DateTime<Utc>,
 }
@@ -333,24 +423,7 @@ impl ApprovalLedger {
             | RiskLevel::CanonicalMutation
             | RiskLevel::Destructive
             | RiskLevel::ExternalSideEffect => {
-                let approval = PendingActionApproval {
-                    approval_id: format!("approval_{}", Uuid::new_v4()),
-                    status: ApprovalStatus::Pending,
-                    scope: ApprovalScope::Once,
-                    project_key: request.project_key,
-                    request_id: request.request_id,
-                    task_id: request.task_id,
-                    action: request.action,
-                    risk_level: request.risk_level,
-                    approval_mode: ApprovalMode::OperatorRequired,
-                    preview: operator_safe_text(&request.preview),
-                    reason: operator_safe_text(&request.reason),
-                    created_at: now,
-                    expires_at: now + request.ttl,
-                    resolved_at: None,
-                    resolved_by: None,
-                    source_surface: request.source_surface,
-                };
+                let approval = pending_approval_from_request(request, now);
                 approvals.push(approval.clone());
                 self.save(&approvals)?;
                 self.append_transition("pending", &approval, "created")?;
@@ -524,13 +597,23 @@ impl ApprovalLedger {
             let entry = ActionAuditEntry {
                 transition: transition.transition,
                 approval_id: &approval.approval_id,
+                action_id: approval.action_id(),
                 status: approval.status,
+                result: approval.status,
+                scope: approval.scope,
                 project_key: &approval.project_key,
                 request_id: &approval.request_id,
                 task_id: &approval.task_id,
                 action: &approval.action,
                 risk_level: approval.risk_level,
                 approval_mode: approval.approval_mode,
+                source_surface: &approval.source_surface,
+                preview: &approval.preview,
+                reason: &approval.reason,
+                created_at: approval.created_at,
+                expires_at: approval.expires_at,
+                resolved_at: approval.resolved_at,
+                resolved_by: approval.resolved_by.as_deref(),
                 detail: &transition.detail,
                 recorded_at: Utc::now(),
             };
@@ -623,24 +706,7 @@ impl ApprovalLedgerSession {
             | RiskLevel::CanonicalMutation
             | RiskLevel::Destructive
             | RiskLevel::ExternalSideEffect => {
-                let approval = PendingActionApproval {
-                    approval_id: format!("approval_{}", Uuid::new_v4()),
-                    status: ApprovalStatus::Pending,
-                    scope: ApprovalScope::Once,
-                    project_key: request.project_key,
-                    request_id: request.request_id,
-                    task_id: request.task_id,
-                    action: request.action,
-                    risk_level: request.risk_level,
-                    approval_mode: ApprovalMode::OperatorRequired,
-                    preview: operator_safe_text(&request.preview),
-                    reason: operator_safe_text(&request.reason),
-                    created_at: now,
-                    expires_at: now + request.ttl,
-                    resolved_at: None,
-                    resolved_by: None,
-                    source_surface: request.source_surface,
-                };
+                let approval = pending_approval_from_request(request, now);
                 let index = self.approvals.len();
                 self.lookup.entry(lookup_key).or_default().push(index);
                 self.approvals.push(approval.clone());
@@ -657,6 +723,102 @@ impl ApprovalLedgerSession {
         Ok(decision)
     }
 
+    pub fn ensure_pending_without_consuming_grant(
+        &mut self,
+        request: ActionApprovalRequest,
+        now: DateTime<Utc>,
+    ) -> Result<Option<PendingActionApproval>> {
+        if now > self.expired_through {
+            for approval in expire_due_collect(&mut self.approvals, now) {
+                self.dirty = true;
+                self.transitions.push(QueuedApprovalTransition {
+                    transition: "expire",
+                    approval,
+                    detail: "expired".to_string(),
+                });
+            }
+            self.expired_through = now;
+        }
+
+        let lookup_key = ApprovalLookupKey::from_request(&request);
+        let candidate_indices = self
+            .lookup
+            .get(&lookup_key)
+            .map_or(&[] as &[usize], Vec::as_slice);
+
+        if let Some(existing) = candidate_indices
+            .iter()
+            .map(|&index| &self.approvals[index])
+            .find(|approval| pending_approval_covers(approval, &request, now))
+        {
+            return Ok(Some(existing.clone()));
+        }
+
+        if candidate_indices
+            .iter()
+            .map(|&index| &self.approvals[index])
+            .any(|approval| {
+                denied_approval_covers(approval, &request)
+                    || approved_once_grant_covers(approval, &request, now)
+                    || approved_session_grant_covers(approval, &request, now)
+            })
+        {
+            return Ok(None);
+        }
+
+        let approval = pending_approval_from_request(request, now);
+        let index = self.approvals.len();
+        self.lookup.entry(lookup_key).or_default().push(index);
+        self.approvals.push(approval.clone());
+        self.dirty = true;
+        self.transitions.push(QueuedApprovalTransition {
+            transition: "pending",
+            approval: approval.clone(),
+            detail: "created".to_string(),
+        });
+        Ok(Some(approval))
+    }
+
+    pub fn approved_provider_fallbacks(&self, now: DateTime<Utc>) -> Vec<PendingActionApproval> {
+        self.approvals
+            .iter()
+            .filter(|approval| {
+                approval.status == ApprovalStatus::Approved
+                    && approval.expires_at >= now
+                    && approval
+                        .metadata
+                        .as_ref()
+                        .and_then(ActionApprovalMetadata::as_provider_fallback)
+                        .is_some()
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn supersede_approval(
+        &mut self,
+        approval_id: &str,
+        detail: impl Into<String>,
+    ) -> Option<PendingActionApproval> {
+        let index = self
+            .approvals
+            .iter()
+            .position(|approval| approval.approval_id == approval_id)?;
+        if self.approvals[index].status == ApprovalStatus::Superseded {
+            return Some(self.approvals[index].clone());
+        }
+
+        self.approvals[index].status = ApprovalStatus::Superseded;
+        let approval = self.approvals[index].clone();
+        self.dirty = true;
+        self.transitions.push(QueuedApprovalTransition {
+            transition: "supersede",
+            approval: approval.clone(),
+            detail: detail.into(),
+        });
+        Some(approval)
+    }
+
     pub fn flush(&mut self) -> Result<()> {
         if self.dirty {
             self.ledger.save(&self.approvals)?;
@@ -665,6 +827,46 @@ impl ApprovalLedgerSession {
         let transitions = std::mem::take(&mut self.transitions);
         self.ledger.append_queued_transitions(&transitions)?;
         Ok(())
+    }
+}
+
+fn pending_approval_from_request(
+    request: ActionApprovalRequest,
+    now: DateTime<Utc>,
+) -> PendingActionApproval {
+    PendingActionApproval {
+        approval_id: format!("approval_{}", Uuid::new_v4()),
+        action_id: format!("action_{}", Uuid::new_v4()),
+        status: ApprovalStatus::Pending,
+        scope: ApprovalScope::Once,
+        project_key: request.project_key,
+        request_id: request.request_id,
+        task_id: request.task_id,
+        action: request.action,
+        risk_level: request.risk_level,
+        approval_mode: ApprovalMode::OperatorRequired,
+        preview: operator_safe_text(&request.preview),
+        reason: operator_safe_text(&request.reason),
+        created_at: now,
+        expires_at: now + request.ttl,
+        resolved_at: None,
+        resolved_by: None,
+        source_surface: request.source_surface,
+        metadata: request.metadata,
+    }
+}
+
+fn operator_safe_provider_fallback_candidate(
+    candidate: &ProviderFallbackCandidate,
+) -> ProviderFallbackCandidate {
+    ProviderFallbackCandidate {
+        provider_id: operator_safe_text(&candidate.provider_id),
+        model: candidate.model.as_deref().map(operator_safe_text),
+        source: candidate.source,
+        auth_status: candidate.auth_status,
+        capacity_status: candidate.capacity_status,
+        recommended: candidate.recommended,
+        reason: operator_safe_text(&candidate.reason),
     }
 }
 
@@ -780,6 +982,10 @@ fn write_approvals(path: &Path, approvals: &[PendingActionApproval]) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::offdesk::{
+        ProviderCapacityStatus, ProviderFallbackApplyScope, ProviderFallbackAuthStatus,
+        ProviderFallbackSource,
+    };
     use tempfile::tempdir;
 
     fn request(risk_level: RiskLevel) -> ActionApprovalRequest {
@@ -801,6 +1007,7 @@ mod tests {
     ) -> PendingActionApproval {
         PendingActionApproval {
             approval_id: approval_id.to_string(),
+            action_id: format!("action_{approval_id}"),
             status,
             scope: ApprovalScope::Once,
             project_key: project_key.to_string(),
@@ -824,7 +1031,28 @@ mod tests {
                 Some("operator".to_string())
             },
             source_surface: "test".to_string(),
+            metadata: None,
         }
+    }
+
+    fn provider_fallback_metadata(now: DateTime<Utc>) -> ActionApprovalMetadata {
+        ActionApprovalMetadata::ProviderFallback(ProviderFallbackApprovalMetadata {
+            current_provider_id: "openai".to_string(),
+            current_model: Some("gpt-4.1".to_string()),
+            runner_role: "worker".to_string(),
+            generated_at: now,
+            candidate_limit: 3,
+            candidates: vec![ProviderFallbackCandidate {
+                provider_id: "openai".to_string(),
+                model: Some("gpt-4.1-mini".to_string()),
+                source: ProviderFallbackSource::SameProviderModel,
+                auth_status: ProviderFallbackAuthStatus::Available,
+                capacity_status: ProviderCapacityStatus::Available,
+                recommended: true,
+                reason: "same provider fallback model".to_string(),
+            }],
+            apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+        })
     }
 
     #[test]
@@ -865,6 +1093,7 @@ mod tests {
             panic!("expected pending approval");
         };
         assert_eq!(approval.status, ApprovalStatus::Pending);
+        assert!(approval.action_id.starts_with("action_"));
         assert!(!approval.preview.contains("sk-secret"));
         assert_eq!(ledger.load()?.len(), 1);
         Ok(())
@@ -897,6 +1126,136 @@ mod tests {
         assert!(audit.contains("\"transition\":\"pending\""));
         assert!(audit.contains("\"transition\":\"approve\""));
         assert!(audit.contains("\"transition\":\"deny\""));
+        assert!(audit.contains("\"action_id\":\"action_"));
+        assert!(audit.contains("\"result\":\"approved\""));
+        assert!(audit.contains("\"resolved_by\":\"operator\""));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_approval_without_action_id_uses_approval_id_fallback() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        fs::create_dir_all(temp.path())?;
+        fs::write(
+            ledger.approvals_path(),
+            serde_json::to_string_pretty(&serde_json::json!([
+                {
+                    "approval_id": "approval_legacy",
+                    "status": "pending",
+                    "scope": "once",
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "task",
+                    "action": "dispatch",
+                    "risk_level": "runtime_mutation",
+                    "approval_mode": "operator_required",
+                    "preview": "",
+                    "reason": "",
+                    "created_at": now,
+                    "expires_at": now + Duration::minutes(10),
+                    "source_surface": "legacy"
+                }
+            ]))?,
+        )?;
+
+        let resolved = ledger
+            .approve_pending(
+                Some("approval_legacy"),
+                "operator",
+                now + Duration::seconds(1),
+            )?
+            .expect("approval");
+
+        assert!(resolved.action_id.is_empty());
+        assert_eq!(resolved.action_id(), "approval_legacy");
+        let audit = fs::read_to_string(ledger.action_audit_path())?;
+        assert!(audit.contains("\"action_id\":\"approval_legacy\""));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_approval_without_metadata_still_evaluates() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        fs::create_dir_all(temp.path())?;
+        fs::write(
+            ledger.approvals_path(),
+            serde_json::to_string_pretty(&serde_json::json!([
+                {
+                    "approval_id": "approval_legacy_metadata",
+                    "action_id": "action_legacy_metadata",
+                    "status": "approved",
+                    "scope": "once",
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "task",
+                    "action": "dispatch",
+                    "risk_level": "runtime_mutation",
+                    "approval_mode": "operator_required",
+                    "preview": "",
+                    "reason": "",
+                    "created_at": now,
+                    "expires_at": now + Duration::minutes(10),
+                    "resolved_at": now,
+                    "resolved_by": "operator",
+                    "source_surface": "legacy"
+                }
+            ]))?,
+        )?;
+
+        let decision = ledger.evaluate_action(
+            request(RiskLevel::RuntimeMutation),
+            None,
+            now + Duration::seconds(1),
+        )?;
+
+        assert_eq!(
+            decision,
+            ApprovalDecision::Proceed(ApprovalMode::OperatorRequired)
+        );
+        assert_eq!(ledger.load()?[0].status, ApprovalStatus::Superseded);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_fallback_approval_does_not_authorize_runtime_dispatch() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        let mut fallback_approval = approval(
+            "approved_provider_fallback",
+            ApprovalStatus::Approved,
+            "project",
+            "request",
+            "task",
+            "dispatch.provider_fallback",
+            now,
+        );
+        fallback_approval.metadata = Some(provider_fallback_metadata(now));
+        ledger.save(&[fallback_approval])?;
+
+        let mut runtime_request = ActionApprovalRequest::new(
+            "project",
+            "request",
+            "task",
+            "dispatch.runtime",
+            RiskLevel::RuntimeMutation,
+        );
+        runtime_request.mutation_class = Some("dispatch.runtime".to_string());
+        let decision = ledger.evaluate_action(runtime_request, None, now + Duration::seconds(1))?;
+
+        let ApprovalDecision::Pending(runtime_approval) = decision else {
+            panic!("expected runtime dispatch to require its own approval");
+        };
+        assert_eq!(runtime_approval.action, "dispatch.runtime");
+        let approvals = ledger.load()?;
+        assert_eq!(approvals.len(), 2);
+        assert_eq!(approvals[0].status, ApprovalStatus::Approved);
+        assert_eq!(approvals[0].action, "dispatch.provider_fallback");
+        assert_eq!(approvals[1].action, "dispatch.runtime");
         Ok(())
     }
 
@@ -1070,6 +1429,37 @@ mod tests {
         assert_eq!(first.approval_id, second.approval_id);
         session.flush()?;
         assert_eq!(ledger.load()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_fallback_pending_approval_is_reused_for_repeated_capacity_block() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        let (mut session, _) = ledger.begin_session(now)?;
+        let mut request = ActionApprovalRequest::new(
+            "project",
+            "request",
+            "task",
+            "dispatch.provider_fallback",
+            RiskLevel::RuntimeMutation,
+        );
+        request.mutation_class = Some("dispatch.provider_fallback".to_string());
+        request.metadata = Some(provider_fallback_metadata(now));
+
+        let first = session
+            .ensure_pending_without_consuming_grant(request.clone(), now)?
+            .expect("first approval");
+        let second = session
+            .ensure_pending_without_consuming_grant(request, now + Duration::seconds(1))?
+            .expect("reused approval");
+
+        assert_eq!(first.approval_id, second.approval_id);
+        session.flush()?;
+        let approvals = ledger.load()?;
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(approvals[0].action, "dispatch.provider_fallback");
         Ok(())
     }
 

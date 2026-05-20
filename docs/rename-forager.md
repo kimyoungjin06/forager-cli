@@ -197,6 +197,37 @@ paths remain compatibility surfaces during the transition.
 - tmux status bar docs now describe `@forager_sandbox` as stored legacy metadata
   rather than a normal new-session field.
 
+## Completed Phase 22
+
+- The local development checkout was moved under the harness workspace:
+  `/home/kimyoungjin06/Desktop/Workspace/98.Harness/forager-cli`.
+- No compatibility symlink is kept for `agent-of-empires` or the previous
+  top-level `forager-cli` path. Active scripts should use the new physical
+  checkout path directly.
+- Do not rename compatibility storage paths, the `aoe` binary alias, or legacy
+  env fallbacks in this phase.
+- Keep `aoe_orch_control` as a separate control-plane repository. If it is
+  renamed later, prefer a Forager-scoped name such as `forager-control` or
+  `forager-orch-lab`, not `forager-cli`.
+- Record the product boundary in
+  [`forager-orchestrator-boundary.md`](forager-orchestrator-boundary.md):
+  Forager owns local execution state, approvals, recovery, and adaptive wiki
+  truth; an orchestrator may observe or request work through Forager surfaces
+  but must not become the canonical Offdesk state store.
+
+Local sequence used after the stabilization patch was checkpointed:
+
+```bash
+cd /home/kimyoungjin06/Desktop/Workspace
+mkdir -p 98.Harness
+mv forager-cli 98.Harness/forager-cli
+rm agent-of-empires
+```
+
+Only run the sequence when no `98.Harness/forager-cli` directory already exists
+and no process is using the old checkout path. Existing references inside
+historical reports and memory artifacts can remain as archival evidence.
+
 ## Compatibility Retirement Policy
 
 Compatibility surfaces stay only when they protect existing local data,

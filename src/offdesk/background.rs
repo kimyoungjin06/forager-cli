@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use super::adaptive_wiki::{AdaptiveWikiAgentMode, AdaptiveWikiProjectionPolicy};
 use super::redaction::operator_safe_text;
 
 const BACKGROUND_RUNS_FILE: &str = "background_runs.json";
@@ -59,6 +60,8 @@ pub struct BackgroundProbe {
     pub request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<AdaptiveWikiAgentMode>,
     pub runner_kind: BackgroundRunnerKind,
     pub phase: BackgroundRunnerPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,6 +80,10 @@ pub struct BackgroundProbe {
     pub runtime_handle_alive: bool,
     #[serde(default)]
     pub worker_heartbeat_stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_heartbeat_at: Option<DateTime<Utc>>,
+    #[serde(default = "default_heartbeat_timeout_sec")]
+    pub heartbeat_timeout_sec: i64,
     #[serde(default)]
     pub log_artifact_present: bool,
     #[serde(default)]
@@ -88,6 +95,12 @@ pub struct BackgroundProbe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_log_tail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_observed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery_evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery_terminal: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notification_cooldown_until: Option<DateTime<Utc>>,
     #[serde(default)]
     pub notification_suppressed_count: u64,
@@ -97,6 +110,12 @@ pub struct BackgroundProbe {
     pub handoff_emitted_at: Option<DateTime<Utc>>,
     #[serde(default = "default_ack_timeout_sec")]
     pub ack_timeout_sec: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adaptive_wiki_entry_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_wiki_runtime_policy: Option<AdaptiveWikiProjectionPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_wiki_context: Option<String>,
 }
 
 impl BackgroundProbe {
@@ -107,6 +126,7 @@ impl BackgroundProbe {
             project_key: None,
             request_id: None,
             task_id: None,
+            agent_mode: None,
             runner_kind,
             phase: BackgroundRunnerPhase::Launched,
             launch_spec_summary: None,
@@ -117,16 +137,24 @@ impl BackgroundProbe {
             result_artifact_path: None,
             runtime_handle_alive: false,
             worker_heartbeat_stale: false,
+            worker_heartbeat_at: None,
+            heartbeat_timeout_sec: default_heartbeat_timeout_sec(),
             log_artifact_present: false,
             result_artifact_present: false,
             external_ack_present: false,
             external_result_present: false,
             last_log_tail: None,
+            last_observed_at: None,
+            last_recovery_evidence: None,
+            last_recovery_terminal: None,
             notification_cooldown_until: None,
             notification_suppressed_count: 0,
             provider_launch_spec_reconstructable: false,
             handoff_emitted_at: None,
             ack_timeout_sec: default_ack_timeout_sec(),
+            adaptive_wiki_entry_ids: Vec::new(),
+            adaptive_wiki_runtime_policy: None,
+            adaptive_wiki_context: None,
         }
     }
 
@@ -196,6 +224,13 @@ impl BackgroundProbe {
             );
         }
         if self.runtime_handle_alive {
+            if self.worker_heartbeat_stale {
+                return BackgroundRecoveryDecision::stale(
+                    BackgroundRunnerPhase::StaleLostCallback,
+                    "local background heartbeat is stale",
+                    self,
+                );
+            }
             return BackgroundRecoveryDecision::running("local background callback alive", self);
         }
         if self.provider_launch_spec_reconstructable {
@@ -343,6 +378,10 @@ fn default_ack_timeout_sec() -> i64 {
     300
 }
 
+fn default_heartbeat_timeout_sec() -> i64 {
+    900
+}
+
 fn read_background_runs(path: &Path) -> Result<Vec<BackgroundProbe>> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -403,6 +442,20 @@ mod tests {
         probe.external_ack_present = true;
         let decision = probe.evaluate(Utc::now());
         assert_eq!(decision.phase, BackgroundRunnerPhase::PickupAcknowledged);
+    }
+
+    #[test]
+    fn local_background_stale_heartbeat_marks_stale_even_when_handle_alive() {
+        let now = Utc::now();
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.runtime_handle_alive = true;
+        probe.worker_heartbeat_stale = true;
+
+        let decision = probe.evaluate(now);
+
+        assert_eq!(decision.phase, BackgroundRunnerPhase::StaleLostCallback);
+        assert!(!decision.terminal);
+        assert!(decision.evidence.contains("heartbeat is stale"));
     }
 
     #[test]
