@@ -8,11 +8,8 @@ mod render;
 mod tests;
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
 use std::time::Instant;
 
-use chrono::{DateTime, Utc};
 use tui_input::Input;
 
 use crate::session::{
@@ -740,78 +737,7 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
         summary.cancelled_tasks = offdesk.tasks.cancelled;
         summary.stale_background = offdesk.background_stale;
         summary.failed_background = offdesk.background_failed;
-    }
-    if let Ok(tasks) = crate::offdesk::OffdeskTaskStore::new(&profile_dir).load() {
-        let approved_closeouts = approved_closeout_reviewed_at_by_task(&profile_dir);
-        summary.closeout_required = tasks
-            .iter()
-            .filter(|task| task.status == crate::offdesk::OffdeskTaskStatus::Completed)
-            .filter(|task| {
-                match approved_closeouts.get(&(task.project_key.clone(), task.task_id.clone())) {
-                    Some(reviewed_at) => task.updated_at > *reviewed_at,
-                    None => true,
-                }
-            })
-            .count();
+        summary.closeout_required = offdesk.closeout_required;
     }
     summary
-}
-
-fn approved_closeout_reviewed_at_by_task(
-    profile_dir: &Path,
-) -> HashMap<(String, String), DateTime<Utc>> {
-    let closeouts_dir = profile_dir.join("offdesk_closeouts");
-    let Ok(entries) = fs::read_dir(closeouts_dir) else {
-        return HashMap::new();
-    };
-    let mut approved = HashMap::new();
-    for (project_key, task_id, reviewed_at) in entries
-        .filter_map(Result::ok)
-        .flat_map(|entry| {
-            fs::read_dir(entry.path())
-                .ok()
-                .into_iter()
-                .flat_map(|entries| entries.filter_map(Result::ok))
-        })
-        .filter_map(|entry| {
-            let path = entry.path();
-            let filename = path.file_name()?.to_str()?;
-            if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
-                return None;
-            }
-            let content = fs::read_to_string(path).ok()?;
-            let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-            if value.get("verdict")?.as_str()? != "approved" {
-                return None;
-            }
-            let reviewed_at = value.get("reviewed_at")?.as_str()?;
-            let reviewed_at = DateTime::parse_from_rfc3339(reviewed_at)
-                .ok()
-                .map(|value| value.with_timezone(&Utc))?;
-            let tasks = value.get("applies_to_tasks")?.as_array()?;
-            Some(
-                tasks
-                    .iter()
-                    .filter_map(move |task| {
-                        Some((
-                            task.get("project_key")?.as_str()?.to_string(),
-                            task.get("task_id")?.as_str()?.to_string(),
-                            reviewed_at,
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .flatten()
-    {
-        approved
-            .entry((project_key, task_id))
-            .and_modify(|existing| {
-                if reviewed_at > *existing {
-                    *existing = reviewed_at;
-                }
-            })
-            .or_insert(reviewed_at);
-    }
-    approved
 }

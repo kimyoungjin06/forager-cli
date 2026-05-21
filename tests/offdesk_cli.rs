@@ -7356,6 +7356,7 @@ fn status_json_includes_offdesk_counts() -> Result<()> {
     assert_eq!(status["failed_offdesk_tasks"], 0);
     assert_eq!(status["resume_pending_offdesk_tasks"], 0);
     assert_eq!(status["cancelled_offdesk_tasks"], 0);
+    assert_eq!(status["closeout_required_offdesk_tasks"], 0);
     Ok(())
 }
 
@@ -7404,6 +7405,67 @@ fn status_json_includes_offdesk_recovery_counts() -> Result<()> {
     assert_eq!(status["failed_offdesk_tasks"], 1);
     assert_eq!(status["resume_pending_offdesk_tasks"], 1);
     assert_eq!(status["cancelled_offdesk_tasks"], 1);
+    assert_eq!(status["closeout_required_offdesk_tasks"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn status_json_includes_closeout_required_count() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([durable_task_with(
+            "completed-task",
+            "dispatch.runtime",
+            "completed",
+            now,
+            "true",
+            temp.path(),
+        )]))?,
+    )?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["closeout_required_offdesk_tasks"], 1);
+
+    let status_output = forager_command(temp.path()).args(["status"]).output()?;
+    assert!(status_output.status.success());
+    let stdout = String::from_utf8_lossy(&status_output.stdout);
+    assert!(stdout.contains("1 closeout required"));
+    assert!(stdout.contains(
+        "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
+    ));
+
+    let closeout_dir = profile_dir.join("offdesk_closeouts").join("latest");
+    fs::create_dir_all(&closeout_dir)?;
+    fs::write(
+        closeout_dir.join("closeout_review_20260521T000000Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now + Duration::minutes(1),
+            "verdict": "approved",
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "completed-task"
+                }
+            ]
+        }))?,
+    )?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["closeout_required_offdesk_tasks"], 0);
     Ok(())
 }
 

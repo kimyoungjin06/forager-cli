@@ -49,6 +49,7 @@ struct StatusJson {
     cancelled_offdesk_tasks: usize,
     stale_background_runs: usize,
     failed_background_runs: usize,
+    closeout_required_offdesk_tasks: usize,
 }
 
 #[derive(Default)]
@@ -82,6 +83,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
                 cancelled_offdesk_tasks: offdesk_summary.tasks.cancelled,
                 stale_background_runs: offdesk_summary.background_stale,
                 failed_background_runs: offdesk_summary.background_failed,
+                closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
             };
             println!("{}", serde_json::to_string(&status_json)?);
         } else if args.quiet {
@@ -131,6 +133,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
             cancelled_offdesk_tasks: offdesk_summary.tasks.cancelled,
             stale_background_runs: offdesk_summary.background_stale,
             failed_background_runs: offdesk_summary.background_failed,
+            closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
         };
         println!("{}", serde_json::to_string(&status_json)?);
     } else if args.quiet {
@@ -183,21 +186,28 @@ fn print_offdesk_summary(summary: &crate::offdesk::OffdeskStatusSummary) {
         && summary.tasks.resume_pending == 0
         && summary.background_stale == 0
         && summary.background_failed == 0
+        && summary.closeout_required == 0
     {
         return;
     }
     println!(
-        "{} approvals • {} queued offdesk • {} active offdesk • {} resume-pending offdesk • {} failed offdesk • {} stale background • {} failed background",
+        "{} approvals • {} queued offdesk • {} active offdesk • {} resume-pending offdesk • {} failed offdesk • {} stale background • {} failed background • {} closeout required",
         summary.pending_approvals,
         summary.tasks.queued,
         summary.tasks.active + summary.tasks.pending_approval,
         summary.tasks.resume_pending,
         summary.tasks.failed,
         summary.background_stale,
-        summary.background_failed
+        summary.background_failed,
+        summary.closeout_required
     );
     if summary.tasks.failed > 0 || summary.tasks.resume_pending > 0 {
         println!("Recovery: run `forager offdesk tasks` for retry, resume, and abandon commands.");
+    }
+    if summary.closeout_required > 0 {
+        println!(
+            "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
+        );
     }
 }
 

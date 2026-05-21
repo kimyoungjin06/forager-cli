@@ -4,6 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::adaptive_wiki::{
@@ -77,6 +78,7 @@ pub struct OffdeskStatusSummary {
     pub background_active: usize,
     pub background_stale: usize,
     pub background_failed: usize,
+    pub closeout_required: usize,
 }
 
 pub fn run_offdesk_tick(
@@ -212,6 +214,7 @@ pub fn load_offdesk_status_summary(
     let mut summary = OffdeskStatusSummary {
         pending_approvals,
         tasks: count_tasks(&tasks),
+        closeout_required: count_closeout_required_tasks(profile_dir, &tasks),
         ..OffdeskStatusSummary::default()
     };
 
@@ -229,6 +232,80 @@ pub fn load_offdesk_status_summary(
     }
 
     Ok(summary)
+}
+
+fn count_closeout_required_tasks(profile_dir: &Path, tasks: &[OffdeskTask]) -> usize {
+    let approved_closeouts = approved_closeout_reviewed_at_by_task(profile_dir);
+    tasks
+        .iter()
+        .filter(|task| task.status == OffdeskTaskStatus::Completed)
+        .filter(|task| {
+            match approved_closeouts.get(&(task.project_key.clone(), task.task_id.clone())) {
+                Some(reviewed_at) => task.updated_at > *reviewed_at,
+                None => true,
+            }
+        })
+        .count()
+}
+
+fn approved_closeout_reviewed_at_by_task(
+    profile_dir: &Path,
+) -> HashMap<(String, String), DateTime<Utc>> {
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    let Ok(entries) = fs::read_dir(closeouts_dir) else {
+        return HashMap::new();
+    };
+    let mut approved = HashMap::new();
+    for (project_key, task_id, reviewed_at) in entries
+        .filter_map(Result::ok)
+        .flat_map(|entry| {
+            fs::read_dir(entry.path())
+                .ok()
+                .into_iter()
+                .flat_map(|entries| entries.filter_map(Result::ok))
+        })
+        .filter_map(|entry| {
+            let path = entry.path();
+            let filename = path.file_name()?.to_str()?;
+            if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
+                return None;
+            }
+            let content = fs::read_to_string(path).ok()?;
+            let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+            if value.get("verdict")?.as_str()? != "approved" {
+                return None;
+            }
+            let reviewed_at = value
+                .get("reviewed_at")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc))?;
+            let tasks = value.get("applies_to_tasks")?.as_array()?;
+            Some(
+                tasks
+                    .iter()
+                    .filter_map(move |task| {
+                        Some((
+                            task.get("project_key")?.as_str()?.to_string(),
+                            task.get("task_id")?.as_str()?.to_string(),
+                            reviewed_at,
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+    {
+        approved
+            .entry((project_key, task_id))
+            .and_modify(|existing| {
+                if reviewed_at > *existing {
+                    *existing = reviewed_at;
+                }
+            })
+            .or_insert(reviewed_at);
+    }
+    approved
 }
 
 fn apply_background_outcome(
