@@ -1,5 +1,6 @@
 use anyhow::Result;
-use serde_json::Value;
+use chrono::Utc;
+use serde_json::{json, Value};
 use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -111,6 +112,75 @@ fn ondesk_prompt_package_uses_recent_redacted_notes() -> Result<()> {
     let content = json["content"].as_str().expect("content string");
     assert!(content.contains("compare evidence before claim"));
     assert!(content.contains("Instructions For The Next Harness"));
+    assert!(content.contains("[REDACTED]"));
+    assert!(!content.contains("sk-secretsecretsecretsecret"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    let closeout_dir = profile_dir
+        .join("offdesk_closeouts")
+        .join("20260521T000000Z_closeout_test");
+    fs::create_dir_all(&closeout_dir)?;
+    let return_package_path = closeout_dir.join("RETURN_PACKAGE.md");
+    fs::write(
+        &return_package_path,
+        "# Ondesk Return Package\n\nNight result summary token=sk-secretsecretsecretsecret\n",
+    )?;
+    let generated_at = Utc::now();
+    fs::write(
+        closeout_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_test",
+            "generated_at": generated_at,
+            "filters": {
+                "project_key": "twinpaper"
+            },
+            "tasks": [
+                {
+                    "project_key": "twinpaper",
+                    "request_id": "request",
+                    "task_id": "task"
+                }
+            ],
+            "artifacts": {
+                "return_package_markdown": return_package_path
+            }
+        }))?,
+    )?;
+    fs::write(
+        closeout_dir.join("closeout_review_20260521T000000Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": generated_at,
+            "verdict": "approved"
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "ondesk",
+            "prompt-package",
+            "--project-key",
+            "twinpaper",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
+    assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
+    let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Latest Offdesk Return Package"));
+    assert!(content.contains("Night result summary"));
+    assert!(content.contains("review_verdict: approved"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
     Ok(())
