@@ -1,0 +1,64 @@
+# Ondesk Handoff Guide
+
+Ondesk work is usually driven by the harness you are already using, such as
+Codex or Claude Code. In that mode Forager should not become the primary agent
+loop. Its job is to keep a safe bridge between live harness work, project
+notes, and later Offdesk or wiki review.
+
+## Core Loop
+
+1. Record operator intent while the work is fresh.
+
+```bash
+forager ondesk note --project-key twinpaper --mode writing \
+  --text "Draft focuses on evidence chain before novelty claims."
+```
+
+2. Capture the current harness context when you want cross-review or handoff.
+
+```bash
+forager ondesk capture codex-harness --project-key twinpaper --mode writing --lines 250
+```
+
+This writes an append-only capture under the active profile:
+
+```text
+ondesk_captures/<timestamp>_<capture-id>/
+  capture.json
+  PROMPT_CONTEXT.md
+```
+
+3. Give the generated prompt package to another harness.
+
+```bash
+forager ondesk prompt-package --capture-id ondesk-cap-12345678
+```
+
+The package is context, not proof of completion. The next harness should still
+separate observation from inference, ask for missing evidence, and propose wiki
+changes as candidates.
+
+## Knowledge Policy
+
+- `ondesk note` stores redacted, operator-safe JSONL in `ondesk_notes.jsonl`.
+- `ondesk capture` records tmux scrollback only when the session is running.
+- `--include-git` is read-only and captures `git status --short` plus
+  `git diff --stat`; it does not run tests, clean files, or mutate worktrees.
+- Ondesk commands do not promote adaptive wiki entries. They prepare candidate
+  material for a later review stage.
+- Secrets and runner-only context are redacted before durable note or capture
+  artifacts are written.
+
+## When To Use It
+
+Use Ondesk handoff when:
+
+- two live harnesses should cross-review the same project state;
+- a long discussion needs to become a compact prompt for the next harness;
+- a non-code writing, analysis, critique, or planning task should produce
+  durable review material;
+- a future Offdesk episode needs current human intent without inheriting raw
+  chat logs.
+
+Use Offdesk tasks instead when Forager should own the execution, approvals,
+recovery records, and morning-review evidence.

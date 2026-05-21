@@ -159,6 +159,47 @@ fn offdesk_attention_includes_failed_and_resume_pending_tasks() {
 }
 
 #[test]
+fn offdesk_morning_review_includes_cancelled_and_resume_states() {
+    let summary = OffdeskResumeSummary {
+        cancelled_tasks: 1,
+        ..OffdeskResumeSummary::default()
+    };
+    assert!(summary.has_offdesk_activity());
+    assert!(summary.has_morning_review());
+    assert!(!summary.needs_operator_attention());
+    assert_eq!(summary.focus_label(), "cancelled work archived");
+    assert_eq!(summary.next_action_label(), "Review: forager offdesk tasks");
+
+    let resume_summary = OffdeskResumeSummary {
+        fresh_pending: 1,
+        ..OffdeskResumeSummary::default()
+    };
+    assert!(resume_summary.has_morning_review());
+    assert!(resume_summary.needs_operator_attention());
+    assert_eq!(resume_summary.focus_label(), "resume decision pending");
+    assert_eq!(
+        resume_summary.next_action_label(),
+        "Recover: forager offdesk resume"
+    );
+}
+
+#[test]
+fn offdesk_morning_review_prioritizes_approvals_before_running_work() {
+    let summary = OffdeskResumeSummary {
+        pending_approvals: 1,
+        active_tasks: 3,
+        failed_tasks: 1,
+        ..OffdeskResumeSummary::default()
+    };
+
+    assert_eq!(summary.focus_label(), "approvals waiting");
+    assert_eq!(
+        summary.next_action_label(),
+        "Review: forager offdesk pending"
+    );
+}
+
+#[test]
 #[serial]
 fn test_initial_cursor_position() {
     let env = create_test_env_with_sessions(3);

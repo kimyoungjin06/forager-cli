@@ -457,6 +457,8 @@ impl HomeView {
             inner
         };
 
+        let content_area = self.render_offdesk_morning_review_if_needed(frame, content_area, theme);
+
         match self.view_mode {
             ViewMode::Agent => {
                 // Refresh cache before borrowing from instance_map to avoid borrow conflicts
@@ -511,6 +513,89 @@ impl HomeView {
                 }
             }
         }
+    }
+
+    fn render_offdesk_morning_review_if_needed(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+    ) -> Rect {
+        const REVIEW_HEIGHT: u16 = 6;
+
+        if !self.offdesk_resume.has_morning_review() || area.height < REVIEW_HEIGHT + 3 {
+            return area;
+        }
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(REVIEW_HEIGHT), Constraint::Min(1)])
+            .split(area);
+
+        self.render_offdesk_morning_review(frame, chunks[0], theme);
+        chunks[1]
+    }
+
+    fn render_offdesk_morning_review(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let summary = &self.offdesk_resume;
+        let accent_style = if summary.needs_operator_attention() {
+            Style::default().fg(theme.waiting).bold()
+        } else if summary.active_tasks > 0 {
+            Style::default().fg(theme.running).bold()
+        } else {
+            Style::default().fg(theme.dimmed)
+        };
+        let label_style = Style::default().fg(theme.dimmed);
+        let value_style = Style::default().fg(theme.text);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border))
+            .title(" Offdesk Morning Review ")
+            .title_style(Style::default().fg(theme.title).bold());
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("Focus: ", label_style),
+                Span::styled(summary.focus_label(), accent_style),
+            ]),
+            Line::from(vec![
+                Span::styled("Tasks: ", label_style),
+                Span::styled(
+                    format!(
+                        "p/q/a/r/f/c {}/{}/{}/{}/{}/{}",
+                        summary.pending_approvals,
+                        summary.queued_tasks,
+                        summary.active_tasks,
+                        summary.resume_pending_tasks,
+                        summary.failed_tasks,
+                        summary.cancelled_tasks
+                    ),
+                    value_style,
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Runs:  ", label_style),
+                Span::styled(
+                    format!(
+                        "resume fresh/stale {}/{}  bg stale/failed {}/{}",
+                        summary.fresh_pending,
+                        summary.stale_pending,
+                        summary.stale_background,
+                        summary.failed_background
+                    ),
+                    value_style,
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Next:  ", label_style),
+                Span::styled(summary.next_action_label(), accent_style),
+            ]),
+        ];
+
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
     }
 
     fn render_status_bar(&self, frame: &mut Frame, area: Rect, theme: &Theme) {

@@ -102,16 +102,62 @@ impl OffdeskResumeSummary {
             || self.active_tasks > 0
             || self.failed_tasks > 0
             || self.resume_pending_tasks > 0
+            || self.cancelled_tasks > 0
             || self.stale_background > 0
             || self.failed_background > 0
+    }
+
+    pub(super) fn has_morning_review(&self) -> bool {
+        self.has_offdesk_activity() || self.fresh_pending > 0 || self.stale_pending > 0
     }
 
     pub(super) fn needs_operator_attention(&self) -> bool {
         self.pending_approvals > 0
             || self.failed_tasks > 0
             || self.resume_pending_tasks > 0
+            || self.fresh_pending > 0
+            || self.stale_pending > 0
             || self.stale_background > 0
             || self.failed_background > 0
+    }
+
+    pub(super) fn focus_label(&self) -> &'static str {
+        if self.pending_approvals > 0 {
+            "approvals waiting"
+        } else if self.failed_tasks > 0 || self.failed_background > 0 {
+            "failed work needs review"
+        } else if self.resume_pending_tasks > 0 || self.fresh_pending > 0 || self.stale_pending > 0
+        {
+            "resume decision pending"
+        } else if self.stale_background > 0 {
+            "stale background run"
+        } else if self.active_tasks > 0 {
+            "active offdesk work"
+        } else if self.queued_tasks > 0 {
+            "queued offdesk work"
+        } else if self.cancelled_tasks > 0 {
+            "cancelled work archived"
+        } else {
+            "no offdesk attention"
+        }
+    }
+
+    pub(super) fn next_action_label(&self) -> &'static str {
+        if self.pending_approvals > 0 {
+            "Review: forager offdesk pending"
+        } else if self.failed_tasks > 0 || self.resume_pending_tasks > 0 {
+            "Recover: forager offdesk tasks"
+        } else if self.fresh_pending > 0 || self.stale_pending > 0 {
+            "Recover: forager offdesk resume"
+        } else if self.stale_background > 0 || self.failed_background > 0 {
+            "Inspect: forager offdesk poll"
+        } else if self.active_tasks > 0 || self.queued_tasks > 0 {
+            "Monitor: forager offdesk poll"
+        } else if self.cancelled_tasks > 0 {
+            "Review: forager offdesk tasks"
+        } else {
+            "Plan: forager offdesk maintenance-report"
+        }
     }
 }
 

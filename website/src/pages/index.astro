@@ -9,8 +9,8 @@ import Step from '../components/Step.astro';
 const features = [
   {
     icon: 'dashboard',
-    title: 'TUI Dashboard',
-    description: 'Visual interface to manage all your AI coding sessions. See status at a glance, navigate with keyboard shortcuts.',
+    title: 'TUI Ondesk Cockpit',
+    description: 'Create, monitor, attach, review diffs, and recover agent sessions from one keyboard-driven dashboard.',
   },
   {
     icon: 'worktrees',
@@ -19,18 +19,18 @@ const features = [
   },
   {
     icon: 'status',
-    title: 'Offdesk Recovery',
-    description: 'Queue durable background tasks with approvals, retry paths, lifecycle recovery, and audit trails.',
+    title: 'Approval Gates',
+    description: 'Queue durable background tasks with explicit approvals for runtime dispatch, provider fallback, and maintenance actions.',
   },
   {
     icon: 'status',
-    title: 'Status Detection',
-    description: 'Automatic status detection for Claude Code, Gemini CLI, OpenCode, Mistral Vibe, and Codex. Know when agents are working, waiting, or idle.',
+    title: 'Adaptive Wiki',
+    description: 'Project knowledge is captured as reviewable candidates, promoted with audit trails, and projected back into scoped agent modes.',
   },
   {
     icon: 'groups',
-    title: 'Session Groups',
-    description: 'Organize sessions into hierarchical folders. Keep work projects separate from personal experiments.',
+    title: 'Morning Review',
+    description: 'Turn overnight runs into inspectable decisions: what completed, what failed, what needs approval, and what knowledge should be promoted.',
   },
   {
     icon: 'tmux',
@@ -42,7 +42,7 @@ const features = [
 
 <Base
   title="Forager - Offdesk Agent Orchestration"
-  description="Offdesk agent orchestration for Linux and macOS using tmux to manage, approve, recover, and monitor AI coding agents. Git worktrees and a TUI. Written in Rust."
+  description="Safe offdesk autonomy for Linux and macOS using tmux to manage, approve, recover, and review AI coding agent work. Git worktrees, adaptive wiki, and a TUI. Written in Rust."
 >
   <Nav />
 
@@ -57,14 +57,14 @@ const features = [
           <span class="text-gradient">Forager</span>
         </h1>
         <p class="text-xl md:text-2xl text-gray-400 max-w-2xl mx-auto leading-relaxed">
-          Offdesk agent orchestration for AI coding agents
+          Safe offdesk autonomy for AI coding agents
         </p>
       </div>
 
       <!-- Subtitle -->
       <p class="text-lg text-gray-300 max-w-3xl mx-auto mb-12 leading-relaxed">
-        Manage multiple <span class="text-white font-medium">Claude Code</span>, <span class="text-white font-medium">Gemini CLI</span>, <span class="text-white font-medium">OpenCode</span>, <span class="text-white font-medium">Mistral Vibe</span>, and <span class="text-white font-medium">Codex</span> sessions with a beautiful TUI.
-        <span class="text-gray-400">Git worktrees for parallel development. Built on tmux.</span>
+        Manage multiple <span class="text-white font-medium">Claude Code</span>, <span class="text-white font-medium">Gemini CLI</span>, <span class="text-white font-medium">OpenCode</span>, <span class="text-white font-medium">Mistral Vibe</span>, and <span class="text-white font-medium">Codex</span> sessions with a TUI built for on-desk review and off-desk execution.
+        <span class="text-gray-400">Approvals, recovery, audit trails, adaptive wiki guidance, git worktrees, and tmux persistence.</span>
       </p>
 
       <!-- Install Command -->
@@ -74,6 +74,9 @@ const features = [
       <div class="flex flex-col sm:flex-row gap-4 justify-center mb-16">
         <a href="/docs/quick-start.html" class="bg-brand-700 hover:bg-brand-600 text-white font-semibold px-8 py-3.5 rounded-xl transition-all hover:shadow-lg hover:shadow-brand-600/25 text-base">
           Get Started
+        </a>
+        <a href="/guides/offdesk-morning-review/" class="bg-surface-800 hover:bg-surface-700 text-white font-semibold px-8 py-3.5 rounded-xl transition-colors border border-surface-700 hover:border-brand-500/50 text-base">
+          See the Offdesk Loop
         </a>
         <a href="https://github.com/kimyoungjin06/forager-cli" target="_blank" rel="noopener" class="group bg-surface-800 hover:bg-surface-700 text-white font-semibold px-8 py-3.5 rounded-xl transition-colors flex items-center justify-center gap-2 border border-surface-700 hover:border-brand-500/50 text-base" title="Star on GitHub">
           <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -103,8 +106,8 @@ const features = [
   <section class="py-24 px-6">
     <div class="max-w-6xl mx-auto">
       <div class="text-center mb-16">
-        <h2 class="text-3xl md:text-4xl font-bold mb-4">Everything you need to manage AI agents</h2>
-        <p class="text-gray-400 text-lg max-w-2xl mx-auto">Built for developers who run multiple coding agents across different projects and branches.</p>
+        <h2 class="text-3xl md:text-4xl font-bold mb-4">Everything you need to operate AI agents</h2>
+        <p class="text-gray-400 text-lg max-w-2xl mx-auto">Built for developers who want parallel coding agents, durable offdesk runs, and evidence they can review later.</p>
       </div>
 
       <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -123,23 +126,28 @@ const features = [
   <section class="py-24 px-6 bg-surface-900/50">
     <div class="max-w-4xl mx-auto">
       <div class="text-center mb-16">
-        <h2 class="text-3xl md:text-4xl font-bold mb-4">Simple workflow</h2>
-        <p class="text-gray-400 text-lg">Get up and running in seconds</p>
+        <h2 class="text-3xl md:text-4xl font-bold mb-4">Ondesk to Offdesk Loop</h2>
+        <p class="text-gray-400 text-lg">Plan while you are present, run while you are away, review before knowledge becomes durable.</p>
       </div>
 
       <div class="space-y-12">
-        <Step number={1} title="Launch the TUI">
+        <Step number={1} title="Plan from the TUI">
           <div class="code-block rounded-xl px-5 py-3 font-mono text-base inline-block">
             <span class="text-gray-500">$</span> <span class="text-white">forager</span>
           </div>
+          <p class="text-gray-400 leading-relaxed mt-4">Create scoped sessions, isolate branches with worktrees, inspect status, and decide what is safe to hand to Offdesk.</p>
         </Step>
 
-        <Step number={2} title="Add a session">
-          <p class="text-gray-400 leading-relaxed">Press <kbd class="px-2.5 py-1 rounded text-sm font-mono mx-1">a</kbd> and enter the path to your project. Optionally create a worktree for branch isolation.</p>
+        <Step number={2} title="Queue approved Offdesk work">
+          <p class="text-gray-400 leading-relaxed">Durable tasks run behind approval gates, recovery records, provider fallback checks, and redacted audit output.</p>
         </Step>
 
-        <Step number={3} title="Attach and work" showLine={false}>
-          <p class="text-gray-400 leading-relaxed">Press <kbd class="px-2.5 py-1 rounded text-sm font-mono mx-1">Enter</kbd> to attach. You're now in tmux with your AI agent. Press <kbd class="px-2.5 py-1 rounded text-sm font-mono mx-1">Ctrl+b d</kbd> to detach back to Forager.</p>
+        <Step number={3} title="Review the morning evidence">
+          <p class="text-gray-400 leading-relaxed">Use task status, debug bundles, maintenance reports, Council decisions, and wiki review reports before claiming completion.</p>
+        </Step>
+
+        <Step number={4} title="Promote only reviewed knowledge" showLine={false}>
+          <p class="text-gray-400 leading-relaxed">Adaptive wiki candidates and provisional overnight notes become durable guidance only through explicit review and audited CLI actions.</p>
         </Step>
       </div>
     </div>

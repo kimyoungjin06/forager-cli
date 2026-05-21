@@ -92,6 +92,10 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki renew-review-after`↴](#forager-offdesk-wiki-renew-review-after)
 * [`forager offdesk wiki add-counterexample`↴](#forager-offdesk-wiki-add-counterexample)
 * [`forager offdesk wiki update-runbook`↴](#forager-offdesk-wiki-update-runbook)
+* [`forager ondesk`↴](#forager-ondesk)
+* [`forager ondesk note`↴](#forager-ondesk-note)
+* [`forager ondesk capture`↴](#forager-ondesk-capture)
+* [`forager ondesk prompt-package`↴](#forager-ondesk-prompt-package)
 * [`forager tmux`↴](#forager-tmux)
 * [`forager tmux status`↴](#forager-tmux-status)
 * [`forager sounds`↴](#forager-sounds)
@@ -123,6 +127,7 @@ Run without arguments to launch the TUI dashboard. The legacy `aoe` binary remai
 * `profile` — Manage profiles (separate workspaces)
 * `worktree` — Manage git worktrees for parallel development
 * `offdesk` — Manage offdesk approvals and recovery artifacts
+* `ondesk` — Capture ondesk notes and prompt context from external harness work
 * `tmux` — tmux integration utilities
 * `sounds` — Manage sound effects for agent state transitions
 * `uninstall` — Uninstall Forager
@@ -1694,6 +1699,81 @@ Attach governed runbook support refs to a procedure entry
 
   Default value: `cli`
 * `--json` — Output as JSON
+
+
+
+## `forager ondesk`
+
+Capture ondesk notes and prompt context from external harness work
+
+**Usage:** `forager ondesk <COMMAND>`
+
+###### **Subcommands:**
+
+* `note` — Append a safe operator note for an ondesk session or project
+* `capture` — Capture live harness scrollback into an inspectable prompt package
+* `prompt-package` — Build a markdown prompt package from recent notes and optional capture
+
+
+
+## `forager ondesk note`
+
+Append a safe operator note for an ondesk session or project
+
+**Usage:** `forager ondesk note [OPTIONS] --text <TEXT> [IDENTIFIER]`
+
+###### **Arguments:**
+
+* `<IDENTIFIER>` — Session ID, title, or project path. Defaults to current tmux Forager session or cwd
+
+###### **Options:**
+
+* `--text <TEXT>` — Operator note text to persist
+* `--mode <MODE>` — Work mode label, e.g. planning, analysis, writing, critique
+* `--project-key <PROJECT_KEY>` — Stable project key for grouping ondesk knowledge
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk capture`
+
+Capture live harness scrollback into an inspectable prompt package
+
+**Usage:** `forager ondesk capture [OPTIONS] [IDENTIFIER]`
+
+###### **Arguments:**
+
+* `<IDENTIFIER>` — Session ID, title, or project path. Defaults to current tmux Forager session or cwd
+
+###### **Options:**
+
+* `--lines <LINES>` — Number of tmux scrollback lines to capture
+
+  Default value: `200`
+* `--mode <MODE>` — Work mode label, e.g. planning, analysis, writing, critique
+* `--project-key <PROJECT_KEY>` — Stable project key for grouping ondesk knowledge
+* `--include-git` — Include read-only git status and diff-stat from the session/project path
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk prompt-package`
+
+Build a markdown prompt package from recent notes and optional capture
+
+**Usage:** `forager ondesk prompt-package [OPTIONS] [IDENTIFIER]`
+
+###### **Arguments:**
+
+* `<IDENTIFIER>` — Session ID, title, or project path. Defaults to current tmux Forager session or cwd
+
+###### **Options:**
+
+* `--capture-id <CAPTURE_ID>` — Existing capture ID to render
+* `--mode <MODE>` — Work mode label used to filter notes
+* `--project-key <PROJECT_KEY>` — Stable project key used to filter notes
+* `--output <OUTPUT>` — Write markdown package to a file instead of stdout
+* `--json` — Output metadata as JSON
 
 
 
