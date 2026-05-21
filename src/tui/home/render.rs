@@ -590,6 +590,17 @@ impl HomeView {
                 ),
             ]),
             Line::from(vec![
+                Span::styled("Close: ", label_style),
+                Span::styled(
+                    format!("{} tasks require closeout", summary.closeout_required),
+                    if summary.closeout_required > 0 {
+                        accent_style
+                    } else {
+                        value_style
+                    },
+                ),
+            ]),
+            Line::from(vec![
                 Span::styled("Next:  ", label_style),
                 Span::styled(summary.next_action_label(), accent_style),
             ]),
@@ -665,12 +676,13 @@ impl HomeView {
                 Span::styled("│", sep_style),
                 Span::styled(
                     format!(
-                        " Offdesk p/q/a/r/f {}/{}/{}/{}/{} ",
+                        " Offdesk p/q/a/r/f/x {}/{}/{}/{}/{}/{} ",
                         self.offdesk_resume.pending_approvals,
                         self.offdesk_resume.queued_tasks,
                         self.offdesk_resume.active_tasks,
                         self.offdesk_resume.resume_pending_tasks,
-                        self.offdesk_resume.failed_tasks
+                        self.offdesk_resume.failed_tasks,
+                        self.offdesk_resume.closeout_required
                     ),
                     offdesk_style,
                 ),
