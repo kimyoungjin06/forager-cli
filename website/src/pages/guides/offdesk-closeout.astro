@@ -45,6 +45,22 @@ import Footer from '../../components/Footer.astro';
       </section>
 
       <section>
+        <h2>Record Review</h2>
+        <p>
+          Generating the packet is not the same as approving the closeout. After reviewing the commercial packet, record the verdict:
+        </p>
+        <pre><code>forager offdesk closeout-review \
+  --closeout-id &lt;closeout-id&gt; \
+  --verdict approved \
+  --reviewer gpt-5.5 \
+  --review-provider gpt-5.5 \
+  --review-file &lt;path-to-review-output&gt;</code></pre>
+        <p>
+          Only an approved review record clears the TUI closeout-required signal. Revise and blocked verdicts remain evidence but keep the return path reviewable.
+        </p>
+      </section>
+
+      <section>
         <h2>Cleanup Policy</h2>
         <ul>
           <li><strong>Keep:</strong> provenance anchors, result artifacts, reports, declared task artifacts, and files needed for Ondesk return.</li>
@@ -52,7 +68,7 @@ import Footer from '../../components/Footer.astro';
           <li><strong>Delete candidate:</strong> disabled by default in the first closeout surface.</li>
         </ul>
         <p>
-          Any future move, archive, or delete action must pass commercial model review and explicit human approval through the normal approval path.
+          Any future move, archive, or delete action must pass commercial model review and explicit human approval through the normal approval path. Recording a closeout review still does not apply file operations.
         </p>
       </section>
 

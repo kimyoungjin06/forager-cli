@@ -193,6 +193,27 @@ fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
     .unwrap();
 
     let summary = super::load_offdesk_summary("test");
+    assert_eq!(summary.closeout_required, 1);
+    assert!(summary.needs_operator_attention());
+
+    fs::write(
+        closeout_dir.join("closeout_review_20260521T000000Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now + Duration::minutes(2),
+            "verdict": "approved",
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "completed-task"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let summary = super::load_offdesk_summary("test");
     assert_eq!(summary.closeout_required, 0);
     assert!(!summary.needs_operator_attention());
 }
