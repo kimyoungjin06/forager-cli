@@ -26,6 +26,7 @@
 - [Offdesk Agent Modes](offdesk-agent-modes.md)
 - [Forager And Orchestrator Boundary](forager-orchestrator-boundary.md)
 - [Adaptive Wiki](adaptive-wiki.md)
+- [Adaptive Wiki Tag Graph](adaptive-wiki-tag-graph.md)
 - [Adaptive Wiki Execution Plan](adaptive-wiki-execution-plan.md)
 - [Hermes Adaptive Knowledge Benchmark](hermes-adaptive-knowledge-benchmark.md)
 

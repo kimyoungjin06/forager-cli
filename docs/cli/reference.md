@@ -58,6 +58,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk snapshot`↴](#forager-offdesk-snapshot)
 * [`forager offdesk restore-plan`↴](#forager-offdesk-restore-plan)
 * [`forager offdesk debug-bundle`↴](#forager-offdesk-debug-bundle)
+* [`forager offdesk maintenance-report`↴](#forager-offdesk-maintenance-report)
+* [`forager offdesk maintenance-request`↴](#forager-offdesk-maintenance-request)
 * [`forager offdesk wiki`↴](#forager-offdesk-wiki)
 * [`forager offdesk wiki corrections`↴](#forager-offdesk-wiki-corrections)
 * [`forager offdesk wiki proposal-events`↴](#forager-offdesk-wiki-proposal-events)
@@ -77,6 +79,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki ack-runtime-policy`↴](#forager-offdesk-wiki-ack-runtime-policy)
 * [`forager offdesk wiki lint`↴](#forager-offdesk-wiki-lint)
 * [`forager offdesk wiki export-markdown`↴](#forager-offdesk-wiki-export-markdown)
+* [`forager offdesk wiki graph`↴](#forager-offdesk-wiki-graph)
 * [`forager offdesk wiki review`↴](#forager-offdesk-wiki-review)
 * [`forager offdesk wiki evaluate-episode`↴](#forager-offdesk-wiki-evaluate-episode)
 * [`forager offdesk wiki episode-trace`↴](#forager-offdesk-wiki-episode-trace)
@@ -568,7 +571,7 @@ Manage offdesk approvals and recovery artifacts
 * `retry-task` — Requeue a failed, resume-pending, or cancelled durable task
 * `resume-task` — Accept recovery for a resume-pending task and requeue it
 * `abandon-task` — Discard a failed or resume-pending task
-* `poll` — Poll background runner probes and persist phase transitions
+* `poll` — Poll background runner probes, persist phase transitions, and reconcile task status
 * `ok` — Approve the oldest or targeted pending action
 * `cancel` — Deny the oldest or targeted pending action
 * `resume` — Show task resume artifacts
@@ -578,6 +581,8 @@ Manage offdesk approvals and recovery artifacts
 * `snapshot` — Show and verify a pre-mutation checkpoint snapshot
 * `restore-plan` — Show a dry-run rollback plan without modifying files
 * `debug-bundle` — Emit a sanitized read-only debug bundle
+* `maintenance-report` — Summarize read-only Offdesk maintenance risks
+* `maintenance-request` — Create or reuse an approval request for a maintenance action
 * `wiki` — Inspect adaptive wiki candidates, entries, projections, and lint
 
 
@@ -851,7 +856,7 @@ Discard a failed or resume-pending task
 
 ## `forager offdesk poll`
 
-Poll background runner probes and persist phase transitions
+Poll background runner probes, persist phase transitions, and reconcile task status
 
 **Usage:** `forager offdesk poll [OPTIONS] [TICKET_ID]`
 
@@ -998,6 +1003,50 @@ Emit a sanitized read-only debug bundle
 
 
 
+## `forager offdesk maintenance-report`
+
+Summarize read-only Offdesk maintenance risks
+
+**Usage:** `forager offdesk maintenance-report [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+* `--wiki-review-near-expiry-hours <WIKI_REVIEW_NEAR_EXPIRY_HOURS>` — Hours before review_after expiry to flag adaptive wiki entries
+
+  Default value: `168`
+* `--wiki-runtime-ack-near-expiry-hours <WIKI_RUNTIME_ACK_NEAR_EXPIRY_HOURS>` — Hours before runtime policy acknowledgement expiry to flag attention
+
+  Default value: `6`
+
+
+
+## `forager offdesk maintenance-request`
+
+Create or reuse an approval request for a maintenance action
+
+**Usage:** `forager offdesk maintenance-request [OPTIONS] --kind <KIND> --project-key <PROJECT_KEY> --request-id <REQUEST_ID> --preview <PREVIEW> --reason <REASON>`
+
+###### **Options:**
+
+* `--kind <KIND>` — Bounded maintenance action kind to request approval for
+* `--project-key <PROJECT_KEY>` — Project key for approval and audit correlation
+* `--request-id <REQUEST_ID>` — Request ID for approval and audit correlation
+* `--task-id <TASK_ID>` — Task ID for approval identity. Defaults to maintenance-<kind>-<target-id>
+* `--target-id <TARGET_ID>` — Optional target identifier used for approval deduplication and review
+* `--risk <RISK>` — Override the default risk for this maintenance kind
+* `--preview <PREVIEW>` — Operator-safe action preview
+* `--reason <REASON>` — Reason shown when approval is required
+* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on generated approval rows
+
+  Default value: `cli`
+* `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
+
+  Default value: `30`
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk wiki`
 
 Inspect adaptive wiki candidates, entries, projections, and lint
@@ -1024,6 +1073,7 @@ Inspect adaptive wiki candidates, entries, projections, and lint
 * `ack-runtime-policy` — Acknowledge strict review_after exclusion for runtime projection
 * `lint` — Lint adaptive wiki state
 * `export-markdown` — Export adaptive wiki state as a one-way markdown vault
+* `graph` — Export a read-only adaptive wiki tag graph
 * `review` — Generate a recommendation-only adaptive wiki review report
 * `evaluate-episode` — Evaluate one adaptive wiki entry across in-scope and out-of-scope projections
 * `episode-trace` — Trace live task/probe/wiki evidence for adaptive behavior review
@@ -1379,6 +1429,20 @@ Export adaptive wiki state as a one-way markdown vault
 
 * `--output <OUTPUT>` — Directory to write the markdown vault into
 * `--dry-run` — Preview export files without writing them
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki graph`
+
+Export a read-only adaptive wiki tag graph
+
+**Usage:** `forager offdesk wiki graph [OPTIONS]`
+
+###### **Options:**
+
+* `--output <OUTPUT>` — Optional directory to write graph.json and graph.md into
+* `--dry-run` — Preview graph export files without writing them
 * `--json` — Output as JSON
 
 

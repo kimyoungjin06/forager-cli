@@ -17,6 +17,7 @@ use super::background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind,
     BackgroundRunnerPhase, NotificationDecision,
 };
+use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::redaction::operator_safe_text;
 use super::scheduler::{SchedulerGate, SchedulerGateOutcome, SchedulerGateRequest};
 
@@ -83,6 +84,8 @@ pub struct BackgroundLaunchOutcome {
 pub struct BackgroundPollOutcome {
     pub probe: BackgroundProbe,
     pub decision: BackgroundRecoveryDecision,
+    #[serde(flatten)]
+    pub mode_assessment: OffdeskModeAssessment,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notification: Option<NotificationDecision>,
 }
@@ -261,15 +264,43 @@ pub fn poll_background_runs(
         probe.last_recovery_terminal = Some(decision.terminal);
         let notification =
             notification_cooldown.map(|cooldown| probe.record_notification_attempt(now, cooldown));
+        let mode_assessment = assess_offdesk_mode(
+            probe.agent_mode,
+            background_mode_lifecycle(&decision, probe.result_artifact_present),
+        );
         outcomes.push(BackgroundPollOutcome {
             probe: probe.clone(),
             decision,
+            mode_assessment,
             notification,
         });
     }
 
     store.save(&probes)?;
     Ok(outcomes)
+}
+
+fn background_mode_lifecycle(
+    decision: &BackgroundRecoveryDecision,
+    result_artifact_present: bool,
+) -> OffdeskModeLifecycle {
+    match decision.phase {
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived
+            if result_artifact_present =>
+        {
+            OffdeskModeLifecycle::CompletedWithResult
+        }
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived => {
+            OffdeskModeLifecycle::CompletedWithoutResult
+        }
+        BackgroundRunnerPhase::Failed
+        | BackgroundRunnerPhase::StaleNoAck
+        | BackgroundRunnerPhase::StaleLostCallback
+        | BackgroundRunnerPhase::Reconstructable => OffdeskModeLifecycle::Blocked,
+        BackgroundRunnerPhase::Launched
+        | BackgroundRunnerPhase::HandoffEmitted
+        | BackgroundRunnerPhase::PickupAcknowledged => OffdeskModeLifecycle::Running,
+    }
 }
 
 fn prepare_command_probe_metadata(

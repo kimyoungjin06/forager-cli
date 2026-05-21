@@ -81,9 +81,26 @@ pub enum AdaptiveWikiActivationMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdaptiveWikiAgentMode {
-    CodeDevelopment,
-    ResearchWriting,
+    Planning,
+    #[serde(
+        alias = "code_development",
+        alias = "code-development",
+        alias = "code",
+        alias = "coding"
+    )]
+    Development,
+    Analysis,
+    #[serde(
+        alias = "research_writing",
+        alias = "research-writing",
+        alias = "research",
+        alias = "editing"
+    )]
+    Writing,
+    #[serde(alias = "critic")]
     Critique,
+    Review,
+    Maintenance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -279,6 +296,10 @@ pub struct AdaptiveWikiEntry {
     pub capability_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_artifact_kinds: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub core_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposed_tags: Vec<String>,
     #[serde(default)]
     pub confidence: AdaptiveWikiConfidence,
     #[serde(default = "default_timestamp")]
@@ -317,6 +338,10 @@ pub struct AdaptiveWikiCandidate {
     pub source_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_hashes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub core_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposed_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_scope: Option<AdaptiveWikiScopeSuggestion>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -382,6 +407,8 @@ pub struct AdaptiveWikiCandidateInput {
     pub source_hashes: Vec<String>,
     pub suggested_scope: Option<AdaptiveWikiScopeSuggestion>,
     pub agent_modes: Vec<AdaptiveWikiAgentMode>,
+    pub core_tags: Vec<String>,
+    pub proposed_tags: Vec<String>,
     pub review_reason: String,
     pub confidence: AdaptiveWikiConfidence,
 }
@@ -402,6 +429,8 @@ impl Default for AdaptiveWikiCandidateInput {
             source_hashes: Vec::new(),
             suggested_scope: None,
             agent_modes: Vec::new(),
+            core_tags: Vec::new(),
+            proposed_tags: Vec::new(),
             review_reason: String::new(),
             confidence: AdaptiveWikiConfidence::default(),
         }
@@ -669,6 +698,10 @@ pub struct AdaptiveWikiHumanEntry {
     pub capability_ids: Vec<String>,
     #[serde(default)]
     pub required_artifact_kinds: Vec<String>,
+    #[serde(default)]
+    pub core_tags: Vec<String>,
+    #[serde(default)]
+    pub proposed_tags: Vec<String>,
     pub confidence: AdaptiveWikiConfidence,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -690,6 +723,10 @@ pub struct AdaptiveWikiHumanCandidate {
     pub origin: AdaptiveWikiOrigin,
     pub source_refs: Vec<String>,
     pub source_hashes: Vec<String>,
+    #[serde(default)]
+    pub core_tags: Vec<String>,
+    #[serde(default)]
+    pub proposed_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_scope: Option<AdaptiveWikiScopeSuggestion>,
     pub review_reason: String,
@@ -760,6 +797,74 @@ pub struct AdaptiveWikiMarkdownExportReport {
     pub dry_run: bool,
     pub summary: AdaptiveWikiMarkdownExportSummary,
     pub files: Vec<AdaptiveWikiMarkdownExportFile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveWikiTagClass {
+    DerivedCore,
+    Core,
+    Proposed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiTagRegistryRule {
+    pub prefix: String,
+    pub description: String,
+    pub lifecycle: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiGraphNode {
+    pub id: String,
+    pub node_type: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub wiki_id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_class: Option<AdaptiveWikiTagClass>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiGraphEdge {
+    pub source: String,
+    pub target: String,
+    pub relationship: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_class: Option<AdaptiveWikiTagClass>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiTagReviewIssue {
+    pub severity: AdaptiveWikiLintSeverity,
+    pub subject_kind: String,
+    pub subject_id: String,
+    pub tag: String,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AdaptiveWikiGraphSummary {
+    pub entries: usize,
+    pub candidates: usize,
+    pub tag_nodes: usize,
+    pub core_tag_edges: usize,
+    pub proposed_tag_edges: usize,
+    pub derived_core_tag_edges: usize,
+    pub review_issues: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiGraphReport {
+    pub generated_at: DateTime<Utc>,
+    pub summary: AdaptiveWikiGraphSummary,
+    pub registry: Vec<AdaptiveWikiTagRegistryRule>,
+    pub nodes: Vec<AdaptiveWikiGraphNode>,
+    pub edges: Vec<AdaptiveWikiGraphEdge>,
+    pub review_issues: Vec<AdaptiveWikiTagReviewIssue>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1192,6 +1297,11 @@ impl AdaptiveWikiStore {
             push_unique(&mut existing.evidence_refs, input.evidence_ref.as_deref());
             push_unique_many(&mut existing.source_refs, input.source_refs.iter());
             push_unique_many(&mut existing.source_hashes, input.source_hashes.iter());
+            push_unique_many(&mut existing.core_tags, clean_tags(input.core_tags).iter());
+            push_unique_many(
+                &mut existing.proposed_tags,
+                clean_tags(input.proposed_tags).iter(),
+            );
             existing.clone()
         } else {
             let candidate = AdaptiveWikiCandidate {
@@ -1214,6 +1324,8 @@ impl AdaptiveWikiStore {
                 origin: input.origin,
                 source_refs: clean_refs(input.source_refs),
                 source_hashes: clean_refs(input.source_hashes),
+                core_tags: clean_tags(input.core_tags),
+                proposed_tags: clean_tags(input.proposed_tags),
                 suggested_scope: input.suggested_scope,
                 review_reason: input.review_reason.trim().to_string(),
                 occurrence_count: default_occurrence_count(),
@@ -1304,6 +1416,8 @@ impl AdaptiveWikiStore {
             support_refs: Vec::new(),
             capability_ids: Vec::new(),
             required_artifact_kinds: Vec::new(),
+            core_tags: candidate.core_tags,
+            proposed_tags: candidate.proposed_tags,
             confidence: candidate.confidence,
             created_at: now,
             updated_at: now,
@@ -1769,6 +1883,14 @@ impl AdaptiveWikiStore {
             entries.len(),
             candidates.len(),
             &files,
+        ))
+    }
+
+    pub fn graph_report(&self, now: DateTime<Utc>) -> Result<AdaptiveWikiGraphReport> {
+        Ok(build_graph_report(
+            &self.load_entries()?.entries,
+            &self.load_candidates()?.candidates,
+            now,
         ))
     }
 
@@ -2915,6 +3037,8 @@ pub fn build_human_projection(
                 .iter()
                 .map(|value| operator_safe_text(value))
                 .collect(),
+            core_tags: clean_tags(entry.core_tags.clone()),
+            proposed_tags: clean_tags(entry.proposed_tags.clone()),
             confidence: entry.confidence,
             updated_at: entry.updated_at,
             review_after: entry.review_after,
@@ -2956,6 +3080,8 @@ pub fn build_human_projection(
                 .iter()
                 .map(|value| operator_safe_text(value))
                 .collect(),
+            core_tags: clean_tags(candidate.core_tags.clone()),
+            proposed_tags: clean_tags(candidate.proposed_tags.clone()),
             suggested_scope: candidate
                 .suggested_scope
                 .as_ref()
@@ -3158,6 +3284,546 @@ pub fn build_lint_report(
         summary,
         issues,
     }
+}
+
+pub fn build_graph_report(
+    entries: &[AdaptiveWikiEntry],
+    candidates: &[AdaptiveWikiCandidate],
+    now: DateTime<Utc>,
+) -> AdaptiveWikiGraphReport {
+    let mut nodes = Vec::new();
+    let mut graph = AdaptiveWikiGraphDraft::default();
+
+    for entry in entries {
+        let source = format!("entry:{}", fallback_subject_id(&entry.id));
+        nodes.push(AdaptiveWikiGraphNode {
+            id: source.clone(),
+            node_type: "entry".to_string(),
+            wiki_id: operator_safe_text(&entry.id),
+            label: operator_safe_text(&fallback_text(&entry.human_summary, &entry.claim)),
+            tag: None,
+            tag_class: None,
+        });
+
+        add_tag_edges(
+            TagSubject::new("entry", &entry.id),
+            &source,
+            &derived_entry_tags(entry),
+            AdaptiveWikiTagClass::DerivedCore,
+            &mut graph,
+        );
+        add_tag_edges(
+            TagSubject::new("entry", &entry.id),
+            &source,
+            &clean_tags(entry.core_tags.clone()),
+            AdaptiveWikiTagClass::Core,
+            &mut graph,
+        );
+        add_tag_edges(
+            TagSubject::new("entry", &entry.id),
+            &source,
+            &clean_tags(entry.proposed_tags.clone()),
+            AdaptiveWikiTagClass::Proposed,
+            &mut graph,
+        );
+    }
+
+    for candidate in candidates {
+        let source = format!("candidate:{}", fallback_subject_id(&candidate.id));
+        nodes.push(AdaptiveWikiGraphNode {
+            id: source.clone(),
+            node_type: "candidate".to_string(),
+            wiki_id: operator_safe_text(&candidate.id),
+            label: operator_safe_text(&fallback_text(&candidate.human_summary, &candidate.claim)),
+            tag: None,
+            tag_class: None,
+        });
+
+        add_tag_edges(
+            TagSubject::new("candidate", &candidate.id),
+            &source,
+            &derived_candidate_tags(candidate),
+            AdaptiveWikiTagClass::DerivedCore,
+            &mut graph,
+        );
+        add_tag_edges(
+            TagSubject::new("candidate", &candidate.id),
+            &source,
+            &clean_tags(candidate.core_tags.clone()),
+            AdaptiveWikiTagClass::Core,
+            &mut graph,
+        );
+        add_tag_edges(
+            TagSubject::new("candidate", &candidate.id),
+            &source,
+            &clean_tags(candidate.proposed_tags.clone()),
+            AdaptiveWikiTagClass::Proposed,
+            &mut graph,
+        );
+    }
+
+    for (tag, tag_class) in graph.tag_nodes {
+        nodes.push(AdaptiveWikiGraphNode {
+            id: tag_node_id(&tag),
+            node_type: "tag".to_string(),
+            wiki_id: String::new(),
+            label: format!("#{tag}"),
+            tag: Some(tag),
+            tag_class: Some(tag_class),
+        });
+    }
+
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut edges = graph.edges;
+    edges.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then_with(|| left.relationship.cmp(&right.relationship))
+            .then_with(|| left.target.cmp(&right.target))
+    });
+    let mut review_issues = graph.review_issues;
+    review_issues.sort_by(|left, right| {
+        left.subject_kind
+            .cmp(&right.subject_kind)
+            .then_with(|| left.subject_id.cmp(&right.subject_id))
+            .then_with(|| left.tag.cmp(&right.tag))
+            .then_with(|| left.code.cmp(&right.code))
+    });
+
+    let summary = AdaptiveWikiGraphSummary {
+        entries: entries.len(),
+        candidates: candidates.len(),
+        tag_nodes: nodes.iter().filter(|node| node.node_type == "tag").count(),
+        core_tag_edges: edges
+            .iter()
+            .filter(|edge| edge.tag_class == Some(AdaptiveWikiTagClass::Core))
+            .count(),
+        proposed_tag_edges: edges
+            .iter()
+            .filter(|edge| edge.tag_class == Some(AdaptiveWikiTagClass::Proposed))
+            .count(),
+        derived_core_tag_edges: edges
+            .iter()
+            .filter(|edge| edge.tag_class == Some(AdaptiveWikiTagClass::DerivedCore))
+            .count(),
+        review_issues: review_issues.len(),
+    };
+
+    AdaptiveWikiGraphReport {
+        generated_at: now,
+        summary,
+        registry: tag_registry_rules(),
+        nodes,
+        edges,
+        review_issues,
+    }
+}
+
+pub fn build_graph_export_files(report: &AdaptiveWikiGraphReport) -> Result<Vec<(String, String)>> {
+    Ok(vec![
+        (
+            "graph.json".to_string(),
+            serde_json::to_string_pretty(report)?,
+        ),
+        ("graph.md".to_string(), graph_markdown(report)),
+    ])
+}
+
+#[derive(Default)]
+struct AdaptiveWikiGraphDraft {
+    tag_nodes: BTreeMap<String, AdaptiveWikiTagClass>,
+    edges: Vec<AdaptiveWikiGraphEdge>,
+    review_issues: Vec<AdaptiveWikiTagReviewIssue>,
+}
+
+struct TagSubject<'a> {
+    kind: &'a str,
+    id: &'a str,
+}
+
+impl<'a> TagSubject<'a> {
+    fn new(kind: &'a str, id: &'a str) -> Self {
+        Self { kind, id }
+    }
+}
+
+fn tag_registry_rules() -> Vec<AdaptiveWikiTagRegistryRule> {
+    [
+        ("project/", "Project or repository key.", "core"),
+        ("agent/", "Agent mode or role lens.", "core"),
+        ("mode/", "Execution mode such as offdesk.", "core"),
+        (
+            "artifact/",
+            "Artifact class such as report or evidence.",
+            "core",
+        ),
+        ("evidence/", "Evidence class or gate name.", "core"),
+        ("risk/", "Operator or runtime risk class.", "core"),
+        ("status/", "Lifecycle or reportability status.", "core"),
+        (
+            "capability/",
+            "Capability id used by Offdesk rails.",
+            "core",
+        ),
+        ("kind/", "Adaptive wiki entry kind.", "derived_core"),
+        ("scope/", "Adaptive wiki scope kind.", "derived_core"),
+        (
+            "confidence/",
+            "Adaptive wiki confidence class.",
+            "derived_core",
+        ),
+        ("signal/", "Candidate signal kind.", "derived_core"),
+    ]
+    .into_iter()
+    .map(
+        |(prefix, description, lifecycle)| AdaptiveWikiTagRegistryRule {
+            prefix: prefix.to_string(),
+            description: description.to_string(),
+            lifecycle: lifecycle.to_string(),
+        },
+    )
+    .collect()
+}
+
+fn core_tag_prefixes() -> &'static [&'static str] {
+    &[
+        "project/",
+        "agent/",
+        "mode/",
+        "artifact/",
+        "evidence/",
+        "risk/",
+        "status/",
+        "capability/",
+        "kind/",
+        "scope/",
+        "confidence/",
+        "signal/",
+    ]
+}
+
+fn derived_entry_tags(entry: &AdaptiveWikiEntry) -> Vec<String> {
+    let mut tags = vec![
+        format!("kind/{}", kind_label(entry.kind)),
+        format!("scope/{}", scope_label(entry.scope)),
+        format!("status/{}", status_label(entry.status)),
+        format!("confidence/{}", confidence_label(entry.confidence)),
+    ];
+    match entry.scope {
+        AdaptiveWikiScope::Project => push_tag_component(&mut tags, "project", &entry.scope_ref),
+        AdaptiveWikiScope::ArtifactKind => {
+            push_tag_component(&mut tags, "artifact", &entry.scope_ref)
+        }
+        AdaptiveWikiScope::Session | AdaptiveWikiScope::UserGlobal => {}
+    }
+    if entry.agent_modes.is_empty() {
+        tags.push("agent/shared".to_string());
+    } else {
+        tags.extend(
+            entry
+                .agent_modes
+                .iter()
+                .map(|mode| format!("agent/{}", agent_mode_label(*mode))),
+        );
+    }
+    for capability_id in &entry.capability_ids {
+        push_tag_component(&mut tags, "capability", capability_id);
+    }
+    for artifact_kind in &entry.required_artifact_kinds {
+        push_tag_component(&mut tags, "artifact", artifact_kind);
+    }
+    clean_tags(tags)
+}
+
+fn derived_candidate_tags(candidate: &AdaptiveWikiCandidate) -> Vec<String> {
+    let mut tags = vec![
+        "status/candidate".to_string(),
+        format!("kind/{}", kind_label(candidate.kind)),
+        format!("scope/{}", scope_label(candidate.scope)),
+        format!("confidence/{}", confidence_label(candidate.confidence)),
+        format!("signal/{}", signal_label(candidate.signal_kind)),
+    ];
+    match candidate.scope {
+        AdaptiveWikiScope::Project => {
+            push_tag_component(&mut tags, "project", &candidate.scope_ref)
+        }
+        AdaptiveWikiScope::ArtifactKind => {
+            push_tag_component(&mut tags, "artifact", &candidate.scope_ref)
+        }
+        AdaptiveWikiScope::Session | AdaptiveWikiScope::UserGlobal => {}
+    }
+    if candidate.agent_modes.is_empty() {
+        tags.push("agent/shared".to_string());
+    } else {
+        tags.extend(
+            candidate
+                .agent_modes
+                .iter()
+                .map(|mode| format!("agent/{}", agent_mode_label(*mode))),
+        );
+    }
+    clean_tags(tags)
+}
+
+fn push_tag_component(tags: &mut Vec<String>, prefix: &str, value: &str) {
+    if let Some(component) = tag_component(value) {
+        tags.push(format!("{prefix}/{component}"));
+    }
+}
+
+fn add_tag_edges(
+    subject: TagSubject<'_>,
+    source: &str,
+    tags: &[String],
+    tag_class: AdaptiveWikiTagClass,
+    graph: &mut AdaptiveWikiGraphDraft,
+) {
+    let mut seen = BTreeSet::new();
+    for tag in tags {
+        let tag = clean_tag(tag);
+        if tag.is_empty() || !seen.insert(tag.clone()) {
+            continue;
+        }
+        review_tag(
+            subject.kind,
+            subject.id,
+            &tag,
+            tag_class,
+            &mut graph.review_issues,
+        );
+        if !tag_has_valid_syntax(&tag) {
+            continue;
+        }
+        set_tag_node_class(&mut graph.tag_nodes, &tag, tag_class);
+        graph.edges.push(AdaptiveWikiGraphEdge {
+            source: source.to_string(),
+            target: tag_node_id(&tag),
+            relationship: match tag_class {
+                AdaptiveWikiTagClass::DerivedCore => "has_derived_core_tag",
+                AdaptiveWikiTagClass::Core => "has_core_tag",
+                AdaptiveWikiTagClass::Proposed => "has_proposed_tag",
+            }
+            .to_string(),
+            tag_class: Some(tag_class),
+        });
+    }
+}
+
+fn set_tag_node_class(
+    tag_nodes: &mut BTreeMap<String, AdaptiveWikiTagClass>,
+    tag: &str,
+    tag_class: AdaptiveWikiTagClass,
+) {
+    match tag_nodes.get(tag).copied() {
+        Some(existing) if tag_class_rank(existing) >= tag_class_rank(tag_class) => {}
+        _ => {
+            tag_nodes.insert(tag.to_string(), tag_class);
+        }
+    }
+}
+
+fn tag_class_rank(tag_class: AdaptiveWikiTagClass) -> u8 {
+    match tag_class {
+        AdaptiveWikiTagClass::DerivedCore => 0,
+        AdaptiveWikiTagClass::Proposed => 1,
+        AdaptiveWikiTagClass::Core => 2,
+    }
+}
+
+fn review_tag(
+    subject_kind: &str,
+    subject_id: &str,
+    tag: &str,
+    tag_class: AdaptiveWikiTagClass,
+    issues: &mut Vec<AdaptiveWikiTagReviewIssue>,
+) {
+    if !tag_has_valid_syntax(tag) {
+        issues.push(tag_review_issue(
+            AdaptiveWikiLintSeverity::Error,
+            subject_kind,
+            subject_id,
+            tag,
+            "invalid_tag_syntax",
+            "Tag must use lowercase ASCII letters, numbers, slash, dot, dash, or underscore.",
+        ));
+        return;
+    }
+    if !tag.contains('/') {
+        issues.push(tag_review_issue(
+            AdaptiveWikiLintSeverity::Info,
+            subject_kind,
+            subject_id,
+            tag,
+            "unscoped_tag",
+            "Tag has no prefix; prefer controlled prefixes such as project/, agent/, or evidence/.",
+        ));
+    }
+    if tag.len() > 80 {
+        issues.push(tag_review_issue(
+            AdaptiveWikiLintSeverity::Info,
+            subject_kind,
+            subject_id,
+            tag,
+            "long_tag",
+            "Tag is long; consider a shorter reusable tag and keep details in the wiki claim.",
+        ));
+    }
+    if tag_is_overbroad(tag) {
+        issues.push(tag_review_issue(
+            AdaptiveWikiLintSeverity::Warning,
+            subject_kind,
+            subject_id,
+            tag,
+            "overbroad_tag",
+            "Tag is likely too broad to improve retrieval, routing, or review.",
+        ));
+    }
+    let has_core_prefix = core_tag_prefixes()
+        .iter()
+        .any(|prefix| tag.starts_with(prefix) && tag.len() > prefix.len());
+    match tag_class {
+        AdaptiveWikiTagClass::Core if !has_core_prefix => issues.push(tag_review_issue(
+            AdaptiveWikiLintSeverity::Warning,
+            subject_kind,
+            subject_id,
+            tag,
+            "unknown_core_tag_prefix",
+            "Core tag does not match the controlled registry prefixes.",
+        )),
+        AdaptiveWikiTagClass::Proposed if has_core_prefix => issues.push(tag_review_issue(
+            AdaptiveWikiLintSeverity::Info,
+            subject_kind,
+            subject_id,
+            tag,
+            "proposed_tag_matches_core_prefix",
+            "Proposed tag uses a controlled prefix; reviewer should promote it to core or normalize to an existing core tag.",
+        )),
+        AdaptiveWikiTagClass::DerivedCore | AdaptiveWikiTagClass::Core | AdaptiveWikiTagClass::Proposed => {}
+    }
+}
+
+fn tag_review_issue(
+    severity: AdaptiveWikiLintSeverity,
+    subject_kind: &str,
+    subject_id: &str,
+    tag: &str,
+    code: &str,
+    message: &str,
+) -> AdaptiveWikiTagReviewIssue {
+    AdaptiveWikiTagReviewIssue {
+        severity,
+        subject_kind: subject_kind.to_string(),
+        subject_id: fallback_subject_id(subject_id),
+        tag: tag.to_string(),
+        code: code.to_string(),
+        message: message.to_string(),
+    }
+}
+
+fn tag_has_valid_syntax(tag: &str) -> bool {
+    !tag.is_empty()
+        && !tag.starts_with('/')
+        && !tag.ends_with('/')
+        && !tag.contains("//")
+        && tag.chars().all(|ch| {
+            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '/' | '_' | '-' | '.')
+        })
+}
+
+fn tag_is_overbroad(tag: &str) -> bool {
+    let last = tag.rsplit('/').next().unwrap_or(tag);
+    matches!(
+        last,
+        "important" | "misc" | "todo" | "review" | "research" | "wiki" | "note" | "general"
+    )
+}
+
+fn tag_node_id(tag: &str) -> String {
+    format!("tag:{tag}")
+}
+
+fn tag_component(value: &str) -> Option<String> {
+    let mut component = String::new();
+    let mut previous_dash = false;
+    for ch in operator_safe_text(value)
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+    {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '-' | '.') {
+            component.push(ch);
+            previous_dash = false;
+        } else if !previous_dash {
+            component.push('-');
+            previous_dash = true;
+        }
+    }
+    let component = component.trim_matches('-').to_string();
+    (!component.is_empty()).then_some(component)
+}
+
+fn graph_markdown(report: &AdaptiveWikiGraphReport) -> String {
+    let mut content = String::new();
+    content.push_str("# Adaptive Wiki Tag Graph\n\n");
+    content.push_str(&format!(
+        "Generated: `{}`\n\n",
+        report.generated_at.to_rfc3339()
+    ));
+    content.push_str("## Summary\n\n");
+    content.push_str(&format!(
+        "- Entries: `{}`\n- Candidates: `{}`\n- Tag nodes: `{}`\n- Derived core tag edges: `{}`\n- Core tag edges: `{}`\n- Proposed tag edges: `{}`\n- Review issues: `{}`\n",
+        report.summary.entries,
+        report.summary.candidates,
+        report.summary.tag_nodes,
+        report.summary.derived_core_tag_edges,
+        report.summary.core_tag_edges,
+        report.summary.proposed_tag_edges,
+        report.summary.review_issues
+    ));
+
+    content.push_str("\n## Registry\n\n");
+    content.push_str("| Prefix | Lifecycle | Description |\n");
+    content.push_str("| --- | --- | --- |\n");
+    for rule in &report.registry {
+        content.push_str(&format!(
+            "| `{}` | `{}` | {} |\n",
+            table_text(&rule.prefix),
+            table_text(&rule.lifecycle),
+            table_text(&rule.description)
+        ));
+    }
+
+    content.push_str("\n## Review Issues\n\n");
+    if report.review_issues.is_empty() {
+        content.push_str("_No tag review issues._\n");
+    } else {
+        content.push_str("| Severity | Subject | Tag | Code | Message |\n");
+        content.push_str("| --- | --- | --- | --- | --- |\n");
+        for issue in &report.review_issues {
+            content.push_str(&format!(
+                "| `{:?}` | `{}`:`{}` | `#{}` | `{}` | {} |\n",
+                issue.severity,
+                table_text(&issue.subject_kind),
+                table_text(&issue.subject_id),
+                table_text(&issue.tag),
+                table_text(&issue.code),
+                table_text(&issue.message)
+            ));
+        }
+    }
+
+    content.push_str("\n## Edges\n\n");
+    content.push_str("| Source | Relationship | Tag |\n");
+    content.push_str("| --- | --- | --- |\n");
+    for edge in &report.edges {
+        content.push_str(&format!(
+            "| `{}` | `{}` | `{}` |\n",
+            table_text(&edge.source),
+            table_text(&edge.relationship),
+            table_text(edge.target.strip_prefix("tag:").unwrap_or(&edge.target))
+        ));
+    }
+    content
 }
 
 pub fn build_markdown_export_files(
@@ -4684,6 +5350,8 @@ fn operator_safe_human_entry(entry: &AdaptiveWikiHumanEntry) -> AdaptiveWikiHuma
             .iter()
             .map(|value| operator_safe_text(value))
             .collect(),
+        core_tags: clean_tags(entry.core_tags.clone()),
+        proposed_tags: clean_tags(entry.proposed_tags.clone()),
         confidence: entry.confidence,
         updated_at: entry.updated_at,
         review_after: entry.review_after,
@@ -4718,6 +5386,8 @@ fn operator_safe_human_candidate(
             .iter()
             .map(|value| operator_safe_text(value))
             .collect(),
+        core_tags: clean_tags(candidate.core_tags.clone()),
+        proposed_tags: clean_tags(candidate.proposed_tags.clone()),
         suggested_scope: candidate
             .suggested_scope
             .as_ref()
@@ -5692,9 +6362,14 @@ fn markdown_schema() -> String {
         "",
         "## Agent Modes",
         "",
-        "- `code_development`: implementation, debugging, tests, and code review preparation.",
-        "- `research_writing`: research planning, prose drafting, editing, and report work.",
+        "- `planning`: scoped plans, evidence gates, risks, and review handoffs.",
+        "- `development`: implementation, debugging, tests, and code review preparation.",
+        "- `analysis`: log, metric, experiment, and system-state interpretation.",
+        "- `writing`: research synthesis, prose drafting, editing, and report work.",
         "- `critique`: skeptical review, validation, risk finding, and quality checks.",
+        "- `review`: read-only checkpoint review before execution, approval, or handoff.",
+        "- `maintenance`: read-only wiki, task, repo, model, and machine health inspection.",
+        "- Legacy `code_development` loads as `development`; legacy `research_writing` loads as `writing`.",
         "- Missing `agent_modes` means the entry is shared across all modes.",
         "",
         "## Invariants",
@@ -5841,6 +6516,16 @@ fn markdown_entry_page(entry: &AdaptiveWikiEntry) -> String {
         "required_artifact_kinds",
         &entry.required_artifact_kinds,
     );
+    push_frontmatter_list(
+        &mut content,
+        "core_tags",
+        &clean_tags(entry.core_tags.clone()),
+    );
+    push_frontmatter_list(
+        &mut content,
+        "proposed_tags",
+        &clean_tags(entry.proposed_tags.clone()),
+    );
     content.push_str("---\n\n");
 
     content.push_str(&format!(
@@ -5893,11 +6578,13 @@ fn markdown_entry_page(entry: &AdaptiveWikiEntry) -> String {
     }
     content.push_str("\n## Governance\n\n");
     content.push_str(&format!(
-        "- Status: `{}`\n- Scope: `{}`\n- Activation mode: `{}`\n- Agent modes: `{}`\n- Confidence: `{}`\n- Contested: `{}`\n",
+        "- Status: `{}`\n- Scope: `{}`\n- Activation mode: `{}`\n- Agent modes: `{}`\n- Core tags: `{}`\n- Proposed tags: `{}`\n- Confidence: `{}`\n- Contested: `{}`\n",
         status_label(entry.status),
         table_text(&format!("{}:{}", scope_label(entry.scope), entry.scope_ref)),
         activation_label(entry.activation_mode),
         table_text(&agent_modes_label(&entry.agent_modes)),
+        table_text(&tag_list_label(&entry.core_tags)),
+        table_text(&tag_list_label(&entry.proposed_tags)),
         confidence_label(entry.confidence),
         !entry.counterexamples.is_empty()
     ));
@@ -5946,6 +6633,16 @@ fn markdown_candidate_page(candidate: &AdaptiveWikiCandidate) -> String {
     push_frontmatter_list(&mut content, "evidence_refs", &candidate.evidence_refs);
     push_frontmatter_list(&mut content, "source_refs", &candidate.source_refs);
     push_frontmatter_list(&mut content, "source_hashes", &candidate.source_hashes);
+    push_frontmatter_list(
+        &mut content,
+        "core_tags",
+        &clean_tags(candidate.core_tags.clone()),
+    );
+    push_frontmatter_list(
+        &mut content,
+        "proposed_tags",
+        &clean_tags(candidate.proposed_tags.clone()),
+    );
     content.push_str("---\n\n");
 
     content.push_str(&format!(
@@ -5974,7 +6671,7 @@ fn markdown_candidate_page(candidate: &AdaptiveWikiCandidate) -> String {
     );
     content.push_str("\n## Governance\n\n");
     content.push_str(&format!(
-        "- Scope: `{}`\n- Signal: `{}`\n- Origin: `{}`\n- Hits: `{}`\n- Confidence: `{}`\n",
+        "- Scope: `{}`\n- Signal: `{}`\n- Origin: `{}`\n- Hits: `{}`\n- Core tags: `{}`\n- Proposed tags: `{}`\n- Confidence: `{}`\n",
         table_text(&format!(
             "{}:{}",
             scope_label(candidate.scope),
@@ -5983,6 +6680,8 @@ fn markdown_candidate_page(candidate: &AdaptiveWikiCandidate) -> String {
         signal_label(candidate.signal_kind),
         origin_label(candidate.origin),
         candidate.occurrence_count,
+        table_text(&tag_list_label(&candidate.core_tags)),
+        table_text(&tag_list_label(&candidate.proposed_tags)),
         confidence_label(candidate.confidence)
     ));
     if let Some(scope) = candidate.suggested_scope.as_ref() {
@@ -6133,9 +6832,13 @@ fn activation_label(mode: AdaptiveWikiActivationMode) -> &'static str {
 
 fn agent_mode_label(mode: AdaptiveWikiAgentMode) -> &'static str {
     match mode {
-        AdaptiveWikiAgentMode::CodeDevelopment => "code_development",
-        AdaptiveWikiAgentMode::ResearchWriting => "research_writing",
+        AdaptiveWikiAgentMode::Planning => "planning",
+        AdaptiveWikiAgentMode::Development => "development",
+        AdaptiveWikiAgentMode::Analysis => "analysis",
+        AdaptiveWikiAgentMode::Writing => "writing",
         AdaptiveWikiAgentMode::Critique => "critique",
+        AdaptiveWikiAgentMode::Review => "review",
+        AdaptiveWikiAgentMode::Maintenance => "maintenance",
     }
 }
 
@@ -6156,6 +6859,18 @@ fn agent_mode_values(modes: &[AdaptiveWikiAgentMode]) -> Vec<String> {
         .iter()
         .map(|mode| agent_mode_label(*mode).to_string())
         .collect()
+}
+
+fn tag_list_label(tags: &[String]) -> String {
+    let tags = clean_tags(tags.to_vec());
+    if tags.is_empty() {
+        "-".to_string()
+    } else {
+        tags.into_iter()
+            .map(|tag| format!("#{tag}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
 }
 
 fn confidence_label(confidence: AdaptiveWikiConfidence) -> &'static str {
@@ -6440,6 +7155,25 @@ fn clean_refs(values: Vec<String>) -> Vec<String> {
     cleaned
 }
 
+fn clean_tag(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('#')
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn clean_tags(values: Vec<String>) -> Vec<String> {
+    let mut cleaned = Vec::new();
+    for value in values {
+        let tag = clean_tag(&value);
+        if !tag.is_empty() && !cleaned.iter().any(|existing| existing == &tag) {
+            cleaned.push(tag);
+        }
+    }
+    cleaned
+}
+
 fn clean_agent_modes(values: Vec<AdaptiveWikiAgentMode>) -> Vec<AdaptiveWikiAgentMode> {
     let mut cleaned = values;
     cleaned.sort();
@@ -6634,6 +7368,8 @@ mod tests {
             support_refs: Vec::new(),
             capability_ids: Vec::new(),
             required_artifact_kinds: Vec::new(),
+            core_tags: Vec::new(),
+            proposed_tags: Vec::new(),
             confidence: AdaptiveWikiConfidence::Repeated,
             created_at: now(),
             updated_at: now(),
@@ -6730,7 +7466,7 @@ mod tests {
             "project-a",
             "Code development guidance.",
         );
-        code.agent_modes = vec![AdaptiveWikiAgentMode::CodeDevelopment];
+        code.agent_modes = vec![AdaptiveWikiAgentMode::Development];
         let mut critique = promoted_entry(
             "critique_rule",
             AdaptiveWikiScope::Project,
@@ -6743,7 +7479,7 @@ mod tests {
             &[universal, code, critique],
             &AdaptiveWikiQuery {
                 project_key: Some("project-a".to_string()),
-                agent_mode: Some(AdaptiveWikiAgentMode::CodeDevelopment),
+                agent_mode: Some(AdaptiveWikiAgentMode::Development),
                 ..AdaptiveWikiQuery::default()
             },
         );
@@ -6769,7 +7505,7 @@ mod tests {
             "project-a",
             "Code development guidance.",
         );
-        code.agent_modes = vec![AdaptiveWikiAgentMode::CodeDevelopment];
+        code.agent_modes = vec![AdaptiveWikiAgentMode::Development];
 
         let projection = build_ai_projection(
             &[universal, code],
@@ -6782,6 +7518,41 @@ mod tests {
 
         assert_eq!(projection.len(), 1);
         assert_eq!(projection[0].id, "universal_rule");
+    }
+
+    #[test]
+    fn legacy_agent_mode_values_load_as_canonical_modes() -> Result<()> {
+        let state: AdaptiveWikiEntryState = serde_json::from_value(json!({
+            "entries": [
+                {
+                    "id": "legacy_modes",
+                    "kind": "procedure",
+                    "scope": "project",
+                    "scope_ref": "project-a",
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["code_development", "research_writing", "review"],
+                    "claim": "Legacy mode values stay loadable.",
+                    "ai_instruction": "Use canonical mode labels after load.",
+                    "evidence_refs": ["task:legacy"],
+                    "confidence": "explicit"
+                }
+            ]
+        }))?;
+
+        assert_eq!(
+            state.entries[0].agent_modes,
+            vec![
+                AdaptiveWikiAgentMode::Development,
+                AdaptiveWikiAgentMode::Writing,
+                AdaptiveWikiAgentMode::Review,
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&state.entries[0].agent_modes)?,
+            json!(["development", "writing", "review"])
+        );
+        Ok(())
     }
 
     #[test]
@@ -7043,6 +7814,8 @@ mod tests {
             origin: AdaptiveWikiOrigin::OperatorExplicit,
             source_refs: vec!["task:three?token=secret".to_string()],
             source_hashes: vec!["sha256:abc".to_string()],
+            core_tags: vec!["artifact/report".to_string()],
+            proposed_tags: vec!["method/baseline-first".to_string()],
             suggested_scope: Some(AdaptiveWikiScopeSuggestion {
                 scope: AdaptiveWikiScope::ArtifactKind,
                 scope_ref: "report".to_string(),
@@ -7079,6 +7852,67 @@ mod tests {
     }
 
     #[test]
+    fn graph_report_uses_core_tags_as_edges_and_keeps_proposed_tags_reviewable() {
+        let entry = AdaptiveWikiEntry {
+            core_tags: vec!["#project/project-a".to_string()],
+            proposed_tags: vec!["project/project-a".to_string()],
+            capability_ids: vec!["dispatch.runtime".to_string()],
+            ..promoted_entry(
+                "entry",
+                AdaptiveWikiScope::Project,
+                "project-a",
+                "Use project runbook.",
+            )
+        };
+        let candidate = AdaptiveWikiCandidate {
+            id: "candidate".to_string(),
+            kind: AdaptiveWikiKind::FailurePattern,
+            scope: AdaptiveWikiScope::ArtifactKind,
+            scope_ref: "report".to_string(),
+            agent_modes: Vec::new(),
+            claim: "same correction repeated".to_string(),
+            suggested_ai_instruction: "Confirm before rewriting.".to_string(),
+            human_summary: "Candidate summary".to_string(),
+            evidence_refs: vec!["audit:three".to_string()],
+            signal_kind: AdaptiveWikiSignalKind::OperatorCorrection,
+            origin: AdaptiveWikiOrigin::OperatorExplicit,
+            source_refs: Vec::new(),
+            source_hashes: Vec::new(),
+            core_tags: Vec::new(),
+            proposed_tags: vec!["important".to_string()],
+            suggested_scope: None,
+            review_reason: "Review candidate".to_string(),
+            occurrence_count: 3,
+            confidence: AdaptiveWikiConfidence::Repeated,
+            created_at: now(),
+            updated_at: now(),
+            last_seen_at: now(),
+        };
+
+        let report = build_graph_report(&[entry], &[candidate], now());
+
+        assert_eq!(report.summary.entries, 1);
+        assert_eq!(report.summary.candidates, 1);
+        assert!(report
+            .nodes
+            .iter()
+            .any(|node| node.id == "tag:project/project-a"));
+        assert!(report.edges.iter().any(|edge| {
+            edge.relationship == "has_core_tag" && edge.target == "tag:project/project-a"
+        }));
+        assert!(report.edges.iter().any(|edge| {
+            edge.relationship == "has_proposed_tag" && edge.target == "tag:project/project-a"
+        }));
+        assert!(report.review_issues.iter().any(|issue| {
+            issue.code == "proposed_tag_matches_core_prefix" && issue.tag == "project/project-a"
+        }));
+        assert!(report
+            .review_issues
+            .iter()
+            .any(|issue| issue.code == "unscoped_tag" && issue.tag == "important"));
+    }
+
+    #[test]
     fn candidate_recording_merges_repeated_claims_and_evidence_refs() -> Result<()> {
         let temp = tempdir()?;
         let store = AdaptiveWikiStore::new(temp.path());
@@ -7104,7 +7938,9 @@ mod tests {
                 scope: AdaptiveWikiScope::Project,
                 scope_ref: "project-a".to_string(),
             }),
-            agent_modes: vec![AdaptiveWikiAgentMode::CodeDevelopment],
+            agent_modes: vec![AdaptiveWikiAgentMode::Development],
+            core_tags: vec!["project/project-a".to_string()],
+            proposed_tags: vec!["method/frontload-recommendations".to_string()],
             review_reason: "Repeated correction".to_string(),
             confidence: AdaptiveWikiConfidence::Repeated,
         };
@@ -7125,7 +7961,7 @@ mod tests {
         assert_eq!(
             second.agent_modes,
             vec![
-                AdaptiveWikiAgentMode::CodeDevelopment,
+                AdaptiveWikiAgentMode::Development,
                 AdaptiveWikiAgentMode::Critique
             ]
         );
@@ -7263,6 +8099,8 @@ mod tests {
                     origin: AdaptiveWikiOrigin::RuntimeObserved,
                     source_refs: Vec::new(),
                     source_hashes: Vec::new(),
+                    core_tags: vec!["project/project".to_string()],
+                    proposed_tags: Vec::new(),
                     suggested_scope: None,
                     review_reason: String::new(),
                     occurrence_count: 2,
@@ -7349,6 +8187,8 @@ mod tests {
                     origin: AdaptiveWikiOrigin::RuntimeObserved,
                     source_refs: Vec::new(),
                     source_hashes: Vec::new(),
+                    core_tags: vec!["project/project".to_string()],
+                    proposed_tags: Vec::new(),
                     suggested_scope: None,
                     review_reason: String::new(),
                     occurrence_count: 2,
@@ -7415,7 +8255,9 @@ mod tests {
                 source_refs: vec!["task:one".to_string()],
                 source_hashes: Vec::new(),
                 suggested_scope: None,
-                agent_modes: vec![AdaptiveWikiAgentMode::ResearchWriting],
+                agent_modes: vec![AdaptiveWikiAgentMode::Writing],
+                core_tags: vec!["artifact/report".to_string()],
+                proposed_tags: vec!["failure/merged-evidence-recommendations".to_string()],
                 review_reason: "Repeated failure".to_string(),
                 confidence: AdaptiveWikiConfidence::Repeated,
             },
@@ -7428,9 +8270,11 @@ mod tests {
 
         assert_eq!(entry.status, AdaptiveWikiStatus::Promoted);
         assert_eq!(entry.evidence_refs, vec!["audit:one"]);
+        assert_eq!(entry.agent_modes, vec![AdaptiveWikiAgentMode::Writing]);
+        assert_eq!(entry.core_tags, vec!["artifact/report"]);
         assert_eq!(
-            entry.agent_modes,
-            vec![AdaptiveWikiAgentMode::ResearchWriting]
+            entry.proposed_tags,
+            vec!["failure/merged-evidence-recommendations"]
         );
         assert!(store.load_candidates()?.candidates.is_empty());
         assert_eq!(
@@ -7464,6 +8308,8 @@ mod tests {
                 source_hashes: Vec::new(),
                 suggested_scope: None,
                 agent_modes: Vec::new(),
+                core_tags: vec!["project/project-a".to_string()],
+                proposed_tags: Vec::new(),
                 review_reason: "Operator denied retry.".to_string(),
                 confidence: AdaptiveWikiConfidence::Explicit,
             },
@@ -7650,6 +8496,8 @@ mod tests {
                 origin: AdaptiveWikiOrigin::Unknown,
                 source_refs: Vec::new(),
                 source_hashes: Vec::new(),
+                core_tags: Vec::new(),
+                proposed_tags: Vec::new(),
                 suggested_scope: None,
                 review_reason: String::new(),
                 occurrence_count: 1,
@@ -7699,6 +8547,8 @@ mod tests {
                 support_refs: Vec::new(),
                 capability_ids: Vec::new(),
                 required_artifact_kinds: Vec::new(),
+                core_tags: vec!["project/project-a".to_string()],
+                proposed_tags: vec!["method/evidence-separation".to_string()],
                 confidence: AdaptiveWikiConfidence::Repeated,
                 created_at: exported_at,
                 updated_at: exported_at,
@@ -7722,6 +8572,8 @@ mod tests {
                 origin: AdaptiveWikiOrigin::OperatorExplicit,
                 source_refs: vec!["approval:one?token=sk-secretsecretsecretsecret".to_string()],
                 source_hashes: vec!["sha256:abc".to_string()],
+                core_tags: vec!["project/project-a".to_string()],
+                proposed_tags: Vec::new(),
                 suggested_scope: None,
                 review_reason: "Review candidate".to_string(),
                 occurrence_count: 2,
@@ -7864,6 +8716,8 @@ mod tests {
                 support_refs: Vec::new(),
                 capability_ids: Vec::new(),
                 required_artifact_kinds: Vec::new(),
+                core_tags: vec!["project/project-a".to_string()],
+                proposed_tags: vec!["status/review".to_string()],
                 confidence: AdaptiveWikiConfidence::Inferred,
                 created_at: reviewed_at,
                 updated_at: reviewed_at,
@@ -7886,6 +8740,8 @@ mod tests {
                 origin: AdaptiveWikiOrigin::OperatorExplicit,
                 source_refs: vec!["task:one".to_string()],
                 source_hashes: Vec::new(),
+                core_tags: vec!["project/project-a".to_string()],
+                proposed_tags: vec!["method/repeated-evidence".to_string()],
                 suggested_scope: None,
                 review_reason: "Repeated evidence".to_string(),
                 occurrence_count: 2,

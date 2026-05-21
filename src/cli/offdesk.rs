@@ -6,18 +6,21 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::offdesk::{
-    build_usage_records_with_policy, default_capability_registry, launch_background_command,
-    launch_background_run, operator_safe_report, poll_background_runs, recommend_provider_fallback,
-    run_offdesk_tick, AdaptiveWikiActivationMode, AdaptiveWikiAgentMode,
-    AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord,
-    AdaptiveWikiCandidate, AdaptiveWikiCandidateInput, AdaptiveWikiConfidence,
-    AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiEntry, AdaptiveWikiEpisodeEvaluationReport,
+    assess_offdesk_mode, build_graph_export_files, build_usage_records_with_policy,
+    default_capability_registry, launch_background_command, launch_background_run,
+    operator_safe_report, poll_background_runs, recommend_provider_fallback,
+    reconcile_tasks_with_background_outcomes, run_offdesk_tick, ActionApprovalRequest,
+    AdaptiveWikiActivationMode, AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter,
+    AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord, AdaptiveWikiCandidate,
+    AdaptiveWikiCandidateInput, AdaptiveWikiConfidence, AdaptiveWikiCorrectionRecurrenceReport,
+    AdaptiveWikiEntry, AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiGraphReport,
     AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiLintReport,
     AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeTraceReport,
     AdaptiveWikiMarkdownExportReport, AdaptiveWikiOrigin, AdaptiveWikiProjectionBudget,
@@ -31,12 +34,13 @@ use crate::offdesk::{
     AdaptiveWikiScopeSuggestion, AdaptiveWikiSignalKind, AdaptiveWikiStore,
     AdaptiveWikiUsageContext, ApprovalLedger, ApprovalStatus, BackgroundLaunchOutcome,
     BackgroundLaunchRequest, BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore,
-    BackgroundRunnerKind, CapabilityArtifactRef, CapabilityDescriptor, ExecutionBrief,
-    LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan, MutationSnapshot,
-    MutationSnapshotStore, MutationSnapshotVerification, OffdeskTask, OffdeskTaskInput,
-    OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
-    OffdeskTickOptions, PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
-    ProviderFallbackRecommendation, ResumeStatus, SchedulerGate, SchedulerGateRequest,
+    BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
+    ExecutionBrief, LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan,
+    MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
+    OffdeskModeLifecycle, OffdeskTask, OffdeskTaskInput, OffdeskTaskLifecycleReport,
+    OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView, OffdeskTickOptions,
+    PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
+    ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate, SchedulerGateRequest,
     SchedulerGateStatus, TaskResumeState, TaskResumeStore,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
@@ -79,7 +83,7 @@ pub enum OffdeskCommands {
     /// Discard a failed or resume-pending task
     AbandonTask(TaskLifecycleArgs),
 
-    /// Poll background runner probes and persist phase transitions
+    /// Poll background runner probes, persist phase transitions, and reconcile task status
     Poll(PollArgs),
 
     /// Approve the oldest or targeted pending action
@@ -110,6 +114,12 @@ pub enum OffdeskCommands {
 
     /// Emit a sanitized read-only debug bundle
     DebugBundle(DebugBundleArgs),
+
+    /// Summarize read-only Offdesk maintenance risks
+    MaintenanceReport(MaintenanceReportArgs),
+
+    /// Create or reuse an approval request for a maintenance action
+    MaintenanceRequest(MaintenanceRequestArgs),
 
     /// Inspect adaptive wiki candidates, entries, projections, and lint
     Wiki(WikiArgs),
@@ -606,6 +616,120 @@ pub struct DebugBundleArgs {
 }
 
 #[derive(Args)]
+pub struct MaintenanceReportArgs {
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+
+    /// Hours before review_after expiry to flag adaptive wiki entries
+    #[arg(long, default_value_t = 168)]
+    wiki_review_near_expiry_hours: i64,
+
+    /// Hours before runtime policy acknowledgement expiry to flag attention
+    #[arg(long, default_value_t = 6)]
+    wiki_runtime_ack_near_expiry_hours: i64,
+}
+
+#[derive(Args)]
+pub struct MaintenanceRequestArgs {
+    /// Bounded maintenance action kind to request approval for
+    #[arg(long, value_parser = parse_maintenance_action_kind)]
+    kind: MaintenanceActionKind,
+
+    /// Project key for approval and audit correlation
+    #[arg(long)]
+    project_key: String,
+
+    /// Request ID for approval and audit correlation
+    #[arg(long)]
+    request_id: String,
+
+    /// Task ID for approval identity. Defaults to maintenance-<kind>-<target-id>
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Optional target identifier used for approval deduplication and review
+    #[arg(long)]
+    target_id: Option<String>,
+
+    /// Override the default risk for this maintenance kind
+    #[arg(long, value_parser = parse_risk_level)]
+    risk: Option<RiskLevel>,
+
+    /// Operator-safe action preview
+    #[arg(long)]
+    preview: String,
+
+    /// Reason shown when approval is required
+    #[arg(long)]
+    reason: String,
+
+    /// Source surface recorded on generated approval rows
+    #[arg(long, default_value = "cli")]
+    source_surface: String,
+
+    /// Pending approval TTL in minutes
+    #[arg(long, default_value_t = 30)]
+    ttl_minutes: i64,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum MaintenanceActionKind {
+    RuntimeRecovery,
+    WikiRuntimeAck,
+    WikiReviewAfter,
+    WikiMutation,
+    ProviderCapacity,
+    ArtifactCleanup,
+    ServiceRestart,
+    SystemChange,
+}
+
+impl MaintenanceActionKind {
+    fn cli_value(self) -> &'static str {
+        match self {
+            Self::RuntimeRecovery => "runtime_recovery",
+            Self::WikiRuntimeAck => "wiki_runtime_ack",
+            Self::WikiReviewAfter => "wiki_review_after",
+            Self::WikiMutation => "wiki_mutation",
+            Self::ProviderCapacity => "provider_capacity",
+            Self::ArtifactCleanup => "artifact_cleanup",
+            Self::ServiceRestart => "service_restart",
+            Self::SystemChange => "system_change",
+        }
+    }
+
+    fn action_id(self) -> &'static str {
+        match self {
+            Self::RuntimeRecovery => "maintenance.runtime_recovery",
+            Self::WikiRuntimeAck => "maintenance.wiki_runtime_ack",
+            Self::WikiReviewAfter => "maintenance.wiki_review_after",
+            Self::WikiMutation => "maintenance.wiki_mutation",
+            Self::ProviderCapacity => "maintenance.provider_capacity",
+            Self::ArtifactCleanup => "maintenance.artifact_cleanup",
+            Self::ServiceRestart => "maintenance.service_restart",
+            Self::SystemChange => "maintenance.system_change",
+        }
+    }
+
+    fn default_risk(self) -> RiskLevel {
+        match self {
+            Self::RuntimeRecovery | Self::ProviderCapacity => RiskLevel::RuntimeMutation,
+            Self::WikiRuntimeAck | Self::WikiReviewAfter | Self::WikiMutation => {
+                RiskLevel::CanonicalMutation
+            }
+            Self::ArtifactCleanup => RiskLevel::Destructive,
+            Self::ServiceRestart | Self::SystemChange => RiskLevel::ExternalSideEffect,
+        }
+    }
+}
+
+#[derive(Args)]
 pub struct ProviderFallbackArgs {
     /// Current provider ID that is blocked or under review
     #[arg(long)]
@@ -733,6 +857,9 @@ pub enum WikiCommands {
 
     /// Export adaptive wiki state as a one-way markdown vault
     ExportMarkdown(WikiExportMarkdownArgs),
+
+    /// Export a read-only adaptive wiki tag graph
+    Graph(WikiGraphArgs),
 
     /// Generate a recommendation-only adaptive wiki review report
     Review(WikiReviewArgs),
@@ -975,6 +1102,21 @@ pub struct WikiExportMarkdownArgs {
     output: PathBuf,
 
     /// Preview export files without writing them
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct WikiGraphArgs {
+    /// Optional directory to write graph.json and graph.md into
+    #[arg(long)]
+    output: Option<PathBuf>,
+
+    /// Preview graph export files without writing them
     #[arg(long)]
     dry_run: bool,
 
@@ -1285,6 +1427,8 @@ pub struct WikiRunbookArgs {
 struct BackgroundProbeStatus {
     probe: BackgroundProbe,
     decision: BackgroundRecoveryDecision,
+    #[serde(flatten)]
+    mode_assessment: OffdeskModeAssessment,
 }
 
 #[derive(Serialize)]
@@ -1555,6 +1699,92 @@ struct DebugBundleExport {
     bytes_written: usize,
 }
 
+#[derive(Serialize)]
+struct OffdeskMaintenanceReport {
+    generated_at: DateTime<Utc>,
+    profile: String,
+    profile_dir: String,
+    read_only: bool,
+    tasks: MaintenanceTaskSummary,
+    background_runs: MaintenanceBackgroundSummary,
+    approvals: MaintenanceApprovalSummary,
+    resume_states: MaintenanceResumeSummary,
+    provider_capacity: MaintenanceProviderCapacitySummary,
+    adaptive_wiki_runtime_policy_ack_attention_summary: WikiRuntimePolicyAckReportSummary,
+    adaptive_wiki_review_after_attention_summary: WikiReviewAfterReportSummary,
+    recommended_actions: Vec<MaintenanceRecommendedAction>,
+}
+
+#[derive(Serialize)]
+struct MaintenanceApprovalRequestReport {
+    generated_at: DateTime<Utc>,
+    action_kind: MaintenanceActionKind,
+    action: String,
+    project_key: String,
+    request_id: String,
+    task_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_id: Option<String>,
+    risk_level: RiskLevel,
+    status: String,
+    detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approval: Option<Value>,
+    next_commands: Vec<String>,
+}
+
+#[derive(Default, Serialize)]
+struct MaintenanceModeSummary {
+    by_verdict: BTreeMap<String, usize>,
+    by_risk: BTreeMap<String, usize>,
+    review_stage_required: usize,
+}
+
+#[derive(Default, Serialize)]
+struct MaintenanceTaskSummary {
+    total: usize,
+    by_status: BTreeMap<String, usize>,
+    by_agent_mode: BTreeMap<String, usize>,
+    missing_agent_mode: usize,
+    mode: MaintenanceModeSummary,
+}
+
+#[derive(Default, Serialize)]
+struct MaintenanceBackgroundSummary {
+    total: usize,
+    by_phase: BTreeMap<String, usize>,
+    by_agent_mode: BTreeMap<String, usize>,
+    missing_agent_mode: usize,
+    mode: MaintenanceModeSummary,
+}
+
+#[derive(Default, Serialize)]
+struct MaintenanceApprovalSummary {
+    total: usize,
+    by_status: BTreeMap<String, usize>,
+    pending: usize,
+}
+
+#[derive(Default, Serialize)]
+struct MaintenanceResumeSummary {
+    total: usize,
+    by_status: BTreeMap<String, usize>,
+}
+
+#[derive(Default, Serialize)]
+struct MaintenanceProviderCapacitySummary {
+    total: usize,
+    by_status: BTreeMap<String, usize>,
+    attention: usize,
+}
+
+#[derive(Serialize)]
+struct MaintenanceRecommendedAction {
+    kind: &'static str,
+    detail: String,
+    command: &'static str,
+}
+
 pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
     match command {
         OffdeskCommands::Pending(args) => pending(profile, args).await,
@@ -1579,6 +1809,8 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Snapshot(args) => snapshot(profile, args).await,
         OffdeskCommands::RestorePlan(args) => restore_plan(profile, args).await,
         OffdeskCommands::DebugBundle(args) => debug_bundle(profile, args).await,
+        OffdeskCommands::MaintenanceReport(args) => maintenance_report(profile, args).await,
+        OffdeskCommands::MaintenanceRequest(args) => maintenance_request(profile, args).await,
         OffdeskCommands::Wiki(args) => wiki(profile, args).await,
     }
 }
@@ -1759,6 +1991,7 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
         WikiCommands::AckRuntimePolicy(args) => wiki_ack_runtime_policy(profile, args).await,
         WikiCommands::Lint(args) => wiki_lint(profile, args).await,
         WikiCommands::ExportMarkdown(args) => wiki_export_markdown(profile, args).await,
+        WikiCommands::Graph(args) => wiki_graph(profile, args).await,
         WikiCommands::Review(args) => wiki_review(profile, args).await,
         WikiCommands::EvaluateEpisode(args) => wiki_evaluate_episode(profile, args).await,
         WikiCommands::EpisodeTrace(args) => wiki_episode_trace(profile, args).await,
@@ -3952,9 +4185,13 @@ fn runtime_ack_scope_mode_cli_value(mode: AdaptiveWikiRuntimePolicyAckScopeMode)
 
 fn adaptive_wiki_agent_mode_cli_value(mode: AdaptiveWikiAgentMode) -> &'static str {
     match mode {
-        AdaptiveWikiAgentMode::CodeDevelopment => "code-development",
-        AdaptiveWikiAgentMode::ResearchWriting => "research-writing",
+        AdaptiveWikiAgentMode::Planning => "planning",
+        AdaptiveWikiAgentMode::Development => "development",
+        AdaptiveWikiAgentMode::Analysis => "analysis",
+        AdaptiveWikiAgentMode::Writing => "writing",
         AdaptiveWikiAgentMode::Critique => "critique",
+        AdaptiveWikiAgentMode::Review => "review",
+        AdaptiveWikiAgentMode::Maintenance => "maintenance",
     }
 }
 
@@ -3991,6 +4228,47 @@ async fn wiki_export_markdown(profile: &str, args: WikiExportMarkdownArgs) -> Re
     }
 
     print_wiki_markdown_export(&report);
+    Ok(())
+}
+
+async fn wiki_graph(profile: &str, args: WikiGraphArgs) -> Result<()> {
+    let report = wiki_store(profile)?.graph_report(Utc::now())?;
+    let files = if args.output.is_some() {
+        build_graph_export_files(&report)?
+    } else {
+        Vec::new()
+    };
+    if let Some(output) = args.output.as_ref() {
+        if !args.dry_run {
+            write_wiki_graph_export(output, &files)?;
+        }
+    }
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_wiki_graph_report(&report, args.output.as_deref(), args.dry_run, files.len());
+    Ok(())
+}
+
+fn write_wiki_graph_export(output: &Path, files: &[(String, String)]) -> Result<()> {
+    fs::create_dir_all(output)
+        .with_context(|| format!("create adaptive wiki graph export {}", output.display()))?;
+    for (relative_path, content) in files {
+        let path = output.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "create adaptive wiki graph export directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(&path, content)
+            .with_context(|| format!("write adaptive wiki graph export {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -4574,15 +4852,17 @@ async fn launch(profile: &str, args: LaunchArgs) -> Result<()> {
 }
 
 async fn poll(profile: &str, args: PollArgs) -> Result<()> {
+    let now = Utc::now();
     let notification_cooldown = args
         .notify_cooldown_minutes
         .map(|minutes| Duration::minutes(minutes.max(1)));
     let outcomes = poll_background_runs(
         &background_store(profile)?,
         args.ticket_id.as_deref(),
-        Utc::now(),
+        now,
         notification_cooldown,
     )?;
+    reconcile_tasks_with_background_outcomes(get_profile_dir(profile)?, &outcomes, now)?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&outcomes)?);
@@ -4602,6 +4882,7 @@ async fn poll(profile: &str, args: PollArgs) -> Result<()> {
             outcome.decision.phase,
             outcome.decision.evidence
         );
+        print_mode_assessment(&outcome.mode_assessment);
         if let Some(observed_at) = outcome.probe.last_observed_at {
             println!("  observed_at: {observed_at}");
         }
@@ -4730,6 +5011,8 @@ fn record_approval_denial_candidate(
             source_hashes: Vec::new(),
             suggested_scope: Some(suggested_scope),
             agent_modes: Vec::new(),
+            core_tags: vec!["risk/operator-denial".to_string()],
+            proposed_tags: Vec::new(),
             review_reason:
                 "Operator denied an Offdesk approval; review before promoting as durable policy."
                     .to_string(),
@@ -4769,6 +5052,42 @@ fn append_adaptive_wiki_usage_for_launch(
     AdaptiveWikiStore::new(profile_dir).append_usage_records(&records)
 }
 
+fn background_probe_status(probe: BackgroundProbe, now: DateTime<Utc>) -> BackgroundProbeStatus {
+    let decision = probe.evaluate(now);
+    let mode_assessment = assess_offdesk_mode(
+        probe.agent_mode,
+        background_mode_lifecycle(&decision, probe.result_artifact_present),
+    );
+    BackgroundProbeStatus {
+        probe,
+        decision,
+        mode_assessment,
+    }
+}
+
+fn background_mode_lifecycle(
+    decision: &BackgroundRecoveryDecision,
+    result_artifact_present: bool,
+) -> OffdeskModeLifecycle {
+    match decision.phase {
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived
+            if result_artifact_present =>
+        {
+            OffdeskModeLifecycle::CompletedWithResult
+        }
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived => {
+            OffdeskModeLifecycle::CompletedWithoutResult
+        }
+        BackgroundRunnerPhase::Failed
+        | BackgroundRunnerPhase::StaleNoAck
+        | BackgroundRunnerPhase::StaleLostCallback
+        | BackgroundRunnerPhase::Reconstructable => OffdeskModeLifecycle::Blocked,
+        BackgroundRunnerPhase::Launched
+        | BackgroundRunnerPhase::HandoffEmitted
+        | BackgroundRunnerPhase::PickupAcknowledged => OffdeskModeLifecycle::Running,
+    }
+}
+
 async fn resume(profile: &str, args: JsonArgs) -> Result<()> {
     let states = resume_store(profile)?.load()?;
 
@@ -4792,6 +5111,7 @@ async fn background(profile: &str, args: JsonArgs) -> Result<()> {
         poll_background_runs(&background_store(profile)?, None, now, None)?
             .into_iter()
             .map(|outcome| BackgroundProbeStatus {
+                mode_assessment: outcome.mode_assessment,
                 decision: outcome.decision,
                 probe: outcome.probe,
             })
@@ -4815,6 +5135,7 @@ async fn background(profile: &str, args: JsonArgs) -> Result<()> {
             status.decision.phase,
             status.decision.evidence
         );
+        print_mode_assessment(&status.mode_assessment);
         if let Some(observed_at) = status.probe.last_observed_at {
             println!("  observed_at: {observed_at}");
         }
@@ -4955,10 +5276,7 @@ fn build_debug_bundle(profile: &str) -> Result<OffdeskDebugBundle> {
     let background_runs = BackgroundRunStore::new(&profile_dir)
         .load()?
         .into_iter()
-        .map(|probe| BackgroundProbeStatus {
-            decision: probe.evaluate(generated_at),
-            probe,
-        })
+        .map(|probe| background_probe_status(probe, generated_at))
         .collect::<Vec<_>>();
     let background_runs = redactor.value(serde_json::to_value(background_runs)?);
 
@@ -5036,6 +5354,483 @@ fn build_debug_bundle(profile: &str) -> Result<OffdeskDebugBundle> {
         adaptive_wiki_review_after_attention_summary,
         redaction_summary,
     })
+}
+
+async fn maintenance_report(profile: &str, args: MaintenanceReportArgs) -> Result<()> {
+    let report = build_maintenance_report(profile, &args)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_maintenance_report(&report);
+    Ok(())
+}
+
+async fn maintenance_request(profile: &str, args: MaintenanceRequestArgs) -> Result<()> {
+    let json = args.json;
+    let report = build_maintenance_request(profile, args)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_maintenance_request_report(&report);
+    Ok(())
+}
+
+fn build_maintenance_request(
+    profile: &str,
+    args: MaintenanceRequestArgs,
+) -> Result<MaintenanceApprovalRequestReport> {
+    let preview = require_non_empty_arg("--preview", &args.preview)?.to_string();
+    let reason = require_non_empty_arg("--reason", &args.reason)?.to_string();
+    let project_key = require_non_empty_arg("--project-key", &args.project_key)?.to_string();
+    let request_id = require_non_empty_arg("--request-id", &args.request_id)?.to_string();
+    let target_id = clean_optional_string(&args.target_id);
+    let task_id = clean_optional_string(&args.task_id)
+        .unwrap_or_else(|| maintenance_default_task_id(args.kind, target_id.as_deref()));
+    let risk_level = args.risk.unwrap_or_else(|| args.kind.default_risk());
+    if risk_level == RiskLevel::Safe {
+        bail!("maintenance-request requires an approval-gated risk; use maintenance-report for read-only checks");
+    }
+
+    let generated_at = Utc::now();
+    let action = args.kind.action_id().to_string();
+    let mut request = ActionApprovalRequest::new(
+        project_key.clone(),
+        request_id.clone(),
+        task_id.clone(),
+        action.clone(),
+        risk_level,
+    );
+    request.mutation_class = Some(action.clone());
+    request.preview = preview;
+    request.reason = reason;
+    request.source_surface = args.source_surface;
+    request.ttl = Duration::minutes(args.ttl_minutes.max(1));
+
+    let ledger = ApprovalLedger::new(get_profile_dir(profile)?);
+    let (mut session, _) = ledger.begin_session(generated_at)?;
+    let pending = session.ensure_pending_without_consuming_grant(request, generated_at)?;
+    session.flush()?;
+
+    let approvals = ledger.load()?;
+    let approval = pending
+        .or_else(|| {
+            matching_maintenance_approval(
+                &approvals,
+                &project_key,
+                &request_id,
+                &task_id,
+                &action,
+                risk_level,
+            )
+        })
+        .map(|approval| serde_json::to_value(approval).map(operator_safe_json_value))
+        .transpose()?;
+    let approval_status = approval
+        .as_ref()
+        .and_then(|approval| approval["status"].as_str())
+        .unwrap_or("not_created");
+    let status = maintenance_request_status(approval_status).to_string();
+    let detail = maintenance_request_detail(approval_status);
+    let next_commands = maintenance_request_next_commands(approval.as_ref());
+
+    Ok(MaintenanceApprovalRequestReport {
+        generated_at,
+        action_kind: args.kind,
+        action,
+        project_key: crate::offdesk::operator_safe_text(&project_key),
+        request_id: crate::offdesk::operator_safe_text(&request_id),
+        task_id: crate::offdesk::operator_safe_text(&task_id),
+        target_id: target_id.map(|value| crate::offdesk::operator_safe_text(&value)),
+        risk_level,
+        status,
+        detail,
+        approval,
+        next_commands,
+    })
+}
+
+fn matching_maintenance_approval(
+    approvals: &[PendingActionApproval],
+    project_key: &str,
+    request_id: &str,
+    task_id: &str,
+    action: &str,
+    risk_level: RiskLevel,
+) -> Option<PendingActionApproval> {
+    approvals
+        .iter()
+        .find(|approval| {
+            approval.project_key == project_key
+                && approval.request_id == request_id
+                && approval.task_id == task_id
+                && approval.action == action
+                && approval.risk_level == risk_level
+                && approval.status == ApprovalStatus::Pending
+        })
+        .or_else(|| {
+            approvals.iter().find(|approval| {
+                approval.project_key == project_key
+                    && approval.request_id == request_id
+                    && approval.task_id == task_id
+                    && approval.action == action
+                    && approval.risk_level == risk_level
+            })
+        })
+        .cloned()
+}
+
+fn maintenance_request_status(approval_status: &str) -> &'static str {
+    match approval_status {
+        "pending" => "pending_approval",
+        "approved" => "already_approved",
+        "denied" => "previously_denied",
+        "expired" => "expired",
+        "superseded" => "superseded",
+        _ => "not_created",
+    }
+}
+
+fn maintenance_request_detail(approval_status: &str) -> String {
+    match approval_status {
+        "pending" => "Maintenance action approval is pending or was reused.".to_string(),
+        "approved" => {
+            "A matching maintenance approval already exists; this command did not consume it."
+                .to_string()
+        }
+        "denied" => {
+            "A matching maintenance approval was previously denied; create a new scoped request if needed."
+                .to_string()
+        }
+        "expired" => "A matching maintenance approval is expired.".to_string(),
+        "superseded" => "A matching maintenance approval is superseded.".to_string(),
+        _ => "No maintenance approval was created.".to_string(),
+    }
+}
+
+fn maintenance_request_next_commands(approval: Option<&Value>) -> Vec<String> {
+    let Some(approval_id) = approval.and_then(|approval| approval["approval_id"].as_str()) else {
+        return vec!["forager offdesk pending".to_string()];
+    };
+    vec![
+        format!("forager offdesk ok {approval_id}"),
+        format!("forager offdesk deny {approval_id}"),
+        "after approval, run the reviewed maintenance command explicitly".to_string(),
+    ]
+}
+
+fn build_maintenance_report(
+    profile: &str,
+    args: &MaintenanceReportArgs,
+) -> Result<OffdeskMaintenanceReport> {
+    let profile_dir = read_only_profile_dir(profile)?;
+    let generated_at = Utc::now();
+
+    let tasks = OffdeskTaskStore::new(&profile_dir)
+        .load()?
+        .into_iter()
+        .map(|task| task.operator_view())
+        .collect::<Vec<_>>();
+    let task_summary = summarize_maintenance_tasks(&tasks);
+
+    let background_runs = BackgroundRunStore::new(&profile_dir)
+        .load()?
+        .into_iter()
+        .map(|probe| background_probe_status(probe, generated_at))
+        .collect::<Vec<_>>();
+    let background_summary = summarize_maintenance_background(&background_runs);
+
+    let approvals = ApprovalLedger::new(&profile_dir).load()?;
+    let approval_summary = summarize_maintenance_approvals(&approvals);
+
+    let resume_states = TaskResumeStore::new(&profile_dir).load()?;
+    let resume_summary = summarize_maintenance_resume(&resume_states);
+
+    let provider_capacity_states = ProviderCapacityStore::new(&profile_dir).load()?;
+    let provider_capacity_summary =
+        summarize_maintenance_provider_capacity(&provider_capacity_states);
+
+    let wiki_store = AdaptiveWikiStore::new(&profile_dir);
+    let all_wiki_query = AdaptiveWikiQuery {
+        session_id: None,
+        project_key: None,
+        artifact_kind: None,
+        agent_mode: None,
+        agent_mode_filter: AdaptiveWikiAgentModeFilter::AllWhenUnspecified,
+    };
+    let wiki_projection = wiki_store.human_projection(&all_wiki_query)?;
+    let wiki_review_near_expiry_hours = args.wiki_review_near_expiry_hours.max(1);
+    let adaptive_wiki_review_after_attention_summary = build_review_after_report(
+        wiki_projection.entries,
+        all_wiki_query,
+        wiki_review_near_expiry_hours,
+        Duration::hours(wiki_review_near_expiry_hours),
+        generated_at,
+    )
+    .summary;
+
+    let runtime_policy_acknowledgements = wiki_store.load_runtime_policy_acknowledgements()?;
+    let wiki_runtime_ack_near_expiry_hours = args.wiki_runtime_ack_near_expiry_hours.max(1);
+    let adaptive_wiki_runtime_policy_ack_attention_summary = build_runtime_policy_ack_report(
+        runtime_policy_acknowledgements,
+        None,
+        None,
+        None,
+        wiki_runtime_ack_near_expiry_hours,
+        Duration::hours(wiki_runtime_ack_near_expiry_hours),
+        generated_at,
+    )
+    .summary;
+
+    let recommended_actions = maintenance_recommended_actions(
+        &task_summary,
+        &background_summary,
+        &approval_summary,
+        &resume_summary,
+        &provider_capacity_summary,
+        &adaptive_wiki_runtime_policy_ack_attention_summary,
+        &adaptive_wiki_review_after_attention_summary,
+    );
+
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+    Ok(OffdeskMaintenanceReport {
+        generated_at,
+        profile: operator_safe_report(profile_name).text,
+        profile_dir: operator_safe_report(profile_dir.to_string_lossy().as_ref()).text,
+        read_only: true,
+        tasks: task_summary,
+        background_runs: background_summary,
+        approvals: approval_summary,
+        resume_states: resume_summary,
+        provider_capacity: provider_capacity_summary,
+        adaptive_wiki_runtime_policy_ack_attention_summary,
+        adaptive_wiki_review_after_attention_summary,
+        recommended_actions,
+    })
+}
+
+fn summarize_maintenance_tasks(tasks: &[OffdeskTaskView]) -> MaintenanceTaskSummary {
+    let mut summary = MaintenanceTaskSummary {
+        total: tasks.len(),
+        ..MaintenanceTaskSummary::default()
+    };
+    for task in tasks {
+        increment_count(&mut summary.by_status, enum_label(task.status));
+        record_agent_mode(task.agent_mode, &mut summary.by_agent_mode);
+        if task.agent_mode.is_none() {
+            summary.missing_agent_mode += 1;
+        }
+        record_mode_assessment(&task.mode_assessment, &mut summary.mode);
+    }
+    summary
+}
+
+fn summarize_maintenance_background(
+    statuses: &[BackgroundProbeStatus],
+) -> MaintenanceBackgroundSummary {
+    let mut summary = MaintenanceBackgroundSummary {
+        total: statuses.len(),
+        ..MaintenanceBackgroundSummary::default()
+    };
+    for status in statuses {
+        increment_count(&mut summary.by_phase, enum_label(status.probe.phase));
+        record_agent_mode(status.probe.agent_mode, &mut summary.by_agent_mode);
+        if status.probe.agent_mode.is_none() {
+            summary.missing_agent_mode += 1;
+        }
+        record_mode_assessment(&status.mode_assessment, &mut summary.mode);
+    }
+    summary
+}
+
+fn summarize_maintenance_approvals(
+    approvals: &[PendingActionApproval],
+) -> MaintenanceApprovalSummary {
+    let mut summary = MaintenanceApprovalSummary {
+        total: approvals.len(),
+        ..MaintenanceApprovalSummary::default()
+    };
+    for approval in approvals {
+        let status = enum_label(approval.status);
+        if status == "pending" {
+            summary.pending += 1;
+        }
+        increment_count(&mut summary.by_status, status);
+    }
+    summary
+}
+
+fn summarize_maintenance_resume(states: &[TaskResumeState]) -> MaintenanceResumeSummary {
+    let mut summary = MaintenanceResumeSummary {
+        total: states.len(),
+        ..MaintenanceResumeSummary::default()
+    };
+    for state in states {
+        increment_count(&mut summary.by_status, enum_label(state.status));
+    }
+    summary
+}
+
+fn summarize_maintenance_provider_capacity(
+    states: &[ProviderCapacityState],
+) -> MaintenanceProviderCapacitySummary {
+    let mut summary = MaintenanceProviderCapacitySummary {
+        total: states.len(),
+        ..MaintenanceProviderCapacitySummary::default()
+    };
+    for state in states {
+        let status = enum_label(state.status);
+        if status != "available" {
+            summary.attention += 1;
+        }
+        increment_count(&mut summary.by_status, status);
+    }
+    summary
+}
+
+fn record_agent_mode(
+    agent_mode: Option<AdaptiveWikiAgentMode>,
+    counts: &mut BTreeMap<String, usize>,
+) {
+    let label = agent_mode
+        .map(adaptive_wiki_agent_mode_cli_value)
+        .unwrap_or("missing");
+    increment_count(counts, label.to_string());
+}
+
+fn record_mode_assessment(
+    assessment: &OffdeskModeAssessment,
+    summary: &mut MaintenanceModeSummary,
+) {
+    increment_count(
+        &mut summary.by_verdict,
+        assessment.mode_verdict.label().to_string(),
+    );
+    increment_count(
+        &mut summary.by_risk,
+        assessment.mode_risk.label().to_string(),
+    );
+    if assessment.review_stage_required {
+        summary.review_stage_required += 1;
+    }
+}
+
+fn increment_count(counts: &mut BTreeMap<String, usize>, key: String) {
+    *counts.entry(key).or_insert(0) += 1;
+}
+
+fn enum_label(value: impl Serialize) -> String {
+    match serde_json::to_value(value) {
+        Ok(Value::String(value)) => value,
+        Ok(value) => value.to_string(),
+        Err(_) => "unknown".to_string(),
+    }
+}
+
+fn maintenance_risk_count(summary: &MaintenanceModeSummary, risk: &str) -> usize {
+    summary.by_risk.get(risk).copied().unwrap_or(0)
+}
+
+fn maintenance_recommended_actions(
+    tasks: &MaintenanceTaskSummary,
+    background_runs: &MaintenanceBackgroundSummary,
+    approvals: &MaintenanceApprovalSummary,
+    resume_states: &MaintenanceResumeSummary,
+    provider_capacity: &MaintenanceProviderCapacitySummary,
+    runtime_ack_summary: &WikiRuntimePolicyAckReportSummary,
+    review_after_summary: &WikiReviewAfterReportSummary,
+) -> Vec<MaintenanceRecommendedAction> {
+    let mut actions = Vec::new();
+    if approvals.pending > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "pending_approval",
+            detail: format!(
+                "{} pending approvals need an operator decision.",
+                approvals.pending
+            ),
+            command: "forager offdesk pending",
+        });
+    }
+    let review_required = maintenance_risk_count(&tasks.mode, "operator_review_required")
+        + maintenance_risk_count(&background_runs.mode, "operator_review_required");
+    if review_required > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "operator_review",
+            detail: format!("{review_required} completed mode-scoped items need separate review."),
+            command: "forager offdesk tasks",
+        });
+    }
+    let missing_result = maintenance_risk_count(&tasks.mode, "missing_result_artifact")
+        + maintenance_risk_count(&background_runs.mode, "missing_result_artifact");
+    if missing_result > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "missing_result_artifact",
+            detail: format!("{missing_result} completed items have no result artifact to inspect."),
+            command: "forager offdesk tasks --json",
+        });
+    }
+    let runtime_recovery = maintenance_risk_count(&tasks.mode, "runtime_recovery_required")
+        + maintenance_risk_count(&background_runs.mode, "runtime_recovery_required");
+    if runtime_recovery > 0 || resume_states.total > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "runtime_recovery",
+            detail: format!(
+                "{runtime_recovery} mode assessments need recovery; {} resume records exist.",
+                resume_states.total
+            ),
+            command: "forager offdesk resume",
+        });
+    }
+    let missing_mode = tasks.missing_agent_mode + background_runs.missing_agent_mode;
+    if missing_mode > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "missing_agent_mode",
+            detail: format!("{missing_mode} durable records are missing agent_mode scope."),
+            command: "forager offdesk debug-bundle",
+        });
+    }
+    if provider_capacity.attention > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "provider_capacity",
+            detail: format!(
+                "{} provider capacity records are cooling down or blocked.",
+                provider_capacity.attention
+            ),
+            command: "forager offdesk provider-capacity",
+        });
+    }
+    let runtime_ack_attention = runtime_ack_summary.expired
+        + runtime_ack_summary.near_expiry
+        + runtime_ack_summary.suggested_actions;
+    if runtime_ack_attention > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "wiki_runtime_ack",
+            detail: format!(
+                "{runtime_ack_attention} runtime policy acknowledgement signals need attention."
+            ),
+            command: "forager offdesk wiki runtime-policy-ack-report",
+        });
+    }
+    if review_after_summary.attention > 0 {
+        actions.push(MaintenanceRecommendedAction {
+            kind: "wiki_review_after",
+            detail: format!(
+                "{} adaptive wiki entries are expired or near review_after.",
+                review_after_summary.attention
+            ),
+            command: "forager offdesk wiki review-after-report",
+        });
+    }
+    actions
 }
 
 fn write_debug_bundle_export(
@@ -5207,9 +6002,13 @@ fn wiki_episode_out_of_scope_query(args: &WikiEpisodeArgs) -> AdaptiveWikiQuery 
 
 fn out_of_scope_agent_mode(mode: AdaptiveWikiAgentMode) -> AdaptiveWikiAgentMode {
     match mode {
-        AdaptiveWikiAgentMode::CodeDevelopment => AdaptiveWikiAgentMode::ResearchWriting,
-        AdaptiveWikiAgentMode::ResearchWriting => AdaptiveWikiAgentMode::Critique,
-        AdaptiveWikiAgentMode::Critique => AdaptiveWikiAgentMode::CodeDevelopment,
+        AdaptiveWikiAgentMode::Planning => AdaptiveWikiAgentMode::Development,
+        AdaptiveWikiAgentMode::Development => AdaptiveWikiAgentMode::Analysis,
+        AdaptiveWikiAgentMode::Analysis => AdaptiveWikiAgentMode::Writing,
+        AdaptiveWikiAgentMode::Writing => AdaptiveWikiAgentMode::Critique,
+        AdaptiveWikiAgentMode::Critique => AdaptiveWikiAgentMode::Review,
+        AdaptiveWikiAgentMode::Review => AdaptiveWikiAgentMode::Maintenance,
+        AdaptiveWikiAgentMode::Maintenance => AdaptiveWikiAgentMode::Planning,
     }
 }
 
@@ -5219,6 +6018,41 @@ fn clean_optional_string(value: &Option<String>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn maintenance_default_task_id(kind: MaintenanceActionKind, target_id: Option<&str>) -> String {
+    let mut task_id = format!("maintenance-{}", kind.cli_value().replace('_', "-"));
+    if let Some(target_id) = target_id {
+        task_id.push('-');
+        task_id.push_str(&sanitize_id_fragment(target_id));
+    }
+    task_id
+}
+
+fn sanitize_id_fragment(value: &str) -> String {
+    let mut sanitized = value
+        .chars()
+        .filter_map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                Some(ch.to_ascii_lowercase())
+            } else if ch == '-' || ch == '_' {
+                Some(ch)
+            } else if ch.is_whitespace() || ch == '/' || ch == '.' || ch == ':' {
+                Some('-')
+            } else {
+                None
+            }
+        })
+        .collect::<String>();
+    while sanitized.contains("--") {
+        sanitized = sanitized.replace("--", "-");
+    }
+    sanitized = sanitized.trim_matches('-').to_string();
+    if sanitized.is_empty() {
+        "target".to_string()
+    } else {
+        sanitized.chars().take(64).collect()
+    }
 }
 
 fn first_non_empty<'a>(values: &[&'a str]) -> Option<&'a str> {
@@ -5395,6 +6229,55 @@ fn parse_background_runner_kind(value: &str) -> std::result::Result<BackgroundRu
     value.parse()
 }
 
+fn parse_maintenance_action_kind(
+    value: &str,
+) -> std::result::Result<MaintenanceActionKind, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "runtime_recovery" | "runtime-recovery" | "recovery" => {
+            Ok(MaintenanceActionKind::RuntimeRecovery)
+        }
+        "wiki_runtime_ack" | "wiki-runtime-ack" | "runtime_ack" | "runtime-ack" => {
+            Ok(MaintenanceActionKind::WikiRuntimeAck)
+        }
+        "wiki_review_after" | "wiki-review-after" | "review_after" | "review-after" => {
+            Ok(MaintenanceActionKind::WikiReviewAfter)
+        }
+        "wiki_mutation" | "wiki-mutation" | "wiki" => Ok(MaintenanceActionKind::WikiMutation),
+        "provider_capacity" | "provider-capacity" | "capacity" => {
+            Ok(MaintenanceActionKind::ProviderCapacity)
+        }
+        "artifact_cleanup" | "artifact-cleanup" | "cleanup" => {
+            Ok(MaintenanceActionKind::ArtifactCleanup)
+        }
+        "service_restart" | "service-restart" | "restart" => {
+            Ok(MaintenanceActionKind::ServiceRestart)
+        }
+        "system_change" | "system-change" | "system" => Ok(MaintenanceActionKind::SystemChange),
+        _ => Err(
+            "maintenance kind must be one of runtime_recovery, wiki_runtime_ack, wiki_review_after, wiki_mutation, provider_capacity, artifact_cleanup, service_restart, system_change"
+                .to_string(),
+        ),
+    }
+}
+
+fn parse_risk_level(value: &str) -> std::result::Result<RiskLevel, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "safe" => Ok(RiskLevel::Safe),
+        "runtime_mutation" | "runtime-mutation" | "runtime" => Ok(RiskLevel::RuntimeMutation),
+        "canonical_mutation" | "canonical-mutation" | "canonical" => {
+            Ok(RiskLevel::CanonicalMutation)
+        }
+        "destructive" | "delete" | "cleanup" => Ok(RiskLevel::Destructive),
+        "external_side_effect" | "external-side-effect" | "external" => {
+            Ok(RiskLevel::ExternalSideEffect)
+        }
+        _ => Err(
+            "risk must be one of safe, runtime_mutation, canonical_mutation, destructive, external_side_effect"
+                .to_string(),
+        ),
+    }
+}
+
 fn parse_artifact_ref(value: &str) -> std::result::Result<CapabilityArtifactRef, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -5457,15 +6340,23 @@ fn parse_adaptive_wiki_agent_mode(
     value: &str,
 ) -> std::result::Result<AdaptiveWikiAgentMode, String> {
     match value.trim().to_ascii_lowercase().as_str() {
+        "planning" | "plan" | "planner" => Ok(AdaptiveWikiAgentMode::Planning),
         "code_development" | "code-development" | "code" | "coding" | "development" => {
-            Ok(AdaptiveWikiAgentMode::CodeDevelopment)
+            Ok(AdaptiveWikiAgentMode::Development)
+        }
+        "analysis" | "analyze" | "analyse" | "diagnostics" | "diagnostic" => {
+            Ok(AdaptiveWikiAgentMode::Analysis)
         }
         "research_writing" | "research-writing" | "research" | "writing" | "editing" => {
-            Ok(AdaptiveWikiAgentMode::ResearchWriting)
+            Ok(AdaptiveWikiAgentMode::Writing)
         }
-        "critique" | "critic" | "review" => Ok(AdaptiveWikiAgentMode::Critique),
+        "critique" | "critic" => Ok(AdaptiveWikiAgentMode::Critique),
+        "review" | "reviewer" => Ok(AdaptiveWikiAgentMode::Review),
+        "maintenance" | "maintain" | "maintainer" | "ops" | "health" => {
+            Ok(AdaptiveWikiAgentMode::Maintenance)
+        }
         _ => Err(
-            "agent mode must be one of code_development, research_writing, critique".to_string(),
+            "agent mode must be one of planning, development, analysis, writing, critique, review, maintenance".to_string(),
         ),
     }
 }
@@ -6210,6 +7101,45 @@ fn print_wiki_markdown_export(report: &AdaptiveWikiMarkdownExportReport) {
     }
 }
 
+fn print_wiki_graph_report(
+    report: &AdaptiveWikiGraphReport,
+    output: Option<&Path>,
+    dry_run: bool,
+    files: usize,
+) {
+    println!(
+        "Adaptive wiki tag graph: {} nodes, {} edges, {} review issues",
+        report.nodes.len(),
+        report.edges.len(),
+        report.review_issues.len()
+    );
+    println!(
+        "  entries: {}  candidates: {}  tag_nodes: {}",
+        report.summary.entries, report.summary.candidates, report.summary.tag_nodes
+    );
+    println!(
+        "  tag_edges: derived_core={} core={} proposed={}",
+        report.summary.derived_core_tag_edges,
+        report.summary.core_tag_edges,
+        report.summary.proposed_tag_edges
+    );
+    if let Some(output) = output {
+        let action = if dry_run { "planned" } else { "wrote" };
+        println!(
+            "  export: {} {} files to {}",
+            action,
+            files,
+            output.display()
+        );
+    }
+    for issue in report.review_issues.iter().take(8) {
+        println!(
+            "  - {:?} {}:{} #{} {}",
+            issue.severity, issue.subject_kind, issue.subject_id, issue.tag, issue.code
+        );
+    }
+}
+
 fn print_wiki_review_report(report: &AdaptiveWikiReviewReport) {
     let action = if report.dry_run { "planned" } else { "wrote" };
     println!(
@@ -6669,6 +7599,7 @@ fn print_task_rows(tasks: &[&OffdeskTaskView]) {
                 adaptive_wiki_agent_mode_cli_value(agent_mode)
             );
         }
+        print_mode_assessment(&task.mode_assessment);
         if task.provider_id.is_some() || task.model.is_some() {
             println!(
                 "  provider: {} model: {}",
@@ -6714,6 +7645,18 @@ fn print_task_rows(tasks: &[&OffdeskTaskView]) {
             );
         }
         println!("  next:    {}", recommended_task_command(task));
+    }
+}
+
+fn print_mode_assessment(assessment: &OffdeskModeAssessment) {
+    println!(
+        "  mode_verdict: {} risk: {}",
+        assessment.mode_verdict.label(),
+        assessment.mode_risk.label()
+    );
+    println!("  mode_risk_detail: {}", assessment.mode_risk_detail);
+    if assessment.review_stage_required {
+        println!("  review_stage_required: true");
     }
 }
 
@@ -6894,6 +7837,117 @@ fn print_debug_bundle_summary(bundle: &OffdeskDebugBundle) {
         bundle.redaction_summary.runner_context_removed,
         bundle.redaction_summary.secrets_redacted
     );
+}
+
+fn print_maintenance_report(report: &OffdeskMaintenanceReport) {
+    println!("Offdesk maintenance report");
+    println!("  generated_at:       {}", report.generated_at);
+    println!("  profile:            {}", report.profile);
+    println!("  profile_dir:        {}", report.profile_dir);
+    println!("  read_only:          {}", report.read_only);
+    println!(
+        "  tasks:              total={} status=[{}] risk=[{}]",
+        report.tasks.total,
+        format_counts(&report.tasks.by_status),
+        format_counts(&report.tasks.mode.by_risk)
+    );
+    println!(
+        "  task_modes:         agent=[{}] review_required={}",
+        format_counts(&report.tasks.by_agent_mode),
+        report.tasks.mode.review_stage_required
+    );
+    println!(
+        "  background_runs:    total={} phase=[{}] risk=[{}]",
+        report.background_runs.total,
+        format_counts(&report.background_runs.by_phase),
+        format_counts(&report.background_runs.mode.by_risk)
+    );
+    println!(
+        "  approvals:          total={} pending={} status=[{}]",
+        report.approvals.total,
+        report.approvals.pending,
+        format_counts(&report.approvals.by_status)
+    );
+    println!(
+        "  resume_states:      total={} status=[{}]",
+        report.resume_states.total,
+        format_counts(&report.resume_states.by_status)
+    );
+    println!(
+        "  provider_capacity:  total={} attention={} status=[{}]",
+        report.provider_capacity.total,
+        report.provider_capacity.attention,
+        format_counts(&report.provider_capacity.by_status)
+    );
+    println!(
+        "  wiki_ack_attention: expired={} near_expiry={} suggested_actions={}",
+        report
+            .adaptive_wiki_runtime_policy_ack_attention_summary
+            .expired,
+        report
+            .adaptive_wiki_runtime_policy_ack_attention_summary
+            .near_expiry,
+        report
+            .adaptive_wiki_runtime_policy_ack_attention_summary
+            .suggested_actions
+    );
+    println!(
+        "  wiki_review_after:  expired={} near_expiry={} missing_review_after={}",
+        report.adaptive_wiki_review_after_attention_summary.expired,
+        report
+            .adaptive_wiki_review_after_attention_summary
+            .near_expiry,
+        report
+            .adaptive_wiki_review_after_attention_summary
+            .missing_review_after
+    );
+    if report.recommended_actions.is_empty() {
+        println!("No maintenance actions recommended.");
+    } else {
+        println!("Recommended actions:");
+        for action in &report.recommended_actions {
+            println!("  - {}: {}", action.kind, action.detail);
+            println!("    command: {}", action.command);
+        }
+    }
+}
+
+fn print_maintenance_request_report(report: &MaintenanceApprovalRequestReport) {
+    println!("Offdesk maintenance approval request");
+    println!("  generated_at: {}", report.generated_at);
+    println!("  action:       {}", report.action);
+    println!("  kind:         {}", report.action_kind.cli_value());
+    println!("  risk:         {}", enum_label(report.risk_level));
+    println!("  status:       {}", report.status);
+    println!("  detail:       {}", report.detail);
+    println!("  project_key:  {}", report.project_key);
+    println!("  request_id:   {}", report.request_id);
+    println!("  task_id:      {}", report.task_id);
+    if let Some(target_id) = &report.target_id {
+        println!("  target_id:    {}", target_id);
+    }
+    if let Some(approval) = &report.approval {
+        if let Some(approval_id) = approval["approval_id"].as_str() {
+            println!("  approval_id:  {}", approval_id);
+        }
+    }
+    if !report.next_commands.is_empty() {
+        println!("Next commands:");
+        for command in &report.next_commands {
+            println!("  - {}", command);
+        }
+    }
+}
+
+fn format_counts(counts: &BTreeMap<String, usize>) -> String {
+    if counts.is_empty() {
+        return "-".to_string();
+    }
+    counts
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn json_array_len(value: &Value) -> usize {

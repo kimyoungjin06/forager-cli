@@ -11,6 +11,7 @@ use super::adaptive_wiki::AdaptiveWikiAgentMode;
 use super::approval::ExecutionBrief;
 use super::background::BackgroundRunnerKind;
 use super::capability::CapabilityArtifactRef;
+use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::provider::{ProviderFallbackCandidate, ProviderFallbackRecommendation};
 use super::redaction::operator_safe_text;
 use super::resume::TaskResumeStore;
@@ -154,6 +155,10 @@ impl OffdeskTask {
                 .collect(),
             artifact_kind: self.artifact_kind.as_deref().map(operator_safe_text),
             agent_mode: self.agent_mode,
+            mode_assessment: assess_offdesk_mode(
+                self.agent_mode,
+                task_mode_lifecycle(self.status, self.result_artifact_path.as_deref()),
+            ),
             provider_id: self.provider_id.as_deref().map(operator_safe_text),
             model: self.model.as_deref().map(operator_safe_text),
             last_provider_fallback: self
@@ -225,6 +230,8 @@ pub struct OffdeskTaskView {
     pub artifact_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode: Option<AdaptiveWikiAgentMode>,
+    #[serde(flatten)]
+    pub mode_assessment: OffdeskModeAssessment,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -239,6 +246,26 @@ pub struct OffdeskTaskView {
     pub log_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_artifact_path: Option<String>,
+}
+
+fn task_mode_lifecycle(
+    status: OffdeskTaskStatus,
+    result_artifact_path: Option<&str>,
+) -> OffdeskModeLifecycle {
+    match status {
+        OffdeskTaskStatus::Queued | OffdeskTaskStatus::PendingApproval => {
+            OffdeskModeLifecycle::Pending
+        }
+        OffdeskTaskStatus::Launched | OffdeskTaskStatus::Running => OffdeskModeLifecycle::Running,
+        OffdeskTaskStatus::Completed if result_artifact_path.is_some() => {
+            OffdeskModeLifecycle::CompletedWithResult
+        }
+        OffdeskTaskStatus::Completed => OffdeskModeLifecycle::CompletedWithoutResult,
+        OffdeskTaskStatus::Failed | OffdeskTaskStatus::ResumePending => {
+            OffdeskModeLifecycle::Blocked
+        }
+        OffdeskTaskStatus::Cancelled => OffdeskModeLifecycle::Cancelled,
+    }
 }
 
 fn operator_safe_artifact_ref(artifact_ref: &CapabilityArtifactRef) -> CapabilityArtifactRef {
@@ -601,7 +628,10 @@ fn lifecycle_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::offdesk::{ResumePendingInput, ResumeStatus, TaskResumeState, TaskResumeStore};
+    use crate::offdesk::{
+        OffdeskModeRisk, OffdeskModeVerdict, ResumePendingInput, ResumeStatus, TaskResumeState,
+        TaskResumeStore,
+    };
     use chrono::Duration;
     use tempfile::tempdir;
 
@@ -691,6 +721,27 @@ mod tests {
         let view = task.operator_view();
 
         assert!(!view.command.contains("sk-secret"));
+    }
+
+    #[test]
+    fn operator_view_surfaces_mode_assessment_without_persisting_new_fields() {
+        let mut input = input();
+        input.agent_mode = Some(AdaptiveWikiAgentMode::Development);
+        input.result_artifact_path = Some("/tmp/result.json".to_string());
+        let mut task = OffdeskTask::new(input, Utc::now());
+        task.status = OffdeskTaskStatus::Completed;
+
+        let view = task.operator_view();
+
+        assert_eq!(
+            view.mode_assessment.mode_verdict,
+            OffdeskModeVerdict::EvidenceReady
+        );
+        assert_eq!(
+            view.mode_assessment.mode_risk,
+            OffdeskModeRisk::OperatorReviewRequired
+        );
+        assert!(view.mode_assessment.review_stage_required);
     }
 
     fn resume_state(now: DateTime<Utc>) -> TaskResumeState {
