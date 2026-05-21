@@ -1,0 +1,92 @@
+# Offdesk Closeout Guide
+
+Offdesk work is not complete when a background task exits. It is complete only
+after its artifacts, document updates, cleanup candidates, and Ondesk return
+context have been reviewed.
+
+Forager treats closeout as a required lifecycle gate between:
+
+```text
+Ondesk closeout -> Offdesk execution -> Offdesk closeout -> Ondesk return
+```
+
+## Ondesk To Offdesk
+
+Before handing work to Offdesk, prepare the work while you are present:
+
+- record the operator intent with `forager ondesk note`;
+- capture current harness context with `forager ondesk capture`;
+- write or refresh the task plan, wiki candidates, and expected evidence;
+- define success criteria and forbidden actions;
+- require approvals for deletion, file movement, reboot, service restart,
+  provider/model retargeting, and wiki mutation.
+
+This gives Offdesk a scoped target instead of raw chat history.
+
+## Offdesk To Ondesk
+
+After Offdesk work, run closeout before resuming Ondesk:
+
+```bash
+forager offdesk closeout --project-key twinpaper --dry-run
+```
+
+The command writes a closeout artifact directory under the active profile:
+
+```text
+offdesk_closeouts/<timestamp>_<closeout-id>/
+  closeout_plan.json
+  CLOSEOUT_PLAN.md
+  cleanup_manifest.json
+  COMMERCIAL_REVIEW_PACKET.md
+  RETURN_PACKAGE.md
+```
+
+The closeout command is a dry-run planner. It does not move, delete, archive,
+or mutate project files.
+
+## Cleanup Policy
+
+Closeout classifies files but does not apply changes:
+
+- `keep`: provenance anchors, result artifacts, reports, declared task
+  artifacts, and files required for Ondesk return.
+- `archive_candidate`: raw logs and bulky runtime artifacts that may be moved
+  after review.
+- `delete_candidate`: disabled by default in the first closeout surface.
+
+Any future `move`, `archive`, or `delete` action must pass both:
+
+- commercial model review of the closeout packet;
+- explicit human approval recorded through the normal approval path.
+
+Never auto-delete or auto-move:
+
+- git-tracked source or documentation files;
+- human-authored notes or reports;
+- hidden config, env, symlink, mount, external drive, or system paths;
+- artifacts referenced by reports, wiki candidates, approvals, or resume
+  records.
+
+## Commercial Review
+
+`COMMERCIAL_REVIEW_PACKET.md` is the model-facing review packet. It asks a
+strong commercial model to return only a verdict:
+
+```json
+{
+  "verdict": "approved|revise|blocked",
+  "unsafe_operations": [],
+  "missing_evidence": [],
+  "required_first_reads": [],
+  "notes": ""
+}
+```
+
+This review is advisory until the operator approves the concrete action.
+
+## Ondesk Return
+
+Use `RETURN_PACKAGE.md` to start a fresh or resumed Ondesk harness. The harness
+should read the listed result artifacts first, then inspect open decisions and
+run the verification commands before continuing work.

@@ -60,6 +60,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk debug-bundle`↴](#forager-offdesk-debug-bundle)
 * [`forager offdesk maintenance-report`↴](#forager-offdesk-maintenance-report)
 * [`forager offdesk maintenance-request`↴](#forager-offdesk-maintenance-request)
+* [`forager offdesk closeout`↴](#forager-offdesk-closeout)
 * [`forager offdesk wiki`↴](#forager-offdesk-wiki)
 * [`forager offdesk wiki corrections`↴](#forager-offdesk-wiki-corrections)
 * [`forager offdesk wiki proposal-events`↴](#forager-offdesk-wiki-proposal-events)
@@ -588,6 +589,7 @@ Manage offdesk approvals and recovery artifacts
 * `debug-bundle` — Emit a sanitized read-only debug bundle
 * `maintenance-report` — Summarize read-only Offdesk maintenance risks
 * `maintenance-request` — Create or reuse an approval request for a maintenance action
+* `closeout` — Generate a mandatory closeout plan and commercial review packet
 * `wiki` — Inspect adaptive wiki candidates, entries, projections, and lint
 
 
@@ -1048,6 +1050,28 @@ Create or reuse an approval request for a maintenance action
 * `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
 
   Default value: `30`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk closeout`
+
+Generate a mandatory closeout plan and commercial review packet
+
+**Usage:** `forager offdesk closeout [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Project key to close out. Defaults to all projects in the profile
+* `--request-id <REQUEST_ID>` — Request ID to close out
+* `--task-id <TASK_ID>` — Task ID to close out
+* `--workdir <WORKDIR>` — Optional project workdir for read-only git status evidence
+* `--include-git` — Include read-only git status and diff-stat from --workdir or matched task workdir
+* `--review-provider <REVIEW_PROVIDER>` — Commercial model/provider label expected to review move/delete/archive decisions
+
+  Default value: `commercial`
+* `--output <OUTPUT>` — Write closeout artifacts to this directory
+* `--dry-run` — Accepted for explicit operator intent; closeout never applies file operations
 * `--json` — Output as JSON
 
 
