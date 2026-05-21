@@ -169,6 +169,33 @@ pub fn run_offdesk_tick(
     Ok(report)
 }
 
+pub fn reconcile_tasks_with_background_outcomes(
+    profile_dir: impl AsRef<Path>,
+    outcomes: &[BackgroundPollOutcome],
+    now: DateTime<Utc>,
+) -> Result<OffdeskTickReport> {
+    let profile_dir = profile_dir.as_ref();
+    let task_store = OffdeskTaskStore::new(profile_dir);
+    let resume_store = TaskResumeStore::new(profile_dir);
+    let background_by_ticket = outcomes
+        .iter()
+        .map(|outcome| (outcome.probe.ticket_id.clone(), outcome))
+        .collect::<HashMap<_, _>>();
+
+    let mut report = OffdeskTickReport {
+        polled_background: outcomes.len(),
+        ..OffdeskTickReport::default()
+    };
+    let mut tasks = task_store.load()?;
+    for task in tasks.iter_mut() {
+        apply_background_outcome(task, &background_by_ticket, &resume_store, now, &mut report)?;
+    }
+    if !report.updated_task_ids.is_empty() {
+        task_store.save(&tasks)?;
+    }
+    Ok(report)
+}
+
 pub fn load_offdesk_status_summary(
     profile_dir: impl AsRef<Path>,
     now: DateTime<Utc>,

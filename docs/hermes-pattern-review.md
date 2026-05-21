@@ -122,6 +122,9 @@ probe record.
 ## Background Recovery Acceptance Checks
 
 - Polling a completed run persists the recovery evidence and terminal flag.
+- Polling a completed run also reconciles matching launched/running task rows
+  to `completed`, so `offdesk tasks` does not keep stale active state after the
+  result sidecar is present.
 - A stale heartbeat timestamp turns an otherwise alive local background probe
   into `stale_lost_callback`.
 - Legacy background probe rows without heartbeat or observation fields still
@@ -283,7 +286,8 @@ canonical Offdesk wiki record plus separate projections:
   candidates with evidence refs and occurrence counts;
 - `adaptive_wiki_entries.json` stores canonical entries with kind, scope,
   status, activation mode, optional agent-mode tags, claim, AI instruction,
-  human summary, evidence refs, confidence, and review metadata;
+  human summary, evidence refs, core/proposed graph tags, confidence, and
+  review metadata;
 - the AI projection includes only promoted entries matching scope and requested
   agent mode, while entries with no mode tags remain shared guidance; it redacts
   the compact instruction before gate/launch/tick outcomes expose it;
@@ -296,6 +300,9 @@ canonical Offdesk wiki record plus separate projections:
 - the human projection keeps sanitized governance context, including summaries,
   evidence refs, counterexamples, status, activation mode, agent modes, and
   candidate hits.
+- `forager offdesk wiki graph` exports a read-only tag graph from canonical
+  fields plus `core_tags` and `proposed_tags`; proposed tags remain reviewer
+  pressure and do not become runtime policy by themselves.
 
 This pass does not make wiki entries an authority for runtime mutation and does
 not enable `auto_apply`. Candidate observation, promotion, dashboard actions,
@@ -317,6 +324,8 @@ implementation sequence lives in
   workdirs, launch specs, or approval decisions.
 - AI and human projections redact secrets and runner-only context before
   operator/runtime surfaces consume them.
+- Tag graph export is read-only: it can surface proposed tag review issues, but
+  it does not mutate wiki entries, routing, approvals, or runtime projection.
 - Legacy or partial adaptive wiki JSON loads with safe defaults for new fields.
 - Promotion creates a promoted canonical entry and removes the candidate without
   auto-applying behavior.

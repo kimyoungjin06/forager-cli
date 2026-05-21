@@ -1008,8 +1008,8 @@ Implemented the first bridge between the user's intentionally separated agent
 modes and the adaptive wiki:
 
 - wiki candidates and promoted entries can carry `agent_modes`;
-- empty `agent_modes` means shared guidance across code development,
-  research/writing, and critique;
+- empty `agent_modes` means shared guidance across planning, development,
+  analysis, writing, critique, review, and maintenance;
 - `offdesk gate`, `launch`, `enqueue`, wiki list/projection, strict runtime
   acknowledgement reports, review-after reports, and episode evaluation accept
   `--agent-mode`;
@@ -1022,8 +1022,19 @@ modes and the adaptive wiki:
 
 Acceptance checks:
 
-- implemented now: a code-development projection receives shared and
-  code-development entries, but not research/writing or critique-only entries;
+- implemented now: a development projection receives shared and
+  development entries, but not writing or critique-only entries;
+- implemented now: planning, analysis, review, and maintenance are first-class
+  canonical projection modes;
+- implemented now: task, poll, background, and debug-bundle outputs expose
+  derived `mode_verdict`, `mode_risk`, `mode_risk_detail`, and
+  `review_stage_required` fields without changing persisted task state;
+- implemented now: `offdesk maintenance-report` aggregates those mode risks
+  with approval, resume, provider-capacity, and adaptive-wiki attention
+  summaries as a read-only operator checkpoint;
+- implemented now: `offdesk maintenance-request` creates or reuses scoped
+  `maintenance.<kind>` approvals without executing the requested maintenance
+  action or consuming an approved one-time grant;
 - implemented now: a gate without `--agent-mode` receives shared entries only;
 - implemented now: candidate promotion preserves or explicitly overrides
   candidate mode tags;
@@ -1036,18 +1047,23 @@ Implemented deterministic role-specific benchmark episodes:
 
 - `scripts/offdesk_role_episode_harness.py`;
 - isolated profile fixture under `target/offdesk-role-episode-harness/`;
-- shared, code-development, research-writing, critique, and deprecated entries;
+- shared, planning, development, analysis, writing, critique, review,
+  maintenance, legacy alias, and deprecated entries;
 - real `forager offdesk gate inspect.status` calls for each role scope.
 
 Acceptance checks:
 
 - implemented now: a gate without `--agent-mode` receives shared guidance only;
-- implemented now: code-development receives shared plus code-development
-  guidance, with no research/writing or critique leakage;
-- implemented now: research-writing receives shared plus research/writing
-  guidance, with no code-development or critique leakage;
+- implemented now: development receives shared plus development
+  guidance, with no writing or critique leakage;
+- implemented now: planning, analysis, review, and maintenance receive shared
+  plus matching guidance only;
+- implemented now: writing receives shared plus writing
+  guidance, with no development or critique leakage;
 - implemented now: critique receives shared plus critique guidance, with no
-  code-development or research/writing leakage;
+  development or writing leakage;
+- implemented now: legacy `code_development` and `research_writing` entries
+  project into canonical `development` and `writing` mode queries;
 - implemented now: deprecated entries are absent from every AI projection;
 - implemented now: the harness preserves `results.json` with selected ids and
   the isolated profile path for inspection.
@@ -1058,7 +1074,7 @@ Implemented live model role-specific benchmark episodes:
 
 - `scripts/offdesk_role_llm_episode_harness.py`;
 - isolated profile fixture under `target/offdesk-role-llm-episode-harness/`;
-- role markers in shared, code-development, research-writing, critique, and
+- role markers in shared, development, writing, critique, and
   deprecated entries;
 - execution-facing `forager offdesk gate inspect.status` projection for each
   role scope;
@@ -1067,13 +1083,13 @@ Implemented live model role-specific benchmark episodes:
 Acceptance checks:
 
 - implemented now: no-mode gate projection is shared-only in the live harness;
-- implemented now: code-development, research-writing, and critique projections
+- implemented now: development, writing, and critique projections
   include matching role guidance without leaking other role markers;
 - implemented now: the model response does not emit out-of-scope or deprecated
   role markers;
-- implemented now: code-development stays plan-only without claiming edits or
+- implemented now: development stays plan-only without claiming edits or
   test results;
-- implemented now: research-writing remains pending without RunLog and
+- implemented now: writing remains pending without RunLog and
   validation evidence;
 - implemented now: critique asks for no-option and singlex evidence before
   accepting strategy changes;

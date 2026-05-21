@@ -774,7 +774,7 @@ fn offdesk_gate_json_filters_adaptive_wiki_projection_by_agent_mode() -> Result<
             "--artifact-kind",
             "report",
             "--agent-mode",
-            "code-development",
+            "development",
             "--json",
         ])
         .output()?;
@@ -794,7 +794,7 @@ fn offdesk_gate_json_filters_adaptive_wiki_projection_by_agent_mode() -> Result<
         .iter()
         .find(|entry| entry["id"] == "wiki_code")
         .expect("code wiki");
-    assert_eq!(code["agent_modes"], json!(["code_development"]));
+    assert_eq!(code["agent_modes"], json!(["development"]));
     let runtime_ids = value["adaptive_wiki_runtime"]
         .as_array()
         .expect("runtime wiki projection")
@@ -828,6 +828,34 @@ fn offdesk_gate_json_filters_adaptive_wiki_projection_by_agent_mode() -> Result<
         .map(|entry| entry["id"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(shared_only_ids, vec!["wiki_shared"]);
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "gate",
+            "inspect.status",
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--artifact-kind",
+            "report",
+            "--agent-mode",
+            "review",
+            "--json",
+        ])
+        .output()?;
+    assert!(review_output.status.success());
+    let review: serde_json::Value = serde_json::from_slice(&review_output.stdout)?;
+    let review_ids = review["adaptive_wiki"]
+        .as_array()
+        .expect("review wiki projection")
+        .iter()
+        .map(|entry| entry["id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(review_ids, vec!["wiki_shared"]);
     Ok(())
 }
 
@@ -855,6 +883,8 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
                     "ai_instruction": format!("Confirm project-specific wiki rules before acting token={secret}"),
                     "human_summary": "Human project note",
                     "evidence_refs": ["task:project"],
+                    "core_tags": ["project/project"],
+                    "proposed_tags": ["method/baseline-first"],
                     "confidence": "explicit",
                     "created_at": now,
                     "updated_at": now
@@ -911,6 +941,8 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
                     "origin": "operator_explicit",
                     "source_refs": [format!("approval:approval_one?token={secret}")],
                     "source_hashes": ["sha256:abc"],
+                    "core_tags": ["risk/operator-denial"],
+                    "proposed_tags": ["project/project"],
                     "suggested_scope": {
                         "scope": "project",
                         "scope_ref": "project"
@@ -1176,6 +1208,42 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
         .collect();
     assert!(lint_codes.contains(&"promoted_without_evidence"));
     assert!(lint_codes.contains(&"review_expired"));
+
+    let graph_dir = temp.path().join("adaptive-wiki-graph");
+    let graph_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "graph",
+            "--output",
+            graph_dir.to_str().expect("graph dir"),
+            "--json",
+        ])
+        .output()?;
+    assert!(graph_output.status.success());
+    let graph: serde_json::Value = serde_json::from_slice(&graph_output.stdout)?;
+    assert_eq!(graph["summary"]["entries"], 3);
+    assert_eq!(graph["summary"]["candidates"], 1);
+    assert!(graph["nodes"]
+        .as_array()
+        .expect("graph nodes")
+        .iter()
+        .any(|node| node["id"] == "tag:project/project"));
+    assert!(graph["edges"]
+        .as_array()
+        .expect("graph edges")
+        .iter()
+        .any(|edge| edge["relationship"] == "has_proposed_tag"
+            && edge["target"] == "tag:project/project"));
+    assert!(graph["review_issues"]
+        .as_array()
+        .expect("graph review issues")
+        .iter()
+        .any(|issue| issue["code"] == "proposed_tag_matches_core_prefix"));
+    assert!(graph_dir.join("graph.json").is_file());
+    assert!(graph_dir.join("graph.md").is_file());
+    assert!(!String::from_utf8_lossy(&graph_output.stdout).contains(secret));
+    assert!(!fs::read_to_string(graph_dir.join("graph.md"))?.contains(secret));
 
     let entries_before_episode =
         fs::read_to_string(profile_dir.join("adaptive_wiki_entries.json"))?;
@@ -4027,6 +4095,8 @@ fn offdesk_debug_bundle_json_redacts_legacy_state_and_is_read_only() -> Result<(
             > 0
     );
     assert_eq!(bundle["tasks"][0]["status"], "failed");
+    assert_eq!(bundle["tasks"][0]["mode_verdict"], "unscoped");
+    assert_eq!(bundle["tasks"][0]["mode_risk"], "missing_agent_mode");
     assert_eq!(
         bundle["tasks"][0]["last_provider_fallback"]["current_provider_id"],
         "openai"
@@ -4041,10 +4111,227 @@ fn offdesk_debug_bundle_json_redacts_legacy_state_and_is_read_only() -> Result<(
         bundle["background_runs"][0]["decision"]["phase"],
         "stale_lost_callback"
     );
+    assert_eq!(bundle["background_runs"][0]["mode_verdict"], "unscoped");
+    assert_eq!(
+        bundle["background_runs"][0]["mode_risk"],
+        "missing_agent_mode"
+    );
 
     let stored_approvals = fs::read_to_string(profile_dir.join("pending_action_approvals.json"))?;
     assert!(stored_approvals.contains(secret));
     assert!(!profile_dir.join("action_audit.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_maintenance_report_json_is_read_only_and_summarizes_mode_risks() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let result_path = temp.path().join("writing-result.json");
+    fs::write(&result_path, "{\"ok\":true}\n")?;
+
+    fs::write(
+        profile_dir.join("pending_action_approvals.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "approval_id": "approval_pending",
+                "status": "pending",
+                "scope": "once",
+                "project_key": "project",
+                "request_id": "request",
+                "task_id": "writing-task",
+                "action": "dispatch.runtime",
+                "risk_level": "runtime_mutation",
+                "approval_mode": "operator_required",
+                "preview": "safe preview",
+                "reason": "operator review",
+                "created_at": now,
+                "expires_at": now + Duration::minutes(10),
+                "source_surface": "test"
+            }
+        ]))?,
+    )?;
+
+    let mut completed_task = durable_task_with(
+        "writing-task",
+        "dispatch.runtime",
+        "completed",
+        now,
+        "printf secret",
+        temp.path(),
+    );
+    completed_task["agent_mode"] = json!("writing");
+    completed_task["result_artifact_path"] = json!(result_path.to_str().expect("utf-8 path"));
+    let failed_task = durable_task_with(
+        "unscoped-task",
+        "dispatch.runtime",
+        "failed",
+        now,
+        "printf secret",
+        temp.path(),
+    );
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([completed_task, failed_task]))?,
+    )?;
+
+    fs::write(
+        profile_dir.join("task_resume_state.json"),
+        serde_json::to_string_pretty(&json!([resume_state(now)]))?,
+    )?;
+    fs::write(
+        profile_dir.join("provider_capacity.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "provider_id": "openai",
+                "model": "gpt-test",
+                "status": "cooling_down",
+                "reason": "rate_limit",
+                "cooldown_until": now + Duration::minutes(5),
+                "last_error_summary": "rate limited",
+                "updated_at": now
+            }
+        ]))?,
+    )?;
+    let background_runs_json = serde_json::to_string_pretty(&json!([
+        {
+            "ticket_id": "ticket",
+            "runner_kind": "local_background",
+            "phase": "launched",
+            "runtime_handle_alive": false
+        }
+    ]))?;
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        &background_runs_json,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "maintenance-report", "--json"])
+        .output()?;
+
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["read_only"], true);
+    assert_eq!(report["tasks"]["total"], 2);
+    assert_eq!(report["tasks"]["by_status"]["completed"], 1);
+    assert_eq!(
+        report["tasks"]["mode"]["by_risk"]["operator_review_required"],
+        1
+    );
+    assert_eq!(report["tasks"]["missing_agent_mode"], 1);
+    assert_eq!(report["approvals"]["pending"], 1);
+    assert_eq!(report["resume_states"]["total"], 1);
+    assert_eq!(report["provider_capacity"]["attention"], 1);
+    assert_eq!(report["background_runs"]["total"], 1);
+    assert_eq!(report["background_runs"]["missing_agent_mode"], 1);
+    let action_kinds = report["recommended_actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter_map(|action| action["kind"].as_str())
+        .collect::<Vec<_>>();
+    assert!(action_kinds.contains(&"pending_approval"));
+    assert!(action_kinds.contains(&"operator_review"));
+    assert!(action_kinds.contains(&"missing_agent_mode"));
+    assert!(action_kinds.contains(&"provider_capacity"));
+    assert_eq!(
+        fs::read_to_string(profile_dir.join("background_runs.json"))?,
+        background_runs_json
+    );
+    assert!(!profile_dir.join("action_audit.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_maintenance_request_creates_deduped_approval_without_execution() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let secret = "sk-secretsecretsecretsecret";
+
+    let first = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "maintenance-request",
+            "--kind",
+            "artifact-cleanup",
+            "--project-key",
+            "project",
+            "--request-id",
+            "nightly-review",
+            "--target-id",
+            "debug/bundles",
+            "--preview",
+            &format!("Remove old debug bundles token={secret}"),
+            "--reason",
+            "operator wants to clean reviewed diagnostics",
+            "--json",
+        ])
+        .output()?;
+    assert!(first.status.success());
+    let first_report: serde_json::Value = serde_json::from_slice(&first.stdout)?;
+    assert_eq!(first_report["status"], "pending_approval");
+    assert_eq!(first_report["action"], "maintenance.artifact_cleanup");
+    assert_eq!(first_report["risk_level"], "destructive");
+    assert_eq!(
+        first_report["task_id"],
+        "maintenance-artifact-cleanup-debug-bundles"
+    );
+    assert_eq!(first_report["approval"]["status"], "pending");
+    assert!(!first_report["approval"]["preview"]
+        .as_str()
+        .expect("preview")
+        .contains(secret));
+    let approval_id = first_report["approval"]["approval_id"]
+        .as_str()
+        .expect("approval id")
+        .to_string();
+
+    let second = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "maintenance-request",
+            "--kind",
+            "artifact-cleanup",
+            "--project-key",
+            "project",
+            "--request-id",
+            "nightly-review",
+            "--target-id",
+            "debug/bundles",
+            "--preview",
+            "Remove old debug bundles",
+            "--reason",
+            "operator wants to clean reviewed diagnostics",
+            "--json",
+        ])
+        .output()?;
+    assert!(second.status.success());
+    let second_report: serde_json::Value = serde_json::from_slice(&second.stdout)?;
+    assert_eq!(
+        second_report["approval"]["approval_id"]
+            .as_str()
+            .expect("approval id"),
+        approval_id
+    );
+
+    let approvals: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir.join("pending_action_approvals.json"),
+    )?)?;
+    assert_eq!(approvals.as_array().expect("approvals").len(), 1);
+    assert_eq!(approvals[0]["action"], "maintenance.artifact_cleanup");
+    assert_eq!(approvals[0]["risk_level"], "destructive");
+    assert_eq!(
+        approvals[0]["task_id"],
+        "maintenance-artifact-cleanup-debug-bundles"
+    );
+    assert!(!profile_dir.join("offdesk_tasks.json").exists());
+    assert!(!profile_dir.join("background_runs.json").exists());
     Ok(())
 }
 
@@ -6558,6 +6845,86 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
     let stdout = String::from_utf8_lossy(&resume_output.stdout);
     assert!(stdout.contains("resume_id: resume_"));
     assert!(stdout.contains("evidence: background_probe"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_poll_reconciles_completed_background_task() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let log_path = temp.path().join("background.log");
+    let result_path = temp.path().join("background-result.json");
+    fs::write(&log_path, "completed\n")?;
+    fs::write(&result_path, "{\"ok\":true}\n")?;
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "launched",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": temp.path().to_str().expect("utf-8 path"),
+                "background_ticket_id": "ticket",
+                "attempt_count": 1,
+                "agent_mode": "writing",
+                "log_artifact_path": log_path.to_str().expect("utf-8 path"),
+                "result_artifact_path": result_path.to_str().expect("utf-8 path"),
+                "created_at": now,
+                "updated_at": now
+            }
+        ]))?,
+    )?;
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "ticket_id": "ticket",
+                "task_id": "task",
+                "request_id": "request",
+                "project_key": "project",
+                "agent_mode": "writing",
+                "runner_kind": "local_tmux",
+                "phase": "launched",
+                "log_artifact_path": log_path.to_str().expect("utf-8 path"),
+                "result_artifact_path": result_path.to_str().expect("utf-8 path"),
+                "runtime_handle_alive": false
+            }
+        ]))?,
+    )?;
+
+    let poll_output = forager_command(temp.path())
+        .args(["offdesk", "poll", "--json", "ticket"])
+        .output()?;
+    assert!(poll_output.status.success());
+    let poll: serde_json::Value = serde_json::from_slice(&poll_output.stdout)?;
+    assert_eq!(poll[0]["decision"]["phase"], "completed");
+    assert_eq!(poll[0]["probe"]["result_artifact_present"], true);
+    assert_eq!(poll[0]["mode_verdict"], "evidence_ready");
+    assert_eq!(poll[0]["mode_risk"], "operator_review_required");
+    assert_eq!(poll[0]["review_stage_required"], true);
+
+    let tasks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(profile_dir.join("offdesk_tasks.json"))?)?;
+    assert_eq!(tasks[0]["status"], "completed");
+    assert!(tasks[0]["last_error"].is_null());
+
+    let task_output = forager_command(temp.path())
+        .args(["offdesk", "tasks", "--json"])
+        .output()?;
+    assert!(task_output.status.success());
+    let task_views: serde_json::Value = serde_json::from_slice(&task_output.stdout)?;
+    assert_eq!(task_views[0]["status"], "completed");
+    assert_eq!(task_views[0]["agent_mode"], "writing");
+    assert_eq!(task_views[0]["mode_verdict"], "evidence_ready");
+    assert_eq!(task_views[0]["mode_risk"], "operator_review_required");
+    assert_eq!(task_views[0]["review_stage_required"], true);
     Ok(())
 }
 

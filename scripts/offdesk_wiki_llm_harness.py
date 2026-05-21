@@ -28,7 +28,17 @@ DEFAULT_BASE_URL = os.environ.get("OFFDESK_LLM_BASE_URL", "http://172.16.0.37:11
 DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "gemma4:26b")
 DEFAULT_PROFILE = os.environ.get("OFFDESK_LLM_PROFILE", "twinpaper-adaptive-debug")
 DEFAULT_PROJECT_KEY = "twinpaper"
-IMPLEMENTED_PROJECTION_AGENT_MODES = {"code-development", "research-writing", "critique"}
+IMPLEMENTED_PROJECTION_AGENT_MODES = {
+    "planning",
+    "development",
+    "analysis",
+    "writing",
+    "critique",
+    "review",
+    "maintenance",
+    "code-development",
+    "research-writing",
+}
 MAX_WHY_DEPTH = 6
 WHY_ROW_PATTERNS = (
     re.compile(r"(?:\d+[\.)]|-)\s*(?:why|왜)\s*[:=]", re.IGNORECASE),
@@ -194,7 +204,7 @@ CASES: tuple[Case, ...] = (
     Case(
         name="review_offdesk_stage_contract",
         agent_mode="review",
-        projection_agent_mode="critique",
+        projection_agent_mode="review",
         artifact_kind="review-report",
         budget=4096,
         task=(
@@ -468,7 +478,7 @@ CASES: tuple[Case, ...] = (
     Case(
         name="code_plan_module02",
         agent_mode="development",
-        projection_agent_mode="code-development",
+        projection_agent_mode="development",
         artifact_kind="module02",
         budget=4096,
         task=(
@@ -490,7 +500,7 @@ CASES: tuple[Case, ...] = (
     Case(
         name="research_missing_pending",
         agent_mode="writing",
-        projection_agent_mode="research-writing",
+        projection_agent_mode="writing",
         artifact_kind="report",
         budget=12288,
         task=(
@@ -523,7 +533,7 @@ CASES: tuple[Case, ...] = (
     Case(
         name="research_evidence_provided",
         agent_mode="writing",
-        projection_agent_mode="research-writing",
+        projection_agent_mode="writing",
         artifact_kind="report",
         budget=12288,
         task=(
@@ -604,7 +614,7 @@ CASES: tuple[Case, ...] = (
     Case(
         name="module03_root_entrypoint",
         agent_mode="development",
-        projection_agent_mode="code-development",
+        projection_agent_mode="development",
         artifact_kind="module03",
         budget=4096,
         task=(
@@ -632,7 +642,7 @@ CASES: tuple[Case, ...] = (
     Case(
         name="json_verdict_missing_evidence",
         agent_mode="writing",
-        projection_agent_mode="research-writing",
+        projection_agent_mode="writing",
         artifact_kind="report",
         budget=4096,
         task="Return a machine-readable verdict for reportability.",

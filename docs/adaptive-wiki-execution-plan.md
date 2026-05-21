@@ -104,7 +104,7 @@ Usage audit records:
   "request_id": "request_...",
   "project_key": "project-a",
   "artifact_kind": "report",
-  "agent_mode": "code_development | research_writing | critique",
+  "agent_mode": "planning | development | analysis | writing | critique | review | maintenance",
   "projection_kind": "runtime_probe",
   "activation_mode": "context_only | confirm",
   "created_at": "..."
@@ -238,10 +238,16 @@ Implementation tasks:
   signals.
 - Capture candidates from narrow, auditable places first:
   - approval denial reason (implemented);
+  - deterministic TwinPaper post-run review learning candidates
+    (implemented, candidate-only);
   - rollback or restore-plan reason;
   - failed task with repeated `last_error`;
   - explicit operator preference command once a review command exists.
 - Keep capture opt-in or dry-run visible until the candidate quality is proven.
+- Overnight autonomy runs may write only to the adaptive wiki candidate queue.
+  They must not promote, reject, rescope, deprecate, or rewrite promoted wiki
+  entries. The morning operator/Council review decides whether candidates are
+  promoted, merged, rescoped, or rejected.
 
 Tests:
 
@@ -1075,8 +1081,9 @@ Status: implemented.
 This code slice made adaptive wiki projection aware of the operator-selected
 agent mode:
 
-1. Add `code_development`, `research_writing`, and `critique` mode tags to
-   entries and candidates, with empty tags meaning shared guidance.
+1. Add `planning`, `development`, `analysis`, `writing`, `critique`, `review`,
+   and `maintenance` mode tags to entries and candidates, with empty tags
+   meaning shared guidance.
 2. Add `--agent-mode` filters to gate, launch, enqueue, wiki list/projection,
    strict runtime acknowledgement, review-after, and episode-evaluation paths.
 3. Preserve mode context on queued tasks, background probes, runtime usage
@@ -1110,7 +1117,8 @@ testing:
    Ollama-compatible model endpoints.
 2. Load real `offdesk wiki projection` output per profile, project,
    artifact-kind, and agent-mode scope instead of hardcoding wiki context.
-3. Test code-development, research-writing, critique, JSON verdict, and
+3. Test planning, development, analysis, writing, critique, review,
+   maintenance, JSON verdict, and
    mode-classification contracts with anchor, forbidden-claim, strict JSON, and
    schema checks.
 4. Preserve result artifacts under
@@ -1143,7 +1151,7 @@ execution wiring:
 2. Drive real `forager offdesk gate`, `enqueue`, `tick`, `debug-bundle`, and
    `wiki episode-trace` commands instead of directly calling Rust internals.
 3. Verify safe runtime selection defaults: omitted agent mode projects shared
-   entries only, while explicit `code-development` projects shared plus matching
+   entries only, while explicit `development` projects shared plus matching
    mode-specific entries.
 4. Verify launched probes receive fenced runtime context and usage records, with
    out-of-scope and deprecated entries excluded.
@@ -1181,16 +1189,14 @@ evidence after the first 30-minute TwinPaper autonomy run:
 Status: implemented.
 
 This code slice extended the live LLM harness toward the initial target Offdesk
-agent modes without changing Rust persisted mode values:
+agent modes before the Rust registry migration:
 
-1. Split each harness case's target `agent_mode` from the currently supported
-   Rust `projection_agent_mode`.
-2. Keep `development` mapped to `code-development`, `writing` mapped to
-   `research-writing`, and `critique` mapped directly to `critique`.
-3. Evaluate `planning`, `analysis`, and `maintenance` as target modes while
-   loading shared projection context until the Rust adaptive-wiki registry is
-   migrated. The later `review` target mode reuses `critique` projection during
-   the same migration window.
+1. Split each harness case's target `agent_mode` from the Rust
+   `projection_agent_mode` so the harness can bridge migrations explicitly.
+2. Keep legacy projection aliases available for old profiles while preferring
+   canonical mode names in new cases.
+3. Evaluate `planning`, `analysis`, `review`, and `maintenance` as target modes
+   with explicit scope and authority boundaries.
 4. Add planning, analysis, and maintenance cases with explicit authority
    boundaries: no false launched/completed claims, observation-vs-inference
    separation, and approval-gated cleanup/system changes.
@@ -1270,15 +1276,19 @@ adaptive wiki projection layer:
 
 1. Add `scripts/offdesk_role_episode_harness.py` as a non-CI CLI harness that
    creates an isolated profile under `target/offdesk-role-episode-harness/`.
-2. Write a fixture containing shared, code-development, research-writing,
-   critique, and deprecated adaptive wiki entries.
+2. Write a fixture containing shared, planning, development, analysis, writing,
+   critique, review, maintenance, legacy alias, and deprecated adaptive wiki
+   entries.
 3. Drive real `forager offdesk gate inspect.status` commands instead of calling
    Rust internals directly.
 4. Verify that no `--agent-mode` receives only shared guidance.
-5. Verify that code-development, research-writing, and critique runs receive
+5. Verify that planning, development, analysis, writing, critique, review, and
+   maintenance runs receive
    only shared plus matching role-specific guidance.
-6. Verify that deprecated entries do not appear in any projection.
-7. Preserve `results.json` with the isolated profile path and per-role selected
+6. Verify that legacy `code_development` and `research_writing` entries still
+   project into canonical `development` and `writing` runs.
+7. Verify that deprecated entries do not appear in any projection.
+8. Preserve `results.json` with the isolated profile path and per-role selected
    ids so failed scope-leakage checks are inspectable.
 
 ## Forty-Fifth Implementation Slice
@@ -1290,7 +1300,7 @@ This code slice added live model role-specific behavior episodes:
 1. Add `scripts/offdesk_role_llm_episode_harness.py` as an opt-in LLM harness
    that creates an isolated profile under
    `target/offdesk-role-llm-episode-harness/`.
-2. Use role markers in shared, code-development, research-writing, critique,
+2. Use role markers in shared, development, writing, critique,
    and deprecated adaptive wiki fixture entries.
 3. Load execution-facing context through real `forager offdesk gate
    inspect.status` calls so no-mode behavior matches runtime shared-only
@@ -1299,7 +1309,7 @@ This code slice added live model role-specific behavior episodes:
    default.
 5. Check projection leakage before the model call and response leakage after the
    model call.
-6. Require role-appropriate behavior: code stays plan-only, research-writing
+6. Require role-appropriate behavior: code stays plan-only, writing
    remains pending without RunLog and validation evidence, and critique asks for
    no-option plus singlex before strategy changes.
 7. Check that the model keeps adaptive wiki guidance as context only, not
@@ -1388,7 +1398,7 @@ model work:
    `prepared_task.json`.
 5. Pass the generated bundle and review into
    `scripts/offdesk_twinpaper_autonomy_workload.py`.
-6. Add a workload evidence-state case before research/writing/critique cases so
+6. Add a workload evidence-state case before writing/critique cases so
    the model must acknowledge current baseline evidence instead of relying on a
    stale `RunLog.md` prefix.
 7. Store full model responses under `responses/` while keeping `progress.jsonl`
@@ -1461,6 +1471,86 @@ errors:
 5. Verify the full prompt-response-review path with a short qwen3-coder-next
    smoke run: `5/5` workload cases passed and automatic result review returned
    `decision=clean`.
+
+## Fifty-Third Implementation Slice
+
+Status: implemented.
+
+This code slice lets overnight TwinPaper autonomy runs preserve wiki-learning
+signals without giving the workload permission to mutate governed knowledge:
+
+1. Add `scripts/ingest_twinpaper_review_candidates.py` to convert
+   deterministic `result_review/results.json` learning candidates into
+   `adaptive_wiki_candidates.json`.
+2. Keep ingestion candidate-only: it never promotes, rejects, rescope edits,
+   deprecates, or rewrites promoted adaptive wiki entries.
+3. Merge repeated learning signals by kind, scope, scope ref, and normalized
+   claim, incrementing `occurrence_count` while preserving evidence refs and
+   source hashes.
+4. Add `--wiki-candidate-mode` and `--wiki-candidate-profile-dir` to
+   `scripts/offdesk_twinpaper_autonomy_workload.py`, recording
+   `result_review/wiki_candidate_ingest.json` and exposing the ingest result in
+   `result.json` and `REPORT.md`.
+5. Make `scripts/prepare_twinpaper_offdesk_task.py` default to candidate mode
+   for overnight TwinPaper runs, with manifest safety flags that explicitly
+   allow only the adaptive wiki candidate queue as an out-of-run-directory
+   write.
+6. Verify the existing overnight review artifact can create one safe candidate:
+   `Open-explore critique can confuse exploratory evidence with
+   promotion-ready direction-review evidence.`
+
+## Fifty-Fourth Implementation Slice
+
+Status: implemented.
+
+This code slice adds the first safe form of Council-driven temporary wiki
+promotion for overnight runs:
+
+1. Extend `scripts/offdesk_episode_council_harness.py` so reviewer prompts can
+   inspect current adaptive wiki candidates and the current run-local trial
+   overlay.
+2. Add `wiki_candidate_decisions` to reviewer and consensus output. Consensus
+   only carries candidate decisions when both reviewers are available and agree
+   on the same candidate decision.
+3. Add `trial_promote` as a Council decision that means provisional
+   `context_only` use during the current overnight campaign, not canonical wiki
+   promotion.
+4. Add `--wiki-trial-mode council` to
+   `scripts/offdesk_twinpaper_autonomy_workload.py`. Agreed trial promotions
+   are written to `adaptive_wiki_trial_entries.json` under the workload output
+   directory.
+5. Inject active trial entries into later episode prompts inside a separate
+   `<provisional-adaptive-wiki-context>` fenced block.
+6. Keep the overlay non-authoritative: it records
+   `promotion_allowed=false`, `canonical_promotion_allowed=false`, expires at
+   the campaign target time, and cannot mutate promoted entries, commands,
+   providers, models, workdirs, approvals, or files.
+7. Update `scripts/prepare_twinpaper_offdesk_task.py` so prepared overnight
+   tasks can enable Council provisional trials while still exposing the exact
+   trial store path and safety flags in `prepared_task.json`.
+
+## Fifty-Fifth Implementation Slice
+
+Status: implemented.
+
+This code slice adds the morning Ondesk lifecycle review surface:
+
+1. Add `scripts/review_twinpaper_morning_wiki.py`, a read-only report builder
+   for completed TwinPaper workload `result.json` artifacts.
+2. Load the profile candidate store, run-local provisional trial overlay,
+   Council records, trial usage ids on episode records, and deterministic
+   post-run review output.
+3. Present candidate and provisional rows as one lifecycle queue with
+   `lifecycle_status`, `activation_mode`, `confidence`, `evidence_states`,
+   scope, agent modes, and recommendation metadata.
+4. Keep evaluation optional: the report can recommend
+   `promote_context_only` for Council-agreed provisional rows even when there
+   is no effect evaluation, while preserving `evaluation_required=false`.
+5. Keep the report non-mutating with `read_only=true` and
+   `canonical_mutation_performed=false`.
+6. Add a `morning_wiki_review` command and artifact paths to prepared
+   TwinPaper manifests so the operator can run Ondesk review immediately after
+   an overnight task finishes.
 
 ## Verification Commands
 

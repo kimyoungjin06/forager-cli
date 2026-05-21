@@ -28,8 +28,13 @@ The current baseline includes these shipped surfaces:
   usage audit records, governance lint, review proposals, procedure runbook
   refs, and one-way markdown export;
 - strict runtime wiki policy acknowledgements for review-expired entries;
-- agent-mode scoped wiki projection for code development, research/writing, and
-  critique.
+- agent-mode scoped wiki projection for planning, development, analysis,
+  writing, critique, review, and maintenance;
+- read-only Offdesk maintenance reporting for task/probe mode risks, pending
+  approvals, resume records, provider capacity, and adaptive wiki attention
+  counters;
+- scoped maintenance approval requests for cleanup, restart, recovery,
+  provider-capacity, and wiki-maintenance actions without automatic execution.
 
 The baseline does not include autonomous wiki mutation, restore execution,
 provider fallback without approval, upload/export integrations for debug
@@ -51,6 +56,12 @@ bundles, or automatic agent-mode inference.
   default.
 - Mode tags filter context only. They do not authorize command execution,
   provider/model retargeting, file mutation, or approval resolution.
+- Long-running TwinPaper Offdesk workloads must declare system-critical guards:
+  no file deletion or cleanup, reboot/shutdown/power-state changes, service or
+  system configuration changes, storage/RAID/NVMe/mount changes, package or
+  permission changes, process or runner interruption, network/firewall/SSH
+  changes, kernel/driver/firmware/BIOS changes, or any equivalent host mutation
+  without explicit operator approval.
 - Debug bundles and operator JSON must remain sanitized and read-only unless an
   explicit export path is requested.
 
@@ -91,6 +102,15 @@ forager offdesk restore-plan <mutation-id> --json
 Inspect sanitized diagnostics:
 
 ```bash
+forager offdesk maintenance-report --json
+forager offdesk maintenance-request \
+  --kind artifact-cleanup \
+  --project-key <project> \
+  --request-id <request> \
+  --target-id <target> \
+  --preview "<reviewed maintenance action>" \
+  --reason "<why approval is needed>" \
+  --json
 forager offdesk debug-bundle --json
 forager offdesk debug-bundle --export
 forager offdesk debug-bundle --output <path>
@@ -102,8 +122,9 @@ Inspect adaptive wiki state:
 forager offdesk wiki candidates --json
 forager offdesk wiki entries --json
 forager offdesk wiki projection --project-key <project> --artifact-kind <kind> --json
-forager offdesk wiki projection --project-key <project> --artifact-kind <kind> --agent-mode code-development --json
+forager offdesk wiki projection --project-key <project> --artifact-kind <kind> --agent-mode development --json
 forager offdesk wiki lint --json
+forager offdesk wiki graph --json
 ```
 
 Review strict runtime wiki policy:
@@ -135,6 +156,7 @@ Export human-facing wiki pages:
 ```bash
 forager offdesk wiki export-markdown --output <dir> --json
 forager offdesk wiki export-markdown --output <dir> --dry-run --json
+forager offdesk wiki graph --output <dir> --json
 ```
 
 ## Done And Deferred
@@ -153,6 +175,14 @@ Completed in this baseline:
 - adaptive wiki review, proposal, recurrence, promotion-chain, markdown export,
   and agent-mode projection surfaces;
 - safe execution default for missing agent mode.
+- read-only maintenance report that aggregates mode risk, approval, resume,
+  provider-capacity, and wiki attention state without polling runners or
+  mutating task files.
+- maintenance approval requests that deduplicate matching pending approvals and
+  leave the actual maintenance operation as an explicit follow-up command.
+- system-critical hard gates for prepared TwinPaper overnight workloads,
+  including deletion, reboot, service, storage, permission, process, network,
+  kernel, driver, firmware, and BIOS mutation constraints.
 
 Deferred intentionally:
 

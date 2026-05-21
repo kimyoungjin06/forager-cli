@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Deterministic role-specific adaptive-wiki projection episode harness.
+"""Deterministic mode-specific adaptive-wiki projection episode harness.
 
 This harness does not call a model. It creates an isolated profile with shared
 and mode-specific adaptive wiki entries, drives real `forager offdesk gate`
-commands, and checks that role-specific guidance does not leak across current
-persisted adaptive-wiki modes.
+commands, and checks that mode-specific guidance does not leak across Offdesk's
+canonical mode vocabulary. Legacy persisted mode values are included as a
+backward-compatibility check.
 """
 
 from __future__ import annotations
@@ -141,31 +142,91 @@ def write_fixture(profile_path: pathlib.Path, args: argparse.Namespace) -> None:
                     "updated_at": now,
                 },
                 {
-                    "id": "wiki_role_code",
+                    "id": "wiki_role_planning",
+                    "kind": "procedure",
+                    "scope": "artifact_kind",
+                    "scope_ref": args.artifact_kind,
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["planning"],
+                    "claim": "Planning role rule",
+                    "ai_instruction": "Planning guidance only.",
+                    "evidence_refs": ["task:planning"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "wiki_role_development",
+                    "kind": "procedure",
+                    "scope": "artifact_kind",
+                    "scope_ref": args.artifact_kind,
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["development"],
+                    "claim": "Development role rule",
+                    "ai_instruction": "Development guidance only.",
+                    "evidence_refs": ["task:development"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "wiki_role_legacy_code",
                     "kind": "procedure",
                     "scope": "artifact_kind",
                     "scope_ref": args.artifact_kind,
                     "status": "promoted",
                     "activation_mode": "confirm",
                     "agent_modes": ["code_development"],
-                    "claim": "Code role rule",
-                    "ai_instruction": "Code-development guidance only.",
-                    "evidence_refs": ["task:code"],
+                    "claim": "Legacy code role rule",
+                    "ai_instruction": "Legacy code-development guidance only.",
+                    "evidence_refs": ["task:legacy-code"],
                     "confidence": "explicit",
                     "created_at": now,
                     "updated_at": now,
                 },
                 {
-                    "id": "wiki_role_research",
+                    "id": "wiki_role_analysis",
+                    "kind": "procedure",
+                    "scope": "artifact_kind",
+                    "scope_ref": args.artifact_kind,
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["analysis"],
+                    "claim": "Analysis role rule",
+                    "ai_instruction": "Analysis guidance only.",
+                    "evidence_refs": ["task:analysis"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "wiki_role_writing",
+                    "kind": "procedure",
+                    "scope": "artifact_kind",
+                    "scope_ref": args.artifact_kind,
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["writing"],
+                    "claim": "Writing role rule",
+                    "ai_instruction": "Writing guidance only.",
+                    "evidence_refs": ["task:writing"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "wiki_role_legacy_research",
                     "kind": "procedure",
                     "scope": "artifact_kind",
                     "scope_ref": args.artifact_kind,
                     "status": "promoted",
                     "activation_mode": "confirm",
                     "agent_modes": ["research_writing"],
-                    "claim": "Research role rule",
-                    "ai_instruction": "Research/writing guidance only.",
-                    "evidence_refs": ["task:research"],
+                    "claim": "Legacy research role rule",
+                    "ai_instruction": "Legacy research/writing guidance only.",
+                    "evidence_refs": ["task:legacy-research"],
                     "confidence": "explicit",
                     "created_at": now,
                     "updated_at": now,
@@ -181,6 +242,36 @@ def write_fixture(profile_path: pathlib.Path, args: argparse.Namespace) -> None:
                     "claim": "Critique role rule",
                     "ai_instruction": "Critique/review guidance only.",
                     "evidence_refs": ["task:critique"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "wiki_role_review",
+                    "kind": "procedure",
+                    "scope": "artifact_kind",
+                    "scope_ref": args.artifact_kind,
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["review"],
+                    "claim": "Review role rule",
+                    "ai_instruction": "Review guidance only.",
+                    "evidence_refs": ["task:review"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "wiki_role_maintenance",
+                    "kind": "procedure",
+                    "scope": "artifact_kind",
+                    "scope_ref": args.artifact_kind,
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["maintenance"],
+                    "claim": "Maintenance role rule",
+                    "ai_instruction": "Maintenance guidance only.",
+                    "evidence_refs": ["task:maintenance"],
                     "confidence": "explicit",
                     "created_at": now,
                     "updated_at": now,
@@ -235,9 +326,19 @@ def run_episode(args: argparse.Namespace, base_cmd: list[str], work_root: pathli
 
     cases = [
         (None, ["wiki_role_shared"]),
-        ("code-development", ["wiki_role_code", "wiki_role_shared"]),
-        ("research-writing", ["wiki_role_research", "wiki_role_shared"]),
+        ("planning", ["wiki_role_planning", "wiki_role_shared"]),
+        (
+            "development",
+            ["wiki_role_development", "wiki_role_legacy_code", "wiki_role_shared"],
+        ),
+        ("analysis", ["wiki_role_analysis", "wiki_role_shared"]),
+        (
+            "writing",
+            ["wiki_role_legacy_research", "wiki_role_shared", "wiki_role_writing"],
+        ),
         ("critique", ["wiki_role_critique", "wiki_role_shared"]),
+        ("review", ["wiki_role_review", "wiki_role_shared"]),
+        ("maintenance", ["wiki_role_maintenance", "wiki_role_shared"]),
     ]
     results: dict[str, Any] = {}
     for agent_mode, expected_ids in cases:
@@ -263,7 +364,18 @@ def run_episode(args: argparse.Namespace, base_cmd: list[str], work_root: pathli
 
     all_selected = {entry_id for result in results.values() for entry_id in result["ids"]}
     require(
-        all_selected == {"wiki_role_shared", "wiki_role_code", "wiki_role_research", "wiki_role_critique"},
+        all_selected == {
+            "wiki_role_shared",
+            "wiki_role_planning",
+            "wiki_role_development",
+            "wiki_role_legacy_code",
+            "wiki_role_analysis",
+            "wiki_role_writing",
+            "wiki_role_legacy_research",
+            "wiki_role_critique",
+            "wiki_role_review",
+            "wiki_role_maintenance",
+        },
         "episode_exercises_all_role_specific_entries",
         f"selected={sorted(all_selected)}",
         steps,

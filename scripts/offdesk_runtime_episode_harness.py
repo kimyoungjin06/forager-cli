@@ -28,7 +28,7 @@ DEFAULT_REQUEST_ID = "runtime-harness-request"
 DEFAULT_TASK_ID = "runtime-harness-task"
 DEFAULT_PROFILE = "runtime-episode-harness"
 DEFAULT_ARTIFACT_KIND = "report"
-DEFAULT_AGENT_MODE = "code-development"
+DEFAULT_AGENT_MODE = "development"
 SECRET = "sk-secretsecretsecretsecret"
 
 
@@ -190,9 +190,9 @@ def write_fixture(profile_path: pathlib.Path, brief_path: pathlib.Path, args: ar
                     "scope_ref": args.project_key,
                     "status": "promoted",
                     "activation_mode": "context_only",
-                    "agent_modes": ["code_development"],
-                    "claim": "Code runtime rule",
-                    "ai_instruction": "For code-development runtime, prefer module-local scripts.",
+                    "agent_modes": ["development"],
+                    "claim": "Development runtime rule",
+                    "ai_instruction": "For development runtime, prefer module-local scripts.",
                     "human_summary": "Human-only code note",
                     "evidence_refs": ["task:code"],
                     "confidence": "explicit",
@@ -206,9 +206,9 @@ def write_fixture(profile_path: pathlib.Path, brief_path: pathlib.Path, args: ar
                     "scope_ref": args.project_key,
                     "status": "promoted",
                     "activation_mode": "confirm",
-                    "agent_modes": ["research_writing"],
+                    "agent_modes": ["writing"],
                     "claim": "Research runtime rule",
-                    "ai_instruction": "Do not inject this into code-development runtime.",
+                    "ai_instruction": "Do not inject this into development runtime.",
                     "human_summary": "Human-only research note",
                     "evidence_refs": ["task:research"],
                     "confidence": "explicit",
@@ -399,7 +399,7 @@ def run_runtime_episode(args: argparse.Namespace, base_cmd: list[str], work_root
             and row["request_id"] == args.request_id
             and row["project_key"] == args.project_key
             and row["artifact_kind"] == args.artifact_kind
-            and row["agent_mode"] == "code_development"
+            and row["agent_mode"] == "development"
             and row["projection_kind"] == "runtime_probe"
             and row["projection_policy"]["review_expired"] == "warn"
             for row in usage

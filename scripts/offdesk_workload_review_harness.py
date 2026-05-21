@@ -20,6 +20,18 @@ from typing import Any
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CASE_NAME = "workload_manifest_review"
 ALLOWED_LONG_RUNNER = "local-tmux"
+SYSTEM_CRITICAL_SAFETY_KEYS = (
+    "model_responses_not_executed",
+    "no_file_deletion_or_cleanup",
+    "no_reboot_shutdown_or_power_state_change",
+    "no_service_restart_or_system_config_change",
+    "no_storage_raid_nvme_or_mount_change",
+    "no_package_install_or_permission_change",
+    "no_process_termination_or_runner_interference",
+    "no_network_firewall_or_remote_access_change",
+    "no_kernel_driver_firmware_or_bios_change",
+    "operator_approval_required_for_system_mutation",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,6 +86,9 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         blockers.append("repo_read_only_not_confirmed")
     if not as_bool(safety.get("writes_only_under_out_dir")):
         blockers.append("writes_only_under_out_dir_not_confirmed")
+    for key in SYSTEM_CRITICAL_SAFETY_KEYS:
+        if not as_bool(safety.get(key)):
+            blockers.append(f"system_critical_constraint_missing:{key}")
     if safety.get("capability") != "dispatch.runtime":
         blockers.append("capability_not_dispatch_runtime")
     if not as_bool(safety.get("approval_required_before_dispatch")):
@@ -85,8 +100,29 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
 
     runner = safety.get("runner")
     duration_minutes = float(manifest.get("duration_minutes") or 0)
+    schedule = manifest.get("schedule", {})
+    if not isinstance(schedule, dict):
+        schedule = {}
+    if schedule.get("mode") == "run_until_local":
+        if not schedule.get("target_at") or not schedule.get("timezone"):
+            blockers.append("run_until_schedule_missing_target")
+        if float(schedule.get("duration_minutes") or 0) <= 0:
+            blockers.append("run_until_schedule_non_positive_duration")
     if duration_minutes >= 5 and runner != ALLOWED_LONG_RUNNER:
         blockers.append("long_workload_not_using_local_tmux")
+
+    council = manifest.get("council", {})
+    if not isinstance(council, dict):
+        council = {}
+    if safety.get("episode_council_between_episodes") is True:
+        if council.get("mode") in (None, "disabled"):
+            blockers.append("episode_council_enabled_without_mode")
+        if "gpt" not in council.get("reviewers", []) or "claude" not in council.get("reviewers", []):
+            blockers.append("episode_council_missing_gpt_or_claude_reviewer")
+        if int(council.get("every") or 0) <= 0:
+            blockers.append("episode_council_invalid_frequency")
+        if council.get("mode") == "command" and council.get("ready") is not True:
+            blockers.append("episode_council_command_not_ready")
 
     role_gate = manifest.get("preflight", {}).get("role_gate", {})
     if not isinstance(role_gate, dict):
@@ -192,6 +228,12 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
     counterarguments.append(
         "The evidence bundle confirms available artifacts and current status only; the workload must still preserve full model responses for quality review."
     )
+    counterarguments.append(
+        "System-critical constraints must remain hard gates: no file cleanup, reboot/shutdown, service restart, storage/NVMe/RAID mutation, package install, permission change, process termination, runner interruption, network/firewall/SSH change, kernel/driver/firmware change, or BIOS change without explicit operator approval."
+    )
+    counterarguments.append(
+        "Episode council review changes the next-step decision only; it does not authorize mutation, approval, cleanup, or provider retargeting."
+    )
     if missing_evidence:
         counterarguments.append("Some artifact paths are absent or incomplete in the prepared manifest.")
 
@@ -211,6 +253,16 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
             "separate_manifest_review",
             "deterministic_evidence_bundle_review",
             "local_tmux_for_long_workload",
+            "runtime_schedule_until_target_when_configured",
+            "system_critical_no_file_deletion_or_cleanup",
+            "system_critical_no_reboot_shutdown_or_power_state_change",
+            "system_critical_no_service_restart_or_system_config_change",
+            "system_critical_no_storage_raid_nvme_or_mount_change",
+            "system_critical_no_package_install_or_permission_change",
+            "system_critical_no_process_termination_or_runner_interference",
+            "system_critical_no_network_firewall_or_remote_access_change",
+            "system_critical_no_kernel_driver_firmware_or_bios_change",
+            "episode_council_between_episodes_when_enabled",
         ],
         "approval_gates": [
             "dispatch.runtime approval before tick launches the workload",

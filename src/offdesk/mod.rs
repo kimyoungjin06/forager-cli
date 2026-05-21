@@ -9,6 +9,7 @@ pub mod approval;
 pub mod background;
 pub mod capability;
 pub mod control_loop;
+pub mod mode_contract;
 pub mod mutation;
 pub mod provider;
 pub mod redaction;
@@ -19,33 +20,34 @@ pub mod task_queue;
 pub mod tick_lock;
 
 pub use adaptive_wiki::{
-    build_ai_projection, build_ai_projection_report, build_human_projection,
-    build_runtime_projection, build_usage_records, build_usage_records_with_policy,
-    AdaptiveWikiActivationMode, AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter,
-    AdaptiveWikiAiProjection, AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord,
-    AdaptiveWikiCandidate, AdaptiveWikiCandidateInput, AdaptiveWikiCandidateState,
-    AdaptiveWikiConfidence, AdaptiveWikiCorrectionKind, AdaptiveWikiCorrectionRecord,
-    AdaptiveWikiCorrectionRecurrenceAssessment, AdaptiveWikiCorrectionRecurrenceReport,
-    AdaptiveWikiCorrectionRecurrenceSummary, AdaptiveWikiEntry, AdaptiveWikiEntryState,
-    AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiEpisodeEvaluationSummary,
-    AdaptiveWikiEpisodeTraceStep, AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry,
-    AdaptiveWikiHumanProjection, AdaptiveWikiKind, AdaptiveWikiLintIssue, AdaptiveWikiLintReport,
-    AdaptiveWikiLintSeverity, AdaptiveWikiLintSummary, AdaptiveWikiLiveEpisodeEvent,
-    AdaptiveWikiLiveEpisodeEventKind, AdaptiveWikiLiveEpisodeFilter,
-    AdaptiveWikiLiveEpisodeSummary, AdaptiveWikiLiveEpisodeTraceReport,
-    AdaptiveWikiMarkdownExportFile, AdaptiveWikiMarkdownExportReport,
-    AdaptiveWikiMarkdownExportSummary, AdaptiveWikiOrigin, AdaptiveWikiProjectionBudget,
-    AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionComparisonSummary,
-    AdaptiveWikiProjectionConflict, AdaptiveWikiProjectionConflictPolarity,
-    AdaptiveWikiProjectionPolicy, AdaptiveWikiProjectionRejection,
-    AdaptiveWikiProjectionRejectionReason, AdaptiveWikiProjectionReport,
-    AdaptiveWikiProjectionReviewExpired, AdaptiveWikiProjectionReviewExpiredPolicy,
-    AdaptiveWikiProjectionSummary, AdaptiveWikiPromotionEvidenceChainReport,
-    AdaptiveWikiPromotionEvidenceChainSummary, AdaptiveWikiQuery, AdaptiveWikiReviewProposal,
-    AdaptiveWikiReviewProposalAction, AdaptiveWikiReviewProposalDecision,
-    AdaptiveWikiReviewProposalEventRecord, AdaptiveWikiReviewProposalLifecycle,
-    AdaptiveWikiReviewQueueFilter, AdaptiveWikiReviewReport, AdaptiveWikiReviewReportSummary,
-    AdaptiveWikiReviewRisk, AdaptiveWikiRuntimePolicyAckScopeMode,
+    build_ai_projection, build_ai_projection_report, build_graph_export_files,
+    build_human_projection, build_runtime_projection, build_usage_records,
+    build_usage_records_with_policy, AdaptiveWikiActivationMode, AdaptiveWikiAgentMode,
+    AdaptiveWikiAgentModeFilter, AdaptiveWikiAiProjection, AdaptiveWikiAuditAction,
+    AdaptiveWikiAuditRecord, AdaptiveWikiCandidate, AdaptiveWikiCandidateInput,
+    AdaptiveWikiCandidateState, AdaptiveWikiConfidence, AdaptiveWikiCorrectionKind,
+    AdaptiveWikiCorrectionRecord, AdaptiveWikiCorrectionRecurrenceAssessment,
+    AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiCorrectionRecurrenceSummary,
+    AdaptiveWikiEntry, AdaptiveWikiEntryState, AdaptiveWikiEpisodeEvaluationReport,
+    AdaptiveWikiEpisodeEvaluationSummary, AdaptiveWikiEpisodeTraceStep, AdaptiveWikiGraphEdge,
+    AdaptiveWikiGraphNode, AdaptiveWikiGraphReport, AdaptiveWikiGraphSummary,
+    AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiHumanProjection,
+    AdaptiveWikiKind, AdaptiveWikiLintIssue, AdaptiveWikiLintReport, AdaptiveWikiLintSeverity,
+    AdaptiveWikiLintSummary, AdaptiveWikiLiveEpisodeEvent, AdaptiveWikiLiveEpisodeEventKind,
+    AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeSummary,
+    AdaptiveWikiLiveEpisodeTraceReport, AdaptiveWikiMarkdownExportFile,
+    AdaptiveWikiMarkdownExportReport, AdaptiveWikiMarkdownExportSummary, AdaptiveWikiOrigin,
+    AdaptiveWikiProjectionBudget, AdaptiveWikiProjectionComparisonReport,
+    AdaptiveWikiProjectionComparisonSummary, AdaptiveWikiProjectionConflict,
+    AdaptiveWikiProjectionConflictPolarity, AdaptiveWikiProjectionPolicy,
+    AdaptiveWikiProjectionRejection, AdaptiveWikiProjectionRejectionReason,
+    AdaptiveWikiProjectionReport, AdaptiveWikiProjectionReviewExpired,
+    AdaptiveWikiProjectionReviewExpiredPolicy, AdaptiveWikiProjectionSummary,
+    AdaptiveWikiPromotionEvidenceChainReport, AdaptiveWikiPromotionEvidenceChainSummary,
+    AdaptiveWikiQuery, AdaptiveWikiReviewProposal, AdaptiveWikiReviewProposalAction,
+    AdaptiveWikiReviewProposalDecision, AdaptiveWikiReviewProposalEventRecord,
+    AdaptiveWikiReviewProposalLifecycle, AdaptiveWikiReviewQueueFilter, AdaptiveWikiReviewReport,
+    AdaptiveWikiReviewReportSummary, AdaptiveWikiReviewRisk, AdaptiveWikiRuntimePolicyAckScopeMode,
     AdaptiveWikiRuntimePolicyAcknowledgement, AdaptiveWikiRuntimePolicyDecision,
     AdaptiveWikiRuntimePolicyDecisionStatus, AdaptiveWikiRuntimeProjection,
     AdaptiveWikiRuntimeProjectionResolution, AdaptiveWikiScope, AdaptiveWikiScopeSuggestion,
@@ -66,8 +68,12 @@ pub use capability::{
     CapabilityArtifactRef, CapabilityDescriptor, CapabilityRegistry, CapabilityRisk,
 };
 pub use control_loop::{
-    load_offdesk_status_summary, run_offdesk_tick, OffdeskStatusSummary, OffdeskTickOptions,
-    OffdeskTickReport,
+    load_offdesk_status_summary, reconcile_tasks_with_background_outcomes, run_offdesk_tick,
+    OffdeskStatusSummary, OffdeskTickOptions, OffdeskTickReport,
+};
+pub use mode_contract::{
+    assess_offdesk_mode, mode_requires_separate_review, OffdeskModeAssessment,
+    OffdeskModeLifecycle, OffdeskModeRisk, OffdeskModeVerdict,
 };
 pub use mutation::{
     MutationRestoreOperation, MutationRestorePlan, MutationSnapshot, MutationSnapshotRequest,

@@ -20,8 +20,8 @@ Target canonical modes:
 | `review` | Review | Check a draft artifact before Offdesk proceeds to execution or completion. |
 | `maintenance` | Maintenance | Curate wiki/docs and inspect machine, repo, and Offdesk health. |
 
-Current Rust adaptive-wiki code still exposes the earlier subset
-`code_development`, `research_writing`, and `critique`. The migration path is:
+Rust adaptive-wiki and CLI code now expose the canonical mode vocabulary above.
+Legacy persisted values are still accepted while loading older profiles:
 
 | Current value | Target value |
 |---|---|
@@ -29,13 +29,9 @@ Current Rust adaptive-wiki code still exposes the earlier subset
 | `research_writing` | `writing` |
 | `critique` | `critique` |
 
-`planning`, `analysis`, `review`, and `maintenance` should be added through a
-registry and alias layer before changing persisted enum values. During
-migration, existing aliases such as `code`, `coding`, `research`, and
-`editing` should continue to parse. The plain alias `review` should move to the
-new target review mode rather than remaining an alias for `critique`; legacy
-profiles may still project review-mode tasks through the current `critique`
-wiki context until the Rust registry is migrated.
+Existing CLI aliases such as `code`, `coding`, `research`, and `editing`
+continue to parse. The plain alias `review` now resolves to the canonical
+`review` mode rather than `critique`.
 
 ## Shared Rules
 
@@ -102,6 +98,13 @@ The review stage is read-only by default. It must not mutate files, approve
 actions, launch commands, change provider/model routing, promote wiki entries,
 or clean artifacts. If review finds a blocker, the next action is a revised
 plan or operator-visible pending state, not silent execution.
+
+Episode-to-episode Council review is a stricter form of the same boundary. A
+Council may compare independent GPT and Claude reviewer outputs and decide
+whether the next episode should `continue`, `revise`, `pivot`, `handoff`,
+`block`, or require approval. The Council remains read-only: it changes only
+the next-step decision and does not authorize mutation, approval, cleanup,
+provider retargeting, or wiki promotion.
 
 Review lenses are mode-specific:
 
@@ -284,7 +287,9 @@ reporting, and cleanup proposals.
 Forbidden by default:
 Promoting/deprecating/rescoping wiki entries, deleting or moving files,
 restarting services, changing system settings, modifying RAID/NVMe state,
-approving pending actions, or cleaning artifacts without explicit approval.
+changing mounts, changing network/firewall/SSH access, changing kernel modules,
+drivers, firmware, or BIOS settings, terminating processes, approving pending
+actions, or cleaning artifacts without explicit approval.
 
 Expected artifacts:
 Wiki cleanup candidates, stale entry report, conflicting-entry report,
@@ -348,9 +353,19 @@ Reports should include:
 3. Extend the TwinPaper autonomy workload to report `mode_coverage` and
    `mode_failures`.
 4. Add a Rust-side mode registry and parser aliases without changing old
-   persisted data.
+   persisted data. Implemented in the adaptive-wiki mode enum and CLI parser.
 5. Migrate adaptive-wiki mode values with serde backward compatibility.
+   Implemented: legacy `code_development` and `research_writing` load as
+   canonical `development` and `writing`.
 6. Surface `mode_verdict` and `mode_risk` in Offdesk task, poll, and
-   debug-bundle outputs.
-7. Add approval-gated maintenance actions only after read-only maintenance
-   reports are stable.
+   debug-bundle outputs. Implemented as a derived operator-facing assessment
+   from task/probe state, without adding new persisted task fields or granting
+   authority.
+7. Add a read-only maintenance report that summarizes task/probe mode risks,
+   approvals, resume artifacts, provider capacity, and wiki attention signals.
+   Implemented as `forager offdesk maintenance-report`, without polling
+   background runners or writing task state.
+8. Add approval-gated maintenance actions only after read-only maintenance
+   reports are stable. Implemented as `forager offdesk maintenance-request`,
+   which creates or reuses a scoped `maintenance.<kind>` approval row without
+   executing cleanup, restart, recovery, or wiki mutation commands.
