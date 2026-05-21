@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,7 @@ const CAPTURE_FILE: &str = "capture.json";
 const MAX_CAPTURE_CHARS: usize = 30_000;
 const MAX_GIT_CHARS: usize = 12_000;
 const MAX_PROMPT_CHARS: usize = 40_000;
+const MAX_CLOSEOUT_CHARS: usize = 16_000;
 const MAX_RECENT_NOTES: usize = 20;
 
 #[derive(Subcommand)]
@@ -218,8 +220,29 @@ struct PromptPackageOutput {
     capture_id: Option<String>,
     note_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    latest_closeout: Option<OndeskCloseoutSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     output_path: Option<String>,
     content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OndeskCloseoutSummary {
+    closeout_id: String,
+    generated_at: String,
+    artifact_dir: String,
+    return_package_path: String,
+    return_package_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_verdict: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_record_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OndeskCloseoutPackage {
+    summary: OndeskCloseoutSummary,
+    return_package: String,
 }
 
 struct ResolvedOndeskContext {
@@ -337,7 +360,10 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
         prompt_package_path: prompt_package_path.display().to_string(),
     };
 
-    let package = render_prompt_package(PromptPackageContext::Capture(&record));
+    let package = render_prompt_package(PromptPackageContext::Capture {
+        capture: &record,
+        closeout: None,
+    });
     fs::write(&capture_path, serde_json::to_string_pretty(&record)?)?;
     fs::write(&prompt_package_path, package)?;
 
@@ -369,34 +395,48 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
 async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
     let profile_dir = get_profile_dir(profile)?;
     let profile_name = Storage::new(profile)?.profile().to_string();
-    let (content, project_key, note_count, capture_id) = if let Some(capture_id) = args.capture_id {
-        let capture = load_capture_by_id(&profile_dir, &capture_id)?;
-        let note_count = capture.notes.len();
-        let project_key = capture.project_key.clone();
-        (
-            render_prompt_package(PromptPackageContext::Capture(&capture)),
-            project_key,
-            note_count,
-            Some(capture.id),
-        )
-    } else {
-        let context = resolve_context(
-            profile,
-            args.identifier.as_deref(),
-            args.project_key,
-            args.mode,
-        )?;
-        let notes = matching_recent_notes(&context.profile_dir, &context)?;
-        let session_ref = context.session.as_ref().map(SessionRef::from_instance);
-        let content = render_prompt_package(PromptPackageContext::Live {
-            profile: &context.profile,
-            project_key: &context.project_key,
-            mode: context.mode.as_deref(),
-            session: session_ref.as_ref(),
-            notes: &notes,
-        });
-        (content, context.project_key, notes.len(), None)
-    };
+    let (content, project_key, note_count, capture_id, latest_closeout) =
+        if let Some(capture_id) = args.capture_id {
+            let capture = load_capture_by_id(&profile_dir, &capture_id)?;
+            let closeout = latest_closeout_package(&profile_dir, &capture.project_key)?;
+            let note_count = capture.notes.len();
+            let project_key = capture.project_key.clone();
+            (
+                render_prompt_package(PromptPackageContext::Capture {
+                    capture: &capture,
+                    closeout: closeout.as_ref(),
+                }),
+                project_key,
+                note_count,
+                Some(capture.id),
+                closeout.map(|package| package.summary),
+            )
+        } else {
+            let context = resolve_context(
+                profile,
+                args.identifier.as_deref(),
+                args.project_key,
+                args.mode,
+            )?;
+            let notes = matching_recent_notes(&context.profile_dir, &context)?;
+            let session_ref = context.session.as_ref().map(SessionRef::from_instance);
+            let closeout = latest_closeout_package(&context.profile_dir, &context.project_key)?;
+            let content = render_prompt_package(PromptPackageContext::Live {
+                profile: &context.profile,
+                project_key: &context.project_key,
+                mode: context.mode.as_deref(),
+                session: session_ref.as_ref(),
+                notes: &notes,
+                closeout: closeout.as_ref(),
+            });
+            (
+                content,
+                context.project_key,
+                notes.len(),
+                None,
+                closeout.map(|package| package.summary),
+            )
+        };
 
     let (content, truncated) = truncate_chars(&content, MAX_PROMPT_CHARS);
     let output_path = if let Some(path) = args.output {
@@ -418,6 +458,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             project_key,
             capture_id,
             note_count,
+            latest_closeout,
             output_path,
             content: if truncated {
                 format!("{}\n\n[package truncated for CLI output]", content)
@@ -665,35 +706,189 @@ fn load_capture_by_id(profile_dir: &Path, capture_id: &str) -> Result<OndeskCapt
     anyhow::bail!("Ondesk capture not found: {}", capture_id)
 }
 
+fn latest_closeout_package(
+    profile_dir: &Path,
+    project_key: &str,
+) -> Result<Option<OndeskCloseoutPackage>> {
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    if !closeouts_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&closeouts_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let artifact_dir = entry.path();
+        let plan_path = artifact_dir.join("closeout_plan.json");
+        let Ok(plan_content) = fs::read_to_string(&plan_path) else {
+            continue;
+        };
+        let Ok(plan) = serde_json::from_str::<Value>(&plan_content) else {
+            continue;
+        };
+        if !closeout_plan_matches_project(&plan, project_key) {
+            continue;
+        }
+        let generated_at = closeout_plan_generated_at(&plan);
+        candidates.push((generated_at, artifact_dir, plan));
+    }
+
+    candidates.sort_by_key(|(generated_at, _, _)| *generated_at);
+    let Some((generated_at, artifact_dir, plan)) = candidates.pop() else {
+        return Ok(None);
+    };
+
+    let return_package_path = plan
+        .pointer("/artifacts/return_package_markdown")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact_dir.join("RETURN_PACKAGE.md"));
+    let raw_return_package = fs::read_to_string(&return_package_path).unwrap_or_else(|_| {
+        format!(
+            "- Return package is missing at {}. Re-run `forager offdesk closeout --project-key {}`.",
+            safe(return_package_path.to_string_lossy().as_ref()),
+            safe(project_key)
+        )
+    });
+    let safe_return_package = safe(&raw_return_package);
+    let (return_package, return_package_truncated) =
+        truncate_chars(&safe_return_package, MAX_CLOSEOUT_CHARS);
+    let review = latest_closeout_review(&artifact_dir)?;
+    let closeout_id = plan
+        .get("closeout_id")
+        .and_then(Value::as_str)
+        .map(safe)
+        .unwrap_or_else(|| "unknown".to_string());
+
+    Ok(Some(OndeskCloseoutPackage {
+        summary: OndeskCloseoutSummary {
+            closeout_id,
+            generated_at: generated_at.to_rfc3339(),
+            artifact_dir: safe(artifact_dir.to_string_lossy().as_ref()),
+            return_package_path: safe(return_package_path.to_string_lossy().as_ref()),
+            return_package_truncated,
+            review_verdict: review.as_ref().map(|review| review.verdict.clone()),
+            review_record_path: review.map(|review| review.record_path),
+        },
+        return_package,
+    }))
+}
+
+fn closeout_plan_matches_project(plan: &Value, project_key: &str) -> bool {
+    if plan
+        .pointer("/filters/project_key")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == project_key)
+    {
+        return true;
+    }
+
+    plan.get("tasks")
+        .and_then(Value::as_array)
+        .is_some_and(|tasks| {
+            tasks.iter().any(|task| {
+                task.get("project_key")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == project_key)
+            })
+        })
+}
+
+fn closeout_plan_generated_at(plan: &Value) -> DateTime<Utc> {
+    plan.get("generated_at")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
+        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+}
+
+struct OndeskCloseoutReview {
+    reviewed_at: DateTime<Utc>,
+    verdict: String,
+    record_path: String,
+}
+
+fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<OndeskCloseoutReview>> {
+    let mut reviews = Vec::new();
+    for entry in fs::read_dir(artifact_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&content) else {
+            continue;
+        };
+        let Some(reviewed_at) = value
+            .get("reviewed_at")
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+        else {
+            continue;
+        };
+        let verdict = value
+            .get("verdict")
+            .and_then(Value::as_str)
+            .map(safe)
+            .unwrap_or_else(|| "unknown".to_string());
+        reviews.push(OndeskCloseoutReview {
+            reviewed_at,
+            verdict,
+            record_path: safe(path.to_string_lossy().as_ref()),
+        });
+    }
+
+    reviews.sort_by_key(|review| review.reviewed_at);
+    Ok(reviews.pop())
+}
+
 enum PromptPackageContext<'a> {
-    Capture(&'a OndeskCaptureRecord),
+    Capture {
+        capture: &'a OndeskCaptureRecord,
+        closeout: Option<&'a OndeskCloseoutPackage>,
+    },
     Live {
         profile: &'a str,
         project_key: &'a str,
         mode: Option<&'a str>,
         session: Option<&'a SessionRef>,
         notes: &'a [OndeskNoteRecord],
+        closeout: Option<&'a OndeskCloseoutPackage>,
     },
 }
 
 fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
     match context {
-        PromptPackageContext::Capture(capture) => render_prompt_package_parts(PromptPackageParts {
-            profile: &capture.profile,
-            project_key: &capture.project_key,
-            mode: capture.mode.as_deref(),
-            session: capture.session.as_ref(),
-            notes: &capture.notes,
-            scrollback: Some(&capture.scrollback),
-            git: capture.git.as_ref(),
-            capture_id: Some(&capture.id),
-        }),
+        PromptPackageContext::Capture { capture, closeout } => {
+            render_prompt_package_parts(PromptPackageParts {
+                profile: &capture.profile,
+                project_key: &capture.project_key,
+                mode: capture.mode.as_deref(),
+                session: capture.session.as_ref(),
+                notes: &capture.notes,
+                scrollback: Some(&capture.scrollback),
+                git: capture.git.as_ref(),
+                capture_id: Some(&capture.id),
+                closeout,
+            })
+        }
         PromptPackageContext::Live {
             profile,
             project_key,
             mode,
             session,
             notes,
+            closeout,
         } => render_prompt_package_parts(PromptPackageParts {
             profile,
             project_key,
@@ -703,6 +898,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             scrollback: None,
             git: None,
             capture_id: None,
+            closeout,
         }),
     }
 }
@@ -716,6 +912,7 @@ struct PromptPackageParts<'a> {
     scrollback: Option<&'a str>,
     git: Option<&'a GitSnapshot>,
     capture_id: Option<&'a str>,
+    closeout: Option<&'a OndeskCloseoutPackage>,
 }
 
 fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
@@ -782,6 +979,29 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
         } else {
             output.push_str(&fenced("text", scrollback));
         }
+    }
+
+    if let Some(closeout) = parts.closeout {
+        output.push_str("\n## Latest Offdesk Return Package\n");
+        output.push_str(&format!(
+            "- closeout_id: {}\n",
+            closeout.summary.closeout_id
+        ));
+        output.push_str(&format!(
+            "- generated_at: {}\n",
+            closeout.summary.generated_at
+        ));
+        output.push_str(&format!(
+            "- return_package: {}\n",
+            closeout.summary.return_package_path
+        ));
+        if let Some(verdict) = &closeout.summary.review_verdict {
+            output.push_str(&format!("- review_verdict: {verdict}\n"));
+        } else {
+            output.push_str("- review_verdict: none recorded\n");
+        }
+        output.push('\n');
+        output.push_str(&fenced("markdown", &closeout.return_package));
     }
 
     output.push_str("\n## Instructions For The Next Harness\n");

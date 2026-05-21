@@ -38,6 +38,11 @@ The package is context, not proof of completion. The next harness should still
 separate observation from inference, ask for missing evidence, and propose wiki
 changes as candidates.
 
+When a matching Offdesk closeout exists, `prompt-package` also includes the
+latest `RETURN_PACKAGE.md` and closeout-review verdict for the same
+`project_key`. This is the preferred bridge from overnight Offdesk work back
+into a fresh Ondesk session.
+
 ## Knowledge Policy
 
 - `ondesk note` stores redacted, operator-safe JSONL in `ondesk_notes.jsonl`.

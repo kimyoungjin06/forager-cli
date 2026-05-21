@@ -109,3 +109,9 @@ path; it still does not execute file operations.
 Use `RETURN_PACKAGE.md` to start a fresh or resumed Ondesk harness. The harness
 should read the listed result artifacts first, then inspect open decisions and
 run the verification commands before continuing work.
+
+`forager ondesk prompt-package --project-key <project>` now includes the latest
+matching closeout return package and the latest recorded closeout-review
+verdict, when those artifacts exist. This makes the normal morning return path
+start from a fresh package instead of requiring the operator to manually paste
+the closeout artifact path.
