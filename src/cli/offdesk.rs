@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use uuid::Uuid;
 
 use crate::offdesk::{
@@ -120,6 +121,9 @@ pub enum OffdeskCommands {
 
     /// Create or reuse an approval request for a maintenance action
     MaintenanceRequest(MaintenanceRequestArgs),
+
+    /// Generate a mandatory closeout plan and commercial review packet
+    Closeout(CloseoutArgs),
 
     /// Inspect adaptive wiki candidates, entries, projections, and lint
     Wiki(WikiArgs),
@@ -671,6 +675,45 @@ pub struct MaintenanceRequestArgs {
     /// Pending approval TTL in minutes
     #[arg(long, default_value_t = 30)]
     ttl_minutes: i64,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct CloseoutArgs {
+    /// Project key to close out. Defaults to all projects in the profile.
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Request ID to close out
+    #[arg(long)]
+    request_id: Option<String>,
+
+    /// Task ID to close out
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Optional project workdir for read-only git status evidence
+    #[arg(long)]
+    workdir: Option<PathBuf>,
+
+    /// Include read-only git status and diff-stat from --workdir or matched task workdir
+    #[arg(long)]
+    include_git: bool,
+
+    /// Commercial model/provider label expected to review move/delete/archive decisions
+    #[arg(long, default_value = "commercial")]
+    review_provider: String,
+
+    /// Write closeout artifacts to this directory
+    #[arg(long)]
+    output: Option<PathBuf>,
+
+    /// Accepted for explicit operator intent; closeout never applies file operations
+    #[arg(long)]
+    dry_run: bool,
 
     /// Output as JSON
     #[arg(long)]
@@ -1785,6 +1828,160 @@ struct MaintenanceRecommendedAction {
     command: &'static str,
 }
 
+#[derive(Serialize)]
+struct OffdeskCloseoutReport {
+    generated_at: DateTime<Utc>,
+    closeout_id: String,
+    profile: String,
+    profile_dir: String,
+    artifact_dir: String,
+    dry_run: bool,
+    operator_requested_dry_run: bool,
+    read_only_project_state: bool,
+    filters: CloseoutFilters,
+    summary: CloseoutSummary,
+    tasks: Vec<CloseoutTask>,
+    background_runs: Vec<CloseoutBackgroundRun>,
+    file_operations: Vec<CloseoutFileOperation>,
+    required_first_reads: Vec<CloseoutReadRef>,
+    open_decisions: Vec<CloseoutDecision>,
+    verification_commands: Vec<String>,
+    review_contract: CloseoutReviewContract,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    git_snapshot: Option<CloseoutGitSnapshot>,
+    artifacts: CloseoutArtifactPaths,
+}
+
+#[derive(Default, Serialize)]
+struct CloseoutFilters {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+}
+
+#[derive(Default, Serialize)]
+struct CloseoutSummary {
+    tasks_scanned: usize,
+    background_runs_scanned: usize,
+    completed_tasks: usize,
+    active_or_blocked_tasks: usize,
+    file_operations: usize,
+    keep_operations: usize,
+    archive_candidates: usize,
+    delete_candidates: usize,
+    operations_requiring_commercial_review: usize,
+    operations_requiring_human_approval: usize,
+    missing_artifacts: usize,
+    return_package_required: bool,
+}
+
+#[derive(Serialize)]
+struct CloseoutTask {
+    task_id: String,
+    request_id: String,
+    project_key: String,
+    status: OffdeskTaskStatus,
+    capability_id: String,
+    runner_kind: BackgroundRunnerKind,
+    workdir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_mode: Option<AdaptiveWikiAgentMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background_ticket_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_artifact_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    log_artifact_path: Option<String>,
+    artifact_refs: Vec<CapabilityArtifactRef>,
+    preview: String,
+    reason: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutBackgroundRun {
+    ticket_id: String,
+    runner_kind: BackgroundRunnerKind,
+    phase: BackgroundRunnerPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    working_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result_artifact_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    log_artifact_path: Option<String>,
+    runtime_handle_alive: bool,
+    result_artifact_present: bool,
+    log_artifact_present: bool,
+}
+
+#[derive(Serialize)]
+struct CloseoutFileOperation {
+    operation: &'static str,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination: Option<String>,
+    source: String,
+    risk: &'static str,
+    reason: String,
+    evidence_refs: Vec<String>,
+    present: bool,
+    requires_commercial_review: bool,
+    requires_human_approval: bool,
+}
+
+#[derive(Serialize)]
+struct CloseoutReadRef {
+    path: String,
+    reason: String,
+    present: bool,
+}
+
+#[derive(Serialize)]
+struct CloseoutDecision {
+    kind: &'static str,
+    detail: String,
+    suggested_command: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutReviewContract {
+    provider: String,
+    required: bool,
+    applies_to_operations: Vec<&'static str>,
+    required_verdicts: Vec<&'static str>,
+    decision_schema: Value,
+    safety_rules: Vec<&'static str>,
+    packet_path: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutGitSnapshot {
+    workdir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_short: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff_stat: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CloseoutArtifactPaths {
+    closeout_plan_json: String,
+    closeout_plan_markdown: String,
+    cleanup_manifest_json: String,
+    commercial_review_packet: String,
+    return_package_markdown: String,
+}
+
 pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
     match command {
         OffdeskCommands::Pending(args) => pending(profile, args).await,
@@ -1811,6 +2008,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::DebugBundle(args) => debug_bundle(profile, args).await,
         OffdeskCommands::MaintenanceReport(args) => maintenance_report(profile, args).await,
         OffdeskCommands::MaintenanceRequest(args) => maintenance_request(profile, args).await,
+        OffdeskCommands::Closeout(args) => closeout(profile, args).await,
         OffdeskCommands::Wiki(args) => wiki(profile, args).await,
     }
 }
@@ -5379,6 +5577,829 @@ async fn maintenance_request(profile: &str, args: MaintenanceRequestArgs) -> Res
 
     print_maintenance_request_report(&report);
     Ok(())
+}
+
+async fn closeout(profile: &str, args: CloseoutArgs) -> Result<()> {
+    let json = args.json;
+    let report = build_closeout_report(profile, &args)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_closeout_report(&report);
+    Ok(())
+}
+
+fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCloseoutReport> {
+    let profile_dir = get_profile_dir(profile)?;
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+    let generated_at = Utc::now();
+    let closeout_id = format!("closeout_{}", short_uuid());
+    let artifact_dir = allocate_closeout_artifact_dir(
+        &profile_dir,
+        args.output.as_ref(),
+        generated_at,
+        &closeout_id,
+    )?;
+
+    let filters = CloseoutFilters {
+        project_key: args
+            .project_key
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        request_id: args
+            .request_id
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        task_id: args
+            .task_id
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+    };
+
+    let tasks = OffdeskTaskStore::new(&profile_dir)
+        .load()?
+        .into_iter()
+        .filter(|task| closeout_task_matches(task, args))
+        .collect::<Vec<_>>();
+    let background_runs = BackgroundRunStore::new(&profile_dir)
+        .load()?
+        .into_iter()
+        .filter(|probe| closeout_probe_matches(probe, args))
+        .collect::<Vec<_>>();
+
+    let closeout_tasks = tasks.iter().map(closeout_task_summary).collect::<Vec<_>>();
+    let closeout_background_runs = background_runs
+        .iter()
+        .map(closeout_background_summary)
+        .collect::<Vec<_>>();
+
+    let mut file_operations = closeout_file_operations(&tasks, &background_runs);
+    file_operations.sort_by(|left, right| {
+        (left.path.as_str(), left.operation).cmp(&(right.path.as_str(), right.operation))
+    });
+    file_operations.dedup_by(|left, right| {
+        left.path == right.path && left.operation == right.operation && left.source == right.source
+    });
+
+    let mut required_first_reads = file_operations
+        .iter()
+        .filter(|operation| operation.present && operation.operation == "keep")
+        .map(|operation| CloseoutReadRef {
+            path: operation.path.clone(),
+            reason: operation.reason.clone(),
+            present: operation.present,
+        })
+        .collect::<Vec<_>>();
+    required_first_reads.truncate(20);
+
+    let git_snapshot = if args.include_git {
+        closeout_git_snapshot(args, &tasks)?
+    } else {
+        None
+    };
+    let open_decisions =
+        closeout_open_decisions(&tasks, &file_operations, git_snapshot.as_ref(), args);
+    let verification_commands = closeout_verification_commands(args);
+
+    let artifacts = CloseoutArtifactPaths {
+        closeout_plan_json: artifact_dir
+            .join("closeout_plan.json")
+            .display()
+            .to_string(),
+        closeout_plan_markdown: artifact_dir.join("CLOSEOUT_PLAN.md").display().to_string(),
+        cleanup_manifest_json: artifact_dir
+            .join("cleanup_manifest.json")
+            .display()
+            .to_string(),
+        commercial_review_packet: artifact_dir
+            .join("COMMERCIAL_REVIEW_PACKET.md")
+            .display()
+            .to_string(),
+        return_package_markdown: artifact_dir.join("RETURN_PACKAGE.md").display().to_string(),
+    };
+    let review_contract = CloseoutReviewContract {
+        provider: crate::offdesk::operator_safe_text(&args.review_provider),
+        required: true,
+        applies_to_operations: vec!["archive_candidate", "delete_candidate", "move_candidate"],
+        required_verdicts: vec!["approved", "revise", "blocked"],
+        decision_schema: serde_json::json!({
+            "verdict": "approved|revise|blocked",
+            "unsafe_operations": ["operation path or id"],
+            "missing_evidence": ["required file, artifact, or command"],
+            "required_first_reads": ["paths the next Ondesk harness must read first"],
+            "notes": "short rationale"
+        }),
+        safety_rules: vec![
+            "Never approve delete or move for git-tracked source files without explicit human approval.",
+            "Never treat closeout as completion proof; require result and review artifacts.",
+            "Archive raw logs before deletion is considered.",
+            "Reject plans that touch hidden config, env, mount, symlink, external drive, or system paths without dedicated evidence.",
+            "Prefer keep or archive when provenance is uncertain.",
+        ],
+        packet_path: artifacts.commercial_review_packet.clone(),
+    };
+
+    let summary = summarize_closeout(&closeout_tasks, &closeout_background_runs, &file_operations);
+
+    let report = OffdeskCloseoutReport {
+        generated_at,
+        closeout_id,
+        profile: crate::offdesk::operator_safe_text(profile_name),
+        profile_dir: crate::offdesk::operator_safe_text(profile_dir.to_string_lossy().as_ref()),
+        artifact_dir: artifact_dir.display().to_string(),
+        dry_run: true,
+        operator_requested_dry_run: args.dry_run,
+        read_only_project_state: true,
+        filters,
+        summary,
+        tasks: closeout_tasks,
+        background_runs: closeout_background_runs,
+        file_operations,
+        required_first_reads,
+        open_decisions,
+        verification_commands,
+        review_contract,
+        git_snapshot,
+        artifacts,
+    };
+
+    write_closeout_artifacts(&report)?;
+    Ok(report)
+}
+
+fn allocate_closeout_artifact_dir(
+    profile_dir: &Path,
+    output: Option<&PathBuf>,
+    generated_at: DateTime<Utc>,
+    closeout_id: &str,
+) -> Result<PathBuf> {
+    if let Some(output) = output {
+        fs::create_dir_all(output)
+            .with_context(|| format!("create closeout output directory {}", output.display()))?;
+        return Ok(output.clone());
+    }
+
+    let base = profile_dir.join("offdesk_closeouts");
+    fs::create_dir_all(&base)
+        .with_context(|| format!("create closeout artifact root {}", base.display()))?;
+    let timestamp = generated_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let dirname = if attempt == 0 {
+            format!("{timestamp}_{closeout_id}")
+        } else {
+            format!("{timestamp}_{closeout_id}_{attempt:03}")
+        };
+        let path = base.join(dirname);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("create closeout artifact dir {}", path.display()));
+            }
+        }
+    }
+
+    bail!(
+        "could not allocate closeout artifact directory in {}",
+        base.display()
+    )
+}
+
+fn closeout_task_matches(task: &OffdeskTask, args: &CloseoutArgs) -> bool {
+    option_matches(args.project_key.as_deref(), &task.project_key)
+        && option_matches(args.request_id.as_deref(), &task.request_id)
+        && option_matches(args.task_id.as_deref(), &task.task_id)
+}
+
+fn closeout_probe_matches(probe: &BackgroundProbe, args: &CloseoutArgs) -> bool {
+    option_matches(
+        args.project_key.as_deref(),
+        probe.project_key.as_deref().unwrap_or(""),
+    ) && option_matches(
+        args.request_id.as_deref(),
+        probe.request_id.as_deref().unwrap_or(""),
+    ) && option_matches(
+        args.task_id.as_deref(),
+        probe.task_id.as_deref().unwrap_or(""),
+    )
+}
+
+fn option_matches(filter: Option<&str>, value: &str) -> bool {
+    match filter {
+        Some(filter) => filter == value,
+        None => true,
+    }
+}
+
+fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
+    let view = task.operator_view();
+    CloseoutTask {
+        task_id: view.task_id,
+        request_id: view.request_id,
+        project_key: view.project_key,
+        status: view.status,
+        capability_id: view.capability_id,
+        runner_kind: view.runner_kind,
+        workdir: crate::offdesk::operator_safe_text(&view.workdir),
+        agent_mode: view.agent_mode,
+        background_ticket_id: view.background_ticket_id,
+        result_artifact_path: view
+            .result_artifact_path
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        log_artifact_path: view
+            .log_artifact_path
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        artifact_refs: view.artifact_refs,
+        preview: view.preview,
+        reason: view.reason,
+    }
+}
+
+fn closeout_background_summary(probe: &BackgroundProbe) -> CloseoutBackgroundRun {
+    CloseoutBackgroundRun {
+        ticket_id: crate::offdesk::operator_safe_text(&probe.ticket_id),
+        runner_kind: probe.runner_kind,
+        phase: probe.phase,
+        project_key: probe
+            .project_key
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        request_id: probe
+            .request_id
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        task_id: probe
+            .task_id
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        working_dir: probe
+            .working_dir
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        result_artifact_path: probe
+            .result_artifact_path
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        log_artifact_path: probe
+            .log_artifact_path
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text),
+        runtime_handle_alive: probe.runtime_handle_alive,
+        result_artifact_present: probe.result_artifact_present,
+        log_artifact_present: probe.log_artifact_present,
+    }
+}
+
+struct CloseoutFileOperationInput<'a> {
+    operation: &'static str,
+    path: &'a str,
+    destination: Option<String>,
+    source: String,
+    risk: &'static str,
+    reason: &'a str,
+    evidence_refs: Vec<String>,
+    present: bool,
+    requires_commercial_review: bool,
+    requires_human_approval: bool,
+}
+
+fn closeout_file_operation(input: CloseoutFileOperationInput<'_>) -> CloseoutFileOperation {
+    CloseoutFileOperation {
+        operation: input.operation,
+        path: crate::offdesk::operator_safe_text(input.path),
+        destination: input
+            .destination
+            .map(|value| crate::offdesk::operator_safe_text(&value)),
+        source: crate::offdesk::operator_safe_text(&input.source),
+        risk: input.risk,
+        reason: crate::offdesk::operator_safe_text(input.reason),
+        evidence_refs: input
+            .evidence_refs
+            .into_iter()
+            .map(|value| crate::offdesk::operator_safe_text(&value))
+            .collect(),
+        present: input.present,
+        requires_commercial_review: input.requires_commercial_review,
+        requires_human_approval: input.requires_human_approval,
+    }
+}
+
+fn closeout_file_operations(
+    tasks: &[OffdeskTask],
+    background_runs: &[BackgroundProbe],
+) -> Vec<CloseoutFileOperation> {
+    let mut operations = Vec::new();
+
+    for task in tasks {
+        let evidence = vec![format!("task:{}", task.task_id)];
+        if let Some(path) = task.result_artifact_path.as_deref() {
+            operations.push(closeout_file_operation(CloseoutFileOperationInput {
+                operation: "keep",
+                path,
+                destination: None,
+                source: format!("task:{} result_artifact", task.task_id),
+                risk: "low",
+                reason: "Result artifacts are provenance anchors for Ondesk return.",
+                evidence_refs: evidence.clone(),
+                present: path_present(path, None),
+                requires_commercial_review: false,
+                requires_human_approval: false,
+            }));
+        }
+        if let Some(path) = task.log_artifact_path.as_deref() {
+            operations.push(closeout_file_operation(CloseoutFileOperationInput {
+                operation: "archive_candidate",
+                path,
+                destination: archive_destination_for(path),
+                source: format!("task:{} log_artifact", task.task_id),
+                risk: "medium",
+                reason:
+                    "Raw logs should be preserved or archived before any deletion is considered.",
+                evidence_refs: evidence.clone(),
+                present: path_present(path, None),
+                requires_commercial_review: true,
+                requires_human_approval: true,
+            }));
+        }
+        for artifact in &task.artifact_refs {
+            if let Some(path) = artifact.path.as_deref() {
+                operations.push(closeout_file_operation(CloseoutFileOperationInput {
+                    operation: "keep",
+                    path,
+                    destination: None,
+                    source: format!(
+                        "task:{} artifact_ref:{}",
+                        task.task_id, artifact.artifact_id
+                    ),
+                    risk: "low",
+                    reason: "Declared task artifacts must remain available for review.",
+                    evidence_refs: vec![
+                        format!("task:{}", task.task_id),
+                        format!("artifact:{}", artifact.artifact_id),
+                    ],
+                    present: path_present(path, Some(artifact.present)),
+                    requires_commercial_review: false,
+                    requires_human_approval: false,
+                }));
+            }
+        }
+    }
+
+    for probe in background_runs {
+        let evidence = vec![format!("background:{}", probe.ticket_id)];
+        if let Some(path) = probe.result_artifact_path.as_deref() {
+            operations.push(closeout_file_operation(CloseoutFileOperationInput {
+                operation: "keep",
+                path,
+                destination: None,
+                source: format!("background:{} result_artifact", probe.ticket_id),
+                risk: "low",
+                reason: "Background result artifacts are required for morning review.",
+                evidence_refs: evidence.clone(),
+                present: path_present(path, Some(probe.result_artifact_present)),
+                requires_commercial_review: false,
+                requires_human_approval: false,
+            }));
+        }
+        if let Some(path) = probe.log_artifact_path.as_deref() {
+            operations.push(closeout_file_operation(CloseoutFileOperationInput {
+                operation: "archive_candidate",
+                path,
+                destination: archive_destination_for(path),
+                source: format!("background:{} log_artifact", probe.ticket_id),
+                risk: "medium",
+                reason: "Background logs may be large but should be archived while referenced.",
+                evidence_refs: evidence,
+                present: path_present(path, Some(probe.log_artifact_present)),
+                requires_commercial_review: true,
+                requires_human_approval: true,
+            }));
+        }
+    }
+
+    operations
+}
+
+fn path_present(path: &str, explicit: Option<bool>) -> bool {
+    explicit.unwrap_or(false) || Path::new(path).exists()
+}
+
+fn archive_destination_for(path: &str) -> Option<String> {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("archive/{name}"))
+}
+
+fn closeout_git_snapshot(
+    args: &CloseoutArgs,
+    tasks: &[OffdeskTask],
+) -> Result<Option<CloseoutGitSnapshot>> {
+    let workdir = args
+        .workdir
+        .clone()
+        .or_else(|| tasks.first().map(|task| PathBuf::from(&task.workdir)));
+    let Some(workdir) = workdir else {
+        return Ok(Some(CloseoutGitSnapshot {
+            workdir: "-".to_string(),
+            status_short: None,
+            diff_stat: None,
+            error: Some("no workdir supplied and no matched task workdir found".to_string()),
+        }));
+    };
+    let workdir_label = crate::offdesk::operator_safe_text(workdir.to_string_lossy().as_ref());
+    if !workdir.exists() {
+        return Ok(Some(CloseoutGitSnapshot {
+            workdir: workdir_label,
+            status_short: None,
+            diff_stat: None,
+            error: Some("workdir does not exist".to_string()),
+        }));
+    }
+    Ok(Some(CloseoutGitSnapshot {
+        workdir: workdir_label,
+        status_short: closeout_git_output(&workdir, &["status", "--short"])?,
+        diff_stat: closeout_git_output(&workdir, &["diff", "--stat"])?,
+        error: None,
+    }))
+}
+
+fn closeout_git_output(workdir: &Path, args: &[&str]) -> Result<Option<String>> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(workdir)
+        .output()?;
+    let raw = if output.status.success() {
+        String::from_utf8_lossy(&output.stdout).to_string()
+    } else {
+        String::from_utf8_lossy(&output.stderr).to_string()
+    };
+    let safe = crate::offdesk::operator_safe_text(raw.trim());
+    if safe.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(truncate_closeout_text(&safe, 12_000)))
+    }
+}
+
+fn closeout_open_decisions(
+    tasks: &[OffdeskTask],
+    operations: &[CloseoutFileOperation],
+    git_snapshot: Option<&CloseoutGitSnapshot>,
+    args: &CloseoutArgs,
+) -> Vec<CloseoutDecision> {
+    let mut decisions = Vec::new();
+    let active_or_blocked = tasks
+        .iter()
+        .filter(|task| {
+            !matches!(
+                task.status,
+                OffdeskTaskStatus::Completed | OffdeskTaskStatus::Cancelled
+            )
+        })
+        .count();
+    if active_or_blocked > 0 {
+        decisions.push(CloseoutDecision {
+            kind: "non_terminal_task",
+            detail: format!("{active_or_blocked} matched tasks are not terminal yet."),
+            suggested_command: "forager offdesk tasks --json".to_string(),
+        });
+    }
+    let missing = operations
+        .iter()
+        .filter(|operation| !operation.present)
+        .count();
+    if missing > 0 {
+        decisions.push(CloseoutDecision {
+            kind: "missing_artifact",
+            detail: format!("{missing} referenced artifacts are missing or not yet observed."),
+            suggested_command: "forager offdesk poll --json".to_string(),
+        });
+    }
+    let archive_candidates = operations
+        .iter()
+        .filter(|operation| operation.operation == "archive_candidate")
+        .count();
+    if archive_candidates > 0 {
+        decisions.push(CloseoutDecision {
+            kind: "archive_review",
+            detail: format!(
+                "{archive_candidates} archive candidates require commercial review and human approval."
+            ),
+            suggested_command: format!(
+                "Review {}",
+                args.output
+                    .as_ref()
+                    .map(|path| path.join("COMMERCIAL_REVIEW_PACKET.md").display().to_string())
+                    .unwrap_or_else(|| "COMMERCIAL_REVIEW_PACKET.md".to_string())
+            ),
+        });
+    }
+    if let Some(snapshot) = git_snapshot {
+        if snapshot.status_short.is_some()
+            || snapshot.diff_stat.is_some()
+            || snapshot.error.is_some()
+        {
+            decisions.push(CloseoutDecision {
+                kind: "git_state_review",
+                detail: "Git state is included and must be reviewed before Ondesk return."
+                    .to_string(),
+                suggested_command: "git status --short && git diff --stat".to_string(),
+            });
+        }
+    }
+    decisions
+}
+
+fn closeout_verification_commands(args: &CloseoutArgs) -> Vec<String> {
+    let mut commands = vec![
+        "forager offdesk poll --json".to_string(),
+        "forager offdesk tasks --json".to_string(),
+        "forager offdesk maintenance-report --json".to_string(),
+        "forager offdesk wiki review --json".to_string(),
+    ];
+    if let Some(project_key) = args.project_key.as_deref() {
+        commands.push(format!(
+            "forager ondesk prompt-package --project-key {}",
+            crate::offdesk::operator_safe_text(project_key)
+        ));
+    }
+    commands
+}
+
+fn summarize_closeout(
+    tasks: &[CloseoutTask],
+    background_runs: &[CloseoutBackgroundRun],
+    operations: &[CloseoutFileOperation],
+) -> CloseoutSummary {
+    let mut summary = CloseoutSummary {
+        tasks_scanned: tasks.len(),
+        background_runs_scanned: background_runs.len(),
+        completed_tasks: tasks
+            .iter()
+            .filter(|task| task.status == OffdeskTaskStatus::Completed)
+            .count(),
+        active_or_blocked_tasks: tasks
+            .iter()
+            .filter(|task| {
+                !matches!(
+                    task.status,
+                    OffdeskTaskStatus::Completed | OffdeskTaskStatus::Cancelled
+                )
+            })
+            .count(),
+        file_operations: operations.len(),
+        return_package_required: true,
+        ..CloseoutSummary::default()
+    };
+    for operation in operations {
+        match operation.operation {
+            "keep" => summary.keep_operations += 1,
+            "archive_candidate" => summary.archive_candidates += 1,
+            "delete_candidate" => summary.delete_candidates += 1,
+            _ => {}
+        }
+        if operation.requires_commercial_review {
+            summary.operations_requiring_commercial_review += 1;
+        }
+        if operation.requires_human_approval {
+            summary.operations_requiring_human_approval += 1;
+        }
+        if !operation.present {
+            summary.missing_artifacts += 1;
+        }
+    }
+    summary
+}
+
+fn write_closeout_artifacts(report: &OffdeskCloseoutReport) -> Result<()> {
+    let plan_json = serde_json::to_vec_pretty(report)?;
+    write_new_file(Path::new(&report.artifacts.closeout_plan_json), &plan_json)
+        .with_context(|| format!("write {}", report.artifacts.closeout_plan_json))?;
+
+    let manifest_json = serde_json::to_vec_pretty(&report.file_operations)?;
+    write_new_file(
+        Path::new(&report.artifacts.cleanup_manifest_json),
+        &manifest_json,
+    )
+    .with_context(|| format!("write {}", report.artifacts.cleanup_manifest_json))?;
+
+    write_new_file(
+        Path::new(&report.artifacts.closeout_plan_markdown),
+        render_closeout_plan_markdown(report).as_bytes(),
+    )
+    .with_context(|| format!("write {}", report.artifacts.closeout_plan_markdown))?;
+
+    write_new_file(
+        Path::new(&report.artifacts.return_package_markdown),
+        render_closeout_return_package(report).as_bytes(),
+    )
+    .with_context(|| format!("write {}", report.artifacts.return_package_markdown))?;
+
+    write_new_file(
+        Path::new(&report.artifacts.commercial_review_packet),
+        render_commercial_review_packet(report).as_bytes(),
+    )
+    .with_context(|| format!("write {}", report.artifacts.commercial_review_packet))?;
+    Ok(())
+}
+
+fn render_closeout_plan_markdown(report: &OffdeskCloseoutReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Offdesk Closeout Plan\n\n");
+    output.push_str(&format!("- closeout_id: {}\n", report.closeout_id));
+    output.push_str(&format!("- generated_at: {}\n", report.generated_at));
+    output.push_str(&format!("- profile: {}\n", report.profile));
+    output.push_str("- dry_run: true\n");
+    output.push_str("- project file mutations: none\n\n");
+    output.push_str("## Summary\n");
+    output.push_str(&format!(
+        "- tasks: {} scanned, {} completed, {} active_or_blocked\n",
+        report.summary.tasks_scanned,
+        report.summary.completed_tasks,
+        report.summary.active_or_blocked_tasks
+    ));
+    output.push_str(&format!(
+        "- file operations: {} keep, {} archive candidates, {} delete candidates\n",
+        report.summary.keep_operations,
+        report.summary.archive_candidates,
+        report.summary.delete_candidates
+    ));
+    output.push_str(&format!(
+        "- commercial review required: {}\n\n",
+        report.summary.operations_requiring_commercial_review
+    ));
+    output.push_str("## File Operations\n");
+    if report.file_operations.is_empty() {
+        output.push_str("- No file operations proposed.\n");
+    } else {
+        for operation in &report.file_operations {
+            output.push_str(&format!(
+                "- {} `{}` risk={} present={} review={} approval={}\n  - reason: {}\n",
+                operation.operation,
+                operation.path,
+                operation.risk,
+                operation.present,
+                operation.requires_commercial_review,
+                operation.requires_human_approval,
+                operation.reason
+            ));
+        }
+    }
+    output.push_str("\n## Open Decisions\n");
+    if report.open_decisions.is_empty() {
+        output.push_str("- None recorded.\n");
+    } else {
+        for decision in &report.open_decisions {
+            output.push_str(&format!(
+                "- {}: {}\n  - command: `{}`\n",
+                decision.kind, decision.detail, decision.suggested_command
+            ));
+        }
+    }
+    output
+}
+
+fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Ondesk Return Package\n\n");
+    output.push_str("Use this package to rehydrate a fresh Ondesk harness after Offdesk work.\n\n");
+    output.push_str("## Required First Reads\n");
+    if report.required_first_reads.is_empty() {
+        output.push_str(
+            "- No present result artifacts were found. Start with `closeout_plan.json`.\n",
+        );
+    } else {
+        for read in &report.required_first_reads {
+            output.push_str(&format!("- `{}`: {}\n", read.path, read.reason));
+        }
+    }
+    output.push_str("\n## Open Decisions\n");
+    if report.open_decisions.is_empty() {
+        output.push_str("- None recorded.\n");
+    } else {
+        for decision in &report.open_decisions {
+            output.push_str(&format!("- {}: {}\n", decision.kind, decision.detail));
+        }
+    }
+    output.push_str("\n## Verification Commands\n");
+    for command in &report.verification_commands {
+        output.push_str(&format!("- `{command}`\n"));
+    }
+    output.push_str("\n## Context Policy\n");
+    output.push_str("- Treat Offdesk results as evidence, not final truth.\n");
+    output.push_str("- Re-read listed artifacts before continuing work.\n");
+    output.push_str("- Do not delete or move files until commercial review and human approval are both recorded.\n");
+    output
+}
+
+fn render_commercial_review_packet(report: &OffdeskCloseoutReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Commercial Model Closeout Review Packet\n\n");
+    output.push_str(
+        "Review the proposed closeout plan for file movement, archive, and deletion risk.\n",
+    );
+    output
+        .push_str("Do not execute shell commands. Return only a review verdict and rationale.\n\n");
+    output.push_str("## Required Verdict Schema\n");
+    output.push_str("```json\n");
+    output.push_str(
+        "{\n  \"verdict\": \"approved|revise|blocked\",\n  \"unsafe_operations\": [],\n  \"missing_evidence\": [],\n  \"required_first_reads\": [],\n  \"notes\": \"\"\n}\n",
+    );
+    output.push_str("```\n\n");
+    output.push_str("## Safety Rules\n");
+    for rule in &report.review_contract.safety_rules {
+        output.push_str(&format!("- {rule}\n"));
+    }
+    output.push_str("\n## Candidate Operations\n");
+    if report.file_operations.is_empty() {
+        output.push_str("- No file operations proposed.\n");
+    } else {
+        for operation in &report.file_operations {
+            output.push_str(&format!(
+                "- operation: {}\n  path: `{}`\n  destination: `{}`\n  risk: {}\n  present: {}\n  reason: {}\n  evidence: {}\n",
+                operation.operation,
+                operation.path,
+                operation.destination.as_deref().unwrap_or("-"),
+                operation.risk,
+                operation.present,
+                operation.reason,
+                operation.evidence_refs.join(", ")
+            ));
+        }
+    }
+    output.push_str("\n## Open Decisions\n");
+    for decision in &report.open_decisions {
+        output.push_str(&format!("- {}: {}\n", decision.kind, decision.detail));
+    }
+    output
+}
+
+fn print_closeout_report(report: &OffdeskCloseoutReport) {
+    println!("Offdesk closeout plan");
+    println!("  generated_at: {}", report.generated_at);
+    println!("  closeout_id:  {}", report.closeout_id);
+    println!("  profile:      {}", report.profile);
+    println!("  artifact_dir: {}", report.artifact_dir);
+    println!(
+        "  tasks:        scanned={} completed={} active_or_blocked={}",
+        report.summary.tasks_scanned,
+        report.summary.completed_tasks,
+        report.summary.active_or_blocked_tasks
+    );
+    println!(
+        "  operations:   keep={} archive={} delete={} review_required={}",
+        report.summary.keep_operations,
+        report.summary.archive_candidates,
+        report.summary.delete_candidates,
+        report.summary.operations_requiring_commercial_review
+    );
+    println!("  dry_run:      true (no project files moved or deleted)");
+    println!("Artifacts:");
+    println!("  plan:         {}", report.artifacts.closeout_plan_json);
+    println!(
+        "  markdown:     {}",
+        report.artifacts.closeout_plan_markdown
+    );
+    println!(
+        "  review:       {}",
+        report.artifacts.commercial_review_packet
+    );
+    println!(
+        "  return:       {}",
+        report.artifacts.return_package_markdown
+    );
+    if !report.open_decisions.is_empty() {
+        println!("Open decisions:");
+        for decision in &report.open_decisions {
+            println!("  - {}: {}", decision.kind, decision.detail);
+        }
+    }
+}
+
+fn truncate_closeout_text(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else {
+        format!(
+            "{}...[truncated]",
+            value.chars().take(max_chars).collect::<String>()
+        )
+    }
+}
+
+fn short_uuid() -> String {
+    Uuid::new_v4().to_string()[..8].to_string()
 }
 
 fn build_maintenance_request(

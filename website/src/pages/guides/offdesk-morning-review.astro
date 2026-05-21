@@ -1,0 +1,97 @@
+---
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+---
+
+<Base
+  title="Offdesk Morning Review Workflow - Forager"
+  description="Use Forager to plan safe offdesk agent work, review overnight evidence, approve recovery actions, and promote adaptive wiki knowledge only after inspection."
+>
+  <Nav />
+
+  <article class="pt-32 pb-16 px-6">
+    <div class="max-w-3xl mx-auto prose-content">
+      <header class="mb-12">
+        <h1 class="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">Offdesk Morning Review Workflow</h1>
+        <p class="text-lg text-gray-400 leading-relaxed">
+          Forager is not only a session manager. It is a safe loop for handing work to AI agents while you are away, then reviewing durable evidence before the next decision.
+        </p>
+      </header>
+
+      <section>
+        <h2>The Loop</h2>
+        <ol>
+          <li><strong>Ondesk planning:</strong> create focused sessions, isolate branches with worktrees, and decide which tasks are safe to run unattended.</li>
+          <li><strong>Offdesk execution:</strong> queue durable tasks behind approval gates, provider fallback checks, recovery records, and audit trails.</li>
+          <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, result artifacts, and closeout needs.</li>
+          <li><strong>Closeout:</strong> generate the dry-run cleanup plan, commercial review packet, and Ondesk return package before resuming hands-on work.</li>
+          <li><strong>Knowledge promotion:</strong> promote adaptive wiki candidates only after reviewing evidence, counterexamples, scope, and freshness.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>What to Check First</h2>
+        <p>
+          Start with the high-signal surfaces before opening individual agent terminals:
+        </p>
+        <pre><code>forager status
+forager offdesk tasks --json
+forager offdesk pending --json
+forager offdesk maintenance-report --json
+forager offdesk closeout --dry-run</code></pre>
+        <p>
+          These commands answer the operational questions: what ran, what is waiting, what failed, what needs recovery, what requires explicit approval, and what must be cleaned up before Ondesk return.
+        </p>
+      </section>
+
+      <section>
+        <h2>Closeout Review</h2>
+        <p>
+          The TUI marks completed tasks that still need closeout. Treat that signal as mandatory before resuming normal Ondesk work:
+        </p>
+        <pre><code>forager offdesk closeout --project-key &lt;project&gt; --dry-run</code></pre>
+        <p>
+          Closeout writes a plan, cleanup manifest, commercial review packet, and return package. It does not move, delete, archive, or mutate project files.
+        </p>
+        <p>
+          Read the <a href="/guides/offdesk-closeout/">Offdesk Closeout Guide</a> when file cleanup, archive candidates, or handoff context are part of the return path.
+        </p>
+      </section>
+
+      <section>
+        <h2>Adaptive Wiki Review</h2>
+        <p>
+          Overnight runs may create wiki candidates or provisional trial entries. They should not silently become future instructions. Review them as evidence-backed proposals:
+        </p>
+        <pre><code>forager offdesk wiki candidates --json
+forager offdesk wiki lint --json
+forager offdesk wiki review --json
+forager offdesk wiki export-markdown --output ./adaptive-wiki-review</code></pre>
+        <p>
+          The canonical source remains the Forager profile state. Markdown exports are human review snapshots, not writable truth.
+        </p>
+      </section>
+
+      <section>
+        <h2>Decision Rules</h2>
+        <ul>
+          <li>Do not claim completion unless a result artifact, task status, or test output proves it.</li>
+          <li>Do not let wiki context change commands, workdirs, provider choices, models, or approvals.</li>
+          <li>Use Council output as a read-only recommendation, not as permission to mutate state.</li>
+          <li>Do not move, delete, or archive closeout candidates without commercial review and explicit human approval.</li>
+          <li>Convert failures into recovery tasks, maintenance requests, or revised plans instead of silent retries.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Prepare the Next Run</h2>
+        <p>
+          A good night run starts from the morning review. Pick one narrow goal, define stop conditions, choose the agent modes involved, and queue only the work that has the required approvals and evidence boundaries.
+        </p>
+      </section>
+    </div>
+  </article>
+
+  <Footer />
+</Base>

@@ -13,6 +13,7 @@ use super::init::InitArgs;
 use super::list::ListArgs;
 use super::migrate::MigrateCommands;
 use super::offdesk::OffdeskCommands;
+use super::ondesk::OndeskCommands;
 use super::profile::ProfileCommands;
 use super::remove::RemoveArgs;
 use super::session::SessionCommands;
@@ -99,6 +100,12 @@ pub enum Commands {
     Offdesk {
         #[command(subcommand)]
         command: Box<OffdeskCommands>,
+    },
+
+    /// Capture ondesk notes and prompt context from external harness work
+    Ondesk {
+        #[command(subcommand)]
+        command: OndeskCommands,
     },
 
     /// tmux integration utilities

@@ -1,6 +1,6 @@
 //! Tests for HomeView
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::json;
 use serial_test::serial;
@@ -145,6 +145,59 @@ fn load_offdesk_summary_counts_recovery_tasks() {
 }
 
 #[test]
+#[serial]
+fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "completed-task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "completed",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_background",
+                "command": "true",
+                "workdir": "/tmp",
+                "created_at": now,
+                "updated_at": now
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let summary = super::load_offdesk_summary("test");
+    assert_eq!(summary.closeout_required, 1);
+    assert!(summary.needs_operator_attention());
+    assert_eq!(summary.focus_label(), "closeout required");
+    assert_eq!(
+        summary.next_action_label(),
+        "Closeout: forager offdesk closeout"
+    );
+
+    let closeout_dir = profile_dir.join("offdesk_closeouts").join("latest");
+    fs::create_dir_all(&closeout_dir).unwrap();
+    fs::write(
+        closeout_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "generated_at": now + Duration::minutes(1)
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let summary = super::load_offdesk_summary("test");
+    assert_eq!(summary.closeout_required, 0);
+    assert!(!summary.needs_operator_attention());
+}
+
+#[test]
 fn offdesk_attention_includes_failed_and_resume_pending_tasks() {
     assert!(OffdeskResumeSummary {
         failed_tasks: 1,
@@ -156,6 +209,64 @@ fn offdesk_attention_includes_failed_and_resume_pending_tasks() {
         ..OffdeskResumeSummary::default()
     }
     .needs_operator_attention());
+}
+
+#[test]
+fn offdesk_morning_review_includes_cancelled_and_resume_states() {
+    let summary = OffdeskResumeSummary {
+        cancelled_tasks: 1,
+        ..OffdeskResumeSummary::default()
+    };
+    assert!(summary.has_offdesk_activity());
+    assert!(summary.has_morning_review());
+    assert!(!summary.needs_operator_attention());
+    assert_eq!(summary.focus_label(), "cancelled work archived");
+    assert_eq!(summary.next_action_label(), "Review: forager offdesk tasks");
+
+    let resume_summary = OffdeskResumeSummary {
+        fresh_pending: 1,
+        ..OffdeskResumeSummary::default()
+    };
+    assert!(resume_summary.has_morning_review());
+    assert!(resume_summary.needs_operator_attention());
+    assert_eq!(resume_summary.focus_label(), "resume decision pending");
+    assert_eq!(
+        resume_summary.next_action_label(),
+        "Recover: forager offdesk resume"
+    );
+}
+
+#[test]
+fn offdesk_morning_review_surfaces_closeout_as_attention() {
+    let summary = OffdeskResumeSummary {
+        closeout_required: 2,
+        ..OffdeskResumeSummary::default()
+    };
+
+    assert!(summary.has_offdesk_activity());
+    assert!(summary.has_morning_review());
+    assert!(summary.needs_operator_attention());
+    assert_eq!(summary.focus_label(), "closeout required");
+    assert_eq!(
+        summary.next_action_label(),
+        "Closeout: forager offdesk closeout"
+    );
+}
+
+#[test]
+fn offdesk_morning_review_prioritizes_approvals_before_running_work() {
+    let summary = OffdeskResumeSummary {
+        pending_approvals: 1,
+        active_tasks: 3,
+        failed_tasks: 1,
+        ..OffdeskResumeSummary::default()
+    };
+
+    assert_eq!(summary.focus_label(), "approvals waiting");
+    assert_eq!(
+        summary.next_action_label(),
+        "Review: forager offdesk pending"
+    );
 }
 
 #[test]

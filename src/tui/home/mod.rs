@@ -8,8 +8,11 @@ mod render;
 mod tests;
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
 use tui_input::Input;
 
 use crate::session::{
@@ -93,6 +96,7 @@ pub(super) struct OffdeskResumeSummary {
     pub(super) cancelled_tasks: usize,
     pub(super) stale_background: usize,
     pub(super) failed_background: usize,
+    pub(super) closeout_required: usize,
 }
 
 impl OffdeskResumeSummary {
@@ -102,16 +106,68 @@ impl OffdeskResumeSummary {
             || self.active_tasks > 0
             || self.failed_tasks > 0
             || self.resume_pending_tasks > 0
+            || self.cancelled_tasks > 0
             || self.stale_background > 0
             || self.failed_background > 0
+            || self.closeout_required > 0
+    }
+
+    pub(super) fn has_morning_review(&self) -> bool {
+        self.has_offdesk_activity() || self.fresh_pending > 0 || self.stale_pending > 0
     }
 
     pub(super) fn needs_operator_attention(&self) -> bool {
         self.pending_approvals > 0
             || self.failed_tasks > 0
             || self.resume_pending_tasks > 0
+            || self.fresh_pending > 0
+            || self.stale_pending > 0
             || self.stale_background > 0
             || self.failed_background > 0
+            || self.closeout_required > 0
+    }
+
+    pub(super) fn focus_label(&self) -> &'static str {
+        if self.pending_approvals > 0 {
+            "approvals waiting"
+        } else if self.failed_tasks > 0 || self.failed_background > 0 {
+            "failed work needs review"
+        } else if self.resume_pending_tasks > 0 || self.fresh_pending > 0 || self.stale_pending > 0
+        {
+            "resume decision pending"
+        } else if self.stale_background > 0 {
+            "stale background run"
+        } else if self.closeout_required > 0 {
+            "closeout required"
+        } else if self.active_tasks > 0 {
+            "active offdesk work"
+        } else if self.queued_tasks > 0 {
+            "queued offdesk work"
+        } else if self.cancelled_tasks > 0 {
+            "cancelled work archived"
+        } else {
+            "no offdesk attention"
+        }
+    }
+
+    pub(super) fn next_action_label(&self) -> &'static str {
+        if self.pending_approvals > 0 {
+            "Review: forager offdesk pending"
+        } else if self.failed_tasks > 0 || self.resume_pending_tasks > 0 {
+            "Recover: forager offdesk tasks"
+        } else if self.fresh_pending > 0 || self.stale_pending > 0 {
+            "Recover: forager offdesk resume"
+        } else if self.stale_background > 0 || self.failed_background > 0 {
+            "Inspect: forager offdesk poll"
+        } else if self.closeout_required > 0 {
+            "Closeout: forager offdesk closeout"
+        } else if self.active_tasks > 0 || self.queued_tasks > 0 {
+            "Monitor: forager offdesk poll"
+        } else if self.cancelled_tasks > 0 {
+            "Review: forager offdesk tasks"
+        } else {
+            "Plan: forager offdesk maintenance-report"
+        }
     }
 }
 
@@ -675,7 +731,7 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
             }
             summary
         });
-    if let Ok(offdesk) = crate::offdesk::load_offdesk_status_summary(profile_dir, now) {
+    if let Ok(offdesk) = crate::offdesk::load_offdesk_status_summary(&profile_dir, now) {
         summary.pending_approvals = offdesk.pending_approvals;
         summary.queued_tasks = offdesk.tasks.queued;
         summary.active_tasks = offdesk.tasks.active + offdesk.tasks.pending_approval;
@@ -685,5 +741,33 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
         summary.stale_background = offdesk.background_stale;
         summary.failed_background = offdesk.background_failed;
     }
+    if let Ok(tasks) = crate::offdesk::OffdeskTaskStore::new(&profile_dir).load() {
+        let latest_closeout = latest_closeout_generated_at(&profile_dir);
+        summary.closeout_required = tasks
+            .iter()
+            .filter(|task| task.status == crate::offdesk::OffdeskTaskStatus::Completed)
+            .filter(|task| match latest_closeout {
+                Some(closeout_at) => task.updated_at > closeout_at,
+                None => true,
+            })
+            .count();
+    }
     summary
+}
+
+fn latest_closeout_generated_at(profile_dir: &Path) -> Option<DateTime<Utc>> {
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    let entries = fs::read_dir(closeouts_dir).ok()?;
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path().join("closeout_plan.json");
+            let content = fs::read_to_string(path).ok()?;
+            let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+            let generated_at = value.get("generated_at")?.as_str()?;
+            DateTime::parse_from_rfc3339(generated_at)
+                .ok()
+                .map(|value| value.with_timezone(&Utc))
+        })
+        .max()
 }
