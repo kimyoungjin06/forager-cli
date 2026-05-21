@@ -1,0 +1,82 @@
+---
+import Base from '../../layouts/Base.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+---
+
+<Base
+  title="Offdesk Closeout Guide - Forager"
+  description="Generate a dry-run closeout plan, cleanup manifest, commercial review packet, and Ondesk return package before resuming work after offdesk automation."
+>
+  <Nav />
+
+  <article class="pt-32 pb-16 px-6">
+    <div class="max-w-3xl mx-auto prose-content">
+      <header class="mb-12">
+        <h1 class="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">Offdesk Closeout Guide</h1>
+        <p class="text-lg text-gray-400 leading-relaxed">
+          Offdesk work is not complete when a background task exits. It is complete after artifacts, document updates, cleanup candidates, and Ondesk return context have been reviewed.
+        </p>
+      </header>
+
+      <section>
+        <h2>The Lifecycle Gate</h2>
+        <pre><code>Ondesk closeout -&gt; Offdesk execution -&gt; Offdesk closeout -&gt; Ondesk return</code></pre>
+        <p>
+          The TUI surfaces completed tasks that still need closeout as operator attention. Run closeout before using a resumed or fresh Ondesk harness to continue the project.
+        </p>
+      </section>
+
+      <section>
+        <h2>Run Closeout</h2>
+        <pre><code>forager offdesk closeout --project-key twinpaper --dry-run</code></pre>
+        <p>
+          The command writes a closeout artifact directory under the active profile:
+        </p>
+        <pre><code>offdesk_closeouts/&lt;timestamp&gt;_&lt;closeout-id&gt;/
+  closeout_plan.json
+  CLOSEOUT_PLAN.md
+  cleanup_manifest.json
+  COMMERCIAL_REVIEW_PACKET.md
+  RETURN_PACKAGE.md</code></pre>
+        <p>
+          This is a dry-run planner. It does not move, delete, archive, or mutate project files.
+        </p>
+      </section>
+
+      <section>
+        <h2>Cleanup Policy</h2>
+        <ul>
+          <li><strong>Keep:</strong> provenance anchors, result artifacts, reports, declared task artifacts, and files needed for Ondesk return.</li>
+          <li><strong>Archive candidate:</strong> raw logs and bulky runtime artifacts that may be moved only after review.</li>
+          <li><strong>Delete candidate:</strong> disabled by default in the first closeout surface.</li>
+        </ul>
+        <p>
+          Any future move, archive, or delete action must pass commercial model review and explicit human approval through the normal approval path.
+        </p>
+      </section>
+
+      <section>
+        <h2>Never Auto-Mutate</h2>
+        <ul>
+          <li>git-tracked source or documentation files;</li>
+          <li>human-authored notes or reports;</li>
+          <li>hidden config, env, symlink, mount, external drive, or system paths;</li>
+          <li>artifacts referenced by reports, wiki candidates, approvals, or resume records.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Ondesk Return</h2>
+        <p>
+          Use <code>RETURN_PACKAGE.md</code> to start the next Ondesk harness. Read the listed result artifacts first, inspect open decisions, and run the verification commands before continuing work.
+        </p>
+        <p>
+          Pair this with the <a href="/guides/offdesk-morning-review/">Offdesk Morning Review Workflow</a> when reviewing overnight work.
+        </p>
+      </section>
+    </div>
+  </article>
+
+  <Footer />
+</Base>

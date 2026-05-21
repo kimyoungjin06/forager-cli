@@ -30,7 +30,7 @@ const features = [
   {
     icon: 'groups',
     title: 'Morning Review',
-    description: 'Turn overnight runs into inspectable decisions: what completed, what failed, what needs approval, and what knowledge should be promoted.',
+    description: 'Turn overnight runs into inspectable decisions: what completed, what failed, what needs closeout, and what knowledge should be promoted.',
   },
   {
     icon: 'tmux',
@@ -143,10 +143,15 @@ const features = [
         </Step>
 
         <Step number={3} title="Review the morning evidence">
-          <p class="text-gray-400 leading-relaxed">Use task status, debug bundles, maintenance reports, Council decisions, and wiki review reports before claiming completion.</p>
+          <p class="text-gray-400 leading-relaxed">Use task status, debug bundles, maintenance reports, closeout packets, Council decisions, and wiki review reports before claiming completion.</p>
         </Step>
 
-        <Step number={4} title="Promote only reviewed knowledge" showLine={false}>
+        <Step number={4} title="Close out before returning Ondesk">
+          <p class="text-gray-400 leading-relaxed">Completed tasks that still need closeout stay visible until a dry-run cleanup plan and return package have been generated.</p>
+          <a href="/guides/offdesk-closeout/" class="inline-flex mt-4 text-brand-400 hover:text-brand-300 font-medium transition-colors">Read the closeout guide</a>
+        </Step>
+
+        <Step number={5} title="Promote only reviewed knowledge" showLine={false}>
           <p class="text-gray-400 leading-relaxed">Adaptive wiki candidates and provisional overnight notes become durable guidance only through explicit review and audited CLI actions.</p>
         </Step>
       </div>

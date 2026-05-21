@@ -24,7 +24,8 @@ import Footer from '../../components/Footer.astro';
         <ol>
           <li><strong>Ondesk planning:</strong> create focused sessions, isolate branches with worktrees, and decide which tasks are safe to run unattended.</li>
           <li><strong>Offdesk execution:</strong> queue durable tasks behind approval gates, provider fallback checks, recovery records, and audit trails.</li>
-          <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, and result artifacts.</li>
+          <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, result artifacts, and closeout needs.</li>
+          <li><strong>Closeout:</strong> generate the dry-run cleanup plan, commercial review packet, and Ondesk return package before resuming hands-on work.</li>
           <li><strong>Knowledge promotion:</strong> promote adaptive wiki candidates only after reviewing evidence, counterexamples, scope, and freshness.</li>
         </ol>
       </section>
@@ -37,9 +38,24 @@ import Footer from '../../components/Footer.astro';
         <pre><code>forager status
 forager offdesk tasks --json
 forager offdesk pending --json
-forager offdesk maintenance-report --json</code></pre>
+forager offdesk maintenance-report --json
+forager offdesk closeout --dry-run</code></pre>
         <p>
-          These commands answer the operational questions: what ran, what is waiting, what failed, what needs recovery, and what requires explicit approval.
+          These commands answer the operational questions: what ran, what is waiting, what failed, what needs recovery, what requires explicit approval, and what must be cleaned up before Ondesk return.
+        </p>
+      </section>
+
+      <section>
+        <h2>Closeout Review</h2>
+        <p>
+          The TUI marks completed tasks that still need closeout. Treat that signal as mandatory before resuming normal Ondesk work:
+        </p>
+        <pre><code>forager offdesk closeout --project-key &lt;project&gt; --dry-run</code></pre>
+        <p>
+          Closeout writes a plan, cleanup manifest, commercial review packet, and return package. It does not move, delete, archive, or mutate project files.
+        </p>
+        <p>
+          Read the <a href="/guides/offdesk-closeout/">Offdesk Closeout Guide</a> when file cleanup, archive candidates, or handoff context are part of the return path.
         </p>
       </section>
 
@@ -63,6 +79,7 @@ forager offdesk wiki export-markdown --output ./adaptive-wiki-review</code></pre
           <li>Do not claim completion unless a result artifact, task status, or test output proves it.</li>
           <li>Do not let wiki context change commands, workdirs, provider choices, models, or approvals.</li>
           <li>Use Council output as a read-only recommendation, not as permission to mutate state.</li>
+          <li>Do not move, delete, or archive closeout candidates without commercial review and explicit human approval.</li>
           <li>Convert failures into recovery tasks, maintenance requests, or revised plans instead of silent retries.</li>
         </ul>
       </section>
