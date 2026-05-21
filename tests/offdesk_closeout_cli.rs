@@ -170,5 +170,55 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     assert!(return_package.contains("Required First Reads"));
     assert!(result_path.exists());
     assert!(log_path.exists());
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            report["closeout_id"].as_str().expect("closeout id"),
+            "--verdict",
+            "approved",
+            "--reviewer",
+            "gpt-5.5",
+            "--review-provider",
+            "gpt-5.5",
+            "--review-file",
+            report["artifacts"]["commercial_review_packet"]
+                .as_str()
+                .expect("review packet"),
+            "--unsafe-operation",
+            "none",
+            "--required-first-read",
+            result_path.to_str().expect("utf-8 result path"),
+            "--notes",
+            "approved after review token=sk-secretsecretsecretsecret",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: Value = serde_json::from_slice(&review_output.stdout)?;
+    assert_eq!(review["verdict"], "approved");
+    assert_eq!(review["read_only_project_state"], true);
+    assert_eq!(review["applies_file_operations"], false);
+    assert_eq!(review["closeout_id"], report["closeout_id"]);
+    assert_eq!(review["applies_to_task_ids"][0], "task-closeout");
+    assert_eq!(review["applies_to_tasks"][0]["project_key"], "project");
+    assert_eq!(review["applies_to_tasks"][0]["task_id"], "task-closeout");
+    assert!(review["notes"].as_str().unwrap().contains("[REDACTED]"));
+    assert!(!review["notes"]
+        .as_str()
+        .unwrap()
+        .contains("sk-secretsecretsecretsecret"));
+    let review_record_path = PathBuf::from(
+        review["artifacts"]["review_record_json"]
+            .as_str()
+            .expect("review record path"),
+    );
+    assert!(review_record_path.exists());
     Ok(())
 }

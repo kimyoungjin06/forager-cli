@@ -61,6 +61,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk maintenance-report`↴](#forager-offdesk-maintenance-report)
 * [`forager offdesk maintenance-request`↴](#forager-offdesk-maintenance-request)
 * [`forager offdesk closeout`↴](#forager-offdesk-closeout)
+* [`forager offdesk closeout-review`↴](#forager-offdesk-closeout-review)
 * [`forager offdesk wiki`↴](#forager-offdesk-wiki)
 * [`forager offdesk wiki corrections`↴](#forager-offdesk-wiki-corrections)
 * [`forager offdesk wiki proposal-events`↴](#forager-offdesk-wiki-proposal-events)
@@ -590,6 +591,7 @@ Manage offdesk approvals and recovery artifacts
 * `maintenance-report` — Summarize read-only Offdesk maintenance risks
 * `maintenance-request` — Create or reuse an approval request for a maintenance action
 * `closeout` — Generate a mandatory closeout plan and commercial review packet
+* `closeout-review` — Record a reviewed closeout verdict without applying file operations
 * `wiki` — Inspect adaptive wiki candidates, entries, projections, and lint
 
 
@@ -1072,6 +1074,33 @@ Generate a mandatory closeout plan and commercial review packet
   Default value: `commercial`
 * `--output <OUTPUT>` — Write closeout artifacts to this directory
 * `--dry-run` — Accepted for explicit operator intent; closeout never applies file operations
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk closeout-review`
+
+Record a reviewed closeout verdict without applying file operations
+
+**Usage:** `forager offdesk closeout-review [OPTIONS] --verdict <VERDICT>`
+
+###### **Options:**
+
+* `--closeout-id <CLOSEOUT_ID>` — Closeout ID from `forager offdesk closeout`
+* `--artifact-dir <ARTIFACT_DIR>` — Closeout artifact directory containing closeout_plan.json
+* `--verdict <VERDICT>` — Commercial review verdict
+
+  Possible values: `approved`, `revise`, `blocked`
+
+* `--reviewer <REVIEWER>` — Reviewer or reviewing model label
+
+  Default value: `operator`
+* `--review-provider <REVIEW_PROVIDER>` — Commercial model/provider label used for review
+* `--review-file <REVIEW_FILE>` — Optional path to the raw commercial review output
+* `--unsafe-operation <UNSAFE_OPERATION>` — Unsafe operation reported by review; may be passed multiple times
+* `--missing-evidence <MISSING_EVIDENCE>` — Missing evidence reported by review; may be passed multiple times
+* `--required-first-read <REQUIRED_FIRST_READ>` — Required first-read path reported by review; may be passed multiple times
+* `--notes <NOTES>` — Short review note. Secrets are redacted before persistence
 * `--json` — Output as JSON
 
 

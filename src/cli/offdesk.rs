@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -124,6 +124,9 @@ pub enum OffdeskCommands {
 
     /// Generate a mandatory closeout plan and commercial review packet
     Closeout(CloseoutArgs),
+
+    /// Record a reviewed closeout verdict without applying file operations
+    CloseoutReview(CloseoutReviewArgs),
 
     /// Inspect adaptive wiki candidates, entries, projections, and lint
     Wiki(WikiArgs),
@@ -718,6 +721,71 @@ pub struct CloseoutArgs {
     /// Output as JSON
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Args)]
+pub struct CloseoutReviewArgs {
+    /// Closeout ID from `forager offdesk closeout`
+    #[arg(long)]
+    closeout_id: Option<String>,
+
+    /// Closeout artifact directory containing closeout_plan.json
+    #[arg(long)]
+    artifact_dir: Option<PathBuf>,
+
+    /// Commercial review verdict
+    #[arg(long, value_enum)]
+    verdict: CloseoutReviewVerdict,
+
+    /// Reviewer or reviewing model label
+    #[arg(long, default_value = "operator")]
+    reviewer: String,
+
+    /// Commercial model/provider label used for review
+    #[arg(long)]
+    review_provider: Option<String>,
+
+    /// Optional path to the raw commercial review output
+    #[arg(long)]
+    review_file: Option<PathBuf>,
+
+    /// Unsafe operation reported by review; may be passed multiple times
+    #[arg(long)]
+    unsafe_operation: Vec<String>,
+
+    /// Missing evidence reported by review; may be passed multiple times
+    #[arg(long)]
+    missing_evidence: Vec<String>,
+
+    /// Required first-read path reported by review; may be passed multiple times
+    #[arg(long)]
+    required_first_read: Vec<String>,
+
+    /// Short review note. Secrets are redacted before persistence.
+    #[arg(long)]
+    notes: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+enum CloseoutReviewVerdict {
+    Approved,
+    Revise,
+    Blocked,
+}
+
+impl CloseoutReviewVerdict {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Revise => "revise",
+            Self::Blocked => "blocked",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1982,6 +2050,46 @@ struct CloseoutArtifactPaths {
     return_package_markdown: String,
 }
 
+#[derive(Serialize)]
+struct CloseoutReviewRecord {
+    reviewed_at: DateTime<Utc>,
+    review_id: String,
+    closeout_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closeout_generated_at: Option<DateTime<Utc>>,
+    profile: String,
+    artifact_dir: String,
+    verdict: CloseoutReviewVerdict,
+    reviewer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_file: Option<String>,
+    unsafe_operations: Vec<String>,
+    missing_evidence: Vec<String>,
+    required_first_reads: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<String>,
+    applies_to_task_ids: Vec<String>,
+    applies_to_tasks: Vec<CloseoutReviewTaskRef>,
+    read_only_project_state: bool,
+    applies_file_operations: bool,
+    artifacts: CloseoutReviewArtifactPaths,
+}
+
+#[derive(Serialize)]
+struct CloseoutReviewTaskRef {
+    project_key: String,
+    request_id: String,
+    task_id: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutReviewArtifactPaths {
+    closeout_plan_json: String,
+    review_record_json: String,
+}
+
 pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
     match command {
         OffdeskCommands::Pending(args) => pending(profile, args).await,
@@ -2009,6 +2117,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::MaintenanceReport(args) => maintenance_report(profile, args).await,
         OffdeskCommands::MaintenanceRequest(args) => maintenance_request(profile, args).await,
         OffdeskCommands::Closeout(args) => closeout(profile, args).await,
+        OffdeskCommands::CloseoutReview(args) => closeout_review(profile, args).await,
         OffdeskCommands::Wiki(args) => wiki(profile, args).await,
     }
 }
@@ -5592,6 +5701,19 @@ async fn closeout(profile: &str, args: CloseoutArgs) -> Result<()> {
     Ok(())
 }
 
+async fn closeout_review(profile: &str, args: CloseoutReviewArgs) -> Result<()> {
+    let json = args.json;
+    let record = build_closeout_review_record(profile, &args)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        return Ok(());
+    }
+
+    print_closeout_review_record(&record);
+    Ok(())
+}
+
 fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCloseoutReport> {
     let profile_dir = get_profile_dir(profile)?;
     let profile_name = if profile.is_empty() {
@@ -5732,6 +5854,211 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
 
     write_closeout_artifacts(&report)?;
     Ok(report)
+}
+
+fn build_closeout_review_record(
+    profile: &str,
+    args: &CloseoutReviewArgs,
+) -> Result<CloseoutReviewRecord> {
+    let profile_dir = get_profile_dir(profile)?;
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+    let artifact_dir = resolve_closeout_artifact_dir(&profile_dir, args)?;
+    let plan_path = artifact_dir.join("closeout_plan.json");
+    let plan: Value = serde_json::from_str(&fs::read_to_string(&plan_path).with_context(|| {
+        format!(
+            "read closeout plan for review record {}",
+            plan_path.display()
+        )
+    })?)
+    .with_context(|| format!("parse closeout plan {}", plan_path.display()))?;
+
+    let closeout_id = plan
+        .get("closeout_id")
+        .and_then(Value::as_str)
+        .map(crate::offdesk::operator_safe_text)
+        .ok_or_else(|| anyhow::anyhow!("closeout plan is missing closeout_id"))?;
+    if let Some(expected) = args.closeout_id.as_deref() {
+        let expected = crate::offdesk::operator_safe_text(expected);
+        if expected != closeout_id {
+            bail!(
+                "closeout id mismatch: requested {}, artifact contains {}",
+                expected,
+                closeout_id
+            );
+        }
+    }
+
+    let closeout_generated_at = plan
+        .get("generated_at")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+    let applies_to_task_ids = plan
+        .get("tasks")
+        .and_then(Value::as_array)
+        .map(|tasks| {
+            tasks
+                .iter()
+                .filter_map(|task| task.get("task_id").and_then(Value::as_str))
+                .map(crate::offdesk::operator_safe_text)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let applies_to_tasks = plan
+        .get("tasks")
+        .and_then(Value::as_array)
+        .map(|tasks| {
+            tasks
+                .iter()
+                .filter_map(|task| {
+                    Some(CloseoutReviewTaskRef {
+                        project_key: crate::offdesk::operator_safe_text(
+                            task.get("project_key")?.as_str()?,
+                        ),
+                        request_id: crate::offdesk::operator_safe_text(
+                            task.get("request_id")?.as_str()?,
+                        ),
+                        task_id: crate::offdesk::operator_safe_text(task.get("task_id")?.as_str()?),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let reviewed_at = Utc::now();
+    let review_id = format!("closeout_review_{}", short_uuid());
+    let review_record_path = allocate_closeout_review_record_path(&artifact_dir, reviewed_at)?;
+    let artifacts = CloseoutReviewArtifactPaths {
+        closeout_plan_json: plan_path.display().to_string(),
+        review_record_json: review_record_path.display().to_string(),
+    };
+    let record = CloseoutReviewRecord {
+        reviewed_at,
+        review_id,
+        closeout_id,
+        closeout_generated_at,
+        profile: crate::offdesk::operator_safe_text(profile_name),
+        artifact_dir: artifact_dir.display().to_string(),
+        verdict: args.verdict,
+        reviewer: crate::offdesk::operator_safe_text(args.reviewer.trim()),
+        review_provider: args
+            .review_provider
+            .as_deref()
+            .map(|value| crate::offdesk::operator_safe_text(value.trim())),
+        review_file: args
+            .review_file
+            .as_ref()
+            .map(|path| crate::offdesk::operator_safe_text(path.to_string_lossy().as_ref())),
+        unsafe_operations: safe_text_list(&args.unsafe_operation),
+        missing_evidence: safe_text_list(&args.missing_evidence),
+        required_first_reads: safe_text_list(&args.required_first_read),
+        notes: args
+            .notes
+            .as_deref()
+            .map(|value| truncate_closeout_text(&crate::offdesk::operator_safe_text(value), 2000)),
+        applies_to_task_ids,
+        applies_to_tasks,
+        read_only_project_state: true,
+        applies_file_operations: false,
+        artifacts,
+    };
+
+    write_closeout_review_record(&record)?;
+    Ok(record)
+}
+
+fn resolve_closeout_artifact_dir(profile_dir: &Path, args: &CloseoutReviewArgs) -> Result<PathBuf> {
+    if let Some(artifact_dir) = args.artifact_dir.as_ref() {
+        return Ok(artifact_dir.clone());
+    }
+
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    let entries = fs::read_dir(&closeouts_dir)
+        .with_context(|| format!("read closeout artifact root {}", closeouts_dir.display()))?;
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let artifact_dir = entry.path();
+        let plan_path = artifact_dir.join("closeout_plan.json");
+        let Ok(content) = fs::read_to_string(&plan_path) else {
+            continue;
+        };
+        let Ok(plan) = serde_json::from_str::<Value>(&content) else {
+            continue;
+        };
+        let plan_closeout_id = plan.get("closeout_id").and_then(Value::as_str);
+        if let Some(expected) = args.closeout_id.as_deref() {
+            if plan_closeout_id != Some(expected) {
+                continue;
+            }
+        }
+        let generated_at = plan
+            .get("generated_at")
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        candidates.push((generated_at, artifact_dir));
+    }
+
+    candidates.sort_by_key(|(generated_at, _)| *generated_at);
+    candidates.pop().map(|(_, path)| path).ok_or_else(|| {
+        if let Some(closeout_id) = args.closeout_id.as_deref() {
+            anyhow::anyhow!(
+                "no closeout artifact found for closeout_id {}",
+                crate::offdesk::operator_safe_text(closeout_id)
+            )
+        } else {
+            anyhow::anyhow!("no closeout artifact found; run `forager offdesk closeout` first")
+        }
+    })
+}
+
+fn allocate_closeout_review_record_path(
+    artifact_dir: &Path,
+    reviewed_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    fs::create_dir_all(artifact_dir)
+        .with_context(|| format!("create closeout artifact dir {}", artifact_dir.display()))?;
+    let timestamp = reviewed_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("closeout_review_{timestamp}.json")
+        } else {
+            format!("closeout_review_{timestamp}_{attempt:03}.json")
+        };
+        let path = artifact_dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+
+    bail!(
+        "could not allocate closeout review record path in {}",
+        artifact_dir.display()
+    )
+}
+
+fn write_closeout_review_record(record: &CloseoutReviewRecord) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(record)?;
+    write_new_file(Path::new(&record.artifacts.review_record_json), &bytes)
+        .with_context(|| format!("write {}", record.artifacts.review_record_json))?;
+    Ok(())
+}
+
+fn safe_text_list(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| crate::offdesk::operator_safe_text(value.trim()))
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 fn allocate_closeout_artifact_dir(
@@ -6383,6 +6710,34 @@ fn print_closeout_report(report: &OffdeskCloseoutReport) {
         println!("Open decisions:");
         for decision in &report.open_decisions {
             println!("  - {}: {}", decision.kind, decision.detail);
+        }
+    }
+}
+
+fn print_closeout_review_record(record: &CloseoutReviewRecord) {
+    println!("Offdesk closeout review");
+    println!("  reviewed_at:  {}", record.reviewed_at);
+    println!("  review_id:    {}", record.review_id);
+    println!("  closeout_id:  {}", record.closeout_id);
+    println!("  verdict:      {}", record.verdict.as_str());
+    println!("  reviewer:     {}", record.reviewer);
+    if let Some(provider) = record.review_provider.as_deref() {
+        println!("  provider:     {provider}");
+    }
+    println!("  project file mutations: none");
+    println!("Artifacts:");
+    println!("  plan:         {}", record.artifacts.closeout_plan_json);
+    println!("  review:       {}", record.artifacts.review_record_json);
+    if !record.unsafe_operations.is_empty() {
+        println!("Unsafe operations:");
+        for operation in &record.unsafe_operations {
+            println!("  - {operation}");
+        }
+    }
+    if !record.missing_evidence.is_empty() {
+        println!("Missing evidence:");
+        for evidence in &record.missing_evidence {
+            println!("  - {evidence}");
         }
     }
 }

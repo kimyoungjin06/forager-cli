@@ -45,6 +45,23 @@ offdesk_closeouts/<timestamp>_<closeout-id>/
 The closeout command is a dry-run planner. It does not move, delete, archive,
 or mutate project files.
 
+Generating the packet is not the same as approving the closeout. After a
+commercial model or operator reviews `COMMERCIAL_REVIEW_PACKET.md`, record the
+verdict:
+
+```bash
+forager offdesk closeout-review \
+  --closeout-id <closeout-id> \
+  --verdict approved \
+  --reviewer gpt-5.5 \
+  --review-provider gpt-5.5 \
+  --review-file <path-to-review-output>
+```
+
+Only an `approved` review record clears the TUI's closeout-required signal.
+`revise` and `blocked` verdicts are preserved as evidence but keep the return
+path reviewable.
+
 ## Cleanup Policy
 
 Closeout classifies files but does not apply changes:
@@ -84,6 +101,8 @@ strong commercial model to return only a verdict:
 ```
 
 This review is advisory until the operator approves the concrete action.
+`forager offdesk closeout-review` records the verdict and the review artifact
+path; it still does not execute file operations.
 
 ## Ondesk Return
 

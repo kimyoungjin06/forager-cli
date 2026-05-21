@@ -54,6 +54,10 @@ forager offdesk closeout --dry-run</code></pre>
         <p>
           Closeout writes a plan, cleanup manifest, commercial review packet, and return package. It does not move, delete, archive, or mutate project files.
         </p>
+        <pre><code>forager offdesk closeout-review --closeout-id &lt;closeout-id&gt; --verdict approved</code></pre>
+        <p>
+          The review record is the durable evidence that the closeout packet was inspected. Packet generation alone does not approve file cleanup.
+        </p>
         <p>
           Read the <a href="/guides/offdesk-closeout/">Offdesk Closeout Guide</a> when file cleanup, archive candidates, or handoff context are part of the return path.
         </p>
