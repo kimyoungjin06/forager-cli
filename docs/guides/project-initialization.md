@@ -3,6 +3,12 @@
 `forager project init` creates a read-only operation packet for a new project.
 It is the bootstrap step before Ondesk/Offdesk/wiki work starts.
 
+In the full operation cycle, initialization is the first bounded artifact. It
+replaces "look around the repo again from scratch" with a durable first-read
+packet that later Ondesk prompt packages and Offdesk preflight checks can
+reference. See the [Operation Cycle Guide](operation-cycle.md) for the complete
+handoff path.
+
 ```bash
 forager project init /path/to/project \
   --project-key my-project \
@@ -125,3 +131,17 @@ runtime blocked until operator review selects a scoped operation.
    example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
 9. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.
+
+## Operator Interpretation
+
+Treat the packet as a scope map, not as a green light:
+
+- `ready_for_ondesk_start=true` means a fresh harness has enough first reads to
+  begin with context.
+- `ready_for_offdesk_runtime=false` is normal until a specific task has a clean
+  evidence bundle, module preflight, workload review, and runtime approval.
+- `MODULE_OPERATION_PREFLIGHT.json` should be referenced by later prepare
+  scripts, but it should not be copied wholesale into model prompts or operator
+  output.
+- A selected module target narrows operating context; it does not change the
+  canonical project key or grant permission to mutate files.

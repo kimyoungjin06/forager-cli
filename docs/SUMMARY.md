@@ -10,8 +10,10 @@
 # Guides
 
 - [Workflow](guides/workflow.md)
+- [Operation Cycle](guides/operation-cycle.md)
 - [Project Initialization](guides/project-initialization.md)
 - [Ondesk Handoff](guides/ondesk-handoff.md)
+- [TwinPaper Offdesk Runtime Smoke](guides/twinpaper-offdesk-runtime-smoke.md)
 - [Offdesk Closeout](guides/offdesk-closeout.md)
 - [Module Operation Profiles](guides/module-operation-profile.md)
 - [Repo Config & Hooks](guides/repo-config.md)

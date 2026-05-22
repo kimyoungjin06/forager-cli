@@ -10,6 +10,10 @@ Forager treats closeout as a required lifecycle gate between:
 Ondesk closeout -> Offdesk execution -> Offdesk closeout -> Ondesk return
 ```
 
+The surrounding handoff path is documented in the
+[Operation Cycle Guide](operation-cycle.md). Closeout is the point where a
+finished process becomes reviewable work.
+
 ## Ondesk To Offdesk
 
 Before handing work to Offdesk, prepare the work while you are present:
@@ -115,3 +119,16 @@ matching closeout return package and the latest recorded closeout-review
 verdict, when those artifacts exist. This makes the normal morning return path
 start from a fresh package instead of requiring the operator to manually paste
 the closeout artifact path.
+
+## Runtime Smoke Interpretation
+
+A clean runtime smoke does not skip closeout. For example, the TwinPaper
+runtime smoke can prove that `dispatch.runtime` approval, `local-tmux` launch,
+polling, result artifacts, and deterministic post-run review all work. It still
+leaves `mode_risk=operator_review_required`, because the result must be read
+before it becomes trusted work.
+
+Use the smoke result as launch-path evidence, then close out any real Offdesk
+run before returning to Ondesk. See
+[`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md) for the
+validated short-run procedure.
