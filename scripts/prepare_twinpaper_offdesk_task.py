@@ -901,7 +901,7 @@ def render_launch_dry_run_report(
         f"- runner: `{manifest['safety']['runner']}`",
         f"- provider_model: `{manifest['provider']}:{manifest['model']}`",
         f"- schedule_mode: `{schedule['mode']}`",
-        f"- schedule_target_at: `{schedule.get('target_at')}`",
+        f"- schedule_target_at: `{markdown_scalar(schedule.get('target_at'))}`",
         f"- scheduled_duration_minutes: `{schedule['duration_minutes']:.1f}`",
         f"- enqueue_requested_in_this_run: `{markdown_scalar(args.enqueue)}`",
         "",
