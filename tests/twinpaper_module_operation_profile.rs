@@ -376,6 +376,8 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
     let launch_report = fs::read_to_string(&launch_report_path)?;
     assert!(launch_report.contains("TwinPaper Launch Dry Run"));
     assert!(launch_report.contains("ready_for_enqueue: `true`"));
+    assert!(launch_report.contains("schedule_target_at: `null`"));
+    assert!(!launch_report.contains("schedule_target_at: `None`"));
     assert!(launch_report.contains("module_preflight: `true`"));
     assert!(launch_report.contains("Runtime dispatch still requires"));
     assert!(launch_report.contains("offdesk_enqueue_command.sh"));
