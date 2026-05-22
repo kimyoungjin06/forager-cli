@@ -12,6 +12,7 @@
 - [Workflow](guides/workflow.md)
 - [Ondesk Handoff](guides/ondesk-handoff.md)
 - [Offdesk Closeout](guides/offdesk-closeout.md)
+- [Module Operation Profiles](guides/module-operation-profile.md)
 - [Repo Config & Hooks](guides/repo-config.md)
 - [Git Worktrees](guides/worktrees.md)
 - [Diff View](guides/diff-view.md)

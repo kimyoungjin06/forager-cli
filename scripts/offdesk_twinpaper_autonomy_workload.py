@@ -450,6 +450,7 @@ def render_evidence_context(
         },
         "artifacts": compact_artifacts(bundle),
         "entrypoints": bundle.get("entrypoints", {}),
+        "module_operation_profiles": bundle.get("module_operation_profiles", {}),
     }
     return json.dumps(context, ensure_ascii=False, indent=2)
 
@@ -524,6 +525,9 @@ Canonical Module03 entrypoint fact:
 modules/03_regspec_machine/scripts/run_module_03.sh is the only command wrapper
 to use for this task. This canonical fact overrides older internal Python
 examples inside the snippets.
+
+--- Deterministic Evidence And Module Operation Profile ---
+{evidence_context}
 
 --- README.md ---
 {readme}

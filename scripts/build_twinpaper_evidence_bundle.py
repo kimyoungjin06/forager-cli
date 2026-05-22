@@ -11,6 +11,8 @@ import pathlib
 import re
 from typing import Any
 
+from build_twinpaper_module03_operation_profile import compact_profile, build_profile, next_actions_for_state
+
 
 DEFAULT_REPO = pathlib.Path("/home/kimyoungjin06/Desktop/Workspace/1.2.8.TwinPaper")
 DEFAULT_TERMS = (
@@ -284,6 +286,20 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
         },
     }
     bundle["current_state"] = derive_current_state(targeted_excerpts, artifacts)
+    module03_profile = build_profile(repo)
+    module03_profile["current_state"] = {
+        **module03_profile.get("current_state", {}),
+        **bundle["current_state"],
+        "source": "embedded_evidence_bundle",
+    }
+    module03_profile["operation_gates"]["reportability_status"] = module03_profile["current_state"]["claim_status"]
+    module03_profile["operation_gates"]["baseline_evidence_status"] = module03_profile["current_state"][
+        "baseline_evidence_status"
+    ]
+    module03_profile["next_actions"] = next_actions_for_state(module03_profile["current_state"])
+    bundle["module_operation_profiles"] = {
+        "module03_regspec_machine": compact_profile(module03_profile),
+    }
     return bundle
 
 
