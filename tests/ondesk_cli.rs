@@ -198,6 +198,7 @@ fn ondesk_prompt_package_includes_latest_project_initialization() -> Result<()> 
     let generated_at = Utc::now();
     let start_package_path = init_dir.join("ONDESK_START_PACKAGE.md");
     let ready_check_path = init_dir.join("OFFDESK_READY_CHECK.json");
+    let module_preflight_path = init_dir.join("MODULE_OPERATION_PREFLIGHT.json");
     fs::write(
         &start_package_path,
         "# Ondesk Start Package\n\nRead Module03 first token=sk-secretsecretsecretsecret\n",
@@ -208,6 +209,38 @@ fn ondesk_prompt_package_includes_latest_project_initialization() -> Result<()> 
             "ready_for_ondesk_start": true,
             "ready_for_offdesk_runtime": false,
             "requires_operator_review": true
+        }))?,
+    )?;
+    fs::write(
+        &module_preflight_path,
+        serde_json::to_string_pretty(&json!({
+            "kind": "forager_module_operation_preflight",
+            "ready_for_offdesk_runtime": false,
+            "blockers": [
+                "operator_review_required_before_runtime_enqueue",
+                "module_operation_profile_requires_review"
+            ],
+            "operation_targets": [
+                {
+                    "scope_ref": "module03_regspec_machine",
+                    "readiness_level": "known_profile_builder_available",
+                    "recognized_profile_kind": "twinpaper_module03_regspec_machine",
+                    "profile_builder_available": true,
+                    "evidence_bundle_builder_available": true,
+                    "evidence_review_builder_available": true,
+                    "blockers": ["evidence_bundle_requires_review"],
+                    "recommended_commands": [
+                        {
+                            "purpose": "build_evidence_bundle",
+                            "command": "scripts/build_bundle.py --token sk-secretsecretsecretsecret"
+                        },
+                        {
+                            "purpose": "review_evidence_bundle",
+                            "command": "scripts/review_bundle.py"
+                        }
+                    ]
+                }
+            ]
         }))?,
     )?;
     fs::write(
@@ -226,7 +259,8 @@ fn ondesk_prompt_package_includes_latest_project_initialization() -> Result<()> 
                 ]
             },
             "ondesk_start_package_path": start_package_path,
-            "offdesk_ready_check_path": ready_check_path
+            "offdesk_ready_check_path": ready_check_path,
+            "module_operation_preflight_path": module_preflight_path
         }))?,
     )?;
 
@@ -261,12 +295,40 @@ fn ondesk_prompt_package_includes_latest_project_initialization() -> Result<()> 
         json["latest_project_initialization"]["ready_for_offdesk_runtime"],
         false
     );
+    assert_eq!(
+        json["latest_project_initialization"]["module_operation_preflight"]
+            ["ready_for_offdesk_runtime"],
+        false
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["module_operation_preflight"]["blocker_count"],
+        2
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["module_operation_preflight"]["operation_targets"][0]
+            ["readiness_level"],
+        "known_profile_builder_available"
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["module_operation_preflight"]["operation_targets"][0]
+            ["recognized_profile_kind"],
+        "twinpaper_module03_regspec_machine"
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["module_operation_preflight"]["operation_targets"][0]
+            ["recommended_command_purposes"][0],
+        "build_evidence_bundle"
+    );
     let content = json["content"].as_str().expect("content string");
     assert!(content.contains("Latest Project Initialization"));
+    assert!(content.contains("Latest Module Operation Preflight"));
     assert!(content.contains("module03_regspec_machine"));
+    assert!(content.contains("known_profile_builder_available"));
+    assert!(content.contains("build_evidence_bundle"));
     assert!(content.contains("Read Module03 first"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
+    assert!(!content.contains("scripts/build_bundle.py"));
     Ok(())
 }
 

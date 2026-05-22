@@ -101,8 +101,10 @@ reviewed before promotion.
 harness. It is designed to avoid raw context resume as the only startup path.
 `forager ondesk prompt-package --project-key <project>` automatically includes
 the latest matching project initialization start package from the active
-profile, so a fresh Ondesk harness can begin from the reviewed project/module
-scope instead of searching for the artifact directory manually.
+profile, plus a concise `MODULE_OPERATION_PREFLIGHT.json` summary when present.
+That lets a fresh Ondesk harness see the reviewed project/module scope,
+readiness blockers, and module-preflight command purposes without searching for
+the artifact directory manually or inheriting raw command strings.
 
 `OFFDESK_READY_CHECK.json` marks Ondesk startup as ready but keeps Offdesk
 runtime blocked until operator review selects a scoped operation.

@@ -23,6 +23,9 @@ const MAX_GIT_CHARS: usize = 12_000;
 const MAX_PROMPT_CHARS: usize = 40_000;
 const MAX_CLOSEOUT_CHARS: usize = 16_000;
 const MAX_PROJECT_INIT_CHARS: usize = 16_000;
+const MAX_MODULE_PREFLIGHT_TARGETS: usize = 6;
+const MAX_MODULE_PREFLIGHT_BLOCKERS: usize = 8;
+const MAX_MODULE_PREFLIGHT_COMMANDS: usize = 8;
 const MAX_RECENT_NOTES: usize = 20;
 
 #[derive(Subcommand)]
@@ -256,11 +259,38 @@ struct OndeskProjectInitializationSummary {
     operation_profile_path: String,
     ondesk_start_package_path: String,
     offdesk_ready_check_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    module_operation_preflight_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    module_operation_preflight: Option<OndeskModuleOperationPreflightSummary>,
     operation_targets: Vec<String>,
     ready_for_ondesk_start: Option<bool>,
     ready_for_offdesk_runtime: Option<bool>,
     requires_operator_review: Option<bool>,
     start_package_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OndeskModuleOperationPreflightSummary {
+    path: String,
+    ready_for_offdesk_runtime: Option<bool>,
+    blocker_count: usize,
+    blockers: Vec<String>,
+    operation_targets: Vec<OndeskModuleOperationPreflightTargetSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OndeskModuleOperationPreflightTargetSummary {
+    scope_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    readiness_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recognized_profile_kind: Option<String>,
+    profile_builder_available: Option<bool>,
+    evidence_bundle_builder_available: Option<bool>,
+    evidence_review_builder_available: Option<bool>,
+    blockers: Vec<String>,
+    recommended_command_purposes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -869,6 +899,18 @@ fn latest_project_initialization(
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .unwrap_or_else(|| artifact_dir.join("OFFDESK_READY_CHECK.json"));
+    let module_operation_preflight_path_from_profile = profile
+        .get("module_operation_preflight_path")
+        .and_then(Value::as_str);
+    let module_operation_preflight_path = module_operation_preflight_path_from_profile
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact_dir.join("MODULE_OPERATION_PREFLIGHT.json"));
+    let module_operation_preflight_path_summary = (module_operation_preflight_path_from_profile
+        .is_some()
+        || module_operation_preflight_path.exists())
+    .then(|| safe(module_operation_preflight_path.to_string_lossy().as_ref()));
+    let module_operation_preflight =
+        summarize_module_operation_preflight(&module_operation_preflight_path);
     let ready_check = fs::read_to_string(&offdesk_ready_check_path)
         .ok()
         .and_then(|content| serde_json::from_str::<Value>(&content).ok());
@@ -906,6 +948,8 @@ fn latest_project_initialization(
             operation_profile_path: safe(profile_path.to_string_lossy().as_ref()),
             ondesk_start_package_path: safe(ondesk_start_package_path.to_string_lossy().as_ref()),
             offdesk_ready_check_path: safe(offdesk_ready_check_path.to_string_lossy().as_ref()),
+            module_operation_preflight_path: module_operation_preflight_path_summary,
+            module_operation_preflight,
             operation_targets,
             ready_for_ondesk_start: ready_check
                 .as_ref()
@@ -923,6 +967,78 @@ fn latest_project_initialization(
         },
         start_package,
     }))
+}
+
+fn summarize_module_operation_preflight(
+    path: &Path,
+) -> Option<OndeskModuleOperationPreflightSummary> {
+    let content = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<Value>(&content).ok()?;
+    let blockers = safe_json_string_list(value.get("blockers"), MAX_MODULE_PREFLIGHT_BLOCKERS);
+    let operation_targets = value
+        .get("operation_targets")
+        .and_then(Value::as_array)
+        .map(|targets| {
+            targets
+                .iter()
+                .take(MAX_MODULE_PREFLIGHT_TARGETS)
+                .filter_map(summarize_module_operation_preflight_target)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Some(OndeskModuleOperationPreflightSummary {
+        path: safe(path.to_string_lossy().as_ref()),
+        ready_for_offdesk_runtime: value
+            .get("ready_for_offdesk_runtime")
+            .and_then(Value::as_bool),
+        blocker_count: value
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        blockers,
+        operation_targets,
+    })
+}
+
+fn summarize_module_operation_preflight_target(
+    value: &Value,
+) -> Option<OndeskModuleOperationPreflightTargetSummary> {
+    let scope_ref = value.get("scope_ref").and_then(Value::as_str).map(safe)?;
+    Some(OndeskModuleOperationPreflightTargetSummary {
+        scope_ref,
+        readiness_level: value
+            .get("readiness_level")
+            .and_then(Value::as_str)
+            .map(safe),
+        recognized_profile_kind: value
+            .get("recognized_profile_kind")
+            .and_then(Value::as_str)
+            .map(safe),
+        profile_builder_available: value
+            .get("profile_builder_available")
+            .and_then(Value::as_bool),
+        evidence_bundle_builder_available: value
+            .get("evidence_bundle_builder_available")
+            .and_then(Value::as_bool),
+        evidence_review_builder_available: value
+            .get("evidence_review_builder_available")
+            .and_then(Value::as_bool),
+        blockers: safe_json_string_list(value.get("blockers"), MAX_MODULE_PREFLIGHT_BLOCKERS),
+        recommended_command_purposes: value
+            .get("recommended_commands")
+            .and_then(Value::as_array)
+            .map(|commands| {
+                commands
+                    .iter()
+                    .take(MAX_MODULE_PREFLIGHT_COMMANDS)
+                    .filter_map(|command| command.get("purpose").and_then(Value::as_str))
+                    .map(safe)
+                    .filter(|purpose| !purpose.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    })
 }
 
 fn closeout_plan_matches_project(plan: &Value, project_key: &str) -> bool {
@@ -1155,6 +1271,9 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
             "- ondesk_start_package: {}\n",
             initialization.summary.ondesk_start_package_path
         ));
+        if let Some(path) = &initialization.summary.module_operation_preflight_path {
+            output.push_str(&format!("- module_operation_preflight: {path}\n"));
+        }
         if initialization.summary.operation_targets.is_empty() {
             output.push_str("- operation_targets: none selected\n");
         } else {
@@ -1174,6 +1293,52 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
         }
         output.push('\n');
         output.push_str(&fenced("markdown", &initialization.start_package));
+
+        if let Some(preflight) = &initialization.summary.module_operation_preflight {
+            output.push_str("\n## Latest Module Operation Preflight\n");
+            output.push_str(&format!("- preflight: {}\n", preflight.path));
+            if let Some(ready) = preflight.ready_for_offdesk_runtime {
+                output.push_str(&format!("- ready_for_offdesk_runtime: {ready}\n"));
+            }
+            output.push_str(&format!("- blocker_count: {}\n", preflight.blocker_count));
+            if preflight.blockers.is_empty() {
+                output.push_str("- blockers: none recorded\n");
+            } else {
+                output.push_str(&format!("- blockers: {}\n", preflight.blockers.join(", ")));
+            }
+            if preflight.operation_targets.is_empty() {
+                output.push_str("- operation_targets: none recorded\n");
+            } else {
+                for target in &preflight.operation_targets {
+                    output.push_str(&format!("- target `{}`", target.scope_ref));
+                    if let Some(readiness) = &target.readiness_level {
+                        output.push_str(&format!(" readiness={readiness}"));
+                    }
+                    if let Some(kind) = &target.recognized_profile_kind {
+                        output.push_str(&format!(" recognized_profile_kind={kind}"));
+                    }
+                    if let Some(available) = target.profile_builder_available {
+                        output.push_str(&format!(" profile_builder_available={available}"));
+                    }
+                    if let Some(available) = target.evidence_bundle_builder_available {
+                        output.push_str(&format!(" evidence_bundle_builder_available={available}"));
+                    }
+                    if let Some(available) = target.evidence_review_builder_available {
+                        output.push_str(&format!(" evidence_review_builder_available={available}"));
+                    }
+                    output.push('\n');
+                    if !target.blockers.is_empty() {
+                        output.push_str(&format!("  blockers: {}\n", target.blockers.join(", ")));
+                    }
+                    if !target.recommended_command_purposes.is_empty() {
+                        output.push_str(&format!(
+                            "  recommended_command_purposes: {}\n",
+                            target.recommended_command_purposes.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     if let Some(closeout) = parts.closeout {
@@ -1219,6 +1384,21 @@ fn short_id(prefix: &str) -> String {
 
 fn safe(value: &str) -> String {
     operator_safe_text(value).trim().to_string()
+}
+
+fn safe_json_string_list(value: Option<&Value>, max_items: usize) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .take(max_items)
+                .filter_map(Value::as_str)
+                .map(safe)
+                .filter(|item| !item.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> (String, bool) {
