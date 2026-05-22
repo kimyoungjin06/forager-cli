@@ -1168,6 +1168,29 @@ Acceptance checks:
 - implemented now: existing generic review artifacts that return `blocked` or
   `revise` still block enqueue when supplied explicitly.
 
+### Slice 41: Module Operation Preflight Gate
+
+Implemented a module-operation preflight gate in the TwinPaper workload
+preparer:
+
+- `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact <path|latest|none>`;
+- `prepared_task.json.preflight.module_operation_preflight`;
+- `prepared_task.json.module_operation_preflight`;
+- `prepared_task.json.safety.module_operation_preflight_required`;
+- `offdesk_monitor_commands.md` module-preflight readiness lines.
+
+Acceptance checks:
+
+- implemented now: `latest` resolves the newest matching project initialization
+  `MODULE_OPERATION_PREFLIGHT.json`;
+- implemented now: the gate requires the Module03 scope, the recognized
+  TwinPaper Module03 profile kind, profile/evidence/review builder availability,
+  and all expected preflight command purposes;
+- implemented now: raw command strings from `MODULE_OPERATION_PREFLIGHT.json`
+  are not copied into `prepared_task.json`;
+- implemented now: missing or unrecognized module preflight blocks enqueue
+  unless the operator explicitly allows preflight blockers.
+
 ## Immediate Next Work
 
 The next useful slice is an operator-facing launch dry run: prepare the
