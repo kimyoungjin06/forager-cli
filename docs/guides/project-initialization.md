@@ -19,6 +19,7 @@ project_initializations/<timestamp>_<project-key>/
   PROJECT_OPERATION_PROFILE.json
   PROJECT_ONBOARDING.md
   MODULE_CANDIDATES.json
+  MODULE_OPERATION_PREFLIGHT.json
   EVIDENCE_COLLECTOR_PLAN.md
   WIKI_SEED_CANDIDATES.json
   ONDESK_START_PACKAGE.md
@@ -65,6 +66,12 @@ for operator review.
 `modules/`, `apps/`, `packages/`, and `crates/`. Candidates are not approved
 module operation profiles. They are review targets.
 
+`MODULE_OPERATION_PREFLIGHT.json` turns selected operation targets into an
+explicit preflight checklist. It records known module-profile builders,
+evidence-bundle/review commands, runtime blockers, and operator decisions. It
+is advisory and read-only; it does not run the commands or authorize Offdesk
+runtime.
+
 For example, a TwinPaper initialization should use:
 
 ```bash
@@ -106,9 +113,11 @@ runtime blocked until operator review selects a scoped operation.
 2. Read `PROJECT_ONBOARDING.md` and `OFFDESK_READY_CHECK.json`.
 3. Review module candidates and decide which ones need a module operation
    profile.
-4. Turn the evidence collector plan into a project-specific deterministic
+4. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
+   module-profile and evidence preflight commands where available.
+5. Turn the evidence collector plan into a project-specific deterministic
    bundle builder.
-5. Promote only reviewed wiki seeds.
-6. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-7. Enqueue Offdesk only after runtime capability, evidence, and closeout
+6. Promote only reviewed wiki seeds.
+7. Start Ondesk from `ONDESK_START_PACKAGE.md`.
+8. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.

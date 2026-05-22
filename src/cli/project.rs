@@ -16,6 +16,7 @@ use crate::session::get_profile_dir;
 const PROFILE_FILE: &str = "PROJECT_OPERATION_PROFILE.json";
 const ONBOARDING_FILE: &str = "PROJECT_ONBOARDING.md";
 const MODULE_CANDIDATES_FILE: &str = "MODULE_CANDIDATES.json";
+const MODULE_PREFLIGHT_FILE: &str = "MODULE_OPERATION_PREFLIGHT.json";
 const EVIDENCE_PLAN_FILE: &str = "EVIDENCE_COLLECTOR_PLAN.md";
 const WIKI_SEEDS_FILE: &str = "WIKI_SEED_CANDIDATES.json";
 const ONDESK_PACKAGE_FILE: &str = "ONDESK_START_PACKAGE.md";
@@ -77,6 +78,7 @@ struct ProjectInitArtifacts {
     operation_profile_json: String,
     onboarding_markdown: String,
     module_candidates_json: String,
+    module_operation_preflight_json: String,
     evidence_collector_plan_markdown: String,
     wiki_seed_candidates_json: String,
     ondesk_start_package_markdown: String,
@@ -90,6 +92,7 @@ struct ProjectInitSummary {
     evidence_source_count: usize,
     warning_count: usize,
     operation_target_count: usize,
+    module_operation_preflight_blocker_count: usize,
     ready_for_ondesk_start: bool,
     ready_for_offdesk_runtime: bool,
 }
@@ -111,6 +114,7 @@ struct ProjectOperationProfile {
     offdesk_policy: OffdeskProjectPolicy,
     safety_policy: ProjectSafetyPolicy,
     module_candidates_path: String,
+    module_operation_preflight_path: String,
     evidence_plan_path: String,
     wiki_seed_candidates_path: String,
     ondesk_start_package_path: String,
@@ -239,6 +243,49 @@ struct ModuleCandidate {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct ModuleOperationPreflightReport {
+    kind: String,
+    version: u32,
+    generated_at: DateTime<Utc>,
+    project_key: String,
+    project_root: String,
+    read_only_project_state: bool,
+    ready_for_offdesk_runtime: bool,
+    operation_targets: Vec<ModuleOperationPreflightTarget>,
+    blockers: Vec<String>,
+    recommended_next_steps: Vec<ModuleOperationPreflightCommand>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModuleOperationPreflightTarget {
+    module_id: String,
+    scope_ref: String,
+    label: String,
+    path: String,
+    selected_operation_target: bool,
+    readiness_level: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recognized_profile_kind: Option<String>,
+    module_contract_exists: bool,
+    module_docs_exist: bool,
+    module_entrypoint_count: usize,
+    profile_builder_available: bool,
+    evidence_bundle_builder_available: bool,
+    evidence_review_builder_available: bool,
+    blockers: Vec<String>,
+    recommended_commands: Vec<ModuleOperationPreflightCommand>,
+    required_operator_decisions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModuleOperationPreflightCommand {
+    purpose: String,
+    command: String,
+    writes_target_project_state: bool,
+    requires_runtime_approval: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct WikiSeedCandidateReport {
     kind: String,
     version: u32,
@@ -346,6 +393,13 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         candidates: module_candidates,
     };
     let scope_model = scope_model(&project_key, &project_root, &module_report);
+    let module_operation_preflight = module_operation_preflight(
+        generated_at,
+        &project_key,
+        &project_root,
+        &artifact_dir,
+        &module_report,
+    );
     let wiki_report = WikiSeedCandidateReport {
         kind: "forager_wiki_seed_candidates".to_string(),
         version: 1,
@@ -385,6 +439,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
                 ONDESK_PACKAGE_FILE.to_string(),
                 EVIDENCE_PLAN_FILE.to_string(),
                 MODULE_CANDIDATES_FILE.to_string(),
+                MODULE_PREFLIGHT_FILE.to_string(),
             ],
             capture_policy: vec![
                 "Capture live harness context as Ondesk notes or captures; do not rely on raw resume alone.".to_string(),
@@ -407,6 +462,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         },
         safety_policy: safety_policy(),
         module_candidates_path: artifacts.module_candidates_json.clone(),
+        module_operation_preflight_path: artifacts.module_operation_preflight_json.clone(),
         evidence_plan_path: artifacts.evidence_collector_plan_markdown.clone(),
         wiki_seed_candidates_path: artifacts.wiki_seed_candidates_json.clone(),
         ondesk_start_package_path: artifacts.ondesk_start_package_markdown.clone(),
@@ -418,6 +474,10 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         &profile_record,
     )?;
     write_json(Path::new(&artifacts.module_candidates_json), &module_report)?;
+    write_json(
+        Path::new(&artifacts.module_operation_preflight_json),
+        &module_operation_preflight,
+    )?;
     write_json(
         Path::new(&artifacts.wiki_seed_candidates_json),
         &wiki_report,
@@ -456,6 +516,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
                 .count(),
             warning_count: warnings.len(),
             operation_target_count,
+            module_operation_preflight_blocker_count: module_operation_preflight.blockers.len(),
             ready_for_ondesk_start: ready_check.ready_for_ondesk_start,
             ready_for_offdesk_runtime: ready_check.ready_for_offdesk_runtime,
         },
@@ -504,6 +565,7 @@ fn artifact_paths(artifact_dir: &Path) -> ProjectInitArtifacts {
         operation_profile_json: safe_path(&artifact_dir.join(PROFILE_FILE)),
         onboarding_markdown: safe_path(&artifact_dir.join(ONBOARDING_FILE)),
         module_candidates_json: safe_path(&artifact_dir.join(MODULE_CANDIDATES_FILE)),
+        module_operation_preflight_json: safe_path(&artifact_dir.join(MODULE_PREFLIGHT_FILE)),
         evidence_collector_plan_markdown: safe_path(&artifact_dir.join(EVIDENCE_PLAN_FILE)),
         wiki_seed_candidates_json: safe_path(&artifact_dir.join(WIKI_SEEDS_FILE)),
         ondesk_start_package_markdown: safe_path(&artifact_dir.join(ONDESK_PACKAGE_FILE)),
@@ -802,6 +864,185 @@ fn module_scope_target(candidate: &ModuleCandidate) -> ScopeTarget {
         parent_scope_ref: Some(candidate.parent_project_key.clone()),
         path: Some(candidate.path.clone()),
     }
+}
+
+fn module_operation_preflight(
+    generated_at: DateTime<Utc>,
+    project_key: &str,
+    project_root: &Path,
+    artifact_dir: &Path,
+    modules: &ModuleCandidateReport,
+) -> ModuleOperationPreflightReport {
+    let operation_targets = modules
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.selected_operation_target)
+        .map(|candidate| {
+            module_operation_preflight_target(project_key, project_root, artifact_dir, candidate)
+        })
+        .collect::<Vec<_>>();
+    let mut blockers = operation_targets
+        .iter()
+        .flat_map(|target| target.blockers.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if operation_targets.is_empty() {
+        blockers.push("no_operation_target_selected".to_string());
+    }
+    let recommended_next_steps = operation_targets
+        .iter()
+        .flat_map(|target| target.recommended_commands.iter().cloned())
+        .collect::<Vec<_>>();
+
+    ModuleOperationPreflightReport {
+        kind: "forager_module_operation_preflight".to_string(),
+        version: 1,
+        generated_at,
+        project_key: project_key.to_string(),
+        project_root: safe_path(project_root),
+        read_only_project_state: true,
+        ready_for_offdesk_runtime: false,
+        operation_targets,
+        blockers,
+        recommended_next_steps,
+    }
+}
+
+fn module_operation_preflight_target(
+    project_key: &str,
+    project_root: &Path,
+    artifact_dir: &Path,
+    candidate: &ModuleCandidate,
+) -> ModuleOperationPreflightTarget {
+    let module_contract_exists = project_root
+        .join(&candidate.path)
+        .join("contract.yaml")
+        .exists();
+    let module_docs_exist = candidate
+        .documentation_sources
+        .iter()
+        .any(|source| source.exists);
+    let recognized_profile_kind = recognized_module_profile_kind(project_key, candidate);
+    let mut blockers = vec![
+        "operator_review_required_before_runtime_enqueue".to_string(),
+        "module_operation_profile_requires_review".to_string(),
+        "evidence_bundle_requires_review".to_string(),
+    ];
+    let mut required_operator_decisions = vec![
+        "Confirm this module target is the active operation scope.".to_string(),
+        "Review or create the module operation profile before Offdesk runtime.".to_string(),
+        "Review deterministic evidence before reportability or completion claims.".to_string(),
+    ];
+    let recognized = recognized_profile_kind.is_some();
+    if !recognized {
+        blockers.push("no_known_module_profile_builder".to_string());
+        blockers.push("no_known_evidence_bundle_builder".to_string());
+        required_operator_decisions.push(
+            "Author a project-specific module profile/evidence collector contract.".to_string(),
+        );
+    }
+
+    ModuleOperationPreflightTarget {
+        module_id: candidate.module_id.clone(),
+        scope_ref: candidate.scope_ref.clone(),
+        label: candidate.label.clone(),
+        path: candidate.path.clone(),
+        selected_operation_target: candidate.selected_operation_target,
+        readiness_level: if recognized {
+            "known_profile_builder_available".to_string()
+        } else {
+            "manual_profile_authoring_required".to_string()
+        },
+        recognized_profile_kind,
+        module_contract_exists,
+        module_docs_exist,
+        module_entrypoint_count: candidate.entrypoints.len(),
+        profile_builder_available: recognized,
+        evidence_bundle_builder_available: recognized,
+        evidence_review_builder_available: recognized,
+        blockers,
+        recommended_commands: module_operation_preflight_commands(
+            project_root,
+            artifact_dir,
+            candidate,
+            recognized,
+        ),
+        required_operator_decisions,
+    }
+}
+
+fn recognized_module_profile_kind(
+    project_key: &str,
+    candidate: &ModuleCandidate,
+) -> Option<String> {
+    if project_key == "twinpaper"
+        && (candidate.scope_ref == "module03_regspec_machine"
+            || candidate.path == "modules/03_regspec_machine")
+    {
+        return Some("twinpaper_module03_regspec_machine".to_string());
+    }
+    None
+}
+
+fn module_operation_preflight_commands(
+    project_root: &Path,
+    artifact_dir: &Path,
+    candidate: &ModuleCandidate,
+    recognized: bool,
+) -> Vec<ModuleOperationPreflightCommand> {
+    if !recognized {
+        return vec![ModuleOperationPreflightCommand {
+            purpose: "author_module_operation_profile".to_string(),
+            command: format!(
+                "Create and review a module operation profile for {} before Offdesk runtime.",
+                candidate.scope_ref
+            ),
+            writes_target_project_state: false,
+            requires_runtime_approval: false,
+        }];
+    }
+
+    let repo = shell_arg(&safe_path(project_root));
+    let evidence_bundle = shell_arg(&safe_path(&artifact_dir.join("evidence_bundle.json")));
+    let evidence_review = shell_arg(&safe_path(&artifact_dir.join("evidence_review.json")));
+    let module_profile = shell_arg(&safe_path(
+        &artifact_dir.join("module03_operation_profile.json"),
+    ));
+    vec![
+        ModuleOperationPreflightCommand {
+            purpose: "build_evidence_bundle".to_string(),
+            command: format!(
+                "scripts/build_twinpaper_evidence_bundle.py --repo {repo} --out {evidence_bundle}"
+            ),
+            writes_target_project_state: false,
+            requires_runtime_approval: false,
+        },
+        ModuleOperationPreflightCommand {
+            purpose: "review_evidence_bundle".to_string(),
+            command: format!(
+                "scripts/review_evidence_bundle.py --bundle {evidence_bundle} --out {evidence_review}"
+            ),
+            writes_target_project_state: false,
+            requires_runtime_approval: false,
+        },
+        ModuleOperationPreflightCommand {
+            purpose: "build_module_operation_profile".to_string(),
+            command: format!(
+                "scripts/build_twinpaper_module03_operation_profile.py --repo {repo} --evidence-bundle {evidence_bundle} --include-git --out {module_profile}"
+            ),
+            writes_target_project_state: false,
+            requires_runtime_approval: false,
+        },
+        ModuleOperationPreflightCommand {
+            purpose: "prepare_offdesk_task_after_review".to_string(),
+            command: format!(
+                "scripts/prepare_twinpaper_offdesk_task.py --repo {repo} --project-key twinpaper --role-gate-result latest --review-artifact latest"
+            ),
+            writes_target_project_state: false,
+            requires_runtime_approval: true,
+        },
+    ]
 }
 
 fn module_docs(root: &Path, module_path: &Path) -> Vec<PathSignal> {
@@ -1286,6 +1527,17 @@ fn sanitize_required(label: &str, value: &str) -> Result<String> {
 
 fn safe_path(path: &Path) -> String {
     operator_safe_text(path.to_string_lossy().as_ref())
+}
+
+fn shell_arg(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
 }
 
 fn rel_path(root: &Path, path: &Path) -> String {

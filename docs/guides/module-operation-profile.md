@@ -6,7 +6,9 @@ explicit contract instead of a loose repository scan.
 For new projects, start with
 [`Project Initialization`](project-initialization.md). Its
 `MODULE_CANDIDATES.json` output identifies review targets that can later become
-module operation profiles.
+module operation profiles. Its `MODULE_OPERATION_PREFLIGHT.json` output records
+the selected operation targets, known builder commands, evidence review
+commands, and runtime blockers before Offdesk enqueue.
 
 Keep the hierarchy explicit: the project target owns overall objectives,
 adaptive wiki project scope, closeout, and Ondesk return context. A module

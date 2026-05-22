@@ -101,6 +101,7 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
         "operation_profile_json",
         "onboarding_markdown",
         "module_candidates_json",
+        "module_operation_preflight_json",
         "evidence_collector_plan_markdown",
         "wiki_seed_candidates_json",
         "ondesk_start_package_markdown",
@@ -132,6 +133,15 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
     assert_eq!(
         profile["initialization_policy"]["grants_execution_authority"],
         false
+    );
+    assert!(profile["ondesk_bridge"]["first_reads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "MODULE_OPERATION_PREFLIGHT.json"));
+    assert_eq!(
+        profile["module_operation_preflight_path"],
+        artifacts["module_operation_preflight_json"]
     );
     assert!(profile["agent_modes"]
         .as_array()
@@ -168,6 +178,28 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
         .unwrap()
         .iter()
         .any(|entry| entry["path"] == "modules/01_research/scripts/run.sh"));
+
+    let preflight_path = PathBuf::from(
+        artifacts["module_operation_preflight_json"]
+            .as_str()
+            .expect("preflight path"),
+    );
+    let preflight: Value = serde_json::from_str(&fs::read_to_string(preflight_path)?)?;
+    assert_eq!(preflight["kind"], "forager_module_operation_preflight");
+    assert_eq!(preflight["ready_for_offdesk_runtime"], false);
+    assert_eq!(
+        preflight["operation_targets"][0]["scope_ref"],
+        "module01_research"
+    );
+    assert_eq!(
+        preflight["operation_targets"][0]["readiness_level"],
+        "manual_profile_authoring_required"
+    );
+    assert!(preflight["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "no_known_module_profile_builder"));
 
     let ready_path = PathBuf::from(
         artifacts["offdesk_ready_check_json"]
@@ -223,6 +255,89 @@ fn project_init_rejects_unknown_operation_target() -> Result<()> {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("operation target not found"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_init_preflight_recognizes_twinpaper_module03() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("twinpaper");
+    write_file(repo.join("AGENTS.md").as_path(), "TwinPaper instructions\n")?;
+    write_file(repo.join("README.md").as_path(), "# TwinPaper\n")?;
+    write_file(
+        repo.join("docs/operations/RunLog.md").as_path(),
+        "# RunLog\n",
+    )?;
+    write_file(
+        repo.join("modules/03_regspec_machine/README.md").as_path(),
+        "# RegSpec Machine\n",
+    )?;
+    write_file(
+        repo.join("modules/03_regspec_machine/contract.yaml")
+            .as_path(),
+        "name: regspec\n",
+    )?;
+    write_file(
+        repo.join("modules/03_regspec_machine/pyproject.toml")
+            .as_path(),
+        "[project]\nname='regspec'\n",
+    )?;
+    let out_dir = temp.path().join("init-packet");
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "init",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "twinpaper",
+            "--operation-target",
+            "modules/03_regspec_machine",
+            "--out",
+            out_dir.to_str().expect("utf-8 out path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    let preflight_path = PathBuf::from(
+        json["artifacts"]["module_operation_preflight_json"]
+            .as_str()
+            .expect("preflight path"),
+    );
+    let preflight: Value = serde_json::from_str(&fs::read_to_string(preflight_path)?)?;
+    let target = &preflight["operation_targets"][0];
+    assert_eq!(target["scope_ref"], "module03_regspec_machine");
+    assert_eq!(
+        target["recognized_profile_kind"],
+        "twinpaper_module03_regspec_machine"
+    );
+    assert_eq!(target["profile_builder_available"], true);
+    assert_eq!(target["evidence_bundle_builder_available"], true);
+    assert!(target["recommended_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|command| command["purpose"] == "build_evidence_bundle"
+            && command["command"]
+                .as_str()
+                .unwrap()
+                .contains("build_twinpaper_evidence_bundle.py")));
+    assert!(target["recommended_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(
+            |command| command["purpose"] == "prepare_offdesk_task_after_review"
+                && command["requires_runtime_approval"] == true
+        ));
     Ok(())
 }
 
