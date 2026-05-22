@@ -21,6 +21,14 @@ DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder-next:latest")
 DEFAULT_PROFILE = os.environ.get("OFFDESK_PROFILE", "twinpaper-adaptive-debug")
 REVIEW_GENERATE_VALUES = {"generate", "auto"}
 REVIEW_CASES = {"review_offdesk_stage_contract", "workload_manifest_review"}
+EXPECTED_MODULE_SCOPE = "module03_regspec_machine"
+EXPECTED_MODULE_PROFILE_KIND = "twinpaper_module03_regspec_machine"
+REQUIRED_MODULE_PREFLIGHT_PURPOSES = {
+    "build_evidence_bundle",
+    "review_evidence_bundle",
+    "build_module_operation_profile",
+    "prepare_offdesk_task_after_review",
+}
 SYSTEM_CRITICAL_SAFETY: dict[str, Any] = {
     "repo_read_only": True,
     "writes_only_under_out_dir": True,
@@ -104,6 +112,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--module-preflight-artifact",
+        default="latest",
+        help=(
+            "Path to MODULE_OPERATION_PREFLIGHT.json, 'latest' to use the newest "
+            "matching project initialization, or 'none' to require --allow-preflight-blockers."
+        ),
+    )
+    parser.add_argument(
         "--allow-preflight-blockers",
         action="store_true",
         help="Allow --enqueue even when the role gate or review preflight is missing or failed.",
@@ -184,7 +200,18 @@ def shell_join(args: list[str]) -> str:
 
 
 def profile_dir(profile: str) -> pathlib.Path:
-    return pathlib.Path.home() / ".config" / "agent-of-empires" / "profiles" / profile
+    home = pathlib.Path.home()
+    config_base = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config")))
+    primary = config_base / "forager"
+    legacy_candidates = [
+        config_base / "agent-of-empires",
+        home / ".agent-of-empires",
+    ]
+    if primary.exists():
+        base = primary
+    else:
+        base = next((candidate for candidate in legacy_candidates if candidate.exists()), primary)
+    return base / "profiles" / profile
 
 
 def load_json_file(path: pathlib.Path) -> Any:
@@ -226,6 +253,34 @@ def latest_review_artifact(profile: str) -> pathlib.Path | None:
     return None
 
 
+def latest_module_preflight_artifact(profile: str, project_key: str) -> pathlib.Path | None:
+    root = profile_dir(profile) / "project_initializations"
+    if not root.exists():
+        return None
+    candidates: list[tuple[str, pathlib.Path]] = []
+    for profile_path in root.glob("*/PROJECT_OPERATION_PROFILE.json"):
+        try:
+            data = load_json_file(profile_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict) or data.get("project_key") != project_key:
+            continue
+        preflight = data.get("module_operation_preflight_path")
+        preflight_path = (
+            pathlib.Path(preflight).expanduser()
+            if isinstance(preflight, str) and preflight.strip()
+            else profile_path.with_name("MODULE_OPERATION_PREFLIGHT.json")
+        )
+        if not preflight_path.exists():
+            continue
+        generated_at = str(data.get("generated_at") or profile_path.stat().st_mtime)
+        candidates.append((generated_at, preflight_path))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[-1][1]
+
+
 def resolve_role_gate_result(value: str | None) -> pathlib.Path | None:
     if not value:
         return None
@@ -241,6 +296,18 @@ def resolve_review_artifact(value: str | None, profile: str) -> pathlib.Path | N
         return None
     if value == "latest":
         return latest_review_artifact(profile)
+    return pathlib.Path(value).expanduser().resolve()
+
+
+def resolve_module_preflight_artifact(
+    value: str | None,
+    profile: str,
+    project_key: str,
+) -> pathlib.Path | None:
+    if not value or value == "none":
+        return None
+    if value == "latest":
+        return latest_module_preflight_artifact(profile, project_key)
     return pathlib.Path(value).expanduser().resolve()
 
 
@@ -361,6 +428,95 @@ def summarize_review_artifact(path: pathlib.Path | None) -> dict[str, Any]:
     return summary
 
 
+def summarize_module_preflight(path: pathlib.Path | None, project_key: str) -> dict[str, Any]:
+    if path is None:
+        return {
+            "path": None,
+            "ready": False,
+            "reason": "missing_module_preflight_artifact",
+        }
+    summary: dict[str, Any] = {
+        "path": str(path),
+        "ready": False,
+    }
+    if not path.exists():
+        summary["reason"] = "module_preflight_artifact_not_found"
+        return summary
+    try:
+        data = load_json_file(path)
+    except (OSError, json.JSONDecodeError) as error:
+        summary["reason"] = "module_preflight_artifact_unreadable"
+        summary["error"] = repr(error)
+        return summary
+    if not isinstance(data, dict):
+        summary["reason"] = "module_preflight_artifact_not_object"
+        return summary
+
+    blockers: list[str] = []
+    if data.get("kind") != "forager_module_operation_preflight":
+        blockers.append("module_preflight_wrong_kind")
+    if data.get("project_key") != project_key:
+        blockers.append("module_preflight_project_key_mismatch")
+
+    targets = data.get("operation_targets")
+    if not isinstance(targets, list):
+        targets = []
+        blockers.append("module_preflight_missing_operation_targets")
+    target = next(
+        (
+            item
+            for item in targets
+            if isinstance(item, dict) and item.get("scope_ref") == EXPECTED_MODULE_SCOPE
+        ),
+        None,
+    )
+    if not isinstance(target, dict):
+        blockers.append(f"module_preflight_missing_target:{EXPECTED_MODULE_SCOPE}")
+        target = {}
+
+    target_blockers = target.get("blockers", [])
+    recommended_commands = target.get("recommended_commands", [])
+    recommended_purposes = {
+        str(command.get("purpose"))
+        for command in recommended_commands
+        if isinstance(command, dict) and command.get("purpose")
+    }
+    missing_purposes = sorted(REQUIRED_MODULE_PREFLIGHT_PURPOSES - recommended_purposes)
+    if target.get("recognized_profile_kind") != EXPECTED_MODULE_PROFILE_KIND:
+        blockers.append("module_preflight_unrecognized_profile_kind")
+    if target.get("profile_builder_available") is not True:
+        blockers.append("module_preflight_profile_builder_missing")
+    if target.get("evidence_bundle_builder_available") is not True:
+        blockers.append("module_preflight_evidence_bundle_builder_missing")
+    if target.get("evidence_review_builder_available") is not True:
+        blockers.append("module_preflight_evidence_review_builder_missing")
+    if missing_purposes:
+        blockers.append("module_preflight_missing_recommended_commands")
+
+    ready = not blockers
+    summary.update(
+        {
+            "ready": ready,
+            "kind": data.get("kind"),
+            "project_key": data.get("project_key"),
+            "ready_for_offdesk_runtime": data.get("ready_for_offdesk_runtime"),
+            "target_count": len(targets),
+            "scope_ref": target.get("scope_ref"),
+            "readiness_level": target.get("readiness_level"),
+            "recognized_profile_kind": target.get("recognized_profile_kind"),
+            "profile_builder_available": target.get("profile_builder_available"),
+            "evidence_bundle_builder_available": target.get("evidence_bundle_builder_available"),
+            "evidence_review_builder_available": target.get("evidence_review_builder_available"),
+            "recommended_command_purposes": sorted(recommended_purposes),
+            "missing_recommended_command_purposes": missing_purposes,
+            "blocker_count": len(target_blockers) if isinstance(target_blockers, list) else None,
+            "blocking_reasons": blockers,
+            "reason": "module_preflight_target_ready" if ready else ",".join(blockers),
+        }
+    )
+    return summary
+
+
 def summarize_evidence_review(path: pathlib.Path | None) -> dict[str, Any]:
     if path is None:
         return {
@@ -409,6 +565,7 @@ def summarize_evidence_review(path: pathlib.Path | None) -> dict[str, Any]:
 def build_preflight(
     role_gate: dict[str, Any],
     review_artifact: dict[str, Any],
+    module_preflight: dict[str, Any],
     evidence_review: dict[str, Any],
     council_config: dict[str, Any],
     allow_blockers: bool,
@@ -418,6 +575,8 @@ def build_preflight(
         blockers.append(role_gate["reason"])
     if not review_artifact["ready"]:
         blockers.append(review_artifact["reason"])
+    if not module_preflight["ready"]:
+        blockers.extend(module_preflight.get("blocking_reasons") or [module_preflight["reason"]])
     if not evidence_review["ready"]:
         blockers.append(evidence_review["reason"])
     if not council_config["ready"]:
@@ -425,6 +584,7 @@ def build_preflight(
     return {
         "role_gate": role_gate,
         "review_artifact": review_artifact,
+        "module_operation_preflight": module_preflight,
         "evidence_review": evidence_review,
         "council": council_config,
         "blocking_reasons": blockers,
@@ -741,10 +901,23 @@ def main() -> int:
     review_generate = args.review_artifact in REVIEW_GENERATE_VALUES
     role_gate_path = resolve_role_gate_result(args.role_gate_result)
     review_artifact_path = resolve_review_artifact(args.review_artifact, args.profile)
+    module_preflight_path = resolve_module_preflight_artifact(
+        args.module_preflight_artifact,
+        args.profile,
+        args.project_key,
+    )
     role_gate = summarize_role_gate_result(role_gate_path)
     review_artifact = summarize_review_artifact(review_artifact_path)
+    module_preflight = summarize_module_preflight(module_preflight_path, args.project_key)
     council_config = summarize_council_config(args)
-    preflight = build_preflight(role_gate, review_artifact, evidence_review, council_config, args.allow_preflight_blockers)
+    preflight = build_preflight(
+        role_gate,
+        review_artifact,
+        module_preflight,
+        evidence_review,
+        council_config,
+        args.allow_preflight_blockers,
+    )
     enqueue_args = build_enqueue_args(
         args=args,
         out_dir=out_dir,
@@ -793,6 +966,7 @@ def main() -> int:
             "capability": "dispatch.runtime",
             "runner": args.runner,
             "deterministic_evidence_review_required": True,
+            "module_operation_preflight_required": True,
             "approval_required_before_dispatch": True,
             "clean_role_gate_required": True,
             "separate_review_artifact_required": True,
@@ -818,6 +992,7 @@ def main() -> int:
             "baseline_evidence_status": evidence_review.get("baseline_evidence_status"),
             "claim_status": evidence_review.get("claim_status"),
         },
+        "module_operation_preflight": module_preflight,
         "preflight": preflight,
         "workload_command": workload_command,
         "workload_wrapper": str(wrapper_path),
@@ -856,6 +1031,7 @@ def main() -> int:
             "prepared_task": str(prepared_task_path),
             "preflight": str(out_dir / "preflight.json"),
             "review_artifact": str(generated_review_path) if review_generate else review_artifact.get("path"),
+            "module_operation_preflight": module_preflight.get("path"),
             "evidence_bundle": str(evidence_bundle_path),
             "evidence_markdown": str(evidence_bundle_path.with_name("EVIDENCE.md")),
             "evidence_review": str(evidence_review_path),
@@ -887,7 +1063,14 @@ def main() -> int:
             + "\n",
         )
         review_artifact = summarize_review_artifact(generated_review_path)
-        preflight = build_preflight(role_gate, review_artifact, evidence_review, council_config, args.allow_preflight_blockers)
+        preflight = build_preflight(
+            role_gate,
+            review_artifact,
+            module_preflight,
+            evidence_review,
+            council_config,
+            args.allow_preflight_blockers,
+        )
         manifest["preflight"] = preflight
         manifest["artifacts"]["review_artifact"] = str(generated_review_path)
 
@@ -925,6 +1108,10 @@ def main() -> int:
             f"- role_gate_result: `{role_gate.get('path')}`",
             f"- review_ready: `{review_artifact['ready']}`",
             f"- review_artifact: `{review_artifact.get('path')}`",
+            f"- module_preflight_ready: `{module_preflight['ready']}`",
+            f"- module_preflight_artifact: `{module_preflight.get('path')}`",
+            f"- module_preflight_scope: `{module_preflight.get('scope_ref')}`",
+            f"- module_preflight_reason: `{module_preflight.get('reason')}`",
             f"- evidence_ready: `{evidence_review['ready']}`",
             f"- evidence_review: `{evidence_review.get('path')}`",
             f"- evidence_baseline_status: `{evidence_review.get('baseline_evidence_status')}`",

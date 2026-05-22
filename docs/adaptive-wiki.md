@@ -965,6 +965,9 @@ preflight evidence before enqueue:
 - a clean live role-gate result from
   `scripts/offdesk_role_llm_episode_harness.py`;
 - a separate review artifact for the exact prepared manifest;
+- the latest matching `MODULE_OPERATION_PREFLIGHT.json`, or an explicit
+  `--module-preflight-artifact`, proving that Module03 profile/evidence
+  builders are recognized before runtime preparation;
 - a review decision that allows enqueue: `proceed` or `needs_approval`.
 
 ```bash
@@ -974,6 +977,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --model qwen3-coder-next:latest \
   --base-url http://172.16.0.37:11434 \
   --role-gate-result latest \
+  --module-preflight-artifact latest \
   --review-artifact generate \
   --enqueue
 ```
@@ -987,6 +991,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --model qwen3-coder-next:latest \
   --base-url http://172.16.0.37:11434 \
   --role-gate-result latest \
+  --module-preflight-artifact latest \
   --review-artifact generate \
   --council-mode command \
   --gpt-council-command "$OFFDESK_GPT_COUNCIL_CMD" \
@@ -998,11 +1003,12 @@ the runtime workload recomputes the next `09:00 Asia/Seoul` when it actually
 starts. That keeps approval or tick delays from accidentally pushing the run
 past the morning review window.
 
-If the role gate is missing, failed, or the review artifact returns `blocked`
-or `revise`, `--enqueue` stops before adding the task to the Offdesk queue and
-writes `preflight.json` plus `enqueue_blocked.json` in the workload directory.
-The generated `offdesk_enqueue_command.sh` also checks for `preflight_ready`
-unless `FORAGER_ALLOW_PREFLIGHT_BLOCKERS=1` is set deliberately.
+If the role gate is missing, failed, the module operation preflight is missing
+or unrecognized, or the review artifact returns `blocked` or `revise`,
+`--enqueue` stops before adding the task to the Offdesk queue and writes
+`preflight.json` plus `enqueue_blocked.json` in the workload directory. The
+generated `offdesk_enqueue_command.sh` also checks for `preflight_ready` unless
+`FORAGER_ALLOW_PREFLIGHT_BLOCKERS=1` is set deliberately.
 
 `--review-artifact generate` runs
 `scripts/offdesk_workload_review_harness.py` against the exact

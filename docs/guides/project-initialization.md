@@ -121,5 +121,7 @@ runtime blocked until operator review selects a scoped operation.
    bundle builder.
 6. Promote only reviewed wiki seeds.
 7. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-8. Enqueue Offdesk only after runtime capability, evidence, and closeout
+8. Prepare Offdesk with a matching module operation preflight artifact, for
+   example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
+9. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.

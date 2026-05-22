@@ -216,3 +216,151 @@ fn evidence_bundle_embeds_compact_module03_operation_profile() -> Result<()> {
     assert_eq!(review["decision"], "sufficient");
     Ok(())
 }
+
+#[test]
+fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("TwinPaper");
+    write_synthetic_twinpaper(&repo)?;
+    let role_gate = temp.path().join("role_gate_results.json");
+    write_file(
+        &role_gate,
+        &serde_json::to_string_pretty(&json!({
+            "passed": true,
+            "summary": {
+                "total": 1,
+                "failed": 0,
+                "pass_rate": 1.0,
+                "failure_category_counts": {},
+                "quality_gate": {
+                    "ready_for_long_workload": true
+                }
+            }
+        }))?,
+    )?;
+    let review = temp.path().join("workload_review_results.json");
+    write_file(
+        &review,
+        &serde_json::to_string_pretty(&json!({
+            "summary": {
+                "failed": 0
+            },
+            "results": [
+                {
+                    "case": "workload_manifest_review",
+                    "passed": true,
+                    "review_stage_decision": "needs_approval"
+                }
+            ]
+        }))?,
+    )?;
+    let project_init_dir = temp
+        .path()
+        .join(".config/forager/profiles/twinpaper-adaptive-debug/project_initializations/20260522T000000Z_twinpaper");
+    let module_preflight = project_init_dir.join("MODULE_OPERATION_PREFLIGHT.json");
+    write_file(
+        &module_preflight,
+        &serde_json::to_string_pretty(&json!({
+            "kind": "forager_module_operation_preflight",
+            "project_key": "twinpaper",
+            "ready_for_offdesk_runtime": false,
+            "operation_targets": [
+                {
+                    "scope_ref": "module03_regspec_machine",
+                    "readiness_level": "known_profile_builder_available",
+                    "recognized_profile_kind": "twinpaper_module03_regspec_machine",
+                    "profile_builder_available": true,
+                    "evidence_bundle_builder_available": true,
+                    "evidence_review_builder_available": true,
+                    "blockers": [
+                        "operator_review_required_before_runtime_enqueue",
+                        "module_operation_profile_requires_review",
+                        "evidence_bundle_requires_review"
+                    ],
+                    "recommended_commands": [
+                        {
+                            "purpose": "build_evidence_bundle",
+                            "command": "scripts/build_twinpaper_evidence_bundle.py --secret sk-secretsecretsecretsecret"
+                        },
+                        {
+                            "purpose": "review_evidence_bundle",
+                            "command": "scripts/review_evidence_bundle.py"
+                        },
+                        {
+                            "purpose": "build_module_operation_profile",
+                            "command": "scripts/build_twinpaper_module03_operation_profile.py"
+                        },
+                        {
+                            "purpose": "prepare_offdesk_task_after_review",
+                            "command": "scripts/prepare_twinpaper_offdesk_task.py"
+                        }
+                    ]
+                }
+            ]
+        }))?,
+    )?;
+    write_file(
+        &project_init_dir.join("PROJECT_OPERATION_PROFILE.json"),
+        &serde_json::to_string_pretty(&json!({
+            "kind": "forager_project_operation_profile",
+            "generated_at": "2026-05-22T00:00:00Z",
+            "project_key": "twinpaper",
+            "module_operation_preflight_path": module_preflight
+        }))?,
+    )?;
+    let out_root = temp.path().join("prepare");
+
+    let output = Command::new("python3")
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
+        .arg(script_path("prepare_twinpaper_offdesk_task.py"))
+        .arg("--repo")
+        .arg(&repo)
+        .arg("--out-root")
+        .arg(&out_root)
+        .arg("--duration-minutes")
+        .arg("0.1")
+        .arg("--max-iterations")
+        .arg("1")
+        .arg("--role-gate-result")
+        .arg(&role_gate)
+        .arg("--review-artifact")
+        .arg(&review)
+        .arg("--wiki-candidate-mode")
+        .arg("disabled")
+        .arg("--wiki-trial-mode")
+        .arg("disabled")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let prepared: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(prepared["preflight"]["ready_for_enqueue"], true);
+    assert_eq!(
+        prepared["preflight"]["module_operation_preflight"]["reason"],
+        "module_preflight_target_ready"
+    );
+    let manifest_path = PathBuf::from(prepared["manifest"].as_str().expect("manifest path"));
+    let manifest: Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    assert_eq!(
+        manifest["preflight"]["module_operation_preflight"]["ready"],
+        true
+    );
+    assert_eq!(
+        manifest["preflight"]["module_operation_preflight"]["recommended_command_purposes"][0],
+        "build_evidence_bundle"
+    );
+    assert_eq!(
+        manifest["safety"]["module_operation_preflight_required"],
+        true
+    );
+    assert!(manifest_path.with_file_name("preflight_ready").exists());
+    let manifest_text = fs::read_to_string(&manifest_path)?;
+    assert!(!manifest_text.contains("sk-secretsecretsecretsecret"));
+    assert!(!manifest_text.contains("scripts/build_twinpaper_evidence_bundle.py --secret"));
+    Ok(())
+}
