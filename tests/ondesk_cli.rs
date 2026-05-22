@@ -188,6 +188,90 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
 
 #[test]
 #[serial]
+fn ondesk_prompt_package_includes_latest_project_initialization() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    let init_dir = profile_dir
+        .join("project_initializations")
+        .join("20260521T000000Z_twinpaper");
+    fs::create_dir_all(&init_dir)?;
+    let generated_at = Utc::now();
+    let start_package_path = init_dir.join("ONDESK_START_PACKAGE.md");
+    let ready_check_path = init_dir.join("OFFDESK_READY_CHECK.json");
+    fs::write(
+        &start_package_path,
+        "# Ondesk Start Package\n\nRead Module03 first token=sk-secretsecretsecretsecret\n",
+    )?;
+    fs::write(
+        &ready_check_path,
+        serde_json::to_string_pretty(&json!({
+            "ready_for_ondesk_start": true,
+            "ready_for_offdesk_runtime": false,
+            "requires_operator_review": true
+        }))?,
+    )?;
+    fs::write(
+        init_dir.join("PROJECT_OPERATION_PROFILE.json"),
+        serde_json::to_string_pretty(&json!({
+            "kind": "forager_project_operation_profile",
+            "id": "project-init-test",
+            "generated_at": generated_at,
+            "project_key": "twinpaper",
+            "scope_model": {
+                "operation_targets": [
+                    {
+                        "scope_ref": "module03_regspec_machine",
+                        "role": "module_operation_target"
+                    }
+                ]
+            },
+            "ondesk_start_package_path": start_package_path,
+            "offdesk_ready_check_path": ready_check_path
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "ondesk",
+            "prompt-package",
+            "--project-key",
+            "twinpaper",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["latest_project_initialization"]["initialization_id"],
+        "project-init-test"
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["operation_targets"][0],
+        "module03_regspec_machine"
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["ready_for_ondesk_start"],
+        true
+    );
+    assert_eq!(
+        json["latest_project_initialization"]["ready_for_offdesk_runtime"],
+        false
+    );
+    let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Latest Project Initialization"));
+    assert!(content.contains("module03_regspec_machine"));
+    assert!(content.contains("Read Module03 first"));
+    assert!(content.contains("[REDACTED]"));
+    assert!(!content.contains("sk-secretsecretsecretsecret"));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn ondesk_capture_writes_artifacts_without_requiring_running_tmux() -> Result<()> {
     let temp = tempdir()?;
     let project = temp.path().join("project");

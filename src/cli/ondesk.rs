@@ -22,6 +22,7 @@ const MAX_CAPTURE_CHARS: usize = 30_000;
 const MAX_GIT_CHARS: usize = 12_000;
 const MAX_PROMPT_CHARS: usize = 40_000;
 const MAX_CLOSEOUT_CHARS: usize = 16_000;
+const MAX_PROJECT_INIT_CHARS: usize = 16_000;
 const MAX_RECENT_NOTES: usize = 20;
 
 #[derive(Subcommand)]
@@ -222,6 +223,8 @@ struct PromptPackageOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     latest_closeout: Option<OndeskCloseoutSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    latest_project_initialization: Option<OndeskProjectInitializationSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     output_path: Option<String>,
     content: String,
 }
@@ -243,6 +246,27 @@ struct OndeskCloseoutSummary {
 struct OndeskCloseoutPackage {
     summary: OndeskCloseoutSummary,
     return_package: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OndeskProjectInitializationSummary {
+    initialization_id: String,
+    generated_at: String,
+    artifact_dir: String,
+    operation_profile_path: String,
+    ondesk_start_package_path: String,
+    offdesk_ready_check_path: String,
+    operation_targets: Vec<String>,
+    ready_for_ondesk_start: Option<bool>,
+    ready_for_offdesk_runtime: Option<bool>,
+    requires_operator_review: Option<bool>,
+    start_package_truncated: bool,
+}
+
+#[derive(Debug, Clone)]
+struct OndeskProjectInitializationPackage {
+    summary: OndeskProjectInitializationSummary,
+    start_package: String,
 }
 
 struct ResolvedOndeskContext {
@@ -360,9 +384,12 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
         prompt_package_path: prompt_package_path.display().to_string(),
     };
 
+    let project_initialization =
+        latest_project_initialization(&context.profile_dir, &context.project_key)?;
     let package = render_prompt_package(PromptPackageContext::Capture {
         capture: &record,
         closeout: None,
+        project_initialization: project_initialization.as_ref(),
     });
     fs::write(&capture_path, serde_json::to_string_pretty(&record)?)?;
     fs::write(&prompt_package_path, package)?;
@@ -395,48 +422,62 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
 async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
     let profile_dir = get_profile_dir(profile)?;
     let profile_name = Storage::new(profile)?.profile().to_string();
-    let (content, project_key, note_count, capture_id, latest_closeout) =
-        if let Some(capture_id) = args.capture_id {
-            let capture = load_capture_by_id(&profile_dir, &capture_id)?;
-            let closeout = latest_closeout_package(&profile_dir, &capture.project_key)?;
-            let note_count = capture.notes.len();
-            let project_key = capture.project_key.clone();
-            (
-                render_prompt_package(PromptPackageContext::Capture {
-                    capture: &capture,
-                    closeout: closeout.as_ref(),
-                }),
-                project_key,
-                note_count,
-                Some(capture.id),
-                closeout.map(|package| package.summary),
-            )
-        } else {
-            let context = resolve_context(
-                profile,
-                args.identifier.as_deref(),
-                args.project_key,
-                args.mode,
-            )?;
-            let notes = matching_recent_notes(&context.profile_dir, &context)?;
-            let session_ref = context.session.as_ref().map(SessionRef::from_instance);
-            let closeout = latest_closeout_package(&context.profile_dir, &context.project_key)?;
-            let content = render_prompt_package(PromptPackageContext::Live {
-                profile: &context.profile,
-                project_key: &context.project_key,
-                mode: context.mode.as_deref(),
-                session: session_ref.as_ref(),
-                notes: &notes,
+    let (
+        content,
+        project_key,
+        note_count,
+        capture_id,
+        latest_closeout,
+        latest_project_initialization,
+    ) = if let Some(capture_id) = args.capture_id {
+        let capture = load_capture_by_id(&profile_dir, &capture_id)?;
+        let closeout = latest_closeout_package(&profile_dir, &capture.project_key)?;
+        let project_initialization =
+            latest_project_initialization(&profile_dir, &capture.project_key)?;
+        let note_count = capture.notes.len();
+        let project_key = capture.project_key.clone();
+        (
+            render_prompt_package(PromptPackageContext::Capture {
+                capture: &capture,
                 closeout: closeout.as_ref(),
-            });
-            (
-                content,
-                context.project_key,
-                notes.len(),
-                None,
-                closeout.map(|package| package.summary),
-            )
-        };
+                project_initialization: project_initialization.as_ref(),
+            }),
+            project_key,
+            note_count,
+            Some(capture.id),
+            closeout.map(|package| package.summary),
+            project_initialization.map(|package| package.summary),
+        )
+    } else {
+        let context = resolve_context(
+            profile,
+            args.identifier.as_deref(),
+            args.project_key,
+            args.mode,
+        )?;
+        let notes = matching_recent_notes(&context.profile_dir, &context)?;
+        let session_ref = context.session.as_ref().map(SessionRef::from_instance);
+        let closeout = latest_closeout_package(&context.profile_dir, &context.project_key)?;
+        let project_initialization =
+            latest_project_initialization(&context.profile_dir, &context.project_key)?;
+        let content = render_prompt_package(PromptPackageContext::Live {
+            profile: &context.profile,
+            project_key: &context.project_key,
+            mode: context.mode.as_deref(),
+            session: session_ref.as_ref(),
+            notes: &notes,
+            closeout: closeout.as_ref(),
+            project_initialization: project_initialization.as_ref(),
+        });
+        (
+            content,
+            context.project_key,
+            notes.len(),
+            None,
+            closeout.map(|package| package.summary),
+            project_initialization.map(|package| package.summary),
+        )
+    };
 
     let (content, truncated) = truncate_chars(&content, MAX_PROMPT_CHARS);
     let output_path = if let Some(path) = args.output {
@@ -459,6 +500,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             capture_id,
             note_count,
             latest_closeout,
+            latest_project_initialization,
             output_path,
             content: if truncated {
                 format!("{}\n\n[package truncated for CLI output]", content)
@@ -777,6 +819,112 @@ fn latest_closeout_package(
     }))
 }
 
+fn latest_project_initialization(
+    profile_dir: &Path,
+    project_key: &str,
+) -> Result<Option<OndeskProjectInitializationPackage>> {
+    let initializations_dir = profile_dir.join("project_initializations");
+    if !initializations_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&initializations_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let artifact_dir = entry.path();
+        let profile_path = artifact_dir.join("PROJECT_OPERATION_PROFILE.json");
+        let Ok(profile_content) = fs::read_to_string(&profile_path) else {
+            continue;
+        };
+        let Ok(profile) = serde_json::from_str::<Value>(&profile_content) else {
+            continue;
+        };
+        if profile.get("project_key").and_then(Value::as_str) != Some(project_key) {
+            continue;
+        }
+        let generated_at = profile
+            .get("generated_at")
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        candidates.push((generated_at, artifact_dir, profile_path, profile));
+    }
+
+    candidates.sort_by_key(|(generated_at, _, _, _)| *generated_at);
+    let Some((generated_at, artifact_dir, profile_path, profile)) = candidates.pop() else {
+        return Ok(None);
+    };
+
+    let ondesk_start_package_path = profile
+        .get("ondesk_start_package_path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact_dir.join("ONDESK_START_PACKAGE.md"));
+    let offdesk_ready_check_path = profile
+        .get("offdesk_ready_check_path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact_dir.join("OFFDESK_READY_CHECK.json"));
+    let ready_check = fs::read_to_string(&offdesk_ready_check_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Value>(&content).ok());
+    let raw_start_package = fs::read_to_string(&ondesk_start_package_path).unwrap_or_else(|_| {
+        format!(
+            "- Ondesk start package is missing at {}. Re-run `forager project init` for project_key {}.",
+            safe(ondesk_start_package_path.to_string_lossy().as_ref()),
+            safe(project_key)
+        )
+    });
+    let safe_start_package = safe(&raw_start_package);
+    let (start_package, start_package_truncated) =
+        truncate_chars(&safe_start_package, MAX_PROJECT_INIT_CHARS);
+    let operation_targets = profile
+        .pointer("/scope_model/operation_targets")
+        .and_then(Value::as_array)
+        .map(|targets| {
+            targets
+                .iter()
+                .filter_map(|target| target.get("scope_ref").and_then(Value::as_str))
+                .map(safe)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(Some(OndeskProjectInitializationPackage {
+        summary: OndeskProjectInitializationSummary {
+            initialization_id: profile
+                .get("id")
+                .and_then(Value::as_str)
+                .map(safe)
+                .unwrap_or_else(|| "unknown".to_string()),
+            generated_at: generated_at.to_rfc3339(),
+            artifact_dir: safe(artifact_dir.to_string_lossy().as_ref()),
+            operation_profile_path: safe(profile_path.to_string_lossy().as_ref()),
+            ondesk_start_package_path: safe(ondesk_start_package_path.to_string_lossy().as_ref()),
+            offdesk_ready_check_path: safe(offdesk_ready_check_path.to_string_lossy().as_ref()),
+            operation_targets,
+            ready_for_ondesk_start: ready_check
+                .as_ref()
+                .and_then(|value| value.get("ready_for_ondesk_start"))
+                .and_then(Value::as_bool),
+            ready_for_offdesk_runtime: ready_check
+                .as_ref()
+                .and_then(|value| value.get("ready_for_offdesk_runtime"))
+                .and_then(Value::as_bool),
+            requires_operator_review: ready_check
+                .as_ref()
+                .and_then(|value| value.get("requires_operator_review"))
+                .and_then(Value::as_bool),
+            start_package_truncated,
+        },
+        start_package,
+    }))
+}
+
 fn closeout_plan_matches_project(plan: &Value, project_key: &str) -> bool {
     if plan
         .pointer("/filters/project_key")
@@ -856,6 +1004,7 @@ enum PromptPackageContext<'a> {
     Capture {
         capture: &'a OndeskCaptureRecord,
         closeout: Option<&'a OndeskCloseoutPackage>,
+        project_initialization: Option<&'a OndeskProjectInitializationPackage>,
     },
     Live {
         profile: &'a str,
@@ -864,24 +1013,28 @@ enum PromptPackageContext<'a> {
         session: Option<&'a SessionRef>,
         notes: &'a [OndeskNoteRecord],
         closeout: Option<&'a OndeskCloseoutPackage>,
+        project_initialization: Option<&'a OndeskProjectInitializationPackage>,
     },
 }
 
 fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
     match context {
-        PromptPackageContext::Capture { capture, closeout } => {
-            render_prompt_package_parts(PromptPackageParts {
-                profile: &capture.profile,
-                project_key: &capture.project_key,
-                mode: capture.mode.as_deref(),
-                session: capture.session.as_ref(),
-                notes: &capture.notes,
-                scrollback: Some(&capture.scrollback),
-                git: capture.git.as_ref(),
-                capture_id: Some(&capture.id),
-                closeout,
-            })
-        }
+        PromptPackageContext::Capture {
+            capture,
+            closeout,
+            project_initialization,
+        } => render_prompt_package_parts(PromptPackageParts {
+            profile: &capture.profile,
+            project_key: &capture.project_key,
+            mode: capture.mode.as_deref(),
+            session: capture.session.as_ref(),
+            notes: &capture.notes,
+            scrollback: Some(&capture.scrollback),
+            git: capture.git.as_ref(),
+            capture_id: Some(&capture.id),
+            closeout,
+            project_initialization,
+        }),
         PromptPackageContext::Live {
             profile,
             project_key,
@@ -889,6 +1042,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             session,
             notes,
             closeout,
+            project_initialization,
         } => render_prompt_package_parts(PromptPackageParts {
             profile,
             project_key,
@@ -899,6 +1053,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             git: None,
             capture_id: None,
             closeout,
+            project_initialization,
         }),
     }
 }
@@ -913,6 +1068,7 @@ struct PromptPackageParts<'a> {
     git: Option<&'a GitSnapshot>,
     capture_id: Option<&'a str>,
     closeout: Option<&'a OndeskCloseoutPackage>,
+    project_initialization: Option<&'a OndeskProjectInitializationPackage>,
 }
 
 fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
@@ -979,6 +1135,45 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
         } else {
             output.push_str(&fenced("text", scrollback));
         }
+    }
+
+    if let Some(initialization) = parts.project_initialization {
+        output.push_str("\n## Latest Project Initialization\n");
+        output.push_str(&format!(
+            "- initialization_id: {}\n",
+            initialization.summary.initialization_id
+        ));
+        output.push_str(&format!(
+            "- generated_at: {}\n",
+            initialization.summary.generated_at
+        ));
+        output.push_str(&format!(
+            "- operation_profile: {}\n",
+            initialization.summary.operation_profile_path
+        ));
+        output.push_str(&format!(
+            "- ondesk_start_package: {}\n",
+            initialization.summary.ondesk_start_package_path
+        ));
+        if initialization.summary.operation_targets.is_empty() {
+            output.push_str("- operation_targets: none selected\n");
+        } else {
+            output.push_str(&format!(
+                "- operation_targets: {}\n",
+                initialization.summary.operation_targets.join(", ")
+            ));
+        }
+        if let Some(ready) = initialization.summary.ready_for_ondesk_start {
+            output.push_str(&format!("- ready_for_ondesk_start: {ready}\n"));
+        }
+        if let Some(ready) = initialization.summary.ready_for_offdesk_runtime {
+            output.push_str(&format!("- ready_for_offdesk_runtime: {ready}\n"));
+        }
+        if let Some(required) = initialization.summary.requires_operator_review {
+            output.push_str(&format!("- requires_operator_review: {required}\n"));
+        }
+        output.push('\n');
+        output.push_str(&fenced("markdown", &initialization.start_package));
     }
 
     if let Some(closeout) = parts.closeout {
