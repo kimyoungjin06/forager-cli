@@ -8,6 +8,11 @@ For new projects, start with
 `MODULE_CANDIDATES.json` output identifies review targets that can later become
 module operation profiles.
 
+Keep the hierarchy explicit: the project target owns overall objectives,
+adaptive wiki project scope, closeout, and Ondesk return context. A module
+operation target owns canonical commands, module evidence gates, and
+module-specific reportability vocabulary.
+
 The first concrete profile is TwinPaper Module03:
 
 ```bash

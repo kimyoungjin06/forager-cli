@@ -73,6 +73,8 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
             repo.to_str().expect("utf-8 repo path"),
             "--project-key",
             "demo-project",
+            "--operation-target",
+            "modules/01_research",
             "--out",
             out_dir.to_str().expect("utf-8 out path"),
             "--json",
@@ -91,6 +93,7 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
     assert_eq!(json["read_only_project_state"], true);
     assert_eq!(json["requires_operator_review"], true);
     assert_eq!(json["summary"]["module_candidate_count"], 1);
+    assert_eq!(json["summary"]["operation_target_count"], 1);
     assert_eq!(json["summary"]["ready_for_offdesk_runtime"], false);
 
     let artifacts = &json["artifacts"];
@@ -115,6 +118,18 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
     let profile: Value = serde_json::from_str(&fs::read_to_string(profile_path)?)?;
     assert_eq!(profile["kind"], "forager_project_operation_profile");
     assert_eq!(
+        profile["scope_model"]["project_target"]["scope_ref"],
+        "demo-project"
+    );
+    assert_eq!(
+        profile["scope_model"]["operation_targets"][0]["scope_ref"],
+        "module01_research"
+    );
+    assert_eq!(
+        profile["scope_model"]["operation_targets"][0]["role"],
+        "module_operation_target"
+    );
+    assert_eq!(
         profile["initialization_policy"]["grants_execution_authority"],
         false
     );
@@ -138,10 +153,15 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
     );
     let modules: Value = serde_json::from_str(&fs::read_to_string(modules_path)?)?;
     let candidate = &modules["candidates"][0];
+    assert_eq!(candidate["module_id"], "module01_research");
+    assert_eq!(candidate["scope_kind"], "module");
+    assert_eq!(candidate["scope_ref"], "module01_research");
+    assert_eq!(candidate["parent_project_key"], "demo-project");
+    assert_eq!(candidate["selected_operation_target"], true);
     assert_eq!(candidate["path"], "modules/01_research");
     assert_eq!(
         candidate["operation_profile_status"],
-        "candidate_requires_operator_review"
+        "operation_target_requires_module_profile_review"
     );
     assert!(candidate["entrypoints"]
         .as_array()
@@ -161,7 +181,7 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
         .as_array()
         .unwrap()
         .iter()
-        .any(|item| item == "operator_review_required_before_runtime_enqueue"));
+        .any(|item| item == "operation_targets_require_module_profile_review"));
 
     let start_package = fs::read_to_string(
         artifacts["ondesk_start_package_markdown"]
@@ -169,10 +189,40 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
             .expect("start package path"),
     )?;
     assert!(start_package.contains("Ondesk Start Package"));
+    assert!(start_package.contains("scope=`module:module01_research`"));
     assert!(start_package.contains("Runtime execution, wiki promotion, and file cleanup"));
 
     assert_eq!(fs::read_dir(&repo)?.count(), before_entries);
     assert!(!repo.join(".forager").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_init_rejects_unknown_operation_target() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    let out_dir = temp.path().join("init-packet");
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "init",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--operation-target",
+            "modules/missing",
+            "--out",
+            out_dir.to_str().expect("utf-8 out path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("operation target not found"));
     Ok(())
 }
 

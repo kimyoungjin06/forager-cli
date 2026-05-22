@@ -36,6 +36,10 @@ pub struct ProjectInitArgs {
     #[arg(long)]
     project_key: String,
 
+    /// Module path/id to mark as a prioritized operation target
+    #[arg(long, value_name = "MODULE_PATH_OR_ID")]
+    operation_target: Vec<String>,
+
     /// Write the initialization packet to this directory
     #[arg(long)]
     out: Option<PathBuf>,
@@ -85,6 +89,7 @@ struct ProjectInitSummary {
     entrypoint_count: usize,
     evidence_source_count: usize,
     warning_count: usize,
+    operation_target_count: usize,
     ready_for_ondesk_start: bool,
     ready_for_offdesk_runtime: bool,
 }
@@ -98,6 +103,7 @@ struct ProjectOperationProfile {
     project_key: String,
     project_root: String,
     read_only_project_state: bool,
+    scope_model: ScopeModel,
     initialization_policy: InitializationPolicy,
     project_scan: ProjectScan,
     agent_modes: Vec<AgentModeContract>,
@@ -117,6 +123,30 @@ struct InitializationPolicy {
     grants_wiki_promotion_authority: bool,
     grants_file_cleanup_authority: bool,
     operator_review_required_before_offdesk_runtime: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ScopeModel {
+    project_target: ScopeTarget,
+    operation_targets: Vec<ScopeTarget>,
+    module_candidates: Vec<ScopeTarget>,
+    artifact_scopes: Vec<ScopeTarget>,
+    policy: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ScopeTarget {
+    scope_kind: String,
+    scope_ref: String,
+    label: String,
+    role: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_scope_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_scope_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -195,7 +225,12 @@ struct ModuleCandidateReport {
 #[derive(Debug, Clone, Serialize)]
 struct ModuleCandidate {
     module_id: String,
+    label: String,
     path: String,
+    scope_kind: String,
+    scope_ref: String,
+    parent_project_key: String,
+    selected_operation_target: bool,
     confidence: String,
     signals: Vec<String>,
     entrypoints: Vec<EntryPointCandidate>,
@@ -281,7 +316,12 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
     let documentation_sources = collect_documentation_sources(&project_root);
     let entrypoints = collect_entrypoints(&project_root, &project_root);
     let artifact_roots = collect_artifact_roots(&project_root);
-    let module_candidates = discover_module_candidates(&project_root);
+    let mut module_candidates = discover_module_candidates(&project_key, &project_root);
+    apply_operation_targets(&mut module_candidates, &args.operation_target)?;
+    let operation_target_count = module_candidates
+        .iter()
+        .filter(|candidate| candidate.selected_operation_target)
+        .count();
     let warnings = scan_warnings(&documentation_sources, &entrypoints);
     let git = if args.include_git {
         Some(git_snapshot(&project_root))
@@ -305,6 +345,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         project_root: safe_path(&project_root),
         candidates: module_candidates,
     };
+    let scope_model = scope_model(&project_key, &project_root, &module_report);
     let wiki_report = WikiSeedCandidateReport {
         kind: "forager_wiki_seed_candidates".to_string(),
         version: 1,
@@ -328,6 +369,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         project_key: project_key.clone(),
         project_root: safe_path(&project_root),
         read_only_project_state: true,
+        scope_model,
         initialization_policy: InitializationPolicy {
             grants_execution_authority: false,
             grants_wiki_promotion_authority: false,
@@ -413,6 +455,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
                 .filter(|item| item.exists)
                 .count(),
             warning_count: warnings.len(),
+            operation_target_count,
             ready_for_ondesk_start: ready_check.ready_for_ondesk_start,
             ready_for_offdesk_runtime: ready_check.ready_for_offdesk_runtime,
         },
@@ -589,7 +632,7 @@ fn entrypoint_candidate(root: &Path, path: &Path) -> EntryPointCandidate {
     }
 }
 
-fn discover_module_candidates(root: &Path) -> Vec<ModuleCandidate> {
+fn discover_module_candidates(project_key: &str, root: &Path) -> Vec<ModuleCandidate> {
     let mut candidates = Vec::new();
     for parent in ["modules", "apps", "packages", "crates"] {
         let parent_path = root.join(parent);
@@ -602,6 +645,8 @@ fn discover_module_candidates(root: &Path) -> Vec<ModuleCandidate> {
                 continue;
             }
             let rel = rel_path(root, &path);
+            let module_id = module_id_for(parent, &rel);
+            let label = module_label(&rel);
             let entrypoints = collect_entrypoints(root, &path);
             let docs = module_docs(root, &path);
             let mut signals = Vec::new();
@@ -624,8 +669,13 @@ fn discover_module_candidates(root: &Path) -> Vec<ModuleCandidate> {
                 _ => "low",
             };
             candidates.push(ModuleCandidate {
-                module_id: slug(&rel).replace('-', "_"),
+                module_id: module_id.clone(),
+                label,
                 path: rel,
+                scope_kind: "module".to_string(),
+                scope_ref: module_id,
+                parent_project_key: project_key.to_string(),
+                selected_operation_target: false,
                 confidence: confidence.to_string(),
                 signals,
                 entrypoints,
@@ -636,6 +686,122 @@ fn discover_module_candidates(root: &Path) -> Vec<ModuleCandidate> {
     }
     candidates.sort_by(|left, right| left.path.cmp(&right.path));
     candidates
+}
+
+fn apply_operation_targets(
+    candidates: &mut [ModuleCandidate],
+    requested_targets: &[String],
+) -> Result<()> {
+    for requested in requested_targets {
+        let requested = operator_safe_text(requested.trim());
+        if requested.is_empty() {
+            continue;
+        }
+        let mut matched = false;
+        for candidate in candidates.iter_mut() {
+            if module_target_matches(candidate, &requested) {
+                candidate.selected_operation_target = true;
+                candidate.operation_profile_status =
+                    "operation_target_requires_module_profile_review".to_string();
+                matched = true;
+            }
+        }
+        if !matched {
+            bail!(
+                "operation target not found among module candidates: {}",
+                requested
+            );
+        }
+    }
+    Ok(())
+}
+
+fn module_target_matches(candidate: &ModuleCandidate, requested: &str) -> bool {
+    candidate.path == requested
+        || candidate.module_id == requested
+        || candidate.scope_ref == requested
+        || candidate.label.eq_ignore_ascii_case(requested)
+        || Path::new(&candidate.path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            == Some(requested)
+}
+
+fn scope_model(
+    project_key: &str,
+    project_root: &Path,
+    module_report: &ModuleCandidateReport,
+) -> ScopeModel {
+    let module_candidates = module_report
+        .candidates
+        .iter()
+        .map(module_scope_target)
+        .collect::<Vec<_>>();
+    let operation_targets = module_report
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.selected_operation_target)
+        .map(module_scope_target)
+        .collect::<Vec<_>>();
+    ScopeModel {
+        project_target: ScopeTarget {
+            scope_kind: "project".to_string(),
+            scope_ref: project_key.to_string(),
+            label: project_key.to_string(),
+            role: "project_context_target".to_string(),
+            status: "operator_confirmed_project_key".to_string(),
+            parent_scope_kind: None,
+            parent_scope_ref: None,
+            path: Some(safe_path(project_root)),
+        },
+        operation_targets,
+        module_candidates,
+        artifact_scopes: vec![
+            ScopeTarget {
+                scope_kind: "artifact_kind".to_string(),
+                scope_ref: "evidence_bundle".to_string(),
+                label: "Evidence Bundle".to_string(),
+                role: "deterministic_evidence_scope".to_string(),
+                status: "collector_plan_candidate".to_string(),
+                parent_scope_kind: Some("project".to_string()),
+                parent_scope_ref: Some(project_key.to_string()),
+                path: None,
+            },
+            ScopeTarget {
+                scope_kind: "artifact_kind".to_string(),
+                scope_ref: "ondesk_return".to_string(),
+                label: "Ondesk Return".to_string(),
+                role: "handoff_scope".to_string(),
+                status: "initialization_packet_candidate".to_string(),
+                parent_scope_kind: Some("project".to_string()),
+                parent_scope_ref: Some(project_key.to_string()),
+                path: None,
+            },
+        ],
+        policy: vec![
+            "Project target owns overall objective, wiki scope, closeout, and Ondesk return context.".to_string(),
+            "Module operation targets own canonical commands, module evidence gates, and module-specific reportability vocabulary.".to_string(),
+            "Artifact scopes own concrete evidence bundles and should not replace project or module scope.".to_string(),
+            "A module operation target remains a candidate until an operator reviews or creates its module operation profile.".to_string(),
+        ],
+    }
+}
+
+fn module_scope_target(candidate: &ModuleCandidate) -> ScopeTarget {
+    ScopeTarget {
+        scope_kind: "module".to_string(),
+        scope_ref: candidate.scope_ref.clone(),
+        label: candidate.label.clone(),
+        role: if candidate.selected_operation_target {
+            "module_operation_target".to_string()
+        } else {
+            "module_candidate".to_string()
+        },
+        status: candidate.operation_profile_status.clone(),
+        parent_scope_kind: Some("project".to_string()),
+        parent_scope_ref: Some(candidate.parent_project_key.clone()),
+        path: Some(candidate.path.clone()),
+    }
 }
 
 fn module_docs(root: &Path, module_path: &Path) -> Vec<PathSignal> {
@@ -678,6 +844,10 @@ fn ready_check(
     let docs_present = scan.documentation_sources.iter().any(|item| item.exists);
     let entrypoints_present = !scan.entrypoints.is_empty();
     let module_candidates_present = !modules.candidates.is_empty();
+    let operation_targets_present = modules
+        .candidates
+        .iter()
+        .any(|candidate| candidate.selected_operation_target);
     let mut warnings = scan.warnings.clone();
     if !module_candidates_present {
         warnings.push("no_module_candidates_detected".to_string());
@@ -719,6 +889,18 @@ fn ready_check(
                 detail: format!("{} module candidate(s) detected", modules.candidates.len()),
             },
             ReadinessGate {
+                gate: "operation_target_scope_declared".to_string(),
+                passed: operation_targets_present,
+                detail: format!(
+                    "{} operation target(s) selected",
+                    modules
+                        .candidates
+                        .iter()
+                        .filter(|candidate| candidate.selected_operation_target)
+                        .count()
+                ),
+            },
+            ReadinessGate {
                 gate: "runtime_requires_approval".to_string(),
                 passed: true,
                 detail: "Offdesk runtime must still pass dispatch.runtime approval.".to_string(),
@@ -731,11 +913,18 @@ fn ready_check(
             },
         ],
         warnings,
-        blockers: vec![
-            "operator_review_required_before_runtime_enqueue".to_string(),
-            "module_operation_profiles_are_candidates_until_reviewed".to_string(),
-        ],
+        blockers: readiness_blockers(operation_targets_present),
     }
+}
+
+fn readiness_blockers(operation_targets_present: bool) -> Vec<String> {
+    let mut blockers = vec!["operator_review_required_before_runtime_enqueue".to_string()];
+    if operation_targets_present {
+        blockers.push("operation_targets_require_module_profile_review".to_string());
+    } else {
+        blockers.push("module_operation_profiles_are_candidates_until_reviewed".to_string());
+    }
+    blockers
 }
 
 fn agent_mode_contracts() -> Vec<AgentModeContract> {
@@ -837,6 +1026,16 @@ fn wiki_seed_candidates(project_key: &str) -> Vec<WikiSeedCandidate> {
             review_reason: "Seed candidate only; requires operator confirmation.".to_string(),
         },
         WikiSeedCandidate {
+            title: "Project and module scopes stay separate".to_string(),
+            scope: "project".to_string(),
+            scope_ref: project_key.to_string(),
+            signal_kind: "scope_policy".to_string(),
+            claim: "Use project scope for overall objective and handoff context; use module scope for canonical commands and module evidence gates.".to_string(),
+            human_summary: "Do not collapse a module operation target into the project target unless the operator explicitly splits it into a separate project.".to_string(),
+            suggested_tags: vec!["scope".to_string(), "module-operation".to_string()],
+            review_reason: "Generic scope policy candidate for new project bootstrap.".to_string(),
+        },
+        WikiSeedCandidate {
             title: "Evidence before claims".to_string(),
             scope: "project".to_string(),
             scope_ref: project_key.to_string(),
@@ -874,6 +1073,24 @@ fn render_onboarding(
     output.push_str("## First Reads\n\n");
     for item in &profile.ondesk_bridge.first_reads {
         output.push_str(&format!("- `{}`\n", item));
+    }
+    output.push_str("\n## Scope Model\n\n");
+    output.push_str(&format!(
+        "- project target: `{}` role=`{}`\n",
+        profile.scope_model.project_target.scope_ref, profile.scope_model.project_target.role
+    ));
+    if profile.scope_model.operation_targets.is_empty() {
+        output.push_str("- operation targets: none selected yet\n");
+    } else {
+        for target in &profile.scope_model.operation_targets {
+            output.push_str(&format!(
+                "- operation target: `{}` label=`{}` path=`{}` status=`{}`\n",
+                target.scope_ref,
+                target.label,
+                target.path.as_deref().unwrap_or(""),
+                target.status
+            ));
+        }
     }
     output.push_str("\n## Module Candidates\n\n");
     if modules.candidates.is_empty() {
@@ -931,8 +1148,8 @@ fn render_evidence_plan(
     } else {
         for candidate in &modules.candidates {
             output.push_str(&format!(
-                "- `{}`: define required docs, run summaries, reportability metrics, and stale-evidence rules.\n",
-                candidate.path
+                "- `{}` scope=`module:{}` target=`{}`: define required docs, run summaries, reportability metrics, and stale-evidence rules.\n",
+                candidate.path, candidate.scope_ref, candidate.selected_operation_target
             ));
         }
     }
@@ -963,8 +1180,12 @@ fn render_ondesk_start_package(
     output.push_str("\n## Module Candidates\n\n");
     for candidate in &modules.candidates {
         output.push_str(&format!(
-            "- `{}` at `{}` confidence=`{}`\n",
-            candidate.module_id, candidate.path, candidate.confidence
+            "- `{}` at `{}` scope=`module:{}` confidence=`{}` target=`{}`\n",
+            candidate.module_id,
+            candidate.path,
+            candidate.scope_ref,
+            candidate.confidence,
+            candidate.selected_operation_target
         ));
     }
     if modules.candidates.is_empty() {
@@ -1074,6 +1295,78 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/");
     operator_safe_text(&rel)
+}
+
+fn module_id_for(parent: &str, rel: &str) -> String {
+    let base = Path::new(rel)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(rel);
+    let normalized = slug(base).replace(['-', '.'], "_");
+    let parts = normalized.splitn(2, '_').collect::<Vec<_>>();
+    if parent == "modules" && parts.first().is_some_and(|part| digits_only(part)) {
+        if let Some(rest) = parts.get(1).filter(|part| !part.is_empty()) {
+            return format!("module{}_{}", parts[0], rest);
+        }
+        return format!("module{}", parts[0]);
+    }
+    format!("{}_{}", singular_parent(parent), normalized)
+}
+
+fn singular_parent(parent: &str) -> &str {
+    match parent {
+        "apps" => "app",
+        "packages" => "package",
+        "crates" => "crate",
+        "modules" => "module",
+        value => value,
+    }
+}
+
+fn digits_only(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn module_label(rel: &str) -> String {
+    let base = Path::new(rel)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(rel);
+    let cleaned = base
+        .trim_start_matches(|ch: char| ch.is_ascii_digit())
+        .trim_start_matches(['_', '-', '.'])
+        .replace(['_', '-'], " ");
+    let label = cleaned
+        .split_whitespace()
+        .map(title_word)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if label.is_empty() {
+        rel.to_string()
+    } else {
+        label
+    }
+}
+
+fn title_word(word: &str) -> String {
+    match word.to_ascii_lowercase().as_str() {
+        "regspec" => "RegSpec".to_string(),
+        "api" => "API".to_string(),
+        "ui" => "UI".to_string(),
+        _ => {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => {
+                    format!(
+                        "{}{}",
+                        first.to_ascii_uppercase(),
+                        chars.as_str().to_ascii_lowercase()
+                    )
+                }
+                None => String::new(),
+            }
+        }
+    }
 }
 
 fn slug(value: &str) -> String {

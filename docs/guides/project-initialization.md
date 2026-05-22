@@ -6,6 +6,7 @@ It is the bootstrap step before Ondesk/Offdesk/wiki work starts.
 ```bash
 forager project init /path/to/project \
   --project-key my-project \
+  --operation-target modules/03_regspec_machine \
   --include-git \
   --json
 ```
@@ -27,6 +28,11 @@ project_initializations/<timestamp>_<project-key>/
 Use `--out <dir>` to place the packet somewhere else. Existing non-empty output
 directories are refused unless `--force` is provided.
 
+Use `--operation-target <MODULE_PATH_OR_ID>` when a project-level initialization
+should prioritize a known module, such as TwinPaper's
+`modules/03_regspec_machine`. The project remains the top-level target, while
+the selected module is recorded as a module operation target.
+
 ## Boundary
 
 Initialization does not grant authority. It does not:
@@ -46,6 +52,8 @@ for operator review.
 `PROJECT_OPERATION_PROFILE.json` records:
 
 - `project_key` and project root;
+- scope model: project target, module operation targets, module candidates,
+  and artifact scopes;
 - root docs, entrypoints, artifact roots, and optional git status;
 - default agent mode contracts for planning, development, analysis, writing,
   critique, and maintenance;
@@ -56,6 +64,24 @@ for operator review.
 `MODULE_CANDIDATES.json` is a shallow scan of likely operating units under
 `modules/`, `apps/`, `packages/`, and `crates/`. Candidates are not approved
 module operation profiles. They are review targets.
+
+For example, a TwinPaper initialization should use:
+
+```bash
+forager project init /home/.../1.2.8.TwinPaper \
+  --project-key twinpaper \
+  --operation-target modules/03_regspec_machine
+```
+
+This records:
+
+```text
+project scope: twinpaper
+module operation scope: module03_regspec_machine
+```
+
+Do not initialize the module as the project unless it is being split into a
+separate repository or standalone product/research unit.
 
 `EVIDENCE_COLLECTOR_PLAN.md` is the first draft of the deterministic evidence
 collector contract. It says what the collector should read, not what the
