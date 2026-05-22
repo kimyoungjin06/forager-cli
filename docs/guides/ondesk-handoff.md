@@ -40,8 +40,10 @@ changes as candidates.
 
 When a matching project initialization exists in the active profile,
 `prompt-package` includes the latest `ONDESK_START_PACKAGE.md`, operation
-targets, and readiness state for the same `project_key`. This is the preferred
-bridge from `forager project init` into a fresh Ondesk harness.
+targets, readiness state, and a concise `MODULE_OPERATION_PREFLIGHT.json`
+summary for the same `project_key`. The preflight bridge exposes module
+readiness, blockers, and command purposes, not raw command strings. This is the
+preferred bridge from `forager project init` into a fresh Ondesk harness.
 
 When a matching Offdesk closeout exists, `prompt-package` also includes the
 latest `RETURN_PACKAGE.md` and closeout-review verdict for the same
