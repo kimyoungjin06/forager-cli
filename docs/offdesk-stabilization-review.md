@@ -76,7 +76,7 @@ Reviewers should focus on these questions:
 The integrated tree passed:
 
 ```bash
-python3 -B -m py_compile scripts/build_twinpaper_evidence_bundle.py scripts/review_evidence_bundle.py scripts/offdesk_twinpaper_autonomy_workload.py scripts/prepare_twinpaper_offdesk_task.py scripts/review_twinpaper_offdesk_result.py scripts/offdesk_workload_review_harness.py scripts/offdesk_role_llm_episode_harness.py scripts/offdesk_role_episode_harness.py scripts/offdesk_wiki_llm_harness.py scripts/offdesk_runtime_episode_harness.py
+python3 -B -m py_compile scripts/build_twinpaper_module03_operation_profile.py scripts/build_twinpaper_evidence_bundle.py scripts/review_evidence_bundle.py scripts/offdesk_twinpaper_autonomy_workload.py scripts/prepare_twinpaper_offdesk_task.py scripts/review_twinpaper_offdesk_result.py scripts/offdesk_workload_review_harness.py scripts/offdesk_role_llm_episode_harness.py scripts/offdesk_role_episode_harness.py scripts/offdesk_wiki_llm_harness.py scripts/offdesk_runtime_episode_harness.py
 scripts/review_twinpaper_offdesk_result.py --result /home/kimyoungjin06/.config/agent-of-empires/profiles/twinpaper-adaptive-debug/offdesk_workloads/twinpaper_autonomy/20260520T122750Z/result.json --out target/offdesk-result-review-smoke/latest-30min/results.json
 cargo fmt --all -- --check
 git diff --check

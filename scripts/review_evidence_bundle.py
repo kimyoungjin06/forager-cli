@@ -80,6 +80,35 @@ def review_bundle(bundle_path: pathlib.Path, bundle: dict[str, Any]) -> dict[str
         if not isinstance(entry, dict) or entry.get("exists") is not True:
             blockers.append(f"missing_entrypoint:{rel}")
 
+    operation_profiles = bundle.get("module_operation_profiles", {})
+    module03_profile = (
+        operation_profiles.get("module03_regspec_machine")
+        if isinstance(operation_profiles, dict)
+        else None
+    )
+    if not isinstance(module03_profile, dict):
+        blockers.append("missing_module_operation_profile:module03_regspec_machine")
+    else:
+        if module03_profile.get("kind") != "twinpaper_module_operation_profile":
+            blockers.append("invalid_module_operation_profile_kind:module03_regspec_machine")
+        operation_gates = module03_profile.get("operation_gates", {})
+        if not isinstance(operation_gates, dict):
+            blockers.append("module_operation_gates_missing:module03_regspec_machine")
+        else:
+            if operation_gates.get("entrypoint_exists") is not True:
+                blockers.append("module_operation_entrypoint_missing:module03_regspec_machine")
+            if operation_gates.get("canonical_modes_present") is not True:
+                blockers.append("module_operation_modes_incomplete:module03_regspec_machine")
+        allowed_operations = module03_profile.get("allowed_operations", [])
+        operation_ids = {
+            item.get("id")
+            for item in allowed_operations
+            if isinstance(item, dict)
+        }
+        for required_operation in ("plan", "single-nooption", "single-singlex", "paired"):
+            if required_operation not in operation_ids:
+                blockers.append(f"module_operation_missing:{required_operation}")
+
     current_state = bundle.get("current_state", {})
     baseline_status = current_state.get("baseline_evidence_status") if isinstance(current_state, dict) else None
     if baseline_status in (None, "missing_or_not_in_bundle"):
