@@ -10,6 +10,7 @@
 # Guides
 
 - [Workflow](guides/workflow.md)
+- [Project Initialization](guides/project-initialization.md)
 - [Ondesk Handoff](guides/ondesk-handoff.md)
 - [Offdesk Closeout](guides/offdesk-closeout.md)
 - [Module Operation Profiles](guides/module-operation-profile.md)

@@ -15,6 +15,7 @@ use super::migrate::MigrateCommands;
 use super::offdesk::OffdeskCommands;
 use super::ondesk::OndeskCommands;
 use super::profile::ProfileCommands;
+use super::project::ProjectCommands;
 use super::remove::RemoveArgs;
 use super::session::SessionCommands;
 use super::sounds::SoundsCommands;
@@ -88,6 +89,12 @@ pub enum Commands {
     Profile {
         #[command(subcommand)]
         command: Option<ProfileCommands>,
+    },
+
+    /// Initialize and inspect project operation packets
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommands,
     },
 
     /// Manage git worktrees for parallel development

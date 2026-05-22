@@ -10,6 +10,7 @@ pub mod migrate;
 pub mod offdesk;
 pub mod ondesk;
 pub mod profile;
+pub mod project;
 pub mod remove;
 pub mod session;
 pub mod sounds;
