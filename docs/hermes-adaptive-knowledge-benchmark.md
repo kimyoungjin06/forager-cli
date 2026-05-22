@@ -1191,14 +1191,35 @@ Acceptance checks:
 - implemented now: missing or unrecognized module preflight blocks enqueue
   unless the operator explicitly allows preflight blockers.
 
+### Slice 42: Operator Launch Dry Run Report
+
+Implemented an operator-facing launch dry-run report for prepared TwinPaper
+workloads:
+
+- `LAUNCH_DRY_RUN.md`;
+- `prepared_task.json.artifacts.launch_dry_run_report`;
+- top-level prepare output `launch_dry_run_report`;
+- concise preflight verdict, blockers, safety boundary, and enqueue/approval
+  commands.
+
+Acceptance checks:
+
+- implemented now: every prepare run writes a human-readable launch review
+  packet before enqueue;
+- implemented now: the report states that `dispatch.runtime` still requires the
+  normal approval path;
+- implemented now: the report surfaces module-preflight readiness and command
+  purposes without copying raw preflight command strings;
+- implemented now: tests verify `LAUNCH_DRY_RUN.md` is generated and does not
+  leak a secret-like command embedded in the source preflight artifact.
+
 ## Immediate Next Work
 
-The next useful slice is an operator-facing launch dry run: prepare the
-TwinPaper workload with `--review-artifact generate`, inspect the generated
-review report and preflight summary, then enqueue only after the explicit
-`dispatch.runtime` approval path is selected. This keeps the final boundary on
-human approval rather than letting a clean review artifact launch runtime work
-by itself.
+The next useful slice is a real no-enqueue TwinPaper prepare smoke using
+`--review-artifact generate` and `--module-preflight-artifact latest`, then
+inspect `LAUNCH_DRY_RUN.md`, `preflight.json`, and the generated review report
+before choosing whether to enqueue through the explicit `dispatch.runtime`
+approval path.
 
 ## Rejected For Now
 
