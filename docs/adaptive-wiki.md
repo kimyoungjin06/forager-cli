@@ -1028,6 +1028,12 @@ starts. Approve the pending `dispatch.runtime` action and run `offdesk tick
 workloads should use tmux so the process remains inspectable after the tick
 command exits.
 
+The current launch path is covered by a short TwinPaper smoke runbook:
+[`TwinPaper Offdesk Runtime Smoke`](guides/twinpaper-offdesk-runtime-smoke.md).
+That smoke validates prepare, enqueue, approval, local-tmux launch, polling,
+result artifacts, and deterministic post-run review without starting an
+overnight campaign.
+
 The workload report separates raw pass/fail from operator judgement. `REPORT.md`
 and `result.json` include an `assessment` block with `overall_verdict`,
 `operator_risk`, `next_action`, failure-category counts, baseline policy

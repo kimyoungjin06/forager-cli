@@ -1213,13 +1213,47 @@ Acceptance checks:
 - implemented now: tests verify `LAUNCH_DRY_RUN.md` is generated and does not
   leak a secret-like command embedded in the source preflight artifact.
 
+### Slice 43: Verified TwinPaper Runtime Smoke
+
+Validated the short TwinPaper Offdesk launch path against the live
+`twinpaper-adaptive-debug` profile:
+
+- project initialization produced a matching
+  `MODULE_OPERATION_PREFLIGHT.json`;
+- no-enqueue prepare wrote readable `LAUNCH_DRY_RUN.md` and stayed out of the
+  queue;
+- enqueue created a queued `dispatch.runtime` task;
+- first `tick` created one operator-required runtime approval;
+- `offdesk ok <approval-id>` plus a second `tick` launched `local-tmux`;
+- `offdesk poll` observed terminal completion through the result sidecar;
+- deterministic post-run review reported a clean one-iteration smoke.
+
+Observed smoke:
+
+- task `twinpaper-autonomy-20260522T071200Z`;
+- background ticket `bg_81e0dd2e-1164-4473-8815-e4df04bea179`;
+- runtime `11.81s`;
+- result `1 total / 1 passed / 0 failed`;
+- pending approvals after completion `[]`.
+
+Acceptance checks:
+
+- implemented now: the runtime path does not launch before
+  `dispatch.runtime` approval;
+- implemented now: the short task uses `local-tmux` and writes heartbeat,
+  progress, result, report, runner log, and review artifacts;
+- implemented now: the final task remains review-gated with
+  `mode_risk=operator_review_required`;
+- documented now:
+  [`TwinPaper Offdesk Runtime Smoke`](guides/twinpaper-offdesk-runtime-smoke.md)
+  and [`Operation Cycle`](guides/operation-cycle.md).
+
 ## Immediate Next Work
 
-The next useful slice is a real no-enqueue TwinPaper prepare smoke using
-`--review-artifact generate` and `--module-preflight-artifact latest`, then
-inspect `LAUNCH_DRY_RUN.md`, `preflight.json`, and the generated review report
-before choosing whether to enqueue through the explicit `dispatch.runtime`
-approval path.
+The next useful slice is a realistic longer TwinPaper run with Council enabled,
+followed by closeout and Ondesk return review. The launch path itself has now
+been validated; the remaining risk is output quality, Council usefulness,
+closeout ergonomics, and wiki candidate review.
 
 ## Rejected For Now
 

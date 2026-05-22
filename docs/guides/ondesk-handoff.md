@@ -5,6 +5,10 @@ Codex or Claude Code. In that mode Forager should not become the primary agent
 loop. Its job is to keep a safe bridge between live harness work, project
 notes, and later Offdesk or wiki review.
 
+This guide covers the Ondesk side of the full
+[Operation Cycle](operation-cycle.md). The main rule is that a fresh harness
+should start from a compact package, not from a hidden raw resume.
+
 ## Core Loop
 
 1. Record operator intent while the work is fresh.
@@ -74,3 +78,24 @@ Use Ondesk handoff when:
 
 Use Offdesk tasks instead when Forager should own the execution, approvals,
 recovery records, and morning-review evidence.
+
+## Handoff Checklist
+
+Before switching from Ondesk to Offdesk:
+
+- record the current objective and known non-goals with `ondesk note`;
+- capture only the harness context that the next reviewer needs;
+- make the target project and module explicit through `project_key` and, when
+  available, a project initialization packet;
+- state forbidden operations such as deletion, cleanup, service restart,
+  package install, provider retargeting, and wiki promotion;
+- describe the expected evidence artifacts, not only the desired conclusion.
+
+Before returning from Offdesk to Ondesk:
+
+- read `result.json`, `REPORT.md`, and post-run review artifacts;
+- run or inspect Offdesk closeout;
+- start the next harness from `RETURN_PACKAGE.md` or
+  `forager ondesk prompt-package --project-key <project>`;
+- promote wiki changes only after review, not just because an Offdesk run
+  generated candidate knowledge.

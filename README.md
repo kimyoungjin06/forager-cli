@@ -33,6 +33,9 @@ Run multiple AI agents in parallel across different branches of your codebase, e
 - **Rename diagnostics** -- `forager doctor` shows active Forager paths and legacy AoE compatibility state
 - **Safe AoE migration** -- `forager migrate aoe` copies legacy paths without overwriting Forager targets
 - **Offdesk recovery** -- durable task queueing, approval retry, lifecycle recovery, and audit trails
+- **Ondesk/Offdesk handoff** -- project initialization, prompt packages,
+  launch dry runs, runtime approvals, closeout packets, and wiki review
+  surfaces for longer autonomous work
 - **CLI and TUI** -- full functionality from both interfaces
 
 ## How It Works
@@ -77,12 +80,14 @@ In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal v
 
 ## Documentation
 
-- **[Installation](https://kimyoungjin06.github.io/forager-cli/installation)** -- prerequisites and install methods
-- **[Quick Start](https://kimyoungjin06.github.io/forager-cli/quick-start)** -- first steps and basic usage
-- **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/guides/workflow)** -- recommended setup with bare repos and worktrees
-- **[Repo Config & Hooks](https://kimyoungjin06.github.io/forager-cli/guides/repo-config)** -- per-project settings and automation
-- **[Configuration Reference](https://kimyoungjin06.github.io/forager-cli/guides/configuration)** -- all config options
-- **[CLI Reference](https://kimyoungjin06.github.io/forager-cli/cli/reference)** -- complete command documentation
+- **[Installation](https://kimyoungjin06.github.io/forager-cli/docs/installation.html)** -- prerequisites and install methods
+- **[Quick Start](https://kimyoungjin06.github.io/forager-cli/docs/quick-start.html)** -- first steps and basic usage
+- **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/docs/guides/workflow.html)** -- recommended setup with bare repos and worktrees
+- **[Operation Cycle](https://kimyoungjin06.github.io/forager-cli/docs/guides/operation-cycle.html)** -- Ondesk to Offdesk to Ondesk lifecycle, approvals, evidence, and wiki boundaries
+- **[TwinPaper Offdesk Runtime Smoke](https://kimyoungjin06.github.io/forager-cli/docs/guides/twinpaper-offdesk-runtime-smoke.html)** -- validated short-run procedure for the approval-gated Offdesk launch path
+- **[Repo Config & Hooks](https://kimyoungjin06.github.io/forager-cli/docs/guides/repo-config.html)** -- per-project settings and automation
+- **[Configuration Reference](https://kimyoungjin06.github.io/forager-cli/docs/guides/configuration.html)** -- all config options
+- **[CLI Reference](https://kimyoungjin06.github.io/forager-cli/docs/cli/reference.html)** -- complete command documentation
 
 ## FAQ
 
