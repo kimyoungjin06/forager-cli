@@ -31,6 +31,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager profile create`↴](#forager-profile-create)
 * [`forager profile delete`↴](#forager-profile-delete)
 * [`forager profile default`↴](#forager-profile-default)
+* [`forager project`↴](#forager-project)
+* [`forager project init`↴](#forager-project-init)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -127,6 +129,7 @@ Run without arguments to launch the TUI dashboard. The legacy `aoe` binary remai
 * `session` — Manage session lifecycle (start, stop, attach, etc.)
 * `group` — Manage groups for organizing sessions
 * `profile` — Manage profiles (separate workspaces)
+* `project` — Initialize and inspect project operation packets
 * `worktree` — Manage git worktrees for parallel development
 * `offdesk` — Manage offdesk approvals and recovery artifacts
 * `ondesk` — Capture ondesk notes and prompt context from external harness work
@@ -509,6 +512,38 @@ Show or set default profile
 ###### **Arguments:**
 
 * `<NAME>` — Profile name (optional, shows current if not provided)
+
+
+
+## `forager project`
+
+Initialize and inspect project operation packets
+
+**Usage:** `forager project <COMMAND>`
+
+###### **Subcommands:**
+
+* `init` — Create a read-only project operation initialization packet
+
+
+
+## `forager project init`
+
+Create a read-only project operation initialization packet
+
+**Usage:** `forager project init [OPTIONS] --project-key <PROJECT_KEY> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory to initialize for Forager operation
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key used by Ondesk, Offdesk, and adaptive wiki records
+* `--out <OUT>` — Write the initialization packet to this directory
+* `--include-git` — Include read-only git branch/status/diff-stat evidence
+* `--force` — Overwrite known initialization files when --out already contains files
+* `--json` — Output machine-readable JSON
 
 
 

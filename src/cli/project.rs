@@ -1,0 +1,1123 @@
+//! `forager project` subcommands for project-level operation initialization.
+
+use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Utc};
+use clap::{Args, Subcommand};
+use serde::Serialize;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use uuid::Uuid;
+
+use crate::offdesk::operator_safe_text;
+use crate::session::get_profile_dir;
+
+const PROFILE_FILE: &str = "PROJECT_OPERATION_PROFILE.json";
+const ONBOARDING_FILE: &str = "PROJECT_ONBOARDING.md";
+const MODULE_CANDIDATES_FILE: &str = "MODULE_CANDIDATES.json";
+const EVIDENCE_PLAN_FILE: &str = "EVIDENCE_COLLECTOR_PLAN.md";
+const WIKI_SEEDS_FILE: &str = "WIKI_SEED_CANDIDATES.json";
+const ONDESK_PACKAGE_FILE: &str = "ONDESK_START_PACKAGE.md";
+const OFFDESK_READY_FILE: &str = "OFFDESK_READY_CHECK.json";
+
+#[derive(Subcommand)]
+pub enum ProjectCommands {
+    /// Create a read-only project operation initialization packet
+    Init(ProjectInitArgs),
+}
+
+#[derive(Args)]
+pub struct ProjectInitArgs {
+    /// Project repository/root directory to initialize for Forager operation
+    path: PathBuf,
+
+    /// Stable project key used by Ondesk, Offdesk, and adaptive wiki records
+    #[arg(long)]
+    project_key: String,
+
+    /// Write the initialization packet to this directory
+    #[arg(long)]
+    out: Option<PathBuf>,
+
+    /// Include read-only git branch/status/diff-stat evidence
+    #[arg(long)]
+    include_git: bool,
+
+    /// Overwrite known initialization files when --out already contains files
+    #[arg(long)]
+    force: bool,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectInitOutput {
+    kind: String,
+    version: u32,
+    id: String,
+    profile: String,
+    project_key: String,
+    project_root: String,
+    artifact_dir: String,
+    read_only_project_state: bool,
+    requires_operator_review: bool,
+    artifacts: ProjectInitArtifacts,
+    summary: ProjectInitSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectInitArtifacts {
+    operation_profile_json: String,
+    onboarding_markdown: String,
+    module_candidates_json: String,
+    evidence_collector_plan_markdown: String,
+    wiki_seed_candidates_json: String,
+    ondesk_start_package_markdown: String,
+    offdesk_ready_check_json: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectInitSummary {
+    module_candidate_count: usize,
+    entrypoint_count: usize,
+    evidence_source_count: usize,
+    warning_count: usize,
+    ready_for_ondesk_start: bool,
+    ready_for_offdesk_runtime: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectOperationProfile {
+    kind: String,
+    version: u32,
+    generated_at: DateTime<Utc>,
+    id: String,
+    project_key: String,
+    project_root: String,
+    read_only_project_state: bool,
+    initialization_policy: InitializationPolicy,
+    project_scan: ProjectScan,
+    agent_modes: Vec<AgentModeContract>,
+    ondesk_bridge: OndeskBridge,
+    offdesk_policy: OffdeskProjectPolicy,
+    safety_policy: ProjectSafetyPolicy,
+    module_candidates_path: String,
+    evidence_plan_path: String,
+    wiki_seed_candidates_path: String,
+    ondesk_start_package_path: String,
+    offdesk_ready_check_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InitializationPolicy {
+    grants_execution_authority: bool,
+    grants_wiki_promotion_authority: bool,
+    grants_file_cleanup_authority: bool,
+    operator_review_required_before_offdesk_runtime: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectScan {
+    root_markers: Vec<PathSignal>,
+    documentation_sources: Vec<PathSignal>,
+    entrypoints: Vec<EntryPointCandidate>,
+    artifact_roots: Vec<PathSignal>,
+    git: Option<GitSnapshot>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PathSignal {
+    path: String,
+    exists: bool,
+    kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EntryPointCandidate {
+    path: String,
+    kind: String,
+    command_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GitSnapshot {
+    is_repo: bool,
+    branch: Option<String>,
+    head: Option<String>,
+    status_short: Option<String>,
+    diff_stat: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AgentModeContract {
+    mode: String,
+    purpose: String,
+    first_reads: Vec<String>,
+    output_contract: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OndeskBridge {
+    default_start_package: String,
+    first_reads: Vec<String>,
+    capture_policy: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OffdeskProjectPolicy {
+    runtime_requires_approval: bool,
+    long_runs_prefer_local_tmux: bool,
+    closeout_required: bool,
+    default_runner_kind: String,
+    required_artifacts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectSafetyPolicy {
+    forbidden_without_separate_approval: Vec<String>,
+    target_repo_default_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModuleCandidateReport {
+    kind: String,
+    version: u32,
+    generated_at: DateTime<Utc>,
+    project_key: String,
+    project_root: String,
+    candidates: Vec<ModuleCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModuleCandidate {
+    module_id: String,
+    path: String,
+    confidence: String,
+    signals: Vec<String>,
+    entrypoints: Vec<EntryPointCandidate>,
+    documentation_sources: Vec<PathSignal>,
+    operation_profile_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WikiSeedCandidateReport {
+    kind: String,
+    version: u32,
+    generated_at: DateTime<Utc>,
+    project_key: String,
+    activation_policy: String,
+    candidates: Vec<WikiSeedCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WikiSeedCandidate {
+    title: String,
+    scope: String,
+    scope_ref: String,
+    signal_kind: String,
+    claim: String,
+    human_summary: String,
+    suggested_tags: Vec<String>,
+    review_reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OffdeskReadyCheck {
+    kind: String,
+    version: u32,
+    generated_at: DateTime<Utc>,
+    project_key: String,
+    project_root: String,
+    ready_for_ondesk_start: bool,
+    ready_for_offdesk_runtime: bool,
+    requires_operator_review: bool,
+    gates: Vec<ReadinessGate>,
+    warnings: Vec<String>,
+    blockers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ReadinessGate {
+    gate: String,
+    passed: bool,
+    detail: String,
+}
+
+pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
+    match command {
+        ProjectCommands::Init(args) => run_init(profile, args).await,
+    }
+}
+
+async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
+    let project_key = sanitize_required("project key", &args.project_key)?;
+    let project_root = args
+        .path
+        .expanduser()
+        .canonicalize()
+        .with_context(|| format!("resolve project path {}", args.path.display()))?;
+    if !project_root.is_dir() {
+        bail!(
+            "project path is not a directory: {}",
+            project_root.display()
+        );
+    }
+
+    let profile_name = if profile.is_empty() {
+        "default"
+    } else {
+        profile
+    };
+    let generated_at = Utc::now();
+    let id = format!("project-init-{}", short_uuid());
+    let artifact_dir = resolve_artifact_dir(profile_name, &project_key, generated_at, &args)?;
+    let artifacts = artifact_paths(&artifact_dir);
+
+    let root_markers = collect_root_markers(&project_root);
+    let documentation_sources = collect_documentation_sources(&project_root);
+    let entrypoints = collect_entrypoints(&project_root, &project_root);
+    let artifact_roots = collect_artifact_roots(&project_root);
+    let module_candidates = discover_module_candidates(&project_root);
+    let warnings = scan_warnings(&documentation_sources, &entrypoints);
+    let git = if args.include_git {
+        Some(git_snapshot(&project_root))
+    } else {
+        None
+    };
+
+    let project_scan = ProjectScan {
+        root_markers,
+        documentation_sources: documentation_sources.clone(),
+        entrypoints: entrypoints.clone(),
+        artifact_roots,
+        git,
+        warnings: warnings.clone(),
+    };
+    let module_report = ModuleCandidateReport {
+        kind: "forager_module_candidate_report".to_string(),
+        version: 1,
+        generated_at,
+        project_key: project_key.clone(),
+        project_root: safe_path(&project_root),
+        candidates: module_candidates,
+    };
+    let wiki_report = WikiSeedCandidateReport {
+        kind: "forager_wiki_seed_candidates".to_string(),
+        version: 1,
+        generated_at,
+        project_key: project_key.clone(),
+        activation_policy: "candidate_only_until_operator_review".to_string(),
+        candidates: wiki_seed_candidates(&project_key),
+    };
+    let ready_check = ready_check(
+        generated_at,
+        &project_key,
+        &project_root,
+        &project_scan,
+        &module_report,
+    );
+    let profile_record = ProjectOperationProfile {
+        kind: "forager_project_operation_profile".to_string(),
+        version: 1,
+        generated_at,
+        id: id.clone(),
+        project_key: project_key.clone(),
+        project_root: safe_path(&project_root),
+        read_only_project_state: true,
+        initialization_policy: InitializationPolicy {
+            grants_execution_authority: false,
+            grants_wiki_promotion_authority: false,
+            grants_file_cleanup_authority: false,
+            operator_review_required_before_offdesk_runtime: true,
+        },
+        project_scan,
+        agent_modes: agent_mode_contracts(),
+        ondesk_bridge: OndeskBridge {
+            default_start_package: artifacts.ondesk_start_package_markdown.clone(),
+            first_reads: vec![
+                PROFILE_FILE.to_string(),
+                ONDESK_PACKAGE_FILE.to_string(),
+                EVIDENCE_PLAN_FILE.to_string(),
+                MODULE_CANDIDATES_FILE.to_string(),
+            ],
+            capture_policy: vec![
+                "Capture live harness context as Ondesk notes or captures; do not rely on raw resume alone.".to_string(),
+                "Treat initialization output as context, not proof of project state completion.".to_string(),
+            ],
+        },
+        offdesk_policy: OffdeskProjectPolicy {
+            runtime_requires_approval: true,
+            long_runs_prefer_local_tmux: true,
+            closeout_required: true,
+            default_runner_kind: "local-tmux".to_string(),
+            required_artifacts: vec![
+                "manifest.json".to_string(),
+                "progress.jsonl".to_string(),
+                "heartbeat.json".to_string(),
+                "result.json".to_string(),
+                "REPORT.md".to_string(),
+                "runner log".to_string(),
+            ],
+        },
+        safety_policy: safety_policy(),
+        module_candidates_path: artifacts.module_candidates_json.clone(),
+        evidence_plan_path: artifacts.evidence_collector_plan_markdown.clone(),
+        wiki_seed_candidates_path: artifacts.wiki_seed_candidates_json.clone(),
+        ondesk_start_package_path: artifacts.ondesk_start_package_markdown.clone(),
+        offdesk_ready_check_path: artifacts.offdesk_ready_check_json.clone(),
+    };
+
+    write_json(
+        Path::new(&artifacts.operation_profile_json),
+        &profile_record,
+    )?;
+    write_json(Path::new(&artifacts.module_candidates_json), &module_report)?;
+    write_json(
+        Path::new(&artifacts.wiki_seed_candidates_json),
+        &wiki_report,
+    )?;
+    write_json(Path::new(&artifacts.offdesk_ready_check_json), &ready_check)?;
+    write_text(
+        Path::new(&artifacts.onboarding_markdown),
+        &render_onboarding(&profile_record, &module_report, &ready_check),
+    )?;
+    write_text(
+        Path::new(&artifacts.evidence_collector_plan_markdown),
+        &render_evidence_plan(&profile_record, &module_report),
+    )?;
+    write_text(
+        Path::new(&artifacts.ondesk_start_package_markdown),
+        &render_ondesk_start_package(&profile_record, &module_report, &ready_check),
+    )?;
+
+    let output = ProjectInitOutput {
+        kind: "forager_project_initialization".to_string(),
+        version: 1,
+        id,
+        profile: profile_name.to_string(),
+        project_key,
+        project_root: safe_path(&project_root),
+        artifact_dir: safe_path(&artifact_dir),
+        read_only_project_state: true,
+        requires_operator_review: true,
+        artifacts,
+        summary: ProjectInitSummary {
+            module_candidate_count: module_report.candidates.len(),
+            entrypoint_count: entrypoints.len(),
+            evidence_source_count: documentation_sources
+                .iter()
+                .filter(|item| item.exists)
+                .count(),
+            warning_count: warnings.len(),
+            ready_for_ondesk_start: ready_check.ready_for_ondesk_start,
+            ready_for_offdesk_runtime: ready_check.ready_for_offdesk_runtime,
+        },
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_project_init_output(&output);
+    }
+
+    Ok(())
+}
+
+fn resolve_artifact_dir(
+    profile: &str,
+    project_key: &str,
+    generated_at: DateTime<Utc>,
+    args: &ProjectInitArgs,
+) -> Result<PathBuf> {
+    let path = if let Some(out) = &args.out {
+        if out.is_absolute() {
+            out.clone()
+        } else {
+            std::env::current_dir()?.join(out)
+        }
+    } else {
+        let timestamp = generated_at.format("%Y%m%dT%H%M%SZ").to_string();
+        get_profile_dir(profile)?
+            .join("project_initializations")
+            .join(format!("{}_{}", timestamp, slug(project_key)))
+    };
+
+    if path.exists() && !args.force && has_any_entry(&path)? {
+        bail!(
+            "output directory is not empty: {}\nUse --force to overwrite known initialization files.",
+            path.display()
+        );
+    }
+    fs::create_dir_all(&path).with_context(|| format!("create {}", path.display()))?;
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn artifact_paths(artifact_dir: &Path) -> ProjectInitArtifacts {
+    ProjectInitArtifacts {
+        operation_profile_json: safe_path(&artifact_dir.join(PROFILE_FILE)),
+        onboarding_markdown: safe_path(&artifact_dir.join(ONBOARDING_FILE)),
+        module_candidates_json: safe_path(&artifact_dir.join(MODULE_CANDIDATES_FILE)),
+        evidence_collector_plan_markdown: safe_path(&artifact_dir.join(EVIDENCE_PLAN_FILE)),
+        wiki_seed_candidates_json: safe_path(&artifact_dir.join(WIKI_SEEDS_FILE)),
+        ondesk_start_package_markdown: safe_path(&artifact_dir.join(ONDESK_PACKAGE_FILE)),
+        offdesk_ready_check_json: safe_path(&artifact_dir.join(OFFDESK_READY_FILE)),
+    }
+}
+
+fn collect_root_markers(root: &Path) -> Vec<PathSignal> {
+    [
+        ("AGENTS.md", "agent_instructions"),
+        ("README.md", "readme"),
+        ("Cargo.toml", "rust_manifest"),
+        ("pyproject.toml", "python_manifest"),
+        ("package.json", "node_manifest"),
+        ("Makefile", "makefile"),
+        ("justfile", "justfile"),
+        (".forager/config.toml", "forager_repo_config"),
+    ]
+    .into_iter()
+    .map(|(path, kind)| path_signal(root, path, kind))
+    .collect()
+}
+
+fn collect_documentation_sources(root: &Path) -> Vec<PathSignal> {
+    [
+        ("AGENTS.md", "agent_instructions"),
+        ("README.md", "readme"),
+        ("CLAUDE.md", "harness_instructions"),
+        ("docs/README.md", "docs_readme"),
+        ("docs/index.md", "docs_index"),
+        ("docs/operations/RunLog.md", "runlog"),
+    ]
+    .into_iter()
+    .map(|(path, kind)| path_signal(root, path, kind))
+    .collect()
+}
+
+fn collect_artifact_roots(root: &Path) -> Vec<PathSignal> {
+    [
+        ("target", "build_output"),
+        ("runs", "run_artifacts"),
+        ("outputs", "project_outputs"),
+        ("data/metadata", "metadata_artifacts"),
+        ("docs/operations", "operation_docs"),
+    ]
+    .into_iter()
+    .map(|(path, kind)| path_signal(root, path, kind))
+    .collect()
+}
+
+fn path_signal(root: &Path, rel: &str, kind: &str) -> PathSignal {
+    PathSignal {
+        path: rel.to_string(),
+        exists: root.join(rel).exists(),
+        kind: kind.to_string(),
+    }
+}
+
+fn collect_entrypoints(root: &Path, base: &Path) -> Vec<EntryPointCandidate> {
+    let mut paths = BTreeSet::new();
+    for rel in [
+        "Cargo.toml",
+        "pyproject.toml",
+        "package.json",
+        "Makefile",
+        "justfile",
+        "scripts/run.sh",
+        "scripts/run_module_03.sh",
+        "scripts/test.sh",
+    ] {
+        let path = base.join(rel);
+        if path.exists() {
+            paths.insert(path);
+        }
+    }
+
+    let scripts_dir = base.join("scripts");
+    if let Ok(entries) = fs::read_dir(scripts_dir) {
+        for entry in entries.flatten().take(40) {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|ext| matches!(ext, "sh" | "py" | "js" | "ts"))
+            {
+                paths.insert(path);
+            }
+        }
+    }
+
+    paths
+        .into_iter()
+        .map(|path| entrypoint_candidate(root, &path))
+        .collect()
+}
+
+fn entrypoint_candidate(root: &Path, path: &Path) -> EntryPointCandidate {
+    let rel = rel_path(root, path);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let kind = match file_name {
+        "Cargo.toml" => "rust_manifest",
+        "pyproject.toml" => "python_manifest",
+        "package.json" => "node_manifest",
+        "Makefile" => "makefile",
+        "justfile" => "justfile",
+        _ if rel.contains("/scripts/") || rel.starts_with("scripts/") => "script",
+        _ => "entrypoint",
+    };
+    let command_hint = match file_name {
+        "Cargo.toml" => Some("cargo test".to_string()),
+        "pyproject.toml" => Some("uv run pytest".to_string()),
+        "package.json" => Some("npm test".to_string()),
+        "Makefile" => Some("make test".to_string()),
+        "justfile" => Some("just --list".to_string()),
+        _ if file_name.ends_with(".sh") => Some(rel.clone()),
+        _ => None,
+    };
+    EntryPointCandidate {
+        path: rel,
+        kind: kind.to_string(),
+        command_hint,
+    }
+}
+
+fn discover_module_candidates(root: &Path) -> Vec<ModuleCandidate> {
+    let mut candidates = Vec::new();
+    for parent in ["modules", "apps", "packages", "crates"] {
+        let parent_path = root.join(parent);
+        let Ok(entries) = fs::read_dir(parent_path) else {
+            continue;
+        };
+        for entry in entries.flatten().take(80) {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let rel = rel_path(root, &path);
+            let entrypoints = collect_entrypoints(root, &path);
+            let docs = module_docs(root, &path);
+            let mut signals = Vec::new();
+            if !entrypoints.is_empty() {
+                signals.push("entrypoints_detected".to_string());
+            }
+            if docs.iter().any(|doc| doc.exists) {
+                signals.push("documentation_detected".to_string());
+            }
+            if path.join("contract.yaml").exists() {
+                signals.push("contract_detected".to_string());
+            }
+            if path.join("tests").exists() {
+                signals.push("tests_detected".to_string());
+            }
+            let confidence = match (entrypoints.is_empty(), signals.len()) {
+                (false, count) if count >= 2 => "high",
+                (false, _) => "medium",
+                (true, count) if count >= 2 => "medium",
+                _ => "low",
+            };
+            candidates.push(ModuleCandidate {
+                module_id: slug(&rel).replace('-', "_"),
+                path: rel,
+                confidence: confidence.to_string(),
+                signals,
+                entrypoints,
+                documentation_sources: docs,
+                operation_profile_status: "candidate_requires_operator_review".to_string(),
+            });
+        }
+    }
+    candidates.sort_by(|left, right| left.path.cmp(&right.path));
+    candidates
+}
+
+fn module_docs(root: &Path, module_path: &Path) -> Vec<PathSignal> {
+    ["README.md", "AGENTS.md", "contract.yaml", "docs/README.md"]
+        .into_iter()
+        .map(|rel| {
+            let path = module_path.join(rel);
+            PathSignal {
+                path: rel_path(root, &path),
+                exists: path.exists(),
+                kind: match rel {
+                    "contract.yaml" => "module_contract",
+                    "AGENTS.md" => "agent_instructions",
+                    _ => "module_docs",
+                }
+                .to_string(),
+            }
+        })
+        .collect()
+}
+
+fn scan_warnings(docs: &[PathSignal], entrypoints: &[EntryPointCandidate]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if !docs.iter().any(|item| item.exists) {
+        warnings.push("no_documentation_sources_detected".to_string());
+    }
+    if entrypoints.is_empty() {
+        warnings.push("no_root_entrypoints_detected".to_string());
+    }
+    warnings
+}
+
+fn ready_check(
+    generated_at: DateTime<Utc>,
+    project_key: &str,
+    project_root: &Path,
+    scan: &ProjectScan,
+    modules: &ModuleCandidateReport,
+) -> OffdeskReadyCheck {
+    let docs_present = scan.documentation_sources.iter().any(|item| item.exists);
+    let entrypoints_present = !scan.entrypoints.is_empty();
+    let module_candidates_present = !modules.candidates.is_empty();
+    let mut warnings = scan.warnings.clone();
+    if !module_candidates_present {
+        warnings.push("no_module_candidates_detected".to_string());
+    }
+    OffdeskReadyCheck {
+        kind: "forager_offdesk_ready_check".to_string(),
+        version: 1,
+        generated_at,
+        project_key: project_key.to_string(),
+        project_root: safe_path(project_root),
+        ready_for_ondesk_start: true,
+        ready_for_offdesk_runtime: false,
+        requires_operator_review: true,
+        gates: vec![
+            ReadinessGate {
+                gate: "target_exists".to_string(),
+                passed: project_root.exists(),
+                detail: safe_path(project_root),
+            },
+            ReadinessGate {
+                gate: "documentation_sources_detected".to_string(),
+                passed: docs_present,
+                detail: format!(
+                    "{} documentation source(s) exist",
+                    scan.documentation_sources
+                        .iter()
+                        .filter(|item| item.exists)
+                        .count()
+                ),
+            },
+            ReadinessGate {
+                gate: "root_entrypoints_detected".to_string(),
+                passed: entrypoints_present,
+                detail: format!("{} root entrypoint(s) detected", scan.entrypoints.len()),
+            },
+            ReadinessGate {
+                gate: "module_candidates_detected".to_string(),
+                passed: module_candidates_present,
+                detail: format!("{} module candidate(s) detected", modules.candidates.len()),
+            },
+            ReadinessGate {
+                gate: "runtime_requires_approval".to_string(),
+                passed: true,
+                detail: "Offdesk runtime must still pass dispatch.runtime approval.".to_string(),
+            },
+            ReadinessGate {
+                gate: "closeout_required".to_string(),
+                passed: true,
+                detail: "Offdesk work must finish with closeout and Ondesk return artifacts."
+                    .to_string(),
+            },
+        ],
+        warnings,
+        blockers: vec![
+            "operator_review_required_before_runtime_enqueue".to_string(),
+            "module_operation_profiles_are_candidates_until_reviewed".to_string(),
+        ],
+    }
+}
+
+fn agent_mode_contracts() -> Vec<AgentModeContract> {
+    vec![
+        AgentModeContract {
+            mode: "planning".to_string(),
+            purpose: "Build or revise execution plans without mutating target project state."
+                .to_string(),
+            first_reads: vec![PROFILE_FILE.to_string(), MODULE_CANDIDATES_FILE.to_string()],
+            output_contract: vec![
+                "state assumptions".to_string(),
+                "candidate operations".to_string(),
+                "approval and evidence requirements".to_string(),
+            ],
+        },
+        AgentModeContract {
+            mode: "development".to_string(),
+            purpose:
+                "Implement scoped code changes after the operation/evidence boundary is clear."
+                    .to_string(),
+            first_reads: vec![PROFILE_FILE.to_string(), EVIDENCE_PLAN_FILE.to_string()],
+            output_contract: vec![
+                "changed files".to_string(),
+                "verification commands".to_string(),
+                "remaining risk".to_string(),
+            ],
+        },
+        AgentModeContract {
+            mode: "analysis".to_string(),
+            purpose: "Collect and compare evidence before making a claim.".to_string(),
+            first_reads: vec![EVIDENCE_PLAN_FILE.to_string(), PROFILE_FILE.to_string()],
+            output_contract: vec![
+                "evidence used".to_string(),
+                "uncertainties".to_string(),
+                "next evidence needed".to_string(),
+            ],
+        },
+        AgentModeContract {
+            mode: "writing".to_string(),
+            purpose: "Draft or revise human-facing text while preserving evidence status."
+                .to_string(),
+            first_reads: vec![
+                ONDESK_PACKAGE_FILE.to_string(),
+                EVIDENCE_PLAN_FILE.to_string(),
+            ],
+            output_contract: vec![
+                "claim status".to_string(),
+                "source/evidence references".to_string(),
+                "open decisions".to_string(),
+            ],
+        },
+        AgentModeContract {
+            mode: "critique".to_string(),
+            purpose: "Find weak assumptions, missing evidence, and overclaiming.".to_string(),
+            first_reads: vec![PROFILE_FILE.to_string(), EVIDENCE_PLAN_FILE.to_string()],
+            output_contract: vec![
+                "findings first".to_string(),
+                "severity".to_string(),
+                "file or artifact references".to_string(),
+            ],
+        },
+        AgentModeContract {
+            mode: "maintenance".to_string(),
+            purpose: "Review wiki, closeout, artifacts, and machine state without broad cleanup."
+                .to_string(),
+            first_reads: vec![OFFDESK_READY_FILE.to_string(), WIKI_SEEDS_FILE.to_string()],
+            output_contract: vec![
+                "proposed file operations".to_string(),
+                "wiki candidates".to_string(),
+                "operator approval requirements".to_string(),
+            ],
+        },
+    ]
+}
+
+fn safety_policy() -> ProjectSafetyPolicy {
+    ProjectSafetyPolicy {
+        target_repo_default_mode: "read_only_until_operator_review".to_string(),
+        forbidden_without_separate_approval: vec![
+            "delete, move, archive, or clean project files".to_string(),
+            "reboot, shutdown, service restart, storage, RAID, NVMe, mount, driver, firmware, or BIOS mutation".to_string(),
+            "package installation, permission changes, or credential changes".to_string(),
+            "wiki promotion beyond seed candidates".to_string(),
+            "provider/model retargeting".to_string(),
+        ],
+    }
+}
+
+fn wiki_seed_candidates(project_key: &str) -> Vec<WikiSeedCandidate> {
+    vec![
+        WikiSeedCandidate {
+            title: "Project objective must be operator-defined".to_string(),
+            scope: "project".to_string(),
+            scope_ref: project_key.to_string(),
+            signal_kind: "initialization_policy".to_string(),
+            claim: "Do not infer the project objective from file names alone.".to_string(),
+            human_summary: "The operator should confirm the project objective before Offdesk runtime.".to_string(),
+            suggested_tags: vec!["policy".to_string(), "project-objective".to_string()],
+            review_reason: "Seed candidate only; requires operator confirmation.".to_string(),
+        },
+        WikiSeedCandidate {
+            title: "Evidence before claims".to_string(),
+            scope: "project".to_string(),
+            scope_ref: project_key.to_string(),
+            signal_kind: "evidence_policy".to_string(),
+            claim: "Writing and critique modes should distinguish observed evidence from inferred conclusions.".to_string(),
+            human_summary: "Keep claim status explicit until an evidence review marks it sufficient.".to_string(),
+            suggested_tags: vec!["evidence".to_string(), "claim-governance".to_string()],
+            review_reason: "Generic policy candidate for new project bootstrap.".to_string(),
+        },
+        WikiSeedCandidate {
+            title: "Unsafe operations need separate approval".to_string(),
+            scope: "project".to_string(),
+            scope_ref: project_key.to_string(),
+            signal_kind: "safety_policy".to_string(),
+            claim: "Initialization does not authorize cleanup, deletion, service changes, or runtime execution.".to_string(),
+            human_summary: "Treat destructive/system operations as separate approval-gated work.".to_string(),
+            suggested_tags: vec!["safety".to_string(), "approval".to_string()],
+            review_reason: "Generic policy candidate for new project bootstrap.".to_string(),
+        },
+    ]
+}
+
+fn render_onboarding(
+    profile: &ProjectOperationProfile,
+    modules: &ModuleCandidateReport,
+    ready: &OffdeskReadyCheck,
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Project Operation Initialization\n\n");
+    output.push_str(&format!("- project_key: `{}`\n", profile.project_key));
+    output.push_str(&format!("- project_root: `{}`\n", profile.project_root));
+    output.push_str("- read_only_project_state: `true`\n");
+    output.push_str("- grants_execution_authority: `false`\n");
+    output.push_str("- requires_operator_review: `true`\n\n");
+    output.push_str("## First Reads\n\n");
+    for item in &profile.ondesk_bridge.first_reads {
+        output.push_str(&format!("- `{}`\n", item));
+    }
+    output.push_str("\n## Module Candidates\n\n");
+    if modules.candidates.is_empty() {
+        output.push_str("- No module candidates were detected by shallow scan.\n");
+    } else {
+        for candidate in &modules.candidates {
+            output.push_str(&format!(
+                "- `{}`: `{}` confidence=`{}` status=`{}`\n",
+                candidate.module_id,
+                candidate.path,
+                candidate.confidence,
+                candidate.operation_profile_status
+            ));
+        }
+    }
+    output.push_str("\n## Offdesk Readiness\n\n");
+    output.push_str(&format!(
+        "- ready_for_ondesk_start: `{}`\n",
+        ready.ready_for_ondesk_start
+    ));
+    output.push_str(&format!(
+        "- ready_for_offdesk_runtime: `{}`\n",
+        ready.ready_for_offdesk_runtime
+    ));
+    output.push_str("\nOffdesk runtime remains blocked until an operator reviews this packet and selects a scoped operation.\n");
+    output
+}
+
+fn render_evidence_plan(
+    profile: &ProjectOperationProfile,
+    modules: &ModuleCandidateReport,
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Evidence Collector Plan\n\n");
+    output.push_str(
+        "This is a read-only collector plan. It does not authorize runtime execution.\n\n",
+    );
+    output.push_str("## Source Candidates\n\n");
+    for source in &profile.project_scan.documentation_sources {
+        output.push_str(&format!(
+            "- `{}` kind=`{}` exists=`{}`\n",
+            source.path, source.kind, source.exists
+        ));
+    }
+    output.push_str("\n## Artifact Roots\n\n");
+    for source in &profile.project_scan.artifact_roots {
+        output.push_str(&format!(
+            "- `{}` kind=`{}` exists=`{}`\n",
+            source.path, source.kind, source.exists
+        ));
+    }
+    output.push_str("\n## Module-Specific Collector Work\n\n");
+    if modules.candidates.is_empty() {
+        output.push_str("- Add module evidence contracts after operator review.\n");
+    } else {
+        for candidate in &modules.candidates {
+            output.push_str(&format!(
+                "- `{}`: define required docs, run summaries, reportability metrics, and stale-evidence rules.\n",
+                candidate.path
+            ));
+        }
+    }
+    output.push_str("\n## Review Contract\n\n");
+    output.push_str("- Collector writes evidence only.\n");
+    output
+        .push_str("- Reviewer decides sufficient, insufficient, conflicting, or needs_operator.\n");
+    output.push_str("- Mode agents must not treat missing bundle evidence as proof of absence.\n");
+    output
+}
+
+fn render_ondesk_start_package(
+    profile: &ProjectOperationProfile,
+    modules: &ModuleCandidateReport,
+    ready: &OffdeskReadyCheck,
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Ondesk Start Package\n\n");
+    output.push_str(&format!("Project key: `{}`\n\n", profile.project_key));
+    output.push_str("## Required First Reads\n\n");
+    for item in &profile.ondesk_bridge.first_reads {
+        output.push_str(&format!("- `{}`\n", item));
+    }
+    output.push_str("\n## Mode Boundary\n\n");
+    for mode in &profile.agent_modes {
+        output.push_str(&format!("- `{}`: {}\n", mode.mode, mode.purpose));
+    }
+    output.push_str("\n## Module Candidates\n\n");
+    for candidate in &modules.candidates {
+        output.push_str(&format!(
+            "- `{}` at `{}` confidence=`{}`\n",
+            candidate.module_id, candidate.path, candidate.confidence
+        ));
+    }
+    if modules.candidates.is_empty() {
+        output.push_str("- No module candidates were detected.\n");
+    }
+    output.push_str("\n## Offdesk Boundary\n\n");
+    output.push_str(&format!(
+        "- ready_for_offdesk_runtime: `{}`\n",
+        ready.ready_for_offdesk_runtime
+    ));
+    output.push_str(
+        "- Runtime execution, wiki promotion, and file cleanup require separate review/approval.\n",
+    );
+    output
+}
+
+fn print_project_init_output(output: &ProjectInitOutput) {
+    println!("Project initialization packet");
+    println!("  id:          {}", output.id);
+    println!("  profile:     {}", output.profile);
+    println!("  project_key: {}", output.project_key);
+    println!("  project:     {}", output.project_root);
+    println!("  artifacts:   {}", output.artifact_dir);
+    println!(
+        "  modules:     {} candidate(s)",
+        output.summary.module_candidate_count
+    );
+    println!(
+        "  offdesk:     runtime_ready={} operator_review_required={}",
+        output.summary.ready_for_offdesk_runtime, output.requires_operator_review
+    );
+    println!(
+        "  start:       {}",
+        output.artifacts.ondesk_start_package_markdown
+    );
+}
+
+fn git_snapshot(root: &Path) -> GitSnapshot {
+    let inside = git_output(root, &["rev-parse", "--is-inside-work-tree"]);
+    let is_repo = inside.as_deref() == Some("true");
+    if !is_repo {
+        return GitSnapshot {
+            is_repo: false,
+            branch: None,
+            head: None,
+            status_short: None,
+            diff_stat: None,
+        };
+    }
+    GitSnapshot {
+        is_repo: true,
+        branch: git_output(root, &["branch", "--show-current"]),
+        head: git_output(root, &["rev-parse", "HEAD"]),
+        status_short: git_output(root, &["status", "--short"]),
+        diff_stat: git_output(root, &["diff", "--stat"]),
+    }
+}
+
+fn git_output(root: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Some(operator_safe_text(&text))
+}
+
+fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(value)?;
+    write_text(path, &format!("{}\n", String::from_utf8(bytes)?))
+}
+
+fn write_text(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(path, content).with_context(|| format!("write {}", path.display()))
+}
+
+fn has_any_entry(path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    Ok(fs::read_dir(path)?.next().is_some())
+}
+
+fn sanitize_required(label: &str, value: &str) -> Result<String> {
+    let safe = operator_safe_text(value.trim());
+    if safe.is_empty() {
+        bail!("{label} cannot be empty");
+    }
+    Ok(safe)
+}
+
+fn safe_path(path: &Path) -> String {
+    operator_safe_text(path.to_string_lossy().as_ref())
+}
+
+fn rel_path(root: &Path, path: &Path) -> String {
+    let rel = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    operator_safe_text(&rel)
+}
+
+fn slug(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "project".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn short_uuid() -> String {
+    Uuid::new_v4().to_string()[..8].to_string()
+}
+
+trait ExpandUser {
+    fn expanduser(&self) -> PathBuf;
+}
+
+impl ExpandUser for PathBuf {
+    fn expanduser(&self) -> PathBuf {
+        let Some(raw) = self.to_str() else {
+            return self.clone();
+        };
+        if raw == "~" {
+            if let Some(home) = dirs::home_dir() {
+                return home;
+            }
+        }
+        if let Some(stripped) = raw.strip_prefix("~/") {
+            if let Some(home) = dirs::home_dir() {
+                return home.join(stripped);
+            }
+        }
+        self.clone()
+    }
+}

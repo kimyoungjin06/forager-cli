@@ -3,6 +3,11 @@
 Module operation profiles make Offdesk operate a project module through an
 explicit contract instead of a loose repository scan.
 
+For new projects, start with
+[`Project Initialization`](project-initialization.md). Its
+`MODULE_CANDIDATES.json` output identifies review targets that can later become
+module operation profiles.
+
 The first concrete profile is TwinPaper Module03:
 
 ```bash
