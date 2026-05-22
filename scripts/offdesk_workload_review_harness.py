@@ -84,7 +84,11 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         safety = {}
     if not as_bool(safety.get("repo_read_only")):
         blockers.append("repo_read_only_not_confirmed")
-    if not as_bool(safety.get("writes_only_under_out_dir")):
+    wiki_candidate_queue_exception = (
+        as_bool(safety.get("writes_only_under_out_dir_except_adaptive_wiki_candidate_queue"))
+        and as_bool(safety.get("adaptive_wiki_candidate_queue_write"))
+    )
+    if not as_bool(safety.get("writes_only_under_out_dir")) and not wiki_candidate_queue_exception:
         blockers.append("writes_only_under_out_dir_not_confirmed")
     for key in SYSTEM_CRITICAL_SAFETY_KEYS:
         if not as_bool(safety.get(key)):
@@ -249,6 +253,7 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         "safety_gates": [
             "repo_read_only",
             "writes_only_under_out_dir",
+            "writes_only_under_out_dir_except_adaptive_wiki_candidate_queue",
             "clean_role_gate",
             "separate_manifest_review",
             "deterministic_evidence_bundle_review",

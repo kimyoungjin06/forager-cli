@@ -7494,3 +7494,132 @@ fn offdesk_tick_rejects_concurrent_lock() -> Result<()> {
     FileExt::unlock(&lock_file)?;
     Ok(())
 }
+
+#[test]
+fn workload_review_allows_wiki_candidate_queue_exception() -> Result<()> {
+    let temp = tempdir()?;
+    let repo_dir = temp.path().join("repo");
+    let out_dir = temp.path().join("out");
+    fs::create_dir_all(&repo_dir)?;
+    fs::create_dir_all(&out_dir)?;
+    fs::write(out_dir.join("run_workload.sh"), "#!/usr/bin/env bash\n")?;
+    fs::write(out_dir.join("evidence_bundle.json"), "{}\n")?;
+    fs::write(
+        out_dir.join("evidence_review.json"),
+        serde_json::to_string_pretty(&json!({
+            "kind": "evidence_bundle_review",
+            "passed": true,
+            "decision": "sufficient"
+        }))?,
+    )?;
+
+    let manifest_path = out_dir.join("prepared_task.json");
+    let review_path = out_dir.join("workload_review").join("results.json");
+    let manifest = json!({
+        "repo": repo_dir,
+        "out_dir": out_dir,
+        "duration_minutes": 10,
+        "max_iterations": 1,
+        "model": "qwen3-coder-next:latest",
+        "schedule": {
+            "mode": "run_until_local",
+            "duration_minutes": 10,
+            "target_at": "2026-05-22T09:00:00+09:00",
+            "timezone": "Asia/Seoul"
+        },
+        "safety": {
+            "repo_read_only": true,
+            "writes_only_under_out_dir": false,
+            "writes_only_under_out_dir_except_adaptive_wiki_candidate_queue": true,
+            "adaptive_wiki_candidate_queue_write": true,
+            "model_responses_not_executed": true,
+            "no_file_deletion_or_cleanup": true,
+            "no_reboot_shutdown_or_power_state_change": true,
+            "no_service_restart_or_system_config_change": true,
+            "no_storage_raid_nvme_or_mount_change": true,
+            "no_package_install_or_permission_change": true,
+            "no_process_termination_or_runner_interference": true,
+            "no_network_firewall_or_remote_access_change": true,
+            "no_kernel_driver_firmware_or_bios_change": true,
+            "operator_approval_required_for_system_mutation": true,
+            "capability": "dispatch.runtime",
+            "runner": "local-tmux",
+            "approval_required_before_dispatch": true,
+            "clean_role_gate_required": true,
+            "separate_review_artifact_required": true,
+            "episode_council_between_episodes": true
+        },
+        "council": {
+            "mode": "mock",
+            "reviewers": ["gpt", "claude"],
+            "every": 1
+        },
+        "preflight": {
+            "role_gate": {
+                "ready": true,
+                "failed": 0,
+                "failure_category_counts": {},
+                "quality_gate": {
+                    "ready_for_long_workload": true
+                }
+            }
+        },
+        "workload_command": [
+            "python3",
+            "scripts/offdesk_twinpaper_autonomy_workload.py",
+            "--out-dir",
+            out_dir,
+            "--evidence-bundle",
+            out_dir.join("evidence_bundle.json"),
+            "--evidence-review",
+            out_dir.join("evidence_review.json")
+        ],
+        "workload_wrapper": out_dir.join("run_workload.sh"),
+        "artifacts": {
+            "prepared_task": manifest_path,
+            "preflight": out_dir.join("preflight.json"),
+            "runner_log": out_dir.join("offdesk-runner.log"),
+            "result": out_dir.join("result.json"),
+            "report": out_dir.join("REPORT.md"),
+            "evidence_bundle": out_dir.join("evidence_bundle.json"),
+            "evidence_review": out_dir.join("evidence_review.json")
+        },
+        "enqueue_args": [
+            "forager",
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--agent-mode",
+            "critique",
+            "--provider-id",
+            "ollama"
+        ]
+    });
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+
+    let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("offdesk_workload_review_harness.py");
+    let output = Command::new("python3")
+        .arg(script_path)
+        .arg("--manifest")
+        .arg(&manifest_path)
+        .arg("--out")
+        .arg(&review_path)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "review harness failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let review: serde_json::Value = serde_json::from_slice(&fs::read(&review_path)?)?;
+    assert_eq!(review["passed"], true);
+    assert_eq!(review["blocking_reasons"], json!([]));
+    assert_eq!(
+        review["results"][0]["review_stage_decision"],
+        "needs_approval"
+    );
+    Ok(())
+}
