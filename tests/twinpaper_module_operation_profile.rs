@@ -340,6 +340,11 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
     );
     let prepared: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(prepared["preflight"]["ready_for_enqueue"], true);
+    let launch_report_path = PathBuf::from(
+        prepared["launch_dry_run_report"]
+            .as_str()
+            .expect("launch dry-run report path"),
+    );
     assert_eq!(
         prepared["preflight"]["module_operation_preflight"]["reason"],
         "module_preflight_target_ready"
@@ -358,9 +363,26 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
         manifest["safety"]["module_operation_preflight_required"],
         true
     );
+    assert_eq!(
+        manifest["artifacts"]["launch_dry_run_report"]
+            .as_str()
+            .expect("launch dry-run artifact path"),
+        launch_report_path
+            .to_str()
+            .expect("utf-8 launch report path")
+    );
     assert!(manifest_path.with_file_name("preflight_ready").exists());
+    assert!(launch_report_path.exists());
+    let launch_report = fs::read_to_string(&launch_report_path)?;
+    assert!(launch_report.contains("TwinPaper Launch Dry Run"));
+    assert!(launch_report.contains("ready_for_enqueue: `true`"));
+    assert!(launch_report.contains("module_preflight: `true`"));
+    assert!(launch_report.contains("Runtime dispatch still requires"));
+    assert!(launch_report.contains("offdesk_enqueue_command.sh"));
     let manifest_text = fs::read_to_string(&manifest_path)?;
     assert!(!manifest_text.contains("sk-secretsecretsecretsecret"));
     assert!(!manifest_text.contains("scripts/build_twinpaper_evidence_bundle.py --secret"));
+    assert!(!launch_report.contains("sk-secretsecretsecretsecret"));
+    assert!(!launch_report.contains("scripts/build_twinpaper_evidence_bundle.py --secret"));
     Ok(())
 }

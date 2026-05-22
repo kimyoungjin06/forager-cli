@@ -1003,12 +1003,15 @@ the runtime workload recomputes the next `09:00 Asia/Seoul` when it actually
 starts. That keeps approval or tick delays from accidentally pushing the run
 past the morning review window.
 
-If the role gate is missing, failed, the module operation preflight is missing
-or unrecognized, or the review artifact returns `blocked` or `revise`,
-`--enqueue` stops before adding the task to the Offdesk queue and writes
-`preflight.json` plus `enqueue_blocked.json` in the workload directory. The
-generated `offdesk_enqueue_command.sh` also checks for `preflight_ready` unless
-`FORAGER_ALLOW_PREFLIGHT_BLOCKERS=1` is set deliberately.
+Every prepare run writes `LAUNCH_DRY_RUN.md`, an operator-facing launch review
+packet with the preflight verdict, blockers, safety boundary, key artifacts, and
+the exact enqueue/approval/poll commands. If the role gate is missing, failed,
+the module operation preflight is missing or unrecognized, or the review
+artifact returns `blocked` or `revise`, `--enqueue` stops before adding the task
+to the Offdesk queue and writes `preflight.json` plus `enqueue_blocked.json` in
+the workload directory. The generated `offdesk_enqueue_command.sh` also checks
+for `preflight_ready` unless `FORAGER_ALLOW_PREFLIGHT_BLOCKERS=1` is set
+deliberately.
 
 `--review-artifact generate` runs
 `scripts/offdesk_workload_review_harness.py` against the exact

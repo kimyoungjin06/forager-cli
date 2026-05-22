@@ -866,6 +866,110 @@ def write_workload_wrapper(path: pathlib.Path, workload_command: list[str]) -> N
     path.chmod(0o755)
 
 
+def markdown_scalar(value: Any) -> str:
+    if isinstance(value, bool) or value is None:
+        return json.dumps(value)
+    return str(value)
+
+
+def render_launch_dry_run_report(
+    *,
+    args: argparse.Namespace,
+    manifest: dict[str, Any],
+    preflight: dict[str, Any],
+    role_gate: dict[str, Any],
+    review_artifact: dict[str, Any],
+    module_preflight: dict[str, Any],
+    evidence_review: dict[str, Any],
+    council_config: dict[str, Any],
+    schedule: dict[str, Any],
+) -> str:
+    blockers = preflight.get("blocking_reasons") or []
+    module_purposes = module_preflight.get("recommended_command_purposes") or []
+    lines = [
+        "# TwinPaper Launch Dry Run",
+        "",
+        "This report is an operator-facing launch review packet. It does not prove the workload is complete, and it does not launch runtime work unless the preparation command was run with `--enqueue`.",
+        "",
+        "## Scope",
+        "",
+        f"- project_key: `{manifest['project_key']}`",
+        f"- request_id: `{manifest['request_id']}`",
+        f"- task_id: `{manifest['task_id']}`",
+        f"- repo: `{manifest['repo']}`",
+        f"- out_dir: `{manifest['out_dir']}`",
+        f"- runner: `{manifest['safety']['runner']}`",
+        f"- provider_model: `{manifest['provider']}:{manifest['model']}`",
+        f"- schedule_mode: `{schedule['mode']}`",
+        f"- schedule_target_at: `{schedule.get('target_at')}`",
+        f"- scheduled_duration_minutes: `{schedule['duration_minutes']:.1f}`",
+        f"- enqueue_requested_in_this_run: `{markdown_scalar(args.enqueue)}`",
+        "",
+        "## Preflight Verdict",
+        "",
+        f"- ready_for_enqueue: `{markdown_scalar(preflight['ready_for_enqueue'])}`",
+        f"- enqueue_allowed: `{markdown_scalar(preflight['enqueue_allowed'])}`",
+        f"- allow_preflight_blockers: `{markdown_scalar(preflight['allow_preflight_blockers'])}`",
+        f"- role_gate: `{markdown_scalar(role_gate['ready'])}` reason=`{role_gate.get('reason')}` path=`{role_gate.get('path')}`",
+        f"- workload_review: `{markdown_scalar(review_artifact['ready'])}` reason=`{review_artifact.get('reason')}` path=`{review_artifact.get('path')}`",
+        f"- module_preflight: `{markdown_scalar(module_preflight['ready'])}` reason=`{module_preflight.get('reason')}` path=`{module_preflight.get('path')}`",
+        f"- module_scope: `{module_preflight.get('scope_ref')}`",
+        f"- module_profile_kind: `{module_preflight.get('recognized_profile_kind')}`",
+        f"- module_command_purposes: `{', '.join(module_purposes) if module_purposes else 'none'}`",
+        f"- evidence_review: `{markdown_scalar(evidence_review['ready'])}` reason=`{evidence_review.get('reason')}` path=`{evidence_review.get('path')}`",
+        f"- council: `{markdown_scalar(council_config['ready'])}` mode=`{council_config['mode']}` reason=`{council_config.get('reason')}`",
+        "",
+        "## Blockers",
+        "",
+    ]
+    if blockers:
+        lines.extend(f"- {blocker}" for blocker in blockers)
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## Safety Boundary",
+            "",
+            "- Runtime dispatch still requires the normal `dispatch.runtime` approval path.",
+            "- The target TwinPaper repo is treated as read-only.",
+            "- File deletion, cleanup, reboot, service restart, storage, package, permission, process, network, kernel, firmware, and power-state mutations remain forbidden without separate approval.",
+            "- Adaptive wiki writes are limited to the configured candidate/trial stores; promotion is not allowed here.",
+            "",
+            "## Operator Commands",
+            "",
+            "Inspect first:",
+            "",
+            "```bash",
+            f"cat {shlex.quote(manifest['artifacts']['preflight'])}",
+            f"cat {shlex.quote(manifest['artifacts']['prepared_task'])}",
+            f"cat {shlex.quote(manifest['artifacts']['launch_dry_run_report'])}",
+            "```",
+            "",
+            "Enqueue only after review:",
+            "",
+            "```bash",
+            f"bash {shlex.quote(str(pathlib.Path(manifest['out_dir']) / 'offdesk_enqueue_command.sh'))}",
+            manifest["commands"]["pending"],
+            manifest["commands"]["approve_oldest_then_tick"],
+            manifest["commands"]["poll"],
+            "```",
+            "",
+            "## Key Artifacts",
+            "",
+            f"- prepared_task: `{manifest['artifacts']['prepared_task']}`",
+            f"- preflight: `{manifest['artifacts']['preflight']}`",
+            f"- workload_review: `{manifest['artifacts']['review_artifact']}`",
+            f"- module_operation_preflight: `{manifest['artifacts']['module_operation_preflight']}`",
+            f"- evidence_review: `{manifest['artifacts']['evidence_review']}`",
+            f"- runner_log: `{manifest['artifacts']['runner_log']}`",
+            f"- result: `{manifest['artifacts']['result']}`",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def main() -> int:
     args = parse_args()
     schedule = compute_run_until_schedule(args)
@@ -1030,6 +1134,7 @@ def main() -> int:
             "runner_log": str(out_dir / "offdesk-runner.log"),
             "prepared_task": str(prepared_task_path),
             "preflight": str(out_dir / "preflight.json"),
+            "launch_dry_run_report": str(out_dir / "LAUNCH_DRY_RUN.md"),
             "review_artifact": str(generated_review_path) if review_generate else review_artifact.get("path"),
             "module_operation_preflight": module_preflight.get("path"),
             "evidence_bundle": str(evidence_bundle_path),
@@ -1142,6 +1247,21 @@ def main() -> int:
             "",
         ]
     ))
+    write_text(
+        out_dir / "LAUNCH_DRY_RUN.md",
+        render_launch_dry_run_report(
+            args=args,
+            manifest=manifest,
+            preflight=preflight,
+            role_gate=role_gate,
+            review_artifact=review_artifact,
+            module_preflight=module_preflight,
+            evidence_review=evidence_review,
+            council_config=council_config,
+            schedule=schedule,
+        )
+        + "\n",
+    )
     write_text(prepared_task_path, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
 
     enqueue_result: dict[str, Any] | None = None
@@ -1152,6 +1272,7 @@ def main() -> int:
                 "enqueued": False,
                 "enqueue_blocked": True,
                 "manifest": str(out_dir / "prepared_task.json"),
+                "launch_dry_run_report": str(out_dir / "LAUNCH_DRY_RUN.md"),
                 "out_dir": str(out_dir),
                 "request_id": request_id,
                 "task_id": task_id,
@@ -1178,6 +1299,7 @@ def main() -> int:
         "prepared": True,
         "enqueued": args.enqueue,
         "manifest": str(out_dir / "prepared_task.json"),
+        "launch_dry_run_report": str(out_dir / "LAUNCH_DRY_RUN.md"),
         "out_dir": str(out_dir),
         "request_id": request_id,
         "task_id": task_id,
