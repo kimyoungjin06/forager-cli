@@ -1250,10 +1250,12 @@ Acceptance checks:
 
 ## Immediate Next Work
 
-The next useful slice is a realistic longer TwinPaper run with Council enabled,
-followed by closeout and Ondesk return review. The launch path itself has now
-been validated; the remaining risk is output quality, Council usefulness,
-closeout ergonomics, and wiki candidate review.
+The current baseline and remaining work queue are tracked in
+[`Offdesk Operation Status`](offdesk-operation-status.md). The next useful
+slice is a realistic longer TwinPaper run with Council enabled, followed by
+closeout and Ondesk return review. The launch path itself has now been
+validated; the remaining risk is output quality, Council usefulness, closeout
+ergonomics, and wiki candidate review.
 
 ## Rejected For Now
 

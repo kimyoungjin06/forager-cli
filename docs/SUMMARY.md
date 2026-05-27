@@ -29,6 +29,7 @@
 - [Offdesk Stabilization Patch Set](offdesk-stabilization-patchset.md)
 - [Offdesk Stabilization Review Note](offdesk-stabilization-review.md)
 - [Offdesk Safety Rail Baseline](offdesk-safety-rail-baseline.md)
+- [Offdesk Operation Status](offdesk-operation-status.md)
 - [Offdesk Agent Modes](offdesk-agent-modes.md)
 - [Forager And Orchestrator Boundary](forager-orchestrator-boundary.md)
 - [Adaptive Wiki](adaptive-wiki.md)
