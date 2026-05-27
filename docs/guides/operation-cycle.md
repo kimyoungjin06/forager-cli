@@ -156,4 +156,6 @@ Stop and inspect before continuing when:
 - a wiki change would promote candidate knowledge without review.
 
 For the concrete TwinPaper validation flow, see
-[`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md).
+[`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md). For
+the current baseline and remaining work queue, see
+[`Offdesk Operation Status`](../offdesk-operation-status.md).
