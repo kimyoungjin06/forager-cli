@@ -326,6 +326,8 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
         .arg(&role_gate)
         .arg("--review-artifact")
         .arg(&review)
+        .arg("--council-mode")
+        .arg("prompt-package")
         .arg("--wiki-candidate-mode")
         .arg("disabled")
         .arg("--wiki-trial-mode")
@@ -340,6 +342,14 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
     );
     let prepared: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(prepared["preflight"]["ready_for_enqueue"], true);
+    assert!(prepared["preflight"]["warnings"]
+        .as_array()
+        .expect("preflight warnings")
+        .iter()
+        .any(|warning| warning.as_str()
+            == Some(
+                "prompt_package_council_requires_external_reviewer_execution_and_will_stop_on_needs_council_execution"
+            )));
     let launch_report_path = PathBuf::from(
         prepared["launch_dry_run_report"]
             .as_str()
@@ -359,6 +369,19 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
         manifest["preflight"]["module_operation_preflight"]["recommended_command_purposes"][0],
         "build_evidence_bundle"
     );
+    assert_eq!(manifest["preflight"]["council"]["mode"], "prompt-package");
+    assert_eq!(
+        manifest["preflight"]["council"]["stop_on_non_continue"],
+        true
+    );
+    assert!(manifest["preflight"]["warnings"]
+        .as_array()
+        .expect("manifest preflight warnings")
+        .iter()
+        .any(|warning| warning.as_str()
+            == Some(
+                "prompt_package_council_requires_external_reviewer_execution_and_will_stop_on_needs_council_execution"
+            )));
     assert_eq!(
         manifest["safety"]["module_operation_preflight_required"],
         true
@@ -371,20 +394,863 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
             .to_str()
             .expect("utf-8 launch report path")
     );
+    let validation_packet_path = PathBuf::from(
+        manifest["artifacts"]["long_run_validation_packet"]
+            .as_str()
+            .expect("long-run validation packet path"),
+    );
     assert!(manifest_path.with_file_name("preflight_ready").exists());
     assert!(launch_report_path.exists());
+    assert!(validation_packet_path.exists());
     let launch_report = fs::read_to_string(&launch_report_path)?;
     assert!(launch_report.contains("TwinPaper Launch Dry Run"));
     assert!(launch_report.contains("ready_for_enqueue: `true`"));
     assert!(launch_report.contains("schedule_target_at: `null`"));
     assert!(!launch_report.contains("schedule_target_at: `None`"));
     assert!(launch_report.contains("module_preflight: `true`"));
+    assert!(launch_report.contains("council_stop_on_non_continue: `true`"));
+    assert!(launch_report.contains(
+        "prompt_package_council_requires_external_reviewer_execution_and_will_stop_on_needs_council_execution"
+    ));
+    assert!(launch_report.contains("prompt-package council writes reviewer prompts"));
     assert!(launch_report.contains("Runtime dispatch still requires"));
     assert!(launch_report.contains("offdesk_enqueue_command.sh"));
+    let validation_packet = fs::read_to_string(&validation_packet_path)?;
+    assert!(validation_packet.contains("TwinPaper Long-Run Validation Packet"));
+    assert!(validation_packet.contains("Gate 5: Closeout"));
+    assert!(validation_packet.contains("Gate 6: Ondesk Return"));
+    assert!(validation_packet.contains("Gate 7: Wiki Review"));
+    assert!(validation_packet.contains("council_stop_on_non_continue: `true`"));
+    assert!(validation_packet.contains(
+        "prompt_package_council_requires_external_reviewer_execution_and_will_stop_on_needs_council_execution"
+    ));
+    assert!(validation_packet.contains("the run can stop before the scheduled duration"));
+    assert!(validation_packet.contains("offdesk closeout"));
+    assert!(validation_packet.contains("ondesk prompt-package"));
+    assert!(validation_packet.contains("wiki candidates"));
+    assert!(validation_packet
+        .contains("offdesk tasks --project-key twinpaper --task-id twinpaper-autonomy-"));
     let manifest_text = fs::read_to_string(&manifest_path)?;
     assert!(!manifest_text.contains("sk-secretsecretsecretsecret"));
     assert!(!manifest_text.contains("scripts/build_twinpaper_evidence_bundle.py --secret"));
     assert!(!launch_report.contains("sk-secretsecretsecretsecret"));
     assert!(!launch_report.contains("scripts/build_twinpaper_evidence_bundle.py --secret"));
+    assert!(!validation_packet.contains("sk-secretsecretsecretsecret"));
+    assert!(!validation_packet.contains("scripts/build_twinpaper_evidence_bundle.py --secret"));
+
+    let telegram_env = temp.path().join("telegram.env");
+    write_file(
+        &telegram_env,
+        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n",
+    )?;
+    let relay_output = Command::new("python3")
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
+        .arg(script_path("prepare_twinpaper_offdesk_task.py"))
+        .arg("--repo")
+        .arg(&repo)
+        .arg("--out-root")
+        .arg(temp.path().join("prepare-with-telegram"))
+        .arg("--duration-minutes")
+        .arg("0.1")
+        .arg("--max-iterations")
+        .arg("1")
+        .arg("--role-gate-result")
+        .arg(&role_gate)
+        .arg("--review-artifact")
+        .arg(&review)
+        .arg("--council-mode")
+        .arg("prompt-package")
+        .arg("--council-operator-decision-relay")
+        .arg("telegram")
+        .arg("--telegram-env-file")
+        .arg(&telegram_env)
+        .arg("--telegram-decision-dry-run")
+        .arg("--wiki-candidate-mode")
+        .arg("disabled")
+        .arg("--wiki-trial-mode")
+        .arg("disabled")
+        .output()?;
+
+    assert!(
+        relay_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&relay_output.stdout),
+        String::from_utf8_lossy(&relay_output.stderr)
+    );
+    let relay_prepared: Value = serde_json::from_slice(&relay_output.stdout)?;
+    let relay_manifest_path = PathBuf::from(
+        relay_prepared["manifest"]
+            .as_str()
+            .expect("relay manifest path"),
+    );
+    let relay_manifest_text = fs::read_to_string(&relay_manifest_path)?;
+    let relay_manifest: Value = serde_json::from_str(&relay_manifest_text)?;
+    assert_eq!(
+        relay_manifest["preflight"]["council"]["operator_decision_relay"]["mode"],
+        "telegram"
+    );
+    assert_eq!(
+        relay_manifest["preflight"]["council"]["operator_decision_relay"]["ready"],
+        true
+    );
+    assert!(relay_manifest["workload_command"]
+        .as_array()
+        .expect("workload command")
+        .iter()
+        .any(|arg| arg.as_str() == Some("--council-operator-decision-relay")));
+    assert!(!relay_manifest_text.contains("fake-token-for-test"));
+    assert!(!relay_manifest_text.contains("123456789"));
+    Ok(())
+}
+
+#[test]
+fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_secrets() -> Result<()>
+{
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_file(
+        &env_path,
+        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n",
+    )?;
+    let request_path = temp.path().join("request.json");
+    let episode_path = temp.path().join("episode.json");
+    write_file(
+        &episode_path,
+        &serde_json::to_string_pretty(&json!({
+            "iteration": 8,
+            "case": "research_reportability_status_json",
+            "passed": false,
+            "failure_category": "contract_anchor_failure",
+            "must_missing": ["primary_objective_gate"],
+            "json": {
+                "blocking_evidence": [
+                    "primary objective gate failed despite execution",
+                    "direction_review_checks.nooption_primary_validated_gate_pass = false",
+                    "direction_review_checks.nooption_restart_validated_rate_gate_pass = false",
+                    "direction_review_checks.nooption_q_gate_pass = false (in some paired runs)"
+                ],
+                "next_action": [
+                    "diagnose primary objective gate failure",
+                    "do not promote evidence to reportable claim"
+                ],
+                "baseline_evidence_status": "executed_primary_gate_failed",
+                "claim_status": "pending_not_reportable"
+            }
+        }))?,
+    )?;
+    let council_path = temp.path().join("council.json");
+    write_file(
+        &council_path,
+        &serde_json::to_string_pretty(&json!({
+            "consensus": {
+                "decision": "revise",
+                "agreement": true,
+                "requires_operator_review": true,
+                "reviewer_decisions": {
+                    "gpt": "revise",
+                    "claude": "revise"
+                },
+                "evidence_gaps": ["missing_contract_anchor"]
+            }
+        }))?,
+    )?;
+    write_file(
+        &request_path,
+        &serde_json::to_string_pretty(&json!({
+            "decision_request_id": "relay-test-1",
+            "message_type": "council_decision",
+            "title": "test council decision",
+            "summary": {
+                "council_decision": "needs_council_execution",
+                "safety_boundary": "continuation only"
+            },
+            "artifacts": {
+                "episode_record": episode_path,
+                "council": council_path
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("relay_result.json");
+
+    let output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&request_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--decision-text")
+        .arg("relay-test-1 continue because operator reviewed the prompt package")
+        .arg("--dry-run")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result_text = fs::read_to_string(&out)?;
+    let result: Value = serde_json::from_str(&result_text)?;
+    assert_eq!(result["status"], "accepted");
+    assert_eq!(result["decision"], "continue");
+    assert!(result["target_chat_id_hash"]
+        .as_str()
+        .expect("target chat hash")
+        .starts_with("sha256:"));
+    assert_eq!(result["reply_keyboard_cleanup"]["enabled"], true);
+    assert_eq!(result["reply_keyboard_cleanup"]["attempted"], false);
+    assert_eq!(result["keyboard"]["labels"][0], "계속");
+    assert!(result["keyboard"]["labels"]
+        .as_array()
+        .expect("keyboard labels")
+        .iter()
+        .any(|label| label.as_str() == Some("수정(권장)")));
+    assert!(result["keyboard"]["labels"]
+        .as_array()
+        .expect("keyboard labels")
+        .iter()
+        .any(|label| label.as_str() == Some("근거 보기")));
+    assert!(!result["keyboard"]["labels"]
+        .as_array()
+        .expect("keyboard labels")
+        .iter()
+        .any(|label| label.as_str() == Some("자료")
+            || label.as_str() == Some("ID 복사")
+            || label.as_str() == Some("더 자세히")));
+    assert_eq!(result["message_type"], "council_decision");
+    assert_eq!(result["keyboard"]["natural_input_required"][0], "revise");
+    assert_eq!(result["keyboard"]["natural_input_required"][1], "block");
+    assert_eq!(result["approval_brief_schema"], "approval_brief.v1");
+    let first_state_path = PathBuf::from(result["state_path"].as_str().expect("state path"));
+    let first_state: Value = serde_json::from_slice(&fs::read(&first_state_path)?)?;
+    assert_eq!(
+        first_state["request"]["approval_brief"]["schema"],
+        "approval_brief.v1"
+    );
+    assert_eq!(
+        first_state["request"]["approval_brief"]["source"],
+        "operator_brief"
+    );
+    let message_preview = result["message_preview"].as_str().expect("message preview");
+    assert!(message_preview.contains("수정 권고"));
+    assert!(message_preview.contains("보고 가능성 상태 점검"));
+    assert!(message_preview.contains("현재 결과는 reportable claim으로 승격할 수 없습니다"));
+    assert!(message_preview.contains("이유: primary_objective_gate 미통과"));
+    assert!(message_preview.contains("Council: 수정 권고, 리뷰어 합의"));
+    assert!(message_preview.contains("질문"));
+    assert!(message_preview.contains("어떻게 진행할까요"));
+    assert!(message_preview.contains("수정/보류"));
+    assert!(message_preview.contains("설명 답장"));
+    assert!(!message_preview.contains("실패 요약"));
+    assert!(!message_preview.contains("핵심 근거"));
+    assert!(!message_preview.contains("Council 판단"));
+    assert!(!message_preview.contains("요청 ID"));
+    assert!(!message_preview.contains("relay-test-1"));
+    assert!(!message_preview.contains("episode.json"));
+    assert!(!message_preview.contains("<pre>"));
+    assert!(!message_preview.contains("council_decision"));
+    let detail_preview = result["detail_preview"].as_str().expect("detail preview");
+    assert!(detail_preview.contains("수정 권고의 근거"));
+    assert!(detail_preview.contains("왜 이 추천인가"));
+    assert!(detail_preview.contains("<blockquote expandable>"));
+    assert!(detail_preview.contains("선택별 의미"));
+    assert!(detail_preview.contains("답장 예시"));
+    assert!(!detail_preview.contains("episode.json"));
+    assert!(!result_text.contains("fake-token-for-test"));
+    assert!(!result_text.contains("123456789"));
+
+    let explicit_request_path = temp.path().join("explicit_approval_request.json");
+    write_file(
+        &explicit_request_path,
+        &serde_json::to_string_pretty(&json!({
+            "decision_request_id": "approval-test-1",
+            "message_type": "approval_request",
+            "title": "provider fallback approval",
+            "approval_brief": {
+                "schema": "approval_brief.v1",
+                "recommendation": "approve",
+                "subject": "provider fallback",
+                "summary_lines": [
+                    "Provider/model retargeting is waiting for operator approval.",
+                    "Reason: provider capacity cooldown active.",
+                    "Candidate: openai model gpt-4.1-mini."
+                ],
+                "why_recommendation": [
+                    "openai model gpt-4.1 is currently blocked by provider capacity state.",
+                    "openai model gpt-4.1-mini is the first currently recommended fallback candidate."
+                ],
+                "evidence": [
+                    "primary provider timeout rate increased",
+                    "fallback provider cost is unknown",
+                    "no approval exists for provider retargeting",
+                    "operator scope is continuation only"
+                ],
+                "decision_impacts": {
+                    "approve": "Retarget only this request; runtime dispatch still needs its own approval.",
+                    "deny": "Keep the current provider/model queued until capacity recovers.",
+                    "defer": "Leave the approval pending while reviewing cost, quality, or capacity evidence."
+                },
+                "options": [
+                    {
+                        "id": "approve",
+                        "label": "Approve fallback",
+                        "description": "Retarget only this request; runtime dispatch still needs its own approval."
+                    },
+                    {
+                        "id": "deny",
+                        "label": "Deny fallback",
+                        "description": "Keep the current provider/model queued until capacity recovers.",
+                        "natural_input_prompt": "Explain why this fallback should not be applied."
+                    },
+                    {
+                        "id": "defer",
+                        "label": "Need more detail",
+                        "description": "Leave the approval pending while reviewing cost, quality, or capacity evidence.",
+                        "natural_input_prompt": "State what provider, cost, or quality evidence you need first."
+                    }
+                ],
+                "reply_examples": {
+                    "deny": "fallback 후보와 비용 한계를 정리할 때까지 거부해."
+                },
+                "scope": "Approves provider/model retargeting for this request only; does not approve runtime dispatch, command/workdir changes, cleanup, or wiki promotion.",
+                "question": "Approve this provider fallback retargeting?"
+            }
+        }))?,
+    )?;
+    let explicit_out = temp.path().join("explicit_approval_result.json");
+    let explicit_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&explicit_request_path)
+        .arg("--out")
+        .arg(&explicit_out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--decision-text")
+        .arg("approval-test-1 2 fallback 후보와 비용 한계를 정리할 때까지 거부")
+        .arg("--dry-run")
+        .output()?;
+
+    assert!(
+        explicit_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&explicit_output.stdout),
+        String::from_utf8_lossy(&explicit_output.stderr)
+    );
+    let explicit: Value = serde_json::from_slice(&fs::read(&explicit_out)?)?;
+    assert_eq!(explicit["status"], "accepted");
+    assert_eq!(explicit["decision"], "deny");
+    assert_eq!(explicit["message_type"], "approval_request");
+    assert_eq!(explicit["approval_brief_schema"], "approval_brief.v1");
+    assert!(explicit["keyboard"]["labels"]
+        .as_array()
+        .expect("explicit labels")
+        .iter()
+        .any(|label| label.as_str() == Some("1. Approve fallback(권장)")));
+    assert_eq!(explicit["keyboard"]["natural_input_required"][0], "deny");
+    assert_eq!(explicit["keyboard"]["natural_input_required"][1], "defer");
+    let explicit_preview = explicit["message_preview"]
+        .as_str()
+        .expect("explicit message preview");
+    assert!(explicit_preview.contains("승인 권고: provider fallback"));
+    assert!(explicit_preview.contains("선택지"));
+    assert!(explicit_preview.contains("1. Approve fallback"));
+    assert!(explicit_preview.contains("Approve this provider fallback retargeting?"));
+    assert!(explicit_preview.contains("does not approve runtime dispatch"));
+    assert!(!explicit_preview.contains("approval-test-1"));
+    let explicit_detail = explicit["detail_preview"]
+        .as_str()
+        .expect("explicit detail preview");
+    assert!(explicit_detail.contains("승인 권고의 근거"));
+    assert!(explicit_detail.contains("선택별 의미"));
+    assert!(explicit_detail.contains("fallback 후보와 비용 한계를 정리할 때까지 거부"));
+
+    let producer_probe = temp.path().join("producer_probe.py");
+    write_file(
+        &producer_probe,
+        r#"
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+
+script, episode_path, council_path, out_dir = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("workload", script)
+workload = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = workload
+spec.loader.exec_module(workload)
+args = types.SimpleNamespace(task_id="producer-task-1", request_id="producer-request-1")
+council_record = {
+    "iteration": 8,
+    "case": "research_reportability_status_json",
+    "mode": "mock",
+    "returncode": 0,
+    "episode_record_path": episode_path,
+    "council_path": council_path,
+    "decision": "revise",
+    "agreement": True,
+    "requires_operator_review": True,
+    "reviewer_decisions": {"gpt": "revise", "claude": "revise"},
+}
+request = workload.build_operator_decision_request(
+    args=args,
+    out_dir=pathlib.Path(out_dir),
+    council_record=council_record,
+)
+print(json.dumps(request, ensure_ascii=False))
+"#,
+    )?;
+    let producer_output = Command::new("python3")
+        .arg(&producer_probe)
+        .arg(script_path("offdesk_twinpaper_autonomy_workload.py"))
+        .arg(&episode_path)
+        .arg(&council_path)
+        .arg(temp.path())
+        .output()?;
+
+    assert!(
+        producer_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&producer_output.stdout),
+        String::from_utf8_lossy(&producer_output.stderr)
+    );
+    let producer_request: Value = serde_json::from_slice(&producer_output.stdout)?;
+    assert_eq!(
+        producer_request["approval_brief"]["schema"],
+        "approval_brief.v1"
+    );
+    assert_eq!(
+        producer_request["approval_brief"]["source"],
+        "offdesk_twinpaper_autonomy_workload"
+    );
+    assert_eq!(
+        producer_request["approval_brief"]["recommendation"],
+        "revise"
+    );
+    assert!(producer_request["approval_brief"]["summary_lines"]
+        .as_array()
+        .expect("producer summary lines")
+        .iter()
+        .any(|line| line
+            .as_str()
+            .unwrap_or_default()
+            .contains("reportable claim으로 승격할 수 없습니다")));
+    assert!(producer_request["approval_brief"]["evidence"]
+        .as_array()
+        .expect("producer evidence")
+        .iter()
+        .any(|line| line
+            .as_str()
+            .unwrap_or_default()
+            .contains("primary objective gate failed")));
+
+    let natural_out = temp.path().join("relay_result_natural.json");
+    let natural_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&request_path)
+        .arg("--out")
+        .arg(&natural_out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--decision-text")
+        .arg("좋아 진행해")
+        .arg("--dry-run")
+        .output()?;
+
+    assert!(
+        natural_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&natural_output.stdout),
+        String::from_utf8_lossy(&natural_output.stderr)
+    );
+    let natural: Value = serde_json::from_slice(&fs::read(&natural_out)?)?;
+    assert_eq!(natural["status"], "accepted");
+    assert_eq!(natural["decision"], "continue");
+    assert_eq!(natural["matched_request_id"], false);
+
+    let revise_out = temp.path().join("relay_result_revise.json");
+    let revise_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&request_path)
+        .arg("--out")
+        .arg(&revise_out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--decision-text")
+        .arg("수정 evidence path를 다시 확인해")
+        .arg("--dry-run")
+        .output()?;
+
+    assert!(
+        revise_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&revise_output.stdout),
+        String::from_utf8_lossy(&revise_output.stderr)
+    );
+    let revise: Value = serde_json::from_slice(&fs::read(&revise_out)?)?;
+    assert_eq!(revise["status"], "accepted");
+    assert_eq!(revise["decision"], "revise");
+    assert!(revise["reason"]
+        .as_str()
+        .expect("revise reason")
+        .contains("evidence path"));
+
+    let direction_request_path = temp.path().join("direction_request.json");
+    write_file(
+        &direction_request_path,
+        &serde_json::to_string_pretty(&json!({
+            "decision_request_id": "plan-choice-1",
+            "message_type": "direction_choice",
+            "title": "choose tomorrow morning autonomy direction",
+            "summary": {
+                "recommendation": "pick a bounded validation direction"
+            },
+            "options": [
+                {
+                    "id": "stabilize_first",
+                    "label": "안정화 먼저",
+                    "description": "기존 Telegram/council relay를 굳히고 짧은 테스트런을 반복한다."
+                },
+                {
+                    "id": "expand_templates",
+                    "label": "템플릿 확장",
+                    "description": "execution failure와 artifact review 타입까지 템플릿을 넓힌다."
+                }
+            ]
+        }))?,
+    )?;
+    let direction_out = temp.path().join("direction_result.json");
+    let direction_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&direction_request_path)
+        .arg("--out")
+        .arg(&direction_out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--decision-text")
+        .arg("기타 안정화를 먼저 하되 템플릿 확장은 문서만 남겨")
+        .arg("--dry-run")
+        .output()?;
+
+    assert!(
+        direction_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&direction_output.stdout),
+        String::from_utf8_lossy(&direction_output.stderr)
+    );
+    let direction: Value = serde_json::from_slice(&fs::read(&direction_out)?)?;
+    assert_eq!(direction["status"], "accepted");
+    assert_eq!(direction["message_type"], "direction_choice");
+    assert_eq!(direction["decision"], "custom_direction");
+    assert_eq!(direction["keyboard"]["labels"][0], "1. 안정화 먼저");
+    assert_eq!(
+        direction["keyboard"]["natural_input_required"][0],
+        "custom_direction"
+    );
+    let direction_preview = direction["message_preview"]
+        .as_str()
+        .expect("direction preview");
+    assert!(direction_preview.contains("방향 선택"));
+    assert!(direction_preview.contains("선택지"));
+    assert!(direction_preview.contains("1. 안정화 먼저"));
+    assert!(direction_preview.contains("기타"));
+    assert!(direction["reason"]
+        .as_str()
+        .expect("custom reason")
+        .contains("안정화를 먼저"));
+    let state_text = fs::read_to_string(temp.path().join("telegram_decision_state.json"))?;
+    let state: Value = serde_json::from_str(&state_text)?;
+    assert_eq!(state["status"], "accepted");
+    assert!(state.get("tokens").is_none());
+    assert!(state["token_hashes"].is_object());
+    assert!(!state_text.contains("fake-token-for-test"));
+    assert!(!state_text.contains("123456789"));
+    Ok(())
+}
+
+#[test]
+fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_file(
+        &env_path,
+        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n",
+    )?;
+    let closeout_dir = temp.path().join("closeout");
+    write_file(
+        &closeout_dir.join("closeout_plan.json"),
+        &serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_test",
+            "generated_at": "2026-05-28T01:10:58Z",
+            "summary": {
+                "tasks_scanned": 15,
+                "completed_tasks": 13,
+                "missing_artifacts": 4,
+                "archive_candidates": 27
+            },
+            "open_decisions": [
+                {
+                    "kind": "missing_artifact",
+                    "detail": "4 referenced artifacts are missing or not yet observed."
+                },
+                {
+                    "kind": "archive_review",
+                    "detail": "27 archive candidates require commercial review and human approval."
+                },
+                {
+                    "kind": "git_state_review",
+                    "detail": "Git state is included and must be reviewed before Ondesk return."
+                }
+            ]
+        }))?,
+    )?;
+    write_file(
+        &closeout_dir.join("closeout_review_20260528T011100Z.json"),
+        &serde_json::to_string_pretty(&json!({
+            "verdict": "approved_with_followups"
+        }))?,
+    )?;
+    let prompt_package = temp.path().join("ondesk_prompt_package.md");
+    write_file(&prompt_package, "# prompt package\n")?;
+    let request_path = temp.path().join("ondesk_request.json");
+    let builder_output = Command::new("python3")
+        .arg(script_path("build_ondesk_handoff_request.py"))
+        .arg("--project-key")
+        .arg("twinpaper")
+        .arg("--subject")
+        .arg("TwinPaper")
+        .arg("--closeout-artifact-dir")
+        .arg(&closeout_dir)
+        .arg("--prompt-package")
+        .arg(&prompt_package)
+        .arg("--webui-url")
+        .arg("http://127.0.0.1:3000/ondesk/twinpaper")
+        .arg("--handoff-local-time")
+        .arg("08:30")
+        .arg("--timezone")
+        .arg("Asia/Seoul")
+        .arg("--now")
+        .arg("2026-05-28T08:30:00+09:00")
+        .arg("--out")
+        .arg(&request_path)
+        .output()?;
+
+    assert!(
+        builder_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&builder_output.stdout),
+        String::from_utf8_lossy(&builder_output.stderr)
+    );
+    let request: Value = serde_json::from_slice(&fs::read(&request_path)?)?;
+    assert_eq!(request["message_type"], "ondesk_handoff");
+    assert_eq!(
+        request["approval_brief"]["schema"],
+        "ondesk_handoff_brief.v1"
+    );
+    assert_eq!(
+        request["approval_brief"]["recommendation"],
+        "start_ondesk_review"
+    );
+    assert_eq!(request["summary"]["open_decisions"], 3);
+
+    let out = temp.path().join("ondesk_relay_result.json");
+    let relay_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&request_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--decision-text")
+        .arg("좋아 진행하자")
+        .arg("--dry-run")
+        .output()?;
+
+    assert!(
+        relay_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&relay_output.stdout),
+        String::from_utf8_lossy(&relay_output.stderr)
+    );
+    let result_text = fs::read_to_string(&out)?;
+    let result: Value = serde_json::from_str(&result_text)?;
+    assert_eq!(result["status"], "accepted");
+    assert_eq!(result["message_type"], "ondesk_handoff");
+    assert_eq!(result["decision"], "start_ondesk_review");
+    assert_eq!(result["keyboard"]["labels"][0], "WebUI 열기");
+    assert_eq!(result["keyboard"]["labels"][1], "1. WebUI 검토 시작(권장)");
+    let message_preview = result["message_preview"].as_str().expect("message preview");
+    assert!(message_preview.contains("Ondesk 전환 브리핑: TwinPaper"));
+    assert!(message_preview.contains("08:30 Asia/Seoul"));
+    assert!(message_preview.contains("Closeout 요약"));
+    assert!(message_preview.contains("남은 사용자 결정 3건"));
+    assert!(message_preview.contains("WebUI에서 ondesk 검토를 시작할까요"));
+    assert!(message_preview.contains("Telegram은 ondesk 검토 진입/대기만 기록"));
+    assert!(!message_preview.contains("closeout_test"));
+    assert!(!message_preview.contains("closeout_plan.json"));
+    assert!(!message_preview.contains(temp.path().to_str().expect("temp path")));
+    let detail_preview = result["detail_preview"].as_str().expect("detail preview");
+    assert!(detail_preview.contains("Ondesk 전환 상세"));
+    assert!(detail_preview.contains("왜 이 추천인가"));
+    assert!(detail_preview.contains("핵심 근거"));
+    assert!(detail_preview.contains("선택별 의미"));
+    assert!(!result_text.contains("fake-token-for-test"));
+    assert!(!result_text.contains("123456789"));
+    Ok(())
+}
+
+#[test]
+fn twinpaper_review_accepts_gate_aliases_and_comparability_language() -> Result<()> {
+    let temp = tempdir()?;
+    let probe_path = temp.path().join("twinpaper_review_probe.py");
+    write_file(
+        &probe_path,
+        r#"
+import importlib.util
+import json
+import sys
+
+workload_script, review_script = sys.argv[1:]
+
+workload_spec = importlib.util.spec_from_file_location("workload_probe", workload_script)
+workload = importlib.util.module_from_spec(workload_spec)
+sys.modules[workload_spec.name] = workload
+workload_spec.loader.exec_module(workload)
+
+review_spec = importlib.util.spec_from_file_location("review_probe", review_script)
+review = importlib.util.module_from_spec(review_spec)
+sys.modules[review_spec.name] = review
+review_spec.loader.exec_module(review)
+
+matched, alias = workload.term_match(
+    "no-option evidence fails primary objective gate despite execution",
+    "primary_objective_gate",
+)
+assert matched, alias
+assert alias == "primary objective gate", alias
+
+matched, alias = workload.term_match(
+    "no-option primary objective gates are failing",
+    "primary_objective_gate",
+)
+assert matched, alias
+
+critique = (
+    "Open-explore has exploratory validated_candidate and p/q evidence, "
+    "but it is not directly comparable to promotion-ready direction-review evidence "
+    "until the same threshold and restart comparability are checked."
+)
+assert review.distinguishes_exploratory_from_promotion_gate(critique)
+
+case = workload.WorkloadCase(
+    name="research_reportability_status_json",
+    prompt="",
+    format_json=True,
+    must_have=(
+        "executed_primary_gate_failed",
+        "pending_not_reportable",
+        "evidence_refs",
+        "validated_candidate",
+        "p/q",
+        "restart_stability",
+        "no-option",
+        "singlex",
+        "primary_objective_gate",
+    ),
+    json_required={
+        "reportability_contract_schema": "reportability_contract.v1",
+        "evidence_bundle_used": True,
+        "evidence_review_decision": "sufficient",
+        "baseline_evidence_status": "executed_primary_gate_failed",
+        "claim_status": "pending_not_reportable",
+        "required_metrics": ["validated_candidate", "p/q", "restart_stability"],
+        "coupled_modes": ["no-option", "singlex"],
+        "runlog_path": "docs/operations/RunLog.md",
+        "evidence_refs": ["docs/operations/RunLog.md", "data/metadata"],
+    },
+)
+valid = {
+    "reportability_contract_schema": "reportability_contract.v1",
+    "evidence_bundle_used": True,
+    "evidence_review_decision": "sufficient",
+    "baseline_evidence_status": "executed_primary_gate_failed",
+    "claim_status": "pending_not_reportable",
+    "evidence_available": ["no-option and singlex baseline evidence exists"],
+    "blocking_anchors": [
+        {
+            "id": "primary_objective_gate",
+            "status": "failed",
+            "reason_code": "executed_primary_gate_failed",
+            "evidence_refs": ["data/metadata/phase_b_direction_review.json"],
+        }
+    ],
+    "blocking_evidence": ["no-option evidence fails the gate despite execution"],
+    "next_action": ["diagnose the failed gate before promotion"],
+    "required_metrics": ["validated_candidate", "p/q", "restart_stability"],
+    "coupled_modes": ["no-option", "singlex"],
+    "runlog_path": "docs/operations/RunLog.md",
+    "evidence_refs": ["docs/operations/RunLog.md L1", "data/metadata/phase_b_direction_review.json"],
+}
+evaluation = workload.evaluate(case, json.dumps(valid))
+assert evaluation["passed"], evaluation
+findings = []
+review.review_json_case({"case": "research_reportability_status_json", "iteration": 1, "json": valid}, findings)
+assert not [finding for finding in findings if finding["severity"] == "blocker"], findings
+
+missing_schema = dict(valid)
+missing_schema.pop("reportability_contract_schema")
+evaluation = workload.evaluate(case, json.dumps(missing_schema))
+assert not evaluation["passed"], evaluation
+assert "reportability_contract_schema:expected:reportability_contract.v1" in evaluation["json_failures"], evaluation
+findings = []
+review.review_json_case(
+    {"case": "research_reportability_status_json", "iteration": 1, "json": missing_schema},
+    findings,
+)
+assert any(finding["category"] == "reportability_contract_schema_missing" for finding in findings), findings
+
+missing_structured = dict(valid)
+missing_structured.pop("blocking_anchors")
+evaluation = workload.evaluate(case, json.dumps(missing_structured))
+assert not evaluation["passed"], evaluation
+assert "blocking_anchors:not_list" in evaluation["json_failures"], evaluation
+findings = []
+review.review_json_case(
+    {"case": "research_reportability_status_json", "iteration": 1, "json": missing_structured},
+    findings,
+)
+assert any(finding["category"] == "reportability_blocking_anchors_missing" for finding in findings), findings
+
+alias_anchor = dict(valid)
+alias_anchor["blocking_anchors"] = [dict(valid["blocking_anchors"][0], id="primary objective gate")]
+evaluation = workload.evaluate(case, json.dumps(alias_anchor))
+assert not evaluation["passed"], evaluation
+assert any(":id:not_canonical:primary objective gate" in item for item in evaluation["json_failures"]), evaluation
+findings = []
+review.review_json_case({"case": "research_reportability_status_json", "iteration": 1, "json": alias_anchor}, findings)
+assert any(finding["category"] == "reportability_blocking_anchor_invalid" for finding in findings), findings
+"#,
+    )?;
+
+    let output = Command::new("python3")
+        .arg(&probe_path)
+        .arg(script_path("offdesk_twinpaper_autonomy_workload.py"))
+        .arg(script_path("review_twinpaper_offdesk_result.py"))
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     Ok(())
 }

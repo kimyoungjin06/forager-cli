@@ -99,3 +99,33 @@ Before returning from Offdesk to Ondesk:
   `forager ondesk prompt-package --project-key <project>`;
 - promote wiki changes only after review, not just because an Offdesk run
   generated candidate knowledge.
+
+## Morning Telegram Handoff
+
+For long overnight work, send a compact Telegram handoff around 08:30 KST and
+use WebUI as the review surface. Telegram should answer only: should the
+operator start Ondesk review now, keep it pending, or defer with a natural
+language condition. It should not approve cleanup, wiki promotion, provider
+retargeting, file movement, or deletion.
+
+Build the request from closeout and prompt-package artifacts:
+
+```bash
+scripts/build_ondesk_handoff_request.py \
+  --project-key twinpaper \
+  --closeout-artifact-dir "$CLOSEOUT_DIR" \
+  --prompt-package "$ONDESK_PROMPT_PACKAGE" \
+  --webui-url "$FORAGER_WEBUI_URL" \
+  --out "$HANDOFF_REQUEST_JSON"
+```
+
+Then pass that request through the existing Telegram relay:
+
+```bash
+scripts/offdesk_telegram_decision_relay.py \
+  --request "$HANDOFF_REQUEST_JSON" \
+  --out "$HANDOFF_RESULT_JSON"
+```
+
+The rendered message hides raw paths and ids. Those remain in the request,
+state, and result JSON for audit/debugging.

@@ -14,6 +14,8 @@
 - [Project Initialization](guides/project-initialization.md)
 - [Ondesk Handoff](guides/ondesk-handoff.md)
 - [TwinPaper Offdesk Runtime Smoke](guides/twinpaper-offdesk-runtime-smoke.md)
+- [TwinPaper Offdesk Long-Run Validation](guides/twinpaper-offdesk-long-run-validation.md)
+- [Approval Briefs](guides/approval-brief.md)
 - [Offdesk Closeout](guides/offdesk-closeout.md)
 - [Module Operation Profiles](guides/module-operation-profile.md)
 - [Repo Config & Hooks](guides/repo-config.md)
