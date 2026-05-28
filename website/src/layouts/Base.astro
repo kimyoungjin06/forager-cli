@@ -37,9 +37,16 @@ const structuredData = {
     "priceCurrency": "USD"
   },
   "author": {
-    "@type": "Person",
-    "name": "Nate Brake",
-    "url": "https://twitter.com/natebrake"
+    "@type": "Organization",
+    "name": "Forager Contributors",
+    "url": "https://github.com/kimyoungjin06/forager-cli"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Korea Institute of Science and Technology Information",
+    "alternateName": "KISTI",
+    "url": "https://www.kisti.re.kr/",
+    "logo": `${publicSiteUrl}/assets/kisti-logo-en.png`
   },
   "license": "https://github.com/kimyoungjin06/forager-cli/blob/main/LICENSE",
   "codeRepository": "https://github.com/kimyoungjin06/forager-cli",
@@ -55,7 +62,7 @@ const structuredData = {
   <title>{title}</title>
   <meta name="description" content={description}>
   <meta name="keywords" content="AI coding agent, terminal session manager, tmux, Claude Code, Codex, OpenCode, Mistral Vibe, Gemini CLI, git worktrees, Rust, TUI, CLI, developer tools">
-  <meta name="author" content="Nate Brake">
+  <meta name="author" content="Forager Contributors">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href={canonicalURL}>
 
@@ -70,8 +77,6 @@ const structuredData = {
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:site" content="@natebrake">
-  <meta name="twitter:creator" content="@natebrake">
   <meta name="twitter:title" content={ogTitle}>
   <meta name="twitter:description" content={ogDescription}>
   <meta name="twitter:image" content={ogImage}>

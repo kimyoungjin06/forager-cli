@@ -1,5 +1,5 @@
 /* Forager - Custom mdbook theme
-   Palette: slate/phosphor green to match the Astro website */
+   Palette: slate/KISTI blue to match the Astro website */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -10,19 +10,19 @@
     --fg: #e2e8f0;
     --sidebar-bg: #0c1222;
     --sidebar-fg: #cbd5e1;
-    --sidebar-active: #34d399;
+    --sidebar-active: #0075ba;
     --sidebar-spacer: #1e293b;
     --sidebar-non-existant: #475569;
     --scrollbar: #1e293b;
     --icons: #94a3b8;
-    --icons-hover: #34d399;
-    --links: #34d399;
-    --inline-code-color: #a7f3d0;
+    --icons-hover: #0075ba;
+    --links: #0075ba;
+    --inline-code-color: #bae6fd;
     --theme-popup-bg: #1e293b;
     --theme-popup-border: #334155;
     --theme-hover: #334155;
     --quote-bg: #1e293b;
-    --quote-border: #34d399;
+    --quote-border: #0075ba;
     --table-border-color: #334155;
     --table-header-bg: #1e293b;
     --table-alternate-bg: #131c31;
@@ -30,10 +30,10 @@
     --searchbar-bg: #1e293b;
     --searchbar-fg: #e2e8f0;
     --searchbar-shadow-color: rgba(0, 0, 0, 0.3);
-    --searchresults-header-fg: #34d399;
+    --searchresults-header-fg: #0075ba;
     --searchresults-border-color: #334155;
     --searchresults-li-bg: #1e293b;
-    --search-mark-bg: rgba(52, 211, 153, 0.25);
+    --search-mark-bg: rgba(0, 117, 186, 0.25);
 }
 
 /* ── Typography ────────────────────────────────────────────────────── */
@@ -71,13 +71,13 @@
 }
 
 .navy .sidebar ol.chapter li a:hover {
-    color: #34d399;
-    background: rgba(52, 211, 153, 0.08);
+    color: #0075ba;
+    background: rgba(0, 117, 186, 0.08);
 }
 
 .navy .sidebar ol.chapter li.chapter-item.expanded a,
 .navy .sidebar ol.chapter li a.active {
-    color: #34d399;
+    color: #0075ba;
     font-weight: 600;
 }
 
@@ -106,7 +106,7 @@
 }
 
 .navy h1 {
-    border-bottom: 2px solid #34d399;
+    border-bottom: 2px solid #0075ba;
     padding-bottom: 0.4rem;
     margin-bottom: 1.5rem;
 }
@@ -119,13 +119,13 @@
 /* ── Links ─────────────────────────────────────────────────────────── */
 
 .navy a {
-    color: #34d399;
+    color: #0075ba;
     text-decoration: none;
     transition: color 0.15s;
 }
 
 .navy a:hover {
-    color: #a7f3d0;
+    color: #bae6fd;
     text-decoration: underline;
 }
 
@@ -147,8 +147,8 @@
 }
 
 .navy :not(pre) > code {
-    background: rgba(52, 211, 153, 0.1);
-    border: 1px solid rgba(52, 211, 153, 0.15);
+    background: rgba(0, 117, 186, 0.1);
+    border: 1px solid rgba(0, 117, 186, 0.15);
     border-radius: 4px;
     padding: 0.15em 0.35em;
     color: var(--inline-code-color);
@@ -169,7 +169,7 @@
 }
 
 .navy table th {
-    color: #34d399;
+    color: #0075ba;
     font-weight: 600;
     font-size: 0.85rem;
     text-transform: uppercase;
@@ -188,13 +188,13 @@
 }
 
 .navy table tbody tr:hover {
-    background: rgba(52, 211, 153, 0.05);
+    background: rgba(0, 117, 186, 0.05);
 }
 
 /* ── Blockquotes ───────────────────────────────────────────────────── */
 
 .navy blockquote {
-    border-left: 3px solid #34d399;
+    border-left: 3px solid #0075ba;
     background: var(--quote-bg);
     border-radius: 0 8px 8px 0;
     padding: 0.8rem 1.2rem;
@@ -210,7 +210,7 @@
 }
 
 .navy .nav-chapters:hover {
-    color: #34d399;
+    color: #0075ba;
 }
 
 /* ── Menu bar ──────────────────────────────────────────────────────── */
@@ -225,7 +225,7 @@
 }
 
 .navy #menu-bar i:hover {
-    color: #34d399;
+    color: #0075ba;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────── */
@@ -264,13 +264,13 @@
 }
 
 .contributor-row:hover {
-    border-color: #34d399;
-    box-shadow: 0 0 12px rgba(52, 211, 153, 0.06);
+    border-color: #0075ba;
+    box-shadow: 0 0 12px rgba(0, 117, 186, 0.06);
 }
 
 .contributor-row.rank-1 {
-    border-color: #34d399;
-    background: linear-gradient(135deg, #1e293b 0%, rgba(52, 211, 153, 0.05) 100%);
+    border-color: #0075ba;
+    background: linear-gradient(135deg, #1e293b 0%, rgba(0, 117, 186, 0.05) 100%);
 }
 
 .contributor-row.rank-2 {
@@ -278,7 +278,7 @@
 }
 
 .contributor-row.rank-3 {
-    border-color: #0e7490;
+    border-color: #da2128;
 }
 
 .contributor-rank {
@@ -291,7 +291,7 @@
 }
 
 .rank-1 .contributor-rank {
-    color: #34d399;
+    color: #0075ba;
 }
 
 .rank-2 .contributor-rank {
@@ -299,7 +299,7 @@
 }
 
 .rank-3 .contributor-rank {
-    color: #0e7490;
+    color: #da2128;
 }
 
 .contributor-avatar {
@@ -311,7 +311,7 @@
 }
 
 .rank-1 .contributor-avatar {
-    border-color: #34d399;
+    border-color: #0075ba;
 }
 
 .rank-2 .contributor-avatar {
@@ -319,7 +319,7 @@
 }
 
 .rank-3 .contributor-avatar {
-    border-color: #0e7490;
+    border-color: #da2128;
 }
 
 .contributor-info {
@@ -342,7 +342,7 @@
 }
 
 .contributor-name a:hover {
-    color: #34d399 !important;
+    color: #0075ba !important;
 }
 
 .contributor-stats {
@@ -368,15 +368,15 @@
 }
 
 .contributor-issues a:hover {
-    color: #34d399 !important;
-    background: rgba(52, 211, 153, 0.1);
+    color: #0075ba !important;
+    background: rgba(0, 117, 186, 0.1);
     text-decoration: none;
 }
 
 /* ── Call-to-action box ────────────────────────────────────────────── */
 
 .cta-box {
-    background: linear-gradient(135deg, #1e293b 0%, rgba(52, 211, 153, 0.06) 100%);
+    background: linear-gradient(135deg, #1e293b 0%, rgba(0, 117, 186, 0.06) 100%);
     border: 1px solid #334155;
     border-radius: 12px;
     padding: 1.5rem 2rem;
@@ -390,7 +390,7 @@
 
 .cta-box a {
     display: inline-block;
-    background: #34d399;
+    background: #0075ba;
     color: #0f172a !important;
     font-weight: 600;
     padding: 0.5rem 1.5rem;
@@ -401,5 +401,5 @@
 }
 
 .cta-box a:hover {
-    background: #10b981;
+    background: #00507f;
 }

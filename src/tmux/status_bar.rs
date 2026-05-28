@@ -45,9 +45,8 @@ pub fn apply_status_bar(
         )?;
     }
 
-    // Configure the status bar format using Forager's phosphor green theme
-    // colour46 = bright green (matches Forager accent), colour48 = cyan (matches running)
-    // colour154 = phosphor lime (matches waiting)
+    // Configure the status bar format using Forager's KISTI-aligned theme
+    // colour32 = KISTI blue approximation, colour39 = cyan, colour160 = KISTI red approximation
     // colour235 = dark background
     //
     // Format: "forager: Title | branch | [legacy container] | 14:30"
@@ -55,22 +54,22 @@ pub fn apply_status_bar(
     // - #{?#{@forager_branch}, | #{@forager_branch},}: conditional branch display
     // - #{?#{@forager_sandbox}, [#{@forager_sandbox}],}: conditional sandbox display
     let status_format = concat!(
-        " #[fg=colour46,bold]forager#[fg=colour252,nobold]: ",
+        " #[fg=colour32,bold]forager#[fg=colour252,nobold]: ",
         "#{@forager_title}",
-        "#{?#{@forager_branch}, #[fg=colour48]| #{@forager_branch}#[fg=colour252],}",
-        "#{?#{@forager_sandbox}, #[fg=colour154]⬡ #{@forager_sandbox}#[fg=colour252],}",
+        "#{?#{@forager_branch}, #[fg=colour39]| #{@forager_branch}#[fg=colour252],}",
+        "#{?#{@forager_sandbox}, #[fg=colour160]⬡ #{@forager_sandbox}#[fg=colour252],}",
         " | %H:%M "
     );
 
     set_session_option(session_name, "status-right", status_format)?;
     set_session_option(session_name, "status-right-length", "80")?;
 
-    // Dark background with light text - matches Forager phosphor theme
+    // Dark background with light text - matches the Forager website.
     set_session_option(session_name, "status-style", "bg=colour235,fg=colour252")?;
     set_session_option(
         session_name,
         "status-left",
-        " #[fg=colour46,bold]#S#[fg=colour252,nobold] │ #[fg=colour245]Ctrl+b d#[fg=colour240] to detach ",
+        " #[fg=colour32,bold]#S#[fg=colour252,nobold] │ #[fg=colour245]Ctrl+b d#[fg=colour240] to detach ",
     )?;
     set_session_option(session_name, "status-left-length", "50")?;
 
