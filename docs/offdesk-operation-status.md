@@ -92,6 +92,9 @@ The short TwinPaper smoke observed:
   [`Operation Cycle`](guides/operation-cycle.md).
 - The smoke procedure now has a dedicated runbook:
   [`TwinPaper Offdesk Runtime Smoke`](guides/twinpaper-offdesk-runtime-smoke.md).
+- The longer validation path now has a dedicated runbook and prepare artifact:
+  [`TwinPaper Offdesk Long-Run Validation`](guides/twinpaper-offdesk-long-run-validation.md)
+  and `LONG_RUN_VALIDATION.md`.
 
 ## Remaining Work
 
@@ -226,6 +229,9 @@ The next practical step is:
 4. run closeout after completion;
 5. validate the Ondesk return prompt package;
 6. review wiki candidates before promotion.
+
+Use the generated `LONG_RUN_VALIDATION.md` packet from
+`scripts/prepare_twinpaper_offdesk_task.py` as the checklist for this sequence.
 
 The launch path is no longer the main unknown. The remaining unknowns are
 output quality, Council usefulness, closeout ergonomics, and wiki review load.

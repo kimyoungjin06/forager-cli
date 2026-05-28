@@ -30,6 +30,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_REPO = pathlib.Path("/home/kimyoungjin06/Desktop/Workspace/1.2.8.TwinPaper")
 DEFAULT_BASE_URL = os.environ.get("OFFDESK_LLM_BASE_URL", "http://172.16.0.37:11434")
 DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder-next:latest")
+DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_TELEGRAM_ENV",
+        "/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.aoe-team/telegram.env",
+    )
+)
 
 SYSTEM_CRITICAL_SAFETY: dict[str, Any] = {
     "repo_read_only": True,
@@ -115,6 +121,12 @@ GLOBAL_TERM_ALIASES: dict[str, tuple[str, ...]] = {
         "validated_rate",
         "validated rate",
     ),
+    "primary_objective_gate": (
+        "primary objective gate",
+        "primary objective gates",
+        "primary-objective gate",
+        "primary-objective gates",
+    ),
     "no-option": (
         "no option",
         "no_option",
@@ -142,6 +154,24 @@ BASELINE_POLICY_TERMS = {
     "validated_candidate",
     "p/q",
     "restart_stability",
+}
+
+CANONICAL_BLOCKING_ANCHOR_IDS = {
+    "primary_objective_gate",
+}
+
+CANONICAL_BLOCKING_ANCHOR_STATUSES = {
+    "failed",
+    "missing",
+    "unknown",
+}
+
+CANONICAL_BLOCKING_REASON_CODES = {
+    "executed_primary_gate_failed",
+    "missing_evidence",
+    "insufficient_restart_stability",
+    "insufficient_pq_evidence",
+    "insufficient_validated_candidate",
 }
 
 
@@ -204,6 +234,36 @@ def parse_args() -> argparse.Namespace:
         dest="council_stop_on_non_continue",
         default=True,
         help="Record council decisions but keep running even when the council does not return continue.",
+    )
+    parser.add_argument(
+        "--council-operator-decision-relay",
+        choices=("disabled", "telegram"),
+        default=os.environ.get("OFFDESK_COUNCIL_OPERATOR_DECISION_RELAY", "disabled"),
+        help="Ask the operator for a continuation decision when Council returns a non-continue decision.",
+    )
+    parser.add_argument(
+        "--telegram-env-file",
+        type=pathlib.Path,
+        default=DEFAULT_TELEGRAM_ENV_FILE,
+        help="Env file containing TELEGRAM_BOT_TOKEN and owner/allow chat settings.",
+    )
+    parser.add_argument(
+        "--telegram-decision-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_TELEGRAM_DECISION_TIMEOUT_SEC", "1800")),
+        help="How long to wait for a Telegram operator decision.",
+    )
+    parser.add_argument(
+        "--telegram-decision-poll-interval-sec",
+        type=float,
+        default=float(os.environ.get("OFFDESK_TELEGRAM_DECISION_POLL_INTERVAL_SEC", "5")),
+        help="Polling interval for Telegram decision replies.",
+    )
+    parser.add_argument(
+        "--telegram-decision-dry-run",
+        action="store_true",
+        default=os.environ.get("OFFDESK_TELEGRAM_DECISION_DRY_RUN", "0") in {"1", "true", "yes", "on"},
+        help="Write relay artifacts without sending Telegram messages.",
     )
     parser.add_argument(
         "--wiki-candidate-mode",
@@ -455,6 +515,25 @@ def render_evidence_context(
     return json.dumps(context, ensure_ascii=False, indent=2)
 
 
+def required_reportability_anchor_terms(baseline_status: str) -> tuple[str, ...]:
+    if baseline_status == "executed_primary_gate_failed":
+        return ("primary_objective_gate",)
+    return ()
+
+
+def reportability_blocking_anchor_requirement(baseline_status: str) -> str:
+    if baseline_status == "executed_primary_gate_failed":
+        return (
+            '- include {"id":"primary_objective_gate","status":"failed",'
+            '"reason_code":"executed_primary_gate_failed","evidence_refs":[...]}\n'
+            "- use exact canonical ids and reason codes; do not put natural-language aliases in id"
+        )
+    return (
+        "- include one object per blocking anchor, or [] if no blocking anchor applies\n"
+        "- use exact canonical ids and reason codes; do not put natural-language aliases in id"
+    )
+
+
 def build_cases(repo: pathlib.Path, evidence_context: str, evidence_state: dict[str, Any]) -> list[WorkloadCase]:
     agents = read_text(repo, "AGENTS.md", 9000)
     readme = read_text(repo, "README.md", 6000)
@@ -472,6 +551,18 @@ def build_cases(repo: pathlib.Path, evidence_context: str, evidence_state: dict[
     )
     baseline_status = str(evidence_state.get("baseline_evidence_status", "unknown"))
     claim_status = str(evidence_state.get("claim_status", "unknown"))
+    reportability_anchor_requirement = reportability_blocking_anchor_requirement(baseline_status)
+    reportability_must_have = (
+        baseline_status,
+        claim_status,
+        "evidence_refs",
+        "validated_candidate",
+        "p/q",
+        "restart_stability",
+        "no-option",
+        "singlex",
+        *required_reportability_anchor_terms(baseline_status),
+    )
 
     return [
         WorkloadCase(
@@ -579,30 +670,25 @@ Be conservative and do not invent execution evidence. Distinguish
 no-option/singlex evidence exists when the bundle lists baseline runs.
 
 Required JSON fields:
+- reportability_contract_schema: exactly "reportability_contract.v1"
 - evidence_bundle_used: true
 - evidence_review_decision: exactly "sufficient"
 - baseline_evidence_status: exactly {json.dumps(baseline_status)}
 - claim_status: exactly {json.dumps(claim_status)}
 - evidence_available: array of strings
+- blocking_anchors: array of machine-readable objects
+{reportability_anchor_requirement}
 - blocking_evidence: array of strings
 - next_action: array of strings
+- blocking_evidence and next_action are human-readable explanations; the validator uses blocking_anchors as the machine contract.
 - required_metrics: array containing "validated_candidate", "p/q", and "restart_stability"
 - coupled_modes: array containing "no-option" and "singlex"
 - runlog_path: exactly "docs/operations/RunLog.md"
 - evidence_refs: array containing at least one "docs/operations/RunLog.md L..." ref and at least one "data/metadata/..." artifact ref
 """,
-            must_have=(
-                baseline_status,
-                claim_status,
-                "evidence_refs",
-                "validated_candidate",
-                "p/q",
-                "restart_stability",
-                "no-option",
-                "singlex",
-                "primary_objective_gate",
-            ),
+            must_have=reportability_must_have,
             json_required={
+                "reportability_contract_schema": "reportability_contract.v1",
                 "evidence_bundle_used": True,
                 "evidence_review_decision": "sufficient",
                 "baseline_evidence_status": baseline_status,
@@ -746,10 +832,64 @@ def call_ollama(
     return parsed.get("response", ""), parsed
 
 
+def validate_reportability_blocking_anchors(parsed: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    anchors = parsed.get("blocking_anchors")
+    if not isinstance(anchors, list):
+        return ["blocking_anchors:not_list"]
+    if parsed.get("claim_status") == "pending_not_reportable" and not anchors:
+        failures.append("blocking_anchors:empty_pending_claim")
+
+    primary_gate_anchor: dict[str, Any] | None = None
+    for index, anchor in enumerate(anchors):
+        prefix = f"blocking_anchors[{index}]"
+        if not isinstance(anchor, dict):
+            failures.append(f"{prefix}:not_object")
+            continue
+
+        anchor_id = anchor.get("id")
+        status = anchor.get("status")
+        reason_code = anchor.get("reason_code")
+        evidence_refs = anchor.get("evidence_refs")
+
+        if anchor_id not in CANONICAL_BLOCKING_ANCHOR_IDS:
+            failures.append(f"{prefix}:id:not_canonical:{anchor_id}")
+        if status not in CANONICAL_BLOCKING_ANCHOR_STATUSES:
+            failures.append(f"{prefix}:status:not_canonical:{status}")
+        if reason_code not in CANONICAL_BLOCKING_REASON_CODES:
+            failures.append(f"{prefix}:reason_code:not_canonical:{reason_code}")
+        if not isinstance(evidence_refs, list):
+            failures.append(f"{prefix}:evidence_refs:not_list")
+        elif not evidence_refs:
+            failures.append(f"{prefix}:evidence_refs:empty")
+        elif not all(isinstance(ref, str) and ref.strip() for ref in evidence_refs):
+            failures.append(f"{prefix}:evidence_refs:invalid_ref")
+
+        if anchor_id == "primary_objective_gate":
+            primary_gate_anchor = anchor
+
+    requires_primary_gate_failure = (
+        parsed.get("baseline_evidence_status") == "executed_primary_gate_failed"
+    )
+    if requires_primary_gate_failure and primary_gate_anchor is None:
+        failures.append("blocking_anchors:missing:primary_objective_gate")
+    elif requires_primary_gate_failure and primary_gate_anchor is not None:
+        if primary_gate_anchor.get("status") != "failed":
+            failures.append("blocking_anchors:primary_objective_gate:status:not_failed")
+        if primary_gate_anchor.get("reason_code") != "executed_primary_gate_failed":
+            failures.append(
+                "blocking_anchors:primary_objective_gate:reason_code:not_executed_primary_gate_failed"
+            )
+
+    return failures
+
+
 def validate_json_required(case: WorkloadCase, parsed: Any) -> list[str]:
     failures: list[str] = []
     if not isinstance(parsed, dict):
         return ["json_not_object"]
+    if case.name == "research_reportability_status_json":
+        failures.extend(validate_reportability_blocking_anchors(parsed))
     for key, expected in case.json_required.items():
         actual = parsed.get(key)
         if isinstance(expected, list):
@@ -947,6 +1087,9 @@ def write_markdown_report(path: pathlib.Path, summary: dict[str, Any], records: 
     wiki_learning = summary.get("adaptive_wiki_learning", {})
     wiki_ingest = wiki_learning.get("ingest", {})
     wiki_trial = summary.get("adaptive_wiki_trial", {})
+    council = summary.get("council", {})
+    last_relay = council.get("last_operator_decision_relay")
+    relay_status = last_relay.get("status") if isinstance(last_relay, dict) else None
     lines = [
         "# TwinPaper Offdesk Autonomy Workload",
         "",
@@ -968,9 +1111,10 @@ def write_markdown_report(path: pathlib.Path, summary: dict[str, Any], records: 
         f"- result_review: `{summary.get('result_review_path')}`",
         f"- next_action: `{assessment.get('next_action', '')}`",
         f"- system_critical_constraints: `{', '.join(sorted(SYSTEM_CRITICAL_SAFETY))}`",
-        f"- council_mode: `{summary.get('council', {}).get('mode')}`",
-        f"- council_records: `{summary.get('council', {}).get('records')}`",
-        f"- council_last_decision: `{summary.get('council', {}).get('last_decision')}`",
+        f"- council_mode: `{council.get('mode')}`",
+        f"- council_records: `{council.get('records')}`",
+        f"- council_last_decision: `{council.get('last_decision')}`",
+        f"- council_operator_decision_relay: `{relay_status}`",
         f"- wiki_candidate_mode: `{wiki_learning.get('candidate_mode')}`",
         f"- wiki_candidate_promotion_allowed: `{wiki_learning.get('promotion_allowed')}`",
         f"- wiki_candidate_ingest: `{wiki_ingest.get('path')}`",
@@ -1209,6 +1353,125 @@ def clean_list(values: Any) -> list[str]:
     return result
 
 
+def load_json_object(path_value: Any) -> dict[str, Any]:
+    path = pathlib.Path(str(path_value or ""))
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        value = load_json(path)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def decision_display_name(value: Any) -> str:
+    decision = str(value or "").strip()
+    labels = {
+        "continue": "계속",
+        "revise": "수정",
+        "block": "보류",
+        "stop": "중단",
+        "needs_council_execution": "Council 실행 필요",
+    }
+    return labels.get(decision, decision)
+
+
+def failure_display_name(value: Any) -> str:
+    category = str(value or "").strip()
+    labels = {
+        "pass": "통과",
+        "contract_anchor_failure": "필수 기준 누락",
+        "json_contract_failure": "JSON 계약 불일치",
+        "format_failure": "형식 오류",
+        "safety_failure": "안전 경계 위반",
+        "pass_with_canonicalization": "표현 보정 후 통과",
+    }
+    return labels.get(category, category)
+
+
+def case_display_name(value: Any) -> str:
+    case = str(value or "").strip()
+    labels = {
+        "research_reportability_status_json": "보고 가능성 상태 점검",
+        "evidence_collection_current_state_json": "현재 근거 상태 점검",
+        "critique_open_explore_direction_change": "open-explore 방향 변경 비판",
+        "module03_root_entrypoint": "Module 03 진입점 확인",
+    }
+    return labels.get(case, case.replace("_", " "))
+
+
+def build_operator_approval_brief(council_record: dict[str, Any]) -> dict[str, Any]:
+    episode = load_json_object(council_record.get("episode_record_path"))
+    council = load_json_object(council_record.get("council_path"))
+    consensus = council.get("consensus", {}) if isinstance(council.get("consensus"), dict) else {}
+    episode_json = episode.get("json", {}) if isinstance(episode.get("json"), dict) else {}
+    recommendation = str(consensus.get("decision") or council_record.get("decision") or "").strip()
+    agreement = consensus.get("agreement", council_record.get("agreement"))
+    reviewer_decisions = consensus.get("reviewer_decisions") or council_record.get("reviewer_decisions", {})
+    failure_category = episode.get("failure_category")
+    missing = clean_list(episode.get("must_missing"))
+    primary_reason = f"{', '.join(missing[:2])} 미통과" if missing else failure_display_name(failure_category)
+    claim_status = str(episode_json.get("claim_status") or "").strip()
+    summary_lines: list[str] = []
+    if claim_status == "pending_not_reportable":
+        summary_lines.append("현재 결과는 reportable claim으로 승격할 수 없습니다.")
+    if primary_reason:
+        summary_lines.append(f"이유: {primary_reason}.")
+    if recommendation:
+        agreement_text = "리뷰어 합의" if agreement is True else "리뷰어 합의 없음" if agreement is False else "합의 정보 없음"
+        summary_lines.append(f"Council: {decision_display_name(recommendation)} 권고, {agreement_text}.")
+    why_recommendation: list[str] = []
+    if claim_status == "pending_not_reportable":
+        why_recommendation.append("실행은 됐지만 승격 기준을 통과하지 못했습니다.")
+    if recommendation == "revise":
+        why_recommendation.append("지금 계속하면 non-reportable 상태를 반복할 가능성이 큽니다.")
+    elif recommendation == "block":
+        why_recommendation.append("재개 조건 없이 진행하면 같은 blocker를 반복할 가능성이 큽니다.")
+    elif recommendation == "stop":
+        why_recommendation.append("다음 episode보다 closeout과 별도 검토가 더 적합합니다.")
+    evidence = clean_list(episode_json.get("blocking_evidence")) or clean_list(episode_json.get("evidence_available"))
+    return {
+        "schema": "approval_brief.v1",
+        "source": "offdesk_twinpaper_autonomy_workload",
+        "recommendation": recommendation,
+        "subject": case_display_name(council_record.get("case") or episode.get("case")),
+        "primary_reason": primary_reason,
+        "summary_lines": summary_lines,
+        "why_recommendation": why_recommendation,
+        "failure": {
+            "passed": episode.get("passed"),
+            "category": failure_category,
+            "missing": missing,
+        },
+        "evidence": evidence,
+        "next_action": clean_list(episode_json.get("next_action")),
+        "council": {
+            "recommendation": recommendation,
+            "agreement": agreement,
+            "reviewer_decisions": reviewer_decisions if isinstance(reviewer_decisions, dict) else {},
+            "evidence_gaps": clean_list(consensus.get("evidence_gaps")),
+        },
+        "context": {
+            "iteration": council_record.get("iteration") or episode.get("iteration"),
+            "case": council_record.get("case") or episode.get("case"),
+            "baseline_evidence_status": episode_json.get("baseline_evidence_status"),
+            "claim_status": episode_json.get("claim_status"),
+        },
+        "decision_impacts": {
+            "continue": "현재 경고를 감수하고 다음 episode로 진행합니다.",
+            "revise": "자연어로 수정 방향을 남기고 다음 episode를 그 방향으로 진행합니다.",
+            "block": "지금은 멈추고 재개 조건이나 추가 확인이 필요하다고 기록합니다.",
+            "stop": "이 런을 닫고 closeout 또는 별도 검토로 전환합니다.",
+        },
+        "reply_examples": {
+            "revise": "primary gate 실패 원인을 먼저 진단하고 reportable claim 승격은 금지해.",
+            "block": "primary gate 원인 분석 전까지 멈추고 재개 조건을 다시 정리해.",
+        },
+        "scope": "다음 episode 진행 방식만 승인합니다. 파일 변경, cleanup, provider 변경, wiki 승인은 별도 승인입니다.",
+        "question": "어떻게 진행할까요?",
+    }
+
+
 def apply_wiki_trial_decisions(
     *,
     args: argparse.Namespace,
@@ -1415,8 +1678,136 @@ def run_episode_council(
         "reviewer_decisions": consensus.get("reviewer_decisions", {}),
         "wiki_candidate_decisions": consensus.get("wiki_candidate_decisions", []),
     }
-    append_jsonl(out_dir / "council_progress.jsonl", council_record)
     return council_record
+
+
+def build_operator_decision_request(
+    *,
+    args: argparse.Namespace,
+    out_dir: pathlib.Path,
+    council_record: dict[str, Any],
+) -> dict[str, Any]:
+    decision_request_id = (
+        f"{args.task_id or out_dir.name}:episode-"
+        f"{int(council_record.get('iteration') or 0):03d}:council"
+    )
+    return {
+        "decision_request_id": decision_request_id,
+        "message_type": "council_decision",
+        "title": "Offdesk Council needs operator continuation decision",
+        "request_id": args.request_id,
+        "task_id": args.task_id,
+        "summary": {
+            "project": "twinpaper",
+            "iteration": council_record.get("iteration"),
+            "case": council_record.get("case"),
+            "council_mode": council_record.get("mode"),
+            "council_decision": council_record.get("decision"),
+            "agreement": council_record.get("agreement"),
+            "requires_operator_review": council_record.get("requires_operator_review"),
+            "reviewer_decisions": council_record.get("reviewer_decisions", {}),
+            "returncode": council_record.get("returncode"),
+            "safety_boundary": (
+                "Reply controls episode continuation only. It does not approve mutation, "
+                "cleanup, provider retargeting, wiki promotion, or file changes."
+            ),
+        },
+        "approval_brief": build_operator_approval_brief(council_record),
+        "artifacts": {
+            "episode_record": council_record.get("episode_record_path"),
+            "council": council_record.get("council_path"),
+            "council_progress": str(out_dir / "council_progress.jsonl"),
+            "heartbeat": str(out_dir / "heartbeat.json"),
+            "result": str(out_dir / "result.json"),
+        },
+    }
+
+
+def run_operator_decision_relay(
+    *,
+    args: argparse.Namespace,
+    out_dir: pathlib.Path,
+    council_record: dict[str, Any],
+) -> dict[str, Any]:
+    if args.council_operator_decision_relay != "telegram":
+        return {"enabled": False, "reason": "operator_decision_relay_disabled"}
+    if council_record.get("decision") == "continue":
+        return {"enabled": True, "mode": "telegram", "reason": "council_already_continue"}
+
+    council_path = pathlib.Path(str(council_record["council_path"]))
+    relay_dir = council_path.parent / "operator_decision"
+    request_path = relay_dir / "request.json"
+    result_path = relay_dir / "telegram_decision.json"
+    invocation_path = relay_dir / "invocation.json"
+    request = build_operator_decision_request(args=args, out_dir=out_dir, council_record=council_record)
+    write_json(request_path, request)
+
+    command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts" / "offdesk_telegram_decision_relay.py"),
+        "--request",
+        str(request_path),
+        "--out",
+        str(result_path),
+        "--env-file",
+        str(args.telegram_env_file),
+        "--timeout-sec",
+        str(max(0, args.telegram_decision_timeout_sec)),
+        "--poll-interval-sec",
+        str(max(0.2, args.telegram_decision_poll_interval_sec)),
+    ]
+    if args.telegram_decision_dry_run:
+        command.append("--dry-run")
+    completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
+    invocation = {
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+    write_json(invocation_path, invocation)
+    if result_path.exists():
+        try:
+            result = load_json(result_path)
+        except json.JSONDecodeError as error:
+            result = {"status": "error", "decision": None, "error": repr(error)}
+    else:
+        result = {"status": "error", "decision": None, "error": "telegram_decision_artifact_missing"}
+        write_json(result_path, result)
+    if not isinstance(result, dict):
+        result = {"status": "error", "decision": None, "error": "telegram_decision_artifact_not_object"}
+    return {
+        "enabled": True,
+        "mode": "telegram",
+        "request_path": str(request_path),
+        "result_path": str(result_path),
+        "invocation_path": str(invocation_path),
+        "returncode": completed.returncode,
+        "status": result.get("status"),
+        "decision": result.get("decision"),
+        "reason": result.get("reason"),
+        "received_at": result.get("received_at"),
+        "target_chat_id_hash": result.get("target_chat_id_hash"),
+    }
+
+
+def apply_operator_decision(
+    council_record: dict[str, Any],
+    relay: dict[str, Any],
+) -> None:
+    if relay.get("enabled") is not True or relay.get("status") != "accepted":
+        return
+    decision = str(relay.get("decision") or "").strip()
+    if decision not in {"continue", "revise", "block", "stop"}:
+        return
+    council_record["decision_before_operator"] = council_record.get("decision")
+    council_record["operator_decision_relay"] = relay
+    council_record["operator_decision_applied"] = True
+    council_record["decision"] = decision
+    if decision == "continue":
+        council_record["requires_operator_review"] = False
+    else:
+        council_record["requires_operator_review"] = True
 
 
 def main() -> int:
@@ -1491,6 +1882,14 @@ def main() -> int:
             "stop_on_non_continue": args.council_stop_on_non_continue,
             "gpt_command_configured": bool(args.gpt_council_command),
             "claude_command_configured": bool(args.claude_council_command),
+            "operator_decision_relay": {
+                "mode": args.council_operator_decision_relay,
+                "telegram_env_file": str(args.telegram_env_file),
+                "telegram_timeout_sec": max(0, args.telegram_decision_timeout_sec),
+                "telegram_poll_interval_sec": max(0.2, args.telegram_decision_poll_interval_sec),
+                "telegram_dry_run": bool(args.telegram_decision_dry_run),
+                "controls_continuation_only": True,
+            },
         },
         "adaptive_wiki_learning": {
             "candidate_mode": args.wiki_candidate_mode,
@@ -1621,6 +2020,13 @@ def main() -> int:
                 case_name=case.name,
                 record=record,
             )
+            relay = run_operator_decision_relay(
+                args=args,
+                out_dir=out_dir,
+                council_record=council_record,
+            )
+            council_record["operator_decision_relay"] = relay
+            apply_operator_decision(council_record, relay)
             trial_update = apply_wiki_trial_decisions(
                 args=args,
                 out_dir=out_dir,
@@ -1630,6 +2036,7 @@ def main() -> int:
             )
             council_record["adaptive_wiki_trial_update"] = trial_update
             council_records.append(council_record)
+            append_jsonl(out_dir / "council_progress.jsonl", council_record)
             print(
                 json.dumps(
                     {
@@ -1639,6 +2046,8 @@ def main() -> int:
                         "decision": council_record["decision"],
                         "agreement": council_record.get("agreement"),
                         "requires_operator_review": council_record.get("requires_operator_review"),
+                        "operator_decision_relay_status": relay.get("status"),
+                        "operator_decision": relay.get("decision"),
                         "wiki_trial_active_entries": trial_update.get("active_entries"),
                     },
                     ensure_ascii=False,
@@ -1702,6 +2111,7 @@ def main() -> int:
             "every": max(1, args.council_every),
             "records": len(council_records),
             "last_decision": council_records[-1]["decision"] if council_records else None,
+            "last_operator_decision_relay": council_records[-1].get("operator_decision_relay") if council_records else None,
             "stopped_by_council": stopped_by_council,
             "progress_path": str(out_dir / "council_progress.jsonl"),
         },

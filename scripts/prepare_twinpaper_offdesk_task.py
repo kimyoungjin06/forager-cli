@@ -19,6 +19,12 @@ DEFAULT_TWINPAPER_REPO = pathlib.Path("/home/kimyoungjin06/Desktop/Workspace/1.2
 DEFAULT_BASE_URL = os.environ.get("OFFDESK_LLM_BASE_URL", "http://172.16.0.37:11434")
 DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder-next:latest")
 DEFAULT_PROFILE = os.environ.get("OFFDESK_PROFILE", "twinpaper-adaptive-debug")
+DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_TELEGRAM_ENV",
+        "/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.aoe-team/telegram.env",
+    )
+)
 REVIEW_GENERATE_VALUES = {"generate", "auto"}
 REVIEW_CASES = {"review_offdesk_stage_contract", "workload_manifest_review"}
 EXPECTED_MODULE_SCOPE = "module03_regspec_machine"
@@ -43,6 +49,9 @@ SYSTEM_CRITICAL_SAFETY: dict[str, Any] = {
     "no_kernel_driver_firmware_or_bios_change": True,
     "operator_approval_required_for_system_mutation": True,
 }
+PROMPT_PACKAGE_STOP_WARNING = (
+    "prompt_package_council_requires_external_reviewer_execution_and_will_stop_on_needs_council_execution"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,6 +93,36 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         dest="council_stop_on_non_continue",
         default=True,
+    )
+    parser.add_argument(
+        "--council-operator-decision-relay",
+        choices=("disabled", "telegram"),
+        default=os.environ.get("OFFDESK_COUNCIL_OPERATOR_DECISION_RELAY", "disabled"),
+        help="Ask the operator for a continuation decision when Council returns a non-continue decision.",
+    )
+    parser.add_argument(
+        "--telegram-env-file",
+        type=pathlib.Path,
+        default=DEFAULT_TELEGRAM_ENV_FILE,
+        help="Env file containing TELEGRAM_BOT_TOKEN and owner/allow chat settings.",
+    )
+    parser.add_argument(
+        "--telegram-decision-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_TELEGRAM_DECISION_TIMEOUT_SEC", "1800")),
+        help="How long the workload should wait for a Telegram operator decision.",
+    )
+    parser.add_argument(
+        "--telegram-decision-poll-interval-sec",
+        type=float,
+        default=float(os.environ.get("OFFDESK_TELEGRAM_DECISION_POLL_INTERVAL_SEC", "5")),
+        help="Polling interval for Telegram decision replies.",
+    )
+    parser.add_argument(
+        "--telegram-decision-dry-run",
+        action="store_true",
+        default=os.environ.get("OFFDESK_TELEGRAM_DECISION_DRY_RUN", "0") in {"1", "true", "yes", "on"},
+        help="Write relay artifacts without sending Telegram messages.",
     )
     parser.add_argument(
         "--wiki-candidate-mode",
@@ -571,6 +610,7 @@ def build_preflight(
     allow_blockers: bool,
 ) -> dict[str, Any]:
     blockers = []
+    warnings = []
     if not role_gate["ready"]:
         blockers.append(role_gate["reason"])
     if not review_artifact["ready"]:
@@ -581,6 +621,7 @@ def build_preflight(
         blockers.append(evidence_review["reason"])
     if not council_config["ready"]:
         blockers.extend(council_config.get("blocking_reasons") or [council_config["reason"]])
+    warnings.extend(council_config.get("warnings") or [])
     return {
         "role_gate": role_gate,
         "review_artifact": review_artifact,
@@ -588,36 +629,111 @@ def build_preflight(
         "evidence_review": evidence_review,
         "council": council_config,
         "blocking_reasons": blockers,
+        "warnings": warnings,
         "ready_for_enqueue": not blockers,
         "enqueue_allowed": not blockers or allow_blockers,
         "allow_preflight_blockers": allow_blockers,
     }
 
 
+def parse_env_file(path: pathlib.Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def summarize_operator_decision_relay(args: argparse.Namespace) -> dict[str, Any]:
+    if args.council_operator_decision_relay == "disabled":
+        return {
+            "mode": "disabled",
+            "ready": True,
+            "reason": "operator_decision_relay_disabled",
+            "blocking_reasons": [],
+            "warnings": [],
+        }
+    blockers = []
+    warnings = [
+        "telegram_operator_decision_relay_controls_continuation_only_not_mutation_approval"
+    ]
+    if args.council_mode == "disabled":
+        blockers.append("telegram_operator_decision_relay_requires_council")
+    env = parse_env_file(args.telegram_env_file)
+    if not args.telegram_env_file.exists():
+        blockers.append("telegram_env_file_missing")
+    elif not env.get("TELEGRAM_BOT_TOKEN"):
+        blockers.append("telegram_bot_token_missing")
+    elif not (env.get("TELEGRAM_OWNER_CHAT_ID") or env.get("TELEGRAM_ALLOW_CHAT_IDS")):
+        blockers.append("telegram_owner_or_allow_chat_missing")
+    if args.telegram_decision_timeout_sec <= 0:
+        blockers.append("telegram_decision_timeout_must_be_positive")
+    ready = not blockers
+    return {
+        "mode": "telegram",
+        "ready": ready,
+        "reason": "telegram_operator_decision_relay_configured" if ready else ",".join(blockers),
+        "blocking_reasons": blockers,
+        "warnings": warnings,
+        "env_file": str(args.telegram_env_file),
+        "owner_configured": bool(env.get("TELEGRAM_OWNER_CHAT_ID")),
+        "allow_list_configured": bool(env.get("TELEGRAM_ALLOW_CHAT_IDS")),
+        "timeout_sec": max(0, args.telegram_decision_timeout_sec),
+        "poll_interval_sec": max(0.2, args.telegram_decision_poll_interval_sec),
+        "dry_run": bool(args.telegram_decision_dry_run),
+        "allowed_decisions": ["continue", "revise", "block", "stop"],
+    }
+
+
 def summarize_council_config(args: argparse.Namespace) -> dict[str, Any]:
+    operator_relay = summarize_operator_decision_relay(args)
     if args.council_mode == "disabled":
         return {
             "mode": args.council_mode,
-            "ready": True,
+            "ready": operator_relay["ready"],
             "reason": "council_disabled",
-            "blocking_reasons": [],
+            "blocking_reasons": operator_relay["blocking_reasons"],
+            "warnings": operator_relay["warnings"],
+            "operator_decision_relay": operator_relay,
         }
     blockers = []
+    warnings = []
     if args.council_mode == "command" and not args.gpt_council_command:
         blockers.append("gpt_council_command_missing")
     if args.council_mode == "command" and not args.claude_council_command:
         blockers.append("claude_council_command_missing")
+    if args.council_mode == "prompt-package":
+        warnings.append("prompt_package_council_writes_reviewer_prompts_but_does_not_execute_them")
+        if args.council_stop_on_non_continue and operator_relay["mode"] == "disabled":
+            warnings.append(PROMPT_PACKAGE_STOP_WARNING)
+        elif args.council_stop_on_non_continue:
+            warnings.append("prompt_package_council_can_continue_only_after_operator_decision_relay")
+        else:
+            warnings.append("prompt_package_council_records_needs_council_execution_without_stopping")
+    blockers.extend(operator_relay["blocking_reasons"])
+    warnings.extend(operator_relay["warnings"])
     ready = not blockers
     return {
         "mode": args.council_mode,
         "ready": ready,
         "reason": "council_configured" if ready else ",".join(blockers),
         "blocking_reasons": blockers,
+        "warnings": warnings,
         "reviewers": ["gpt", "claude"],
         "every": max(1, args.council_every),
         "stop_on_non_continue": args.council_stop_on_non_continue,
         "gpt_command_configured": bool(args.gpt_council_command),
         "claude_command_configured": bool(args.claude_council_command),
+        "operator_decision_relay": operator_relay,
     }
 
 
@@ -772,6 +888,21 @@ def build_workload_command(
             command.extend(["--claude-council-command", args.claude_council_command])
         if not args.council_stop_on_non_continue:
             command.append("--no-council-stop-on-non-continue")
+        if args.council_operator_decision_relay != "disabled":
+            command.extend(
+                [
+                    "--council-operator-decision-relay",
+                    args.council_operator_decision_relay,
+                    "--telegram-env-file",
+                    str(args.telegram_env_file),
+                    "--telegram-decision-timeout-sec",
+                    str(max(0, args.telegram_decision_timeout_sec)),
+                    "--telegram-decision-poll-interval-sec",
+                    str(max(0.2, args.telegram_decision_poll_interval_sec)),
+                ]
+            )
+            if args.telegram_decision_dry_run:
+                command.append("--telegram-decision-dry-run")
     if args.wiki_candidate_mode != "disabled":
         command.extend(
             [
@@ -885,7 +1016,9 @@ def render_launch_dry_run_report(
     schedule: dict[str, Any],
 ) -> str:
     blockers = preflight.get("blocking_reasons") or []
+    warnings = preflight.get("warnings") or []
     module_purposes = module_preflight.get("recommended_command_purposes") or []
+    operator_relay = council_config.get("operator_decision_relay") or {}
     lines = [
         "# TwinPaper Launch Dry Run",
         "",
@@ -918,6 +1051,8 @@ def render_launch_dry_run_report(
         f"- module_command_purposes: `{', '.join(module_purposes) if module_purposes else 'none'}`",
         f"- evidence_review: `{markdown_scalar(evidence_review['ready'])}` reason=`{evidence_review.get('reason')}` path=`{evidence_review.get('path')}`",
         f"- council: `{markdown_scalar(council_config['ready'])}` mode=`{council_config['mode']}` reason=`{council_config.get('reason')}`",
+        f"- council_stop_on_non_continue: `{markdown_scalar(council_config.get('stop_on_non_continue'))}`",
+        f"- council_operator_decision_relay: `{operator_relay.get('mode')}` ready=`{markdown_scalar(operator_relay.get('ready'))}` timeout_sec=`{operator_relay.get('timeout_sec')}`",
         "",
         "## Blockers",
         "",
@@ -929,12 +1064,36 @@ def render_launch_dry_run_report(
     lines.extend(
         [
             "",
+            "## Warnings",
+            "",
+        ]
+    )
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+        if PROMPT_PACKAGE_STOP_WARNING in warnings:
+            lines.append(
+                "- prompt-package council writes reviewer prompts but does not run GPT/Claude reviewers; with `stop_on_non_continue=true`, `needs_council_execution` is an expected hard stop."
+            )
+        if "prompt_package_council_can_continue_only_after_operator_decision_relay" in warnings:
+            lines.append(
+                "- prompt-package council still does not run GPT/Claude reviewers; Telegram relay can only apply an explicit operator continuation decision."
+            )
+        if "telegram_operator_decision_relay_controls_continuation_only_not_mutation_approval" in warnings:
+            lines.append(
+                "- Telegram replies are limited to continuation control and do not approve mutations, cleanup, provider retargeting, wiki promotion, or file changes."
+            )
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
             "## Safety Boundary",
             "",
             "- Runtime dispatch still requires the normal `dispatch.runtime` approval path.",
             "- The target TwinPaper repo is treated as read-only.",
             "- File deletion, cleanup, reboot, service restart, storage, package, permission, process, network, kernel, firmware, and power-state mutations remain forbidden without separate approval.",
             "- Adaptive wiki writes are limited to the configured candidate/trial stores; promotion is not allowed here.",
+            "- Telegram operator decisions, when enabled, are stored as workload artifacts and are not canonical approval records.",
             "",
             "## Operator Commands",
             "",
@@ -964,6 +1123,185 @@ def render_launch_dry_run_report(
             f"- evidence_review: `{manifest['artifacts']['evidence_review']}`",
             f"- runner_log: `{manifest['artifacts']['runner_log']}`",
             f"- result: `{manifest['artifacts']['result']}`",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_long_run_validation_packet(
+    *,
+    manifest: dict[str, Any],
+    preflight: dict[str, Any],
+    schedule: dict[str, Any],
+) -> str:
+    blockers = preflight.get("blocking_reasons") or []
+    warnings = preflight.get("warnings") or []
+    commands = manifest["commands"]
+    artifacts = manifest["artifacts"]
+    operator_relay = manifest["council"].get("operator_decision_relay") or {}
+    lines = [
+        "# TwinPaper Long-Run Validation Packet",
+        "",
+        "This packet turns a prepared TwinPaper Offdesk workload into an auditable validation sequence. It does not launch runtime work by itself, approve actions, close out files, or promote wiki entries.",
+        "",
+        "## Validation Goal",
+        "",
+        "- Prove more than launch mechanics: Council usefulness, output quality, closeout ergonomics, Ondesk return readiness, and wiki review load.",
+        "- Keep runtime work under `local-tmux` so progress, heartbeat, logs, and result artifacts remain inspectable.",
+        "- Treat Offdesk output as evidence requiring review, not as trusted completion.",
+        "",
+        "## Prepared Scope",
+        "",
+        f"- project_key: `{manifest['project_key']}`",
+        f"- request_id: `{manifest['request_id']}`",
+        f"- task_id: `{manifest['task_id']}`",
+        f"- runner: `{manifest['safety']['runner']}`",
+        f"- council_mode: `{manifest['council']['mode']}`",
+        f"- council_stop_on_non_continue: `{markdown_scalar(manifest['council'].get('stop_on_non_continue'))}`",
+        f"- council_operator_decision_relay: `{operator_relay.get('mode')}`",
+        f"- telegram_decision_timeout_sec: `{operator_relay.get('timeout_sec')}`",
+        f"- wiki_candidate_mode: `{manifest['adaptive_wiki_learning']['candidate_mode']}`",
+        f"- wiki_trial_mode: `{manifest['adaptive_wiki_learning']['trial_mode']}`",
+        f"- schedule_mode: `{schedule['mode']}`",
+        f"- schedule_target_at: `{markdown_scalar(schedule.get('target_at'))}`",
+        f"- scheduled_duration_minutes: `{schedule['duration_minutes']:.1f}`",
+        "",
+        "## Gate 1: Prepare Review",
+        "",
+        f"- ready_for_enqueue: `{markdown_scalar(preflight['ready_for_enqueue'])}`",
+        f"- enqueue_allowed: `{markdown_scalar(preflight['enqueue_allowed'])}`",
+        "",
+    ]
+    if blockers:
+        lines.append("Blockers:")
+        lines.extend(f"- {blocker}" for blocker in blockers)
+    else:
+        lines.append("Blockers: none")
+    if warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        lines.extend(f"- {warning}" for warning in warnings)
+        if PROMPT_PACKAGE_STOP_WARNING in warnings:
+            lines.append(
+                "- prompt-package council writes reviewer prompts but does not run GPT/Claude reviewers; with `stop_on_non_continue=true`, the run can stop before the scheduled duration."
+            )
+        if "prompt_package_council_can_continue_only_after_operator_decision_relay" in warnings:
+            lines.append(
+                "- prompt-package council can continue past `needs_council_execution` only when the Telegram operator relay receives an explicit `continue` decision."
+            )
+        if "telegram_operator_decision_relay_controls_continuation_only_not_mutation_approval" in warnings:
+            lines.append(
+                "- Telegram replies only control continuation and do not approve mutations, cleanup, provider retargeting, wiki promotion, or file changes."
+            )
+    else:
+        lines.append("")
+        lines.append("Warnings: none")
+    lines.extend(
+        [
+            "",
+            "Required first reads:",
+            "",
+            "```bash",
+            f"cat {shlex.quote(artifacts['preflight'])}",
+            f"cat {shlex.quote(artifacts['prepared_task'])}",
+            f"cat {shlex.quote(artifacts['launch_dry_run_report'])}",
+            "```",
+            "",
+            "Do not continue if `preflight.json` has blockers, the runner is not `local-tmux` for a long run, or the launch dry run does not match the intended project/module scope.",
+            "",
+            "## Gate 2: Runtime Approval",
+            "",
+            "```bash",
+            commands["enqueue"],
+            commands["tick"],
+            commands["pending"],
+            "```",
+            "",
+            "Approve only the pending row whose action is `dispatch.runtime`, whose task id matches this packet, and whose preview matches the launch dry run:",
+            "",
+            "```bash",
+            commands["approve_oldest_then_tick"],
+            "```",
+            "",
+            "This approval does not authorize provider fallback, file cleanup, closeout changes, or wiki promotion.",
+            "",
+            "## Gate 3: Live Monitoring",
+            "",
+            "```bash",
+            commands["poll"],
+            commands["tasks"],
+            "```",
+            "",
+            "Inspect the runtime artifacts together; do not report completion from one status field:",
+            "",
+            f"- runner_log: `{artifacts['runner_log']}`",
+            f"- heartbeat: `{artifacts['heartbeat']}`",
+            f"- progress: `{artifacts['progress']}`",
+            f"- council_progress: `{artifacts['council_progress']}`",
+            f"- operator_decision_relay: `{artifacts.get('operator_decision_relay')}`",
+            f"- result: `{artifacts['result']}`",
+            f"- report: `{artifacts['report']}`",
+            "",
+            "Stop and inspect if polling reports stale callback, stale heartbeat, missing result, unexpected provider retargeting, or a non-`continue` Council decision without an accepted Telegram operator decision.",
+            "",
+            "## Gate 4: Completion Evidence",
+            "",
+            "After `result.json` exists, inspect:",
+            "",
+            "```bash",
+            f"cat {shlex.quote(artifacts['result'])}",
+            f"cat {shlex.quote(artifacts['report'])}",
+            f"cat {shlex.quote(artifacts['result_review'])}",
+            "```",
+            "",
+            "The final report must separate pass/fail mechanics from operator judgement about quality and direction control.",
+            "",
+            "## Gate 5: Closeout",
+            "",
+            "Generate a review packet before returning to live work:",
+            "",
+            "```bash",
+            commands["closeout_dry_run"],
+            "```",
+            "",
+            "Closeout must remain a dry-run planner. If it proposes movement, archive, or deletion, treat that as a separate reviewed approval path.",
+            "",
+            "## Gate 6: Ondesk Return",
+            "",
+            "Start the next harness from artifacts, not raw chat history:",
+            "",
+            "```bash",
+            commands["ondesk_prompt_package"],
+            "```",
+            "",
+            "The prompt package should point to the latest closeout return package and tell the fresh harness what to read first.",
+            "",
+            "## Gate 7: Wiki Review",
+            "",
+            "Review generated knowledge as candidates before promotion:",
+            "",
+            "```bash",
+            commands["wiki_candidates"],
+            commands["wiki_review_active"],
+            commands["wiki_review_after_report"],
+            commands["wiki_runtime_policy_ack_report"],
+            commands["morning_wiki_review"],
+            "```",
+            "",
+            "Promote only entries with explicit evidence refs, correct project/module/agent-mode scope, and no hidden changes to approval, provider, command, or workdir behavior.",
+            "",
+            "## Hard Stop Conditions",
+            "",
+            "- `LAUNCH_DRY_RUN.md` reports blockers.",
+            "- `LAUNCH_DRY_RUN.md` reports warnings that contradict the validation goal.",
+            "- The pending approval is not the expected `dispatch.runtime` approval.",
+            "- The task uses `local-background` for a long Python workload.",
+            "- Polling reports stale callback, stale heartbeat, missing result, or missing closeout evidence.",
+            "- Telegram operator decision relay times out or returns anything other than an explicit request-id-matched decision.",
+            "- Closeout proposes file movement or deletion as already authorized.",
+            "- A wiki promotion lacks evidence refs or correct scope.",
+            "- `ondesk prompt-package` cannot identify the next first reads.",
             "",
         ]
     )
@@ -1031,7 +1369,18 @@ def main() -> int:
     )
     tick_args = [str(args.forager_bin), "-p", args.profile, "offdesk", "tick", "--limit", "1", "--json"]
     pending_args = [str(args.forager_bin), "-p", args.profile, "offdesk", "pending", "--json"]
-    tasks_args = [str(args.forager_bin), "-p", args.profile, "offdesk", "tasks", "--json"]
+    tasks_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "offdesk",
+        "tasks",
+        "--project-key",
+        args.project_key,
+        "--task-id",
+        task_id,
+        "--json",
+    ]
     poll_args = [str(args.forager_bin), "-p", args.profile, "offdesk", "poll", "--json"]
     role_gate_args = role_gate_command(args)
     review_args = review_harness_command(args)
@@ -1044,6 +1393,76 @@ def main() -> int:
         str(profile_dir(args.profile)),
         "--out",
         str(out_dir / "morning_wiki_review" / "report.json"),
+    ]
+    closeout_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "offdesk",
+        "closeout",
+        "--project-key",
+        args.project_key,
+        "--dry-run",
+    ]
+    ondesk_prompt_package_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "ondesk",
+        "prompt-package",
+        "--project-key",
+        args.project_key,
+    ]
+    wiki_candidates_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "offdesk",
+        "wiki",
+        "candidates",
+        "--project-key",
+        args.project_key,
+        "--json",
+    ]
+    wiki_review_active_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "offdesk",
+        "wiki",
+        "review",
+        "--active-only",
+        "--json",
+    ]
+    wiki_review_after_report_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "offdesk",
+        "wiki",
+        "review-after-report",
+        "--project-key",
+        args.project_key,
+        "--artifact-kind",
+        "report",
+        "--agent-mode",
+        "critique",
+        "--json",
+    ]
+    wiki_runtime_policy_ack_report_args = [
+        str(args.forager_bin),
+        "-p",
+        args.profile,
+        "offdesk",
+        "wiki",
+        "runtime-policy-ack-report",
+        "--project-key",
+        args.project_key,
+        "--artifact-kind",
+        "report",
+        "--agent-mode",
+        "critique",
+        "--json",
     ]
     prepared_task_path = out_dir / "prepared_task.json"
     generated_review_path = out_dir / "workload_review" / "results.json"
@@ -1112,6 +1531,12 @@ def main() -> int:
             "pending": shell_join(pending_args),
             "tasks": shell_join(tasks_args),
             "poll": shell_join(poll_args),
+            "closeout_dry_run": shell_join(closeout_args),
+            "ondesk_prompt_package": shell_join(ondesk_prompt_package_args),
+            "wiki_candidates": shell_join(wiki_candidates_args),
+            "wiki_review_active": shell_join(wiki_review_active_args),
+            "wiki_review_after_report": shell_join(wiki_review_after_report_args),
+            "wiki_runtime_policy_ack_report": shell_join(wiki_runtime_policy_ack_report_args),
             "approve_oldest_then_tick": shell_join([str(args.forager_bin), "-p", args.profile, "offdesk", "ok"])
             + " && "
             + shell_join(tick_args),
@@ -1122,6 +1547,7 @@ def main() -> int:
             "episodes": str(out_dir / "episodes"),
             "council": str(out_dir / "council"),
             "council_progress": str(out_dir / "council_progress.jsonl"),
+            "operator_decision_relay": str(out_dir / "council" / "<episode>" / "operator_decision"),
             "heartbeat": str(out_dir / "heartbeat.json"),
             "result": str(out_dir / "result.json"),
             "report": str(out_dir / "REPORT.md"),
@@ -1135,6 +1561,7 @@ def main() -> int:
             "prepared_task": str(prepared_task_path),
             "preflight": str(out_dir / "preflight.json"),
             "launch_dry_run_report": str(out_dir / "LAUNCH_DRY_RUN.md"),
+            "long_run_validation_packet": str(out_dir / "LONG_RUN_VALIDATION.md"),
             "review_artifact": str(generated_review_path) if review_generate else review_artifact.get("path"),
             "module_operation_preflight": module_preflight.get("path"),
             "evidence_bundle": str(evidence_bundle_path),
@@ -1226,10 +1653,13 @@ def main() -> int:
             f"- council_mode: `{council_config['mode']}`",
             f"- council_ready: `{council_config['ready']}`",
             f"- council_reason: `{council_config['reason']}`",
+            f"- council_operator_decision_relay: `{(council_config.get('operator_decision_relay') or {}).get('mode')}`",
+            f"- telegram_decision_timeout_sec: `{(council_config.get('operator_decision_relay') or {}).get('timeout_sec')}`",
             f"- wiki_candidate_mode: `{args.wiki_candidate_mode}`",
             f"- wiki_trial_mode: `{args.wiki_trial_mode}`",
             f"- ready_for_enqueue: `{preflight['ready_for_enqueue']}`",
             f"- blocking_reasons: `{preflight['blocking_reasons']}`",
+            f"- warnings: `{preflight['warnings']}`",
             f"- system_critical_constraints: `{', '.join(sorted(SYSTEM_CRITICAL_SAFETY))}`",
             "",
             "```bash",
@@ -1243,6 +1673,10 @@ def main() -> int:
             manifest["commands"]["approve_oldest_then_tick"],
             manifest["commands"]["poll"],
             manifest["commands"]["tasks"],
+            manifest["commands"]["closeout_dry_run"],
+            manifest["commands"]["ondesk_prompt_package"],
+            manifest["commands"]["wiki_candidates"],
+            manifest["commands"]["wiki_review_active"],
             "```",
             "",
         ]
@@ -1262,6 +1696,15 @@ def main() -> int:
         )
         + "\n",
     )
+    write_text(
+        out_dir / "LONG_RUN_VALIDATION.md",
+        render_long_run_validation_packet(
+            manifest=manifest,
+            preflight=preflight,
+            schedule=schedule,
+        )
+        + "\n",
+    )
     write_text(prepared_task_path, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
 
     enqueue_result: dict[str, Any] | None = None
@@ -1273,6 +1716,7 @@ def main() -> int:
                 "enqueue_blocked": True,
                 "manifest": str(out_dir / "prepared_task.json"),
                 "launch_dry_run_report": str(out_dir / "LAUNCH_DRY_RUN.md"),
+                "long_run_validation_packet": str(out_dir / "LONG_RUN_VALIDATION.md"),
                 "out_dir": str(out_dir),
                 "request_id": request_id,
                 "task_id": task_id,
@@ -1300,6 +1744,7 @@ def main() -> int:
         "enqueued": args.enqueue,
         "manifest": str(out_dir / "prepared_task.json"),
         "launch_dry_run_report": str(out_dir / "LAUNCH_DRY_RUN.md"),
+        "long_run_validation_packet": str(out_dir / "LONG_RUN_VALIDATION.md"),
         "out_dir": str(out_dir),
         "request_id": request_id,
         "task_id": task_id,
