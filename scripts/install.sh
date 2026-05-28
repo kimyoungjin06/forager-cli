@@ -31,6 +31,11 @@ detect_platform() {
 }
 
 get_latest_version() {
+    if [ -n "${FORAGER_VERSION:-}" ]; then
+        echo "$FORAGER_VERSION"
+        return 0
+    fi
+
     curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
         | grep '"tag_name"' \
         | sed -E 's/.*"([^"]+)".*/\1/'
@@ -41,12 +46,18 @@ main() {
     platform=$(detect_platform)
     success "Platform: $platform"
 
-    info "Fetching latest version..."
-    version=$(get_latest_version)
-    if [ -z "$version" ]; then
-        error "Failed to fetch latest version"
+    if [ -n "${FORAGER_VERSION:-}" ]; then
+        info "Using pinned version from FORAGER_VERSION..."
+    else
+        info "Fetching latest release version..."
     fi
-    success "Latest version: $version"
+    if ! version=$(get_latest_version); then
+        error "Failed to fetch latest GitHub release. Set FORAGER_VERSION=vX.Y.Z or build from source."
+    fi
+    if [ -z "$version" ]; then
+        error "No GitHub release version found. Set FORAGER_VERSION=vX.Y.Z or build from source."
+    fi
+    success "Version: $version"
 
     download_url="https://github.com/${REPO}/releases/download/${version}/forager-${platform}.tar.gz"
     legacy_download_url="https://github.com/${REPO}/releases/download/${version}/aoe-${platform}.tar.gz"
