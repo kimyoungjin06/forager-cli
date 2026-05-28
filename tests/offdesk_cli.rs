@@ -3878,6 +3878,106 @@ fn offdesk_enqueue_tasks_json_redacts_command() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_tasks_json_filters_by_project_status_task_and_latest() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let mut other_project = durable_task_with(
+        "other-completed",
+        "dispatch.runtime",
+        "completed",
+        now + Duration::seconds(3),
+        "true",
+        temp.path(),
+    );
+    other_project["project_key"] = json!("other");
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            durable_task_with(
+                "queued-task",
+                "dispatch.runtime",
+                "queued",
+                now,
+                "true",
+                temp.path(),
+            ),
+            durable_task_with(
+                "completed-old",
+                "dispatch.runtime",
+                "completed",
+                now + Duration::seconds(1),
+                "true",
+                temp.path(),
+            ),
+            durable_task_with(
+                "completed-new",
+                "dispatch.runtime",
+                "completed",
+                now + Duration::seconds(2),
+                "true",
+                temp.path(),
+            ),
+            other_project
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "tasks",
+            "--json",
+            "--project-key",
+            "project",
+            "--status",
+            "completed",
+        ])
+        .output()?;
+    assert!(output.status.success());
+    let tasks: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let task_ids: Vec<_> = tasks
+        .as_array()
+        .expect("tasks array")
+        .iter()
+        .map(|task| task["task_id"].as_str().expect("task id"))
+        .collect();
+    assert_eq!(task_ids, vec!["completed-old", "completed-new"]);
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "tasks",
+            "--json",
+            "--project-key",
+            "project",
+            "--status",
+            "completed",
+            "--latest",
+        ])
+        .output()?;
+    assert!(output.status.success());
+    let tasks: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let task_ids: Vec<_> = tasks
+        .as_array()
+        .expect("tasks array")
+        .iter()
+        .map(|task| task["task_id"].as_str().expect("task id"))
+        .collect();
+    assert_eq!(task_ids, vec!["completed-new"]);
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "tasks", "--json", "--task-id", "queued-task"])
+        .output()?;
+    assert!(output.status.success());
+    let tasks: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(tasks.as_array().expect("tasks array").len(), 1);
+    assert_eq!(tasks[0]["task_id"], "queued-task");
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_tasks_human_includes_recovery_commands_and_redacts_secrets() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -4713,6 +4813,47 @@ fn legacy_profile_env_still_works() -> Result<()> {
 
     assert!(output.status.success());
     assert!(profile_dir_for(temp.path(), "legacy-name").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn configured_default_profile_is_used_when_no_profile_is_provided() -> Result<()> {
+    let temp = tempdir()?;
+
+    let create_output = forager_command(temp.path())
+        .args(["profile", "create", "work"])
+        .output()?;
+    assert!(create_output.status.success());
+
+    let default_output = forager_command(temp.path())
+        .args(["profile", "default", "work"])
+        .output()?;
+    assert!(default_output.status.success());
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+
+    assert!(profile_dir_for(temp.path(), "work").exists());
+    assert!(!profile_dir(temp.path()).exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn profile_argument_rejects_path_traversal() -> Result<()> {
+    let temp = tempdir()?;
+
+    let output = forager_command(temp.path())
+        .args(["-p", "../../outside", "list"])
+        .output()?;
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Profile name cannot contain path separators"));
+    assert!(!temp.path().join(".config").join("outside").exists());
     Ok(())
 }
 
@@ -6469,6 +6610,40 @@ fn offdesk_tick_creates_provider_fallback_approval_then_retargets_and_launches()
         approvals[0]["metadata"]["apply_scope"],
         "request_matching_provider_model"
     );
+    let approval_brief = &approvals[0]["metadata"]["approval_brief"];
+    assert_eq!(approval_brief["schema"], "approval_brief.v1");
+    assert_eq!(approval_brief["source"], "offdesk.provider_fallback");
+    assert_eq!(approval_brief["recommendation"], "approve");
+    assert_eq!(approval_brief["subject"], "provider fallback");
+    assert!(approval_brief["summary_lines"]
+        .as_array()
+        .expect("summary lines")
+        .iter()
+        .any(|line| line
+            .as_str()
+            .unwrap_or_default()
+            .contains("Provider/model retargeting")));
+    assert!(approval_brief["scope"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("does not approve runtime dispatch"));
+    assert!(approval_brief["decision_impacts"]["approve"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("runtime dispatch still needs its own approval"));
+    assert!(approval_brief["decision_impacts"]["deny"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Keep openai model gpt-4.1 queued"));
+    assert_eq!(approval_brief["options"][0]["id"], "approve");
+    assert_eq!(approval_brief["options"][0]["label"], "Approve fallback");
+    assert_eq!(approval_brief["options"][1]["id"], "deny");
+    assert!(approval_brief["options"][1]["natural_input_prompt"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("should not be applied"));
+    assert_eq!(approval_brief["options"][2]["id"], "defer");
+    assert!(!serde_json::to_string(approval_brief)?.contains("sk-test-provider-fallback"));
     assert!(approvals[0]["metadata"]["candidates"]
         .as_array()
         .expect("candidates")
@@ -6488,6 +6663,9 @@ fn offdesk_tick_creates_provider_fallback_approval_then_retargets_and_launches()
         .output()?;
     assert!(pending_output.status.success());
     let pending_stdout = String::from_utf8_lossy(&pending_output.stdout);
+    assert!(pending_stdout.contains("prompt: approve recommendation for provider fallback"));
+    assert!(pending_stdout.contains("Approve this provider fallback retargeting?"));
+    assert!(pending_stdout.contains("does not approve runtime dispatch"));
     assert!(pending_stdout.contains("fallback target: openai model gpt-4.1"));
     assert!(pending_stdout.contains("gpt-4.1-mini"));
 

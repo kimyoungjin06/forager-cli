@@ -800,6 +800,10 @@ Show durable offdesk tasks
 
 ###### **Options:**
 
+* `--project-key <PROJECT_KEY>` — Filter tasks by project key
+* `--task-id <TASK_ID>` — Filter tasks by exact task ID
+* `--status <STATUS>` — Filter tasks by status. Repeat for multiple statuses
+* `--latest` — Return only the newest matching task by updated_at
 * `--json` — Output as JSON
 
 
