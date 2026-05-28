@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::warn;
 
-use super::{get_profile_dir, Group, GroupTree, Instance, DEFAULT_PROFILE};
+use super::{get_profile_dir, normalize_profile_name, Group, GroupTree, Instance};
 
 pub struct Storage {
     profile: String,
@@ -14,11 +14,7 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(profile: &str) -> Result<Self> {
-        let profile_name = if profile.is_empty() {
-            DEFAULT_PROFILE.to_string()
-        } else {
-            profile.to_string()
-        };
+        let profile_name = normalize_profile_name(profile)?;
 
         let profile_dir = get_profile_dir(&profile_name)?;
         let sessions_path = profile_dir.join("sessions.json");

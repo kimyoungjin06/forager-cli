@@ -818,6 +818,7 @@ mod tests {
                     candidate_limit: 3,
                     candidates: vec![fallback_candidate()],
                     apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+                    approval_brief: None,
                 },
             )),
         }

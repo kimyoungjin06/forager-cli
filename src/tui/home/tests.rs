@@ -1086,6 +1086,20 @@ fn create_test_env_with_group_sessions() -> TestEnv {
     TestEnv { _temp: temp, view }
 }
 
+fn drain_deletion_results(view: &mut HomeView, expected: usize) {
+    let mut observed = 0;
+    for _ in 0..100 {
+        if view.apply_deletion_results() {
+            observed += 1;
+            if observed >= expected {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("timed out waiting for {expected} deletion results; observed {observed}");
+}
+
 #[test]
 #[serial]
 fn test_group_has_managed_worktrees() {
@@ -1209,19 +1223,20 @@ fn test_delete_group_with_sessions_updates_groups_field() {
         delete_sessions: true,
         delete_worktrees: false,
         delete_branches: false,
+        force_delete_branches: false,
         delete_containers: false,
         force_delete_worktrees: false,
     };
     env.view.delete_group_with_sessions(&options).unwrap();
 
-    // Verify the group is removed from group_tree
-    assert!(!env.view.group_tree.group_exists("work"));
-    assert!(!env.view.group_tree.group_exists("work/projects"));
+    // The group remains visible while deletion is pending.
+    assert!(env.view.group_tree.group_exists("work"));
+    assert!(env.view.group_tree.group_exists("work/projects"));
 
-    // Verify self.groups is updated (this is the bug fix)
+    // The persisted groups list is only updated after deletion succeeds.
     let group_paths: Vec<_> = env.view.groups.iter().map(|g| g.path.as_str()).collect();
-    assert!(!group_paths.contains(&"work"));
-    assert!(!group_paths.contains(&"work/projects"));
+    assert!(group_paths.contains(&"work"));
+    assert!(group_paths.contains(&"work/projects"));
 
     // Verify sessions are marked as deleting
     let deleting_count = env
@@ -1235,6 +1250,15 @@ fn test_delete_group_with_sessions_updates_groups_field() {
 
     // Instance count should remain the same (they're marked as deleting, not removed yet)
     assert_eq!(env.view.instances.len(), initial_instance_count);
+
+    drain_deletion_results(&mut env.view, 3);
+
+    // Once all deletion requests succeed, the empty group path is removed.
+    assert!(!env.view.group_tree.group_exists("work"));
+    assert!(!env.view.group_tree.group_exists("work/projects"));
+    let group_paths: Vec<_> = env.view.groups.iter().map(|g| g.path.as_str()).collect();
+    assert!(!group_paths.contains(&"work"));
+    assert!(!group_paths.contains(&"work/projects"));
 }
 
 #[test]
@@ -1273,13 +1297,15 @@ fn test_delete_group_with_sessions_respects_worktree_option() {
         delete_sessions: true,
         delete_worktrees: true,
         delete_branches: false,
+        force_delete_branches: false,
         delete_containers: false,
         force_delete_worktrees: false,
     };
     view.delete_group_with_sessions(&options).unwrap();
+    drain_deletion_results(&mut view, 1);
 
     // We can't easily verify the deletion request was sent with the right flags
-    // without mocking, but we can verify the group was deleted
+    // without mocking, but we can verify the group is deleted after success.
     assert!(!view.group_tree.group_exists("work"));
 }
 
@@ -1320,10 +1346,12 @@ fn test_delete_group_with_sessions_respects_container_option() {
         delete_sessions: true,
         delete_worktrees: false,
         delete_branches: false,
+        force_delete_branches: false,
         delete_containers: true,
         force_delete_worktrees: false,
     };
     view.delete_group_with_sessions(&options).unwrap();
+    drain_deletion_results(&mut view, 1);
 
     // Verify the group was deleted
     assert!(!view.group_tree.group_exists("work"));
@@ -1355,10 +1383,12 @@ fn test_delete_group_includes_nested_groups() {
         delete_sessions: true,
         delete_worktrees: false,
         delete_branches: false,
+        force_delete_branches: false,
         delete_containers: false,
         force_delete_worktrees: false,
     };
     env.view.delete_group_with_sessions(&options).unwrap();
+    drain_deletion_results(&mut env.view, 3);
 
     // Verify both parent and nested groups are removed
     assert!(!env.view.group_tree.group_exists("work"));

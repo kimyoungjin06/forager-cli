@@ -64,7 +64,7 @@ pub enum OffdeskCommands {
     Tick(TickArgs),
 
     /// Show durable offdesk tasks
-    Tasks(JsonArgs),
+    Tasks(TasksArgs),
 
     /// Show provider capacity cooldown state
     ProviderCapacity(JsonArgs),
@@ -446,6 +446,29 @@ pub struct ResolveArgs {
 
 #[derive(Args)]
 pub struct JsonArgs {
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct TasksArgs {
+    /// Filter tasks by project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Filter tasks by exact task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Filter tasks by status. Repeat for multiple statuses.
+    #[arg(long, value_parser = parse_offdesk_task_status)]
+    status: Vec<OffdeskTaskStatus>,
+
+    /// Return only the newest matching task by updated_at
+    #[arg(long)]
+    latest: bool,
+
     /// Output as JSON
     #[arg(long)]
     json: bool,
@@ -2205,12 +2228,19 @@ async fn tick(profile: &str, args: TickArgs) -> Result<()> {
     Ok(())
 }
 
-async fn tasks(profile: &str, args: JsonArgs) -> Result<()> {
-    let task_views: Vec<OffdeskTaskView> = task_store(profile)?
+async fn tasks(profile: &str, args: TasksArgs) -> Result<()> {
+    let mut task_views: Vec<OffdeskTaskView> = task_store(profile)?
         .load()?
         .into_iter()
+        .filter(|task| task_matches_tasks_filter(task, &args))
         .map(|task| task.operator_view())
         .collect();
+    if args.latest {
+        task_views.sort_by_key(|task| task.updated_at);
+        if let Some(latest) = task_views.pop() {
+            task_views = vec![latest];
+        }
+    }
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&task_views)?);
@@ -2224,6 +2254,23 @@ async fn tasks(profile: &str, args: JsonArgs) -> Result<()> {
 
     print_tasks(&task_views);
     Ok(())
+}
+
+fn task_matches_tasks_filter(task: &OffdeskTask, args: &TasksArgs) -> bool {
+    if let Some(project_key) = args.project_key.as_deref() {
+        if task.project_key != project_key {
+            return false;
+        }
+    }
+    if let Some(task_id) = args.task_id.as_deref() {
+        if task.task_id != task_id {
+            return false;
+        }
+    }
+    if !args.status.is_empty() && !args.status.contains(&task.status) {
+        return false;
+    }
+    true
 }
 
 async fn provider_capacity(profile: &str, args: JsonArgs) -> Result<()> {
@@ -7542,11 +7589,7 @@ fn default_wiki_scope_ref(scope: AdaptiveWikiScope) -> String {
 }
 
 fn read_only_profile_dir(profile: &str) -> Result<PathBuf> {
-    let profile_name = if profile.is_empty() {
-        DEFAULT_PROFILE
-    } else {
-        profile
-    };
+    let profile_name = crate::session::normalize_profile_name(profile)?;
     Ok(resolved_app_dir_path()?.join("profiles").join(profile_name))
 }
 
@@ -8791,6 +8834,17 @@ fn print_approvals(approvals: &[PendingActionApproval]) {
             .as_ref()
             .and_then(crate::offdesk::ActionApprovalMetadata::as_provider_fallback)
         {
+            if let Some(brief) = metadata.approval_brief.as_ref() {
+                println!(
+                    "  prompt: {} recommendation for {}",
+                    brief.recommendation, brief.subject
+                );
+                for line in brief.summary_lines.iter().take(3) {
+                    println!("    {}", line);
+                }
+                println!("  question: {}", brief.question);
+                println!("  scope: {}", brief.scope);
+            }
             println!(
                 "  fallback target: {} model {} ({})",
                 metadata.current_provider_id,
@@ -9099,8 +9153,32 @@ fn is_terminal_task_status(status: OffdeskTaskStatus) -> bool {
     )
 }
 
+fn parse_offdesk_task_status(value: &str) -> std::result::Result<OffdeskTaskStatus, String> {
+    match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+        "queued" => Ok(OffdeskTaskStatus::Queued),
+        "pending-approval" => Ok(OffdeskTaskStatus::PendingApproval),
+        "launched" => Ok(OffdeskTaskStatus::Launched),
+        "running" => Ok(OffdeskTaskStatus::Running),
+        "completed" => Ok(OffdeskTaskStatus::Completed),
+        "failed" => Ok(OffdeskTaskStatus::Failed),
+        "resume-pending" => Ok(OffdeskTaskStatus::ResumePending),
+        "cancelled" => Ok(OffdeskTaskStatus::Cancelled),
+        _ => Err("expected one of: queued, pending-approval, launched, running, completed, failed, resume-pending, cancelled".to_string()),
+    }
+}
+
 fn status_label(status: OffdeskTaskStatus) -> String {
-    format!("{:?}", status).to_lowercase()
+    match status {
+        OffdeskTaskStatus::Queued => "queued",
+        OffdeskTaskStatus::PendingApproval => "pending-approval",
+        OffdeskTaskStatus::Launched => "launched",
+        OffdeskTaskStatus::Running => "running",
+        OffdeskTaskStatus::Completed => "completed",
+        OffdeskTaskStatus::Failed => "failed",
+        OffdeskTaskStatus::ResumePending => "resume-pending",
+        OffdeskTaskStatus::Cancelled => "cancelled",
+    }
+    .to_string()
 }
 
 fn recommended_task_command(task: &OffdeskTaskView) -> String {

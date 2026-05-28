@@ -304,6 +304,10 @@ fn config_path() -> Result<PathBuf> {
     Ok(get_app_dir()?.join("config.toml"))
 }
 
+fn read_only_config_path() -> Result<PathBuf> {
+    Ok(super::resolved_app_dir_path()?.join("config.toml"))
+}
+
 impl Config {
     pub fn load() -> Result<Self> {
         let path = config_path()?;
@@ -323,6 +327,17 @@ pub fn load_config() -> Result<Option<Config>> {
         return Ok(None);
     }
     Ok(Some(Config::load()?))
+}
+
+pub fn load_config_read_only() -> Result<Option<Config>> {
+    let path = read_only_config_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&path)?;
+    let config: Config = toml::from_str(&content)?;
+    Ok(Some(config))
 }
 
 pub fn save_config(config: &Config) -> Result<()> {

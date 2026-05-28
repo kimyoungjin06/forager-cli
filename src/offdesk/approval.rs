@@ -14,6 +14,7 @@ use super::redaction::operator_safe_text;
 
 const APPROVALS_FILE: &str = "pending_action_approvals.json";
 const ACTION_AUDIT_FILE: &str = "action_audit.jsonl";
+const APPROVAL_BRIEF_SCHEMA: &str = "approval_brief.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -108,6 +109,8 @@ impl ActionApprovalMetadata {
         if candidates.is_empty() {
             return None;
         }
+        let approval_brief =
+            ApprovalBrief::provider_fallback(recommendation, runner_role, &candidates);
 
         Some(Self::ProviderFallback(ProviderFallbackApprovalMetadata {
             current_provider_id: operator_safe_text(&recommendation.current_provider_id),
@@ -120,12 +123,147 @@ impl ActionApprovalMetadata {
             candidate_limit,
             candidates,
             apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+            approval_brief: Some(approval_brief),
         }))
     }
 
     pub fn as_provider_fallback(&self) -> Option<&ProviderFallbackApprovalMetadata> {
         match self {
             Self::ProviderFallback(metadata) => Some(metadata),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalBrief {
+    pub schema: String,
+    pub recommendation: String,
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub summary_lines: Vec<String>,
+    pub scope: String,
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<ApprovalBriefOption>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub why_recommendation: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub decision_impacts: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reply_examples: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub context: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalBriefOption {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub natural_input_prompt: Option<String>,
+}
+
+impl ApprovalBrief {
+    fn provider_fallback(
+        recommendation: &ProviderFallbackRecommendation,
+        runner_role: &str,
+        candidates: &[ProviderFallbackCandidate],
+    ) -> Self {
+        let current_target = provider_model_label(
+            &recommendation.current_provider_id,
+            recommendation.current_model.as_deref(),
+        );
+        let candidate_label = candidates
+            .first()
+            .map(|candidate| {
+                provider_model_label(&candidate.provider_id, candidate.model.as_deref())
+            })
+            .unwrap_or_else(|| "no recommended candidate".to_string());
+        let safe_trigger = operator_safe_text(&recommendation.trigger_reason);
+        let safe_runner_role = operator_safe_text(runner_role);
+        let approve_impact = format!(
+            "Retarget only this request from {current_target} to {candidate_label}; runtime dispatch still needs its own approval."
+        );
+        let deny_impact = format!(
+            "Keep {current_target} queued on the current provider/model and wait for capacity recovery or manual retargeting."
+        );
+        let defer_impact =
+            "Leave this approval pending while reviewing provider capacity, quality, or cost evidence."
+                .to_string();
+        let mut decision_impacts = HashMap::new();
+        decision_impacts.insert("approve".to_string(), approve_impact.clone());
+        decision_impacts.insert("deny".to_string(), deny_impact.clone());
+        decision_impacts.insert("defer".to_string(), defer_impact.clone());
+
+        let mut context = HashMap::new();
+        context.insert("runner_role".to_string(), safe_runner_role.clone());
+        context.insert("current_provider_model".to_string(), current_target.clone());
+        context.insert("top_candidate".to_string(), candidate_label.clone());
+
+        Self {
+            schema: APPROVAL_BRIEF_SCHEMA.to_string(),
+            source: Some("offdesk.provider_fallback".to_string()),
+            recommendation: "approve".to_string(),
+            subject: "provider fallback".to_string(),
+            summary_lines: vec![
+                "Provider/model retargeting is waiting for operator approval.".to_string(),
+                format!("Reason: {safe_trigger}."),
+                format!("Candidate: {candidate_label}."),
+            ],
+            options: vec![
+                ApprovalBriefOption {
+                    id: "approve".to_string(),
+                    label: "Approve fallback".to_string(),
+                    description: approve_impact,
+                    natural_input_prompt: None,
+                },
+                ApprovalBriefOption {
+                    id: "deny".to_string(),
+                    label: "Deny fallback".to_string(),
+                    description: deny_impact,
+                    natural_input_prompt: Some(
+                        "Explain why this fallback should not be applied.".to_string(),
+                    ),
+                },
+                ApprovalBriefOption {
+                    id: "defer".to_string(),
+                    label: "Need more detail".to_string(),
+                    description: defer_impact,
+                    natural_input_prompt: Some(
+                        "State what provider, cost, or quality evidence you need first.".to_string(),
+                    ),
+                },
+            ],
+            why_recommendation: vec![
+                format!("{current_target} is currently blocked by provider capacity state."),
+                format!("{candidate_label} is the first currently recommended fallback candidate."),
+                "The approval is scoped to provider/model retargeting only.".to_string(),
+            ],
+            evidence: candidates
+                .iter()
+                .take(3)
+                .map(|candidate| {
+                    format!(
+                        "{}: {}",
+                        provider_model_label(&candidate.provider_id, candidate.model.as_deref()),
+                        operator_safe_text(&candidate.reason)
+                    )
+                })
+                .collect(),
+            decision_impacts,
+            reply_examples: vec![
+                "approve".to_string(),
+                "deny - keep the current provider until cooldown ends".to_string(),
+                "defer - check cost or quality first".to_string(),
+            ],
+            context,
+            scope: "Approves provider/model retargeting for this request only; does not approve runtime dispatch, command/workdir changes, cleanup, or wiki promotion.".to_string(),
+            question: "Approve this provider fallback retargeting?".to_string(),
         }
     }
 }
@@ -141,6 +279,8 @@ pub struct ProviderFallbackApprovalMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<ProviderFallbackCandidate>,
     pub apply_scope: ProviderFallbackApplyScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_brief: Option<ApprovalBrief>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -870,6 +1010,16 @@ fn operator_safe_provider_fallback_candidate(
     }
 }
 
+fn provider_model_label(provider_id: &str, model: Option<&str>) -> String {
+    match model
+        .map(operator_safe_text)
+        .filter(|model| !model.is_empty())
+    {
+        Some(model) => format!("{} model {}", operator_safe_text(provider_id), model),
+        None => format!("{} model -", operator_safe_text(provider_id)),
+    }
+}
+
 fn class_allowed(allowed: &[String], mutation_class: &str) -> bool {
     allowed.iter().any(|class| {
         let class = class.trim();
@@ -1052,6 +1202,7 @@ mod tests {
                 reason: "same provider fallback model".to_string(),
             }],
             apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+            approval_brief: None,
         })
     }
 

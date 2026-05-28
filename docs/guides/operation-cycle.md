@@ -157,5 +157,7 @@ Stop and inspect before continuing when:
 
 For the concrete TwinPaper validation flow, see
 [`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md). For
-the current baseline and remaining work queue, see
+the realistic long-run validation sequence, see
+[`TwinPaper Offdesk Long-Run Validation`](twinpaper-offdesk-long-run-validation.md).
+For the current baseline and remaining work queue, see
 [`Offdesk Operation Status`](../offdesk-operation-status.md).

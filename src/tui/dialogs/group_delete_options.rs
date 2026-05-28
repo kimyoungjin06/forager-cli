@@ -13,6 +13,7 @@ pub struct GroupDeleteOptions {
     pub delete_worktrees: bool,
     pub force_delete_worktrees: bool,
     pub delete_branches: bool,
+    pub force_delete_branches: bool,
     pub delete_containers: bool,
 }
 
@@ -51,6 +52,9 @@ impl GroupDeleteOptionsDialog {
             count += 2; // worktree checkbox + branch checkbox
             if self.options.delete_worktrees {
                 count += 1; // force checkbox
+            }
+            if self.options.delete_branches {
+                count += 1; // branch force checkbox
             }
         }
         if self.has_containers {
@@ -99,11 +103,20 @@ impl GroupDeleteOptionsDialog {
                 if self.options.delete_worktrees {
                     offset += 1; // force
                 }
+                if self.options.delete_branches {
+                    offset += 1; // branch force
+                }
             }
             Some(base + offset)
         } else {
             None
         }
+    }
+
+    fn branch_force_field_index(&self) -> Option<usize> {
+        self.branch_field_index()
+            .filter(|_| self.options.delete_branches)
+            .map(|index| index + 1)
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> DialogResult<GroupDeleteOptions> {
@@ -130,6 +143,7 @@ impl GroupDeleteOptionsDialog {
                         self.options.delete_worktrees = false;
                         self.options.force_delete_worktrees = false;
                         self.options.delete_branches = false;
+                        self.options.force_delete_branches = false;
                         self.options.delete_containers = false;
                     }
                     1 => {
@@ -146,6 +160,12 @@ impl GroupDeleteOptionsDialog {
                     }
                     f if Some(f) == self.branch_field_index() => {
                         self.options.delete_branches = !self.options.delete_branches;
+                        if !self.options.delete_branches {
+                            self.options.force_delete_branches = false;
+                        }
+                    }
+                    f if Some(f) == self.branch_force_field_index() => {
+                        self.options.force_delete_branches = !self.options.force_delete_branches;
                     }
                     f if Some(f) == self.container_field_index() => {
                         self.options.delete_containers = !self.options.delete_containers;
@@ -174,6 +194,7 @@ impl GroupDeleteOptionsDialog {
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let show_worktree_option = self.options.delete_sessions && self.has_managed_worktrees;
         let show_force_option = show_worktree_option && self.options.delete_worktrees;
+        let show_branch_force_option = show_worktree_option && self.options.delete_branches;
         let show_container_option = self.options.delete_sessions && self.has_containers;
         let dialog_width = 50;
         let mut dialog_height = 11; // Base height
@@ -181,6 +202,9 @@ impl GroupDeleteOptionsDialog {
             dialog_height += 2; // worktree + branch checkboxes
             if show_force_option {
                 dialog_height += 1; // force checkbox
+            }
+            if show_branch_force_option {
+                dialog_height += 1; // branch force checkbox
             }
         }
         if show_container_option {
@@ -212,6 +236,9 @@ impl GroupDeleteOptionsDialog {
                 constraints.push(Constraint::Length(1)); // Force checkbox
             }
             constraints.push(Constraint::Length(1)); // Branch checkbox
+            if show_branch_force_option {
+                constraints.push(Constraint::Length(1)); // Branch force checkbox
+            }
         }
         if show_container_option {
             constraints.push(Constraint::Length(1)); // Container checkbox
@@ -347,6 +374,29 @@ impl GroupDeleteOptionsDialog {
             ]);
             frame.render_widget(Paragraph::new(br_line), chunks[next_chunk]);
             next_chunk += 1;
+
+            if show_branch_force_option {
+                let bf_focused = Some(self.focused_field) == self.branch_force_field_index();
+                let bf_checkbox = if self.options.force_delete_branches {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                let bf_style = if bf_focused {
+                    Style::default().fg(theme.error).underlined()
+                } else if self.options.force_delete_branches {
+                    Style::default().fg(theme.error)
+                } else {
+                    Style::default().fg(theme.dimmed)
+                };
+                let bf_line = Line::from(vec![
+                    Span::raw("        "),
+                    Span::styled(bf_checkbox, bf_style),
+                    Span::styled(" Force branch delete", bf_style),
+                ]);
+                frame.render_widget(Paragraph::new(bf_line), chunks[next_chunk]);
+                next_chunk += 1;
+            }
         }
 
         // Container checkbox (only shown when delete is selected and has containers)
@@ -424,6 +474,7 @@ mod tests {
         assert!(!options.delete_worktrees);
         assert!(!options.force_delete_worktrees);
         assert!(!options.delete_branches);
+        assert!(!options.force_delete_branches);
         assert!(!options.delete_containers);
     }
 
@@ -583,6 +634,7 @@ mod tests {
         dialog.options.delete_worktrees = true;
         dialog.options.force_delete_worktrees = true;
         dialog.options.delete_branches = true;
+        dialog.options.force_delete_branches = true;
         dialog.focused_field = 0;
 
         dialog.handle_key(key(KeyCode::Char(' ')));
@@ -590,6 +642,7 @@ mod tests {
         assert!(!dialog.options.delete_worktrees);
         assert!(!dialog.options.force_delete_worktrees);
         assert!(!dialog.options.delete_branches);
+        assert!(!dialog.options.force_delete_branches);
     }
 
     #[test]
@@ -705,6 +758,7 @@ mod tests {
         dialog.options.delete_worktrees = true;
         dialog.options.force_delete_worktrees = true;
         dialog.options.delete_branches = true;
+        dialog.options.force_delete_branches = true;
         dialog.options.delete_containers = true;
 
         let result = dialog.handle_key(key(KeyCode::Enter));
@@ -714,6 +768,7 @@ mod tests {
                 assert!(opts.delete_worktrees);
                 assert!(opts.force_delete_worktrees);
                 assert!(opts.delete_branches);
+                assert!(opts.force_delete_branches);
                 assert!(opts.delete_containers);
             }
             _ => panic!("Expected Submit"),
@@ -727,6 +782,7 @@ mod tests {
         dialog.options.delete_worktrees = true;
         dialog.options.force_delete_worktrees = true;
         dialog.options.delete_branches = true;
+        dialog.options.force_delete_branches = true;
         dialog.options.delete_containers = true;
         dialog.focused_field = 0;
 
@@ -735,6 +791,7 @@ mod tests {
         assert!(!dialog.options.delete_worktrees);
         assert!(!dialog.options.force_delete_worktrees);
         assert!(!dialog.options.delete_branches);
+        assert!(!dialog.options.force_delete_branches);
         assert!(!dialog.options.delete_containers);
     }
 
@@ -750,5 +807,16 @@ mod tests {
 
         dialog.handle_key(key(KeyCode::Char(' ')));
         assert!(!dialog.options.delete_branches);
+        assert!(!dialog.options.force_delete_branches);
+    }
+
+    #[test]
+    fn test_branch_force_checkbox_appears_only_when_branch_delete_selected() {
+        let mut dialog = dialog_with_worktrees();
+        dialog.options.delete_sessions = true;
+        assert_eq!(dialog.branch_force_field_index(), None);
+
+        dialog.options.delete_branches = true;
+        assert_eq!(dialog.branch_force_field_index(), Some(4));
     }
 }

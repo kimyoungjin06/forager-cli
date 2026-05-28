@@ -13,6 +13,7 @@ pub struct DeleteOptions {
     pub delete_worktree: bool,
     pub force_delete: bool,
     pub delete_branch: bool,
+    pub force_delete_branch: bool,
     pub delete_sandbox: bool,
 }
 
@@ -29,6 +30,7 @@ enum FocusElement {
     WorktreeCheckbox,
     ForceCheckbox,
     BranchCheckbox,
+    BranchForceCheckbox,
     SandboxCheckbox,
     YesButton,
     NoButton,
@@ -52,6 +54,7 @@ impl UnifiedDeleteDialog {
             force_delete: false,
             delete_branch: config.worktree_branch.is_some()
                 && user_config.worktree.delete_branch_on_cleanup,
+            force_delete_branch: false,
             delete_sandbox: config.has_sandbox && user_config.sandbox.auto_cleanup,
         };
 
@@ -85,6 +88,9 @@ impl UnifiedDeleteDialog {
                 elements.push(FocusElement::ForceCheckbox);
             }
             elements.push(FocusElement::BranchCheckbox);
+            if options.delete_branch {
+                elements.push(FocusElement::BranchForceCheckbox);
+            }
         }
         if config.has_sandbox {
             elements.push(FocusElement::SandboxCheckbox);
@@ -153,6 +159,14 @@ impl UnifiedDeleteDialog {
                 }
                 FocusElement::BranchCheckbox => {
                     self.options.delete_branch = !self.options.delete_branch;
+                    if !self.options.delete_branch {
+                        self.options.force_delete_branch = false;
+                    }
+                    self.rebuild_focusable_elements();
+                    DialogResult::Continue
+                }
+                FocusElement::BranchForceCheckbox => {
+                    self.options.force_delete_branch = !self.options.force_delete_branch;
                     DialogResult::Continue
                 }
                 FocusElement::SandboxCheckbox => {
@@ -175,6 +189,13 @@ impl UnifiedDeleteDialog {
                     }
                     FocusElement::BranchCheckbox => {
                         self.options.delete_branch = !self.options.delete_branch;
+                        if !self.options.delete_branch {
+                            self.options.force_delete_branch = false;
+                        }
+                        self.rebuild_focusable_elements();
+                    }
+                    FocusElement::BranchForceCheckbox => {
+                        self.options.force_delete_branch = !self.options.force_delete_branch;
                     }
                     FocusElement::SandboxCheckbox => {
                         self.options.delete_sandbox = !self.options.delete_sandbox;
@@ -222,9 +243,12 @@ impl UnifiedDeleteDialog {
         let has_worktree = self.config.worktree_branch.is_some();
         let has_sandbox = self.config.has_sandbox;
         let show_force = has_worktree && self.options.delete_worktree;
+        let show_branch_force = has_worktree && self.options.delete_branch;
         // Count checkbox rows: worktree + force (if worktree checked) + branch (if worktree exists) + sandbox
-        let checkbox_count =
-            if has_worktree { 2 } else { 0 } + (show_force as u16) + (has_sandbox as u16);
+        let checkbox_count = if has_worktree { 2 } else { 0 }
+            + (show_force as u16)
+            + (show_branch_force as u16)
+            + (has_sandbox as u16);
 
         let dialog_width = 55;
         let dialog_height = if checkbox_count > 0 {
@@ -317,6 +341,19 @@ impl UnifiedDeleteDialog {
                     branch_focused,
                 );
                 chunk_idx += 1;
+
+                if show_branch_force {
+                    let branch_force_focused = self.focus == FocusElement::BranchForceCheckbox;
+                    self.render_indented_checkbox(
+                        frame,
+                        chunks[chunk_idx],
+                        theme,
+                        "Force branch delete",
+                        self.options.force_delete_branch,
+                        branch_force_focused,
+                    );
+                    chunk_idx += 1;
+                }
             }
 
             if has_sandbox {
@@ -501,6 +538,7 @@ mod tests {
         assert!(!options.delete_worktree);
         assert!(!options.force_delete);
         assert!(!options.delete_branch);
+        assert!(!options.force_delete_branch);
         assert!(!options.delete_sandbox);
     }
 
@@ -639,6 +677,7 @@ mod tests {
         dialog.options.delete_worktree = true;
         dialog.options.force_delete = true;
         dialog.options.delete_branch = true;
+        dialog.options.force_delete_branch = true;
         dialog.options.delete_sandbox = true;
 
         let result = dialog.handle_key(key(KeyCode::Char('y')));
@@ -647,9 +686,26 @@ mod tests {
                 assert!(opts.delete_worktree);
                 assert!(opts.force_delete);
                 assert!(opts.delete_branch);
+                assert!(opts.force_delete_branch);
                 assert!(opts.delete_sandbox);
             }
             _ => panic!("Expected Submit"),
         }
+    }
+
+    #[test]
+    fn test_branch_force_checkbox_appears_only_when_branch_delete_selected() {
+        let mut dialog = full_dialog();
+        assert!(!dialog
+            .focusable_elements
+            .contains(&FocusElement::BranchForceCheckbox));
+
+        dialog.focus = FocusElement::BranchCheckbox;
+        dialog.handle_key(key(KeyCode::Char(' ')));
+
+        assert!(dialog.options.delete_branch);
+        assert!(dialog
+            .focusable_elements
+            .contains(&FocusElement::BranchForceCheckbox));
     }
 }

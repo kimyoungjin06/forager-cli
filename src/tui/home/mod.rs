@@ -412,6 +412,16 @@ impl HomeView {
                 self.instances.retain(|i| i.id != result.session_id);
                 self.instance_map.remove(&result.session_id);
                 self.group_tree = GroupTree::new_with_groups(&self.instances, &self.groups);
+                if let Some(group_path) = result.delete_empty_group_path.as_deref() {
+                    let prefix = format!("{}/", group_path);
+                    let group_still_has_sessions = self.instances.iter().any(|inst| {
+                        inst.group_path == group_path || inst.group_path.starts_with(&prefix)
+                    });
+                    if !group_still_has_sessions {
+                        self.group_tree.delete_group(group_path);
+                        self.groups = self.group_tree.get_all_groups();
+                    }
+                }
 
                 if let Err(e) = self
                     .storage

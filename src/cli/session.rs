@@ -106,14 +106,7 @@ async fn start_session(profile: &str, args: SessionIdArgs) -> Result<()> {
     let storage = Storage::new(profile)?;
     let (mut instances, groups) = storage.load_with_groups()?;
 
-    let idx = instances
-        .iter()
-        .position(|i| {
-            i.id == args.identifier
-                || i.id.starts_with(&args.identifier)
-                || i.title == args.identifier
-        })
-        .ok_or_else(|| anyhow::anyhow!("Session not found: {}", args.identifier))?;
+    let idx = super::resolve_session_index(&args.identifier, &instances)?;
 
     instances[idx].start_with_size(crate::terminal::get_size())?;
     let title = instances[idx].title.clone();
@@ -146,14 +139,7 @@ async fn restart_session(profile: &str, args: SessionIdArgs) -> Result<()> {
     let storage = Storage::new(profile)?;
     let (mut instances, groups) = storage.load_with_groups()?;
 
-    let idx = instances
-        .iter()
-        .position(|i| {
-            i.id == args.identifier
-                || i.id.starts_with(&args.identifier)
-                || i.title == args.identifier
-        })
-        .ok_or_else(|| anyhow::anyhow!("Session not found: {}", args.identifier))?;
+    let idx = super::resolve_session_index(&args.identifier, &instances)?;
 
     instances[idx].restart_with_size(crate::terminal::get_size())?;
     let title = instances[idx].title.clone();

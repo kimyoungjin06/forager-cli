@@ -12,9 +12,9 @@ mod storage;
 
 pub use crate::sound::{SoundConfig, SoundConfigOverride};
 pub use config::{
-    get_claude_config_dir, get_update_settings, load_config, save_config, ClaudeConfig, Config,
-    SandboxConfig, SessionConfig, ThemeConfig, TmuxMouseMode, TmuxStatusBarMode, UpdatesConfig,
-    WorktreeConfig,
+    get_claude_config_dir, get_update_settings, load_config, load_config_read_only, save_config,
+    ClaudeConfig, Config, SandboxConfig, SessionConfig, ThemeConfig, TmuxMouseMode,
+    TmuxStatusBarMode, UpdatesConfig, WorktreeConfig,
 };
 pub use groups::{flatten_tree, Group, GroupTree, Item};
 pub use instance::{Instance, SandboxInfo, Status, TerminalInfo, WorktreeInfo};
@@ -111,13 +111,30 @@ pub(crate) fn app_dir_candidates() -> Vec<PathBuf> {
     dirs
 }
 
+pub fn normalize_profile_name(profile: &str) -> Result<String> {
+    let profile = profile.trim();
+    if profile.is_empty() {
+        return Ok(DEFAULT_PROFILE.to_string());
+    }
+
+    if profile == "." || profile == ".." {
+        anyhow::bail!("Profile name cannot be '.' or '..'");
+    }
+
+    if profile.contains('/') || profile.contains('\\') {
+        anyhow::bail!("Profile name cannot contain path separators");
+    }
+
+    if profile.contains('\0') {
+        anyhow::bail!("Profile name cannot contain NUL bytes");
+    }
+
+    Ok(profile.to_string())
+}
+
 pub fn get_profile_dir(profile: &str) -> Result<PathBuf> {
     let base = get_app_dir()?;
-    let profile_name = if profile.is_empty() {
-        DEFAULT_PROFILE
-    } else {
-        profile
-    };
+    let profile_name = normalize_profile_name(profile)?;
     let dir = base.join("profiles").join(profile_name);
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
@@ -147,29 +164,25 @@ pub fn list_profiles() -> Result<Vec<String>> {
 }
 
 pub fn create_profile(name: &str) -> Result<()> {
-    if name.is_empty() {
-        anyhow::bail!("Profile name cannot be empty");
-    }
-    if name.contains('/') || name.contains('\\') {
-        anyhow::bail!("Profile name cannot contain path separators");
-    }
+    let name = normalize_profile_name(name)?;
 
     let profiles = list_profiles()?;
-    if profiles.contains(&name.to_string()) {
+    if profiles.contains(&name) {
         anyhow::bail!("Profile '{}' already exists", name);
     }
 
-    get_profile_dir(name)?;
+    get_profile_dir(&name)?;
     Ok(())
 }
 
 pub fn delete_profile(name: &str) -> Result<()> {
+    let name = normalize_profile_name(name)?;
     if name == DEFAULT_PROFILE {
         anyhow::bail!("Cannot delete the default profile");
     }
 
     let base = get_app_dir()?;
-    let profile_dir = base.join("profiles").join(name);
+    let profile_dir = base.join("profiles").join(&name);
 
     if !profile_dir.exists() {
         anyhow::bail!("Profile '{}' does not exist", name);
@@ -180,8 +193,9 @@ pub fn delete_profile(name: &str) -> Result<()> {
 }
 
 pub fn set_default_profile(name: &str) -> Result<()> {
+    let name = normalize_profile_name(name)?;
     let mut config = load_config()?.unwrap_or_default();
-    config.default_profile = name.to_string();
+    config.default_profile = name;
     save_config(&config)?;
     Ok(())
 }

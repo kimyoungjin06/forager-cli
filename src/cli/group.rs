@@ -198,10 +198,8 @@ async fn move_session(profile: &str, args: GroupMoveArgs) -> Result<()> {
     let (mut instances, groups) = storage.load_with_groups()?;
 
     let identifier = args.identifier.trim();
-    let inst = instances
-        .iter_mut()
-        .find(|i| i.id == identifier || i.id.starts_with(identifier) || i.title == identifier)
-        .ok_or_else(|| anyhow::anyhow!("Session not found: {}", identifier))?;
+    let index = super::resolve_session_index(identifier, &instances)?;
+    let inst = &mut instances[index];
 
     let group = args.group.trim();
     let old_group = inst.group_path.clone();

@@ -55,9 +55,10 @@ pub use adaptive_wiki::{
     AdaptiveWikiUsageRecord,
 };
 pub use approval::{
-    ActionApprovalMetadata, ActionApprovalRequest, ApprovalDecision, ApprovalLedger,
-    ApprovalLedgerSession, ApprovalMode, ApprovalScope, ApprovalStatus, ExecutionBrief,
-    PendingActionApproval, ProviderFallbackApplyScope, ProviderFallbackApprovalMetadata, RiskLevel,
+    ActionApprovalMetadata, ActionApprovalRequest, ApprovalBrief, ApprovalBriefOption,
+    ApprovalDecision, ApprovalLedger, ApprovalLedgerSession, ApprovalMode, ApprovalScope,
+    ApprovalStatus, ExecutionBrief, PendingActionApproval, ProviderFallbackApplyScope,
+    ProviderFallbackApprovalMetadata, RiskLevel,
 };
 pub use background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind,

@@ -20,6 +20,21 @@ EXPECTED_COMMANDS = (
     "modules/03_regspec_machine/scripts/run_module_03.sh single-nooption --exec",
     "modules/03_regspec_machine/scripts/run_module_03.sh single-singlex --exec",
 )
+CANONICAL_BLOCKING_ANCHOR_IDS = {
+    "primary_objective_gate",
+}
+CANONICAL_BLOCKING_ANCHOR_STATUSES = {
+    "failed",
+    "missing",
+    "unknown",
+}
+CANONICAL_BLOCKING_REASON_CODES = {
+    "executed_primary_gate_failed",
+    "missing_evidence",
+    "insufficient_restart_stability",
+    "insufficient_pq_evidence",
+    "insufficient_validated_candidate",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -120,9 +135,15 @@ def distinguishes_exploratory_from_promotion_gate(text: str) -> bool:
         marker in lowered
         for marker in (
             "promotion-gate comparability",
+            "promotion-gate comparable",
+            "promotion gate comparable",
+            "promotion-gate evidence",
             "promotion comparable",
             "not promotion comparable",
+            "promotion-ready",
+            "promotion-readiness",
             "primary_objective_gate",
+            "primary objective gate",
             "same primary objective",
         )
     )
@@ -132,10 +153,22 @@ def distinguishes_exploratory_from_promotion_gate(text: str) -> bool:
             "comparability gap",
             "comparability gaps",
             "non-comparable",
+            "not directly comparable",
+            "directly comparable",
             "configuration drift",
+            "gate-equivalent",
             "identical gate",
             "same gate",
             "same primary objective",
+            "same threshold",
+            "same thresholds",
+            "identical threshold",
+            "identical thresholds",
+            "same criteria",
+            "identical criteria",
+            "restart-comparable",
+            "restart comparable",
+            "restart comparability",
         )
     )
     return has_exploratory_signal and has_gate_signal and has_comparability_signal
@@ -243,6 +276,96 @@ def review_json_case(record: dict[str, Any], findings: list[dict[str, Any]]) -> 
             severity="warning",
             category="evidence_bundle_ack_missing",
             message="JSON case does not explicitly acknowledge evidence_bundle_used=true.",
+            iteration=record.get("iteration"),
+            case=record.get("case"),
+            response_path=response_path,
+        )
+    if record.get("case") == "research_reportability_status_json":
+        review_reportability_blocking_anchors(record, parsed, findings)
+
+
+def review_reportability_blocking_anchors(
+    record: dict[str, Any],
+    parsed: dict[str, Any],
+    findings: list[dict[str, Any]],
+) -> None:
+    anchors = parsed.get("blocking_anchors")
+    response_path = record.get("response_path")
+    if parsed.get("reportability_contract_schema") != "reportability_contract.v1":
+        add_finding(
+            findings,
+            severity="blocker",
+            category="reportability_contract_schema_missing",
+            message="Reportability JSON does not declare reportability_contract.v1.",
+            iteration=record.get("iteration"),
+            case=record.get("case"),
+            response_path=response_path,
+            suggested_action="Emit reportability_contract_schema before relying on typed blocking_anchors.",
+        )
+    if not isinstance(anchors, list):
+        add_finding(
+            findings,
+            severity="blocker",
+            category="reportability_blocking_anchors_missing",
+            message="Reportability JSON lacks machine-readable blocking_anchors.",
+            iteration=record.get("iteration"),
+            case=record.get("case"),
+            response_path=response_path,
+            suggested_action="Emit canonical blocking_anchors separately from human-readable blocking_evidence.",
+        )
+        return
+
+    primary_gate_anchor: dict[str, Any] | None = None
+    for index, anchor in enumerate(anchors):
+        if not isinstance(anchor, dict):
+            add_finding(
+                findings,
+                severity="blocker",
+                category="reportability_blocking_anchor_invalid",
+                message="Reportability blocking anchor is not an object.",
+                iteration=record.get("iteration"),
+                case=record.get("case"),
+                response_path=response_path,
+                evidence=f"blocking_anchors[{index}]",
+            )
+            continue
+        anchor_id = anchor.get("id")
+        status = anchor.get("status")
+        reason_code = anchor.get("reason_code")
+        evidence_refs = anchor.get("evidence_refs")
+        invalid_parts = []
+        if anchor_id not in CANONICAL_BLOCKING_ANCHOR_IDS:
+            invalid_parts.append(f"id={anchor_id}")
+        if status not in CANONICAL_BLOCKING_ANCHOR_STATUSES:
+            invalid_parts.append(f"status={status}")
+        if reason_code not in CANONICAL_BLOCKING_REASON_CODES:
+            invalid_parts.append(f"reason_code={reason_code}")
+        if not isinstance(evidence_refs, list) or not evidence_refs:
+            invalid_parts.append("evidence_refs")
+        if invalid_parts:
+            add_finding(
+                findings,
+                severity="blocker",
+                category="reportability_blocking_anchor_invalid",
+                message="Reportability blocking anchor is not canonical.",
+                iteration=record.get("iteration"),
+                case=record.get("case"),
+                response_path=response_path,
+                evidence=f"blocking_anchors[{index}]: {', '.join(invalid_parts)}",
+                suggested_action="Use exact canonical id/status/reason_code values and non-empty evidence_refs.",
+            )
+        if anchor_id == "primary_objective_gate":
+            primary_gate_anchor = anchor
+
+    requires_primary_gate_failure = (
+        parsed.get("baseline_evidence_status") == "executed_primary_gate_failed"
+    )
+    if requires_primary_gate_failure and primary_gate_anchor is None:
+        add_finding(
+            findings,
+            severity="blocker",
+            category="reportability_primary_gate_anchor_missing",
+            message="Reportability JSON says the primary gate failed but lacks the primary_objective_gate anchor.",
             iteration=record.get("iteration"),
             case=record.get("case"),
             response_path=response_path,
