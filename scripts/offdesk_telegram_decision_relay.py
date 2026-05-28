@@ -32,6 +32,12 @@ DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
         "/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.aoe-team/telegram.env",
     )
 )
+DEFAULT_LIVE_ACTIVE_REQUEST_REGISTRY = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_TELEGRAM_ACTIVE_REQUEST_REGISTRY",
+        str(pathlib.Path.home() / ".cache" / "forager" / "telegram_active_requests.json"),
+    )
+)
 VALID_DECISIONS = ("continue", "revise", "block", "stop")
 CUSTOM_DIRECTION_DECISION = "custom_direction"
 DECISION_LABELS = {
@@ -49,6 +55,7 @@ DECISION_LABELS = {
 }
 STATUS_LABELS = {
     "awaiting_input": "설명 입력 대기",
+    "ambiguous_input": "응답 확인 필요",
     "pending": "의사결정 대기",
     "accepted": "응답 반영",
     "timeout": "응답 시간초과",
@@ -212,6 +219,14 @@ def parse_args() -> argparse.Namespace:
         "--decision-text",
         help="Deterministic test/manual input. Must include the request id and one of: continue, revise, block, stop.",
     )
+    parser.add_argument(
+        "--active-request-registry",
+        type=pathlib.Path,
+        help=(
+            "Path to the active Telegram decision registry. Live relays default to a shared "
+            "Forager cache; dry-run/manual calls default beside --out."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -239,6 +254,130 @@ def load_json_if_exists(value: Any) -> Any:
         return load_json(path)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def parse_utc_datetime(value: Any) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def resolve_active_request_registry(args: argparse.Namespace) -> pathlib.Path:
+    if args.active_request_registry:
+        return args.active_request_registry
+    if os.environ.get("OFFDESK_TELEGRAM_ACTIVE_REQUEST_REGISTRY"):
+        return DEFAULT_LIVE_ACTIVE_REQUEST_REGISTRY
+    if args.dry_run or args.decision_text:
+        return args.out.with_name("telegram_active_requests.json")
+    return DEFAULT_LIVE_ACTIVE_REQUEST_REGISTRY
+
+
+def active_request_key(state: dict[str, Any]) -> str:
+    raw = str(state.get("state_path") or state.get("request_id") or "")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def load_active_registry(path: pathlib.Path) -> dict[str, Any]:
+    value = load_json_if_exists(path)
+    if isinstance(value, dict):
+        entries = value.get("entries")
+        if isinstance(entries, list):
+            return {**value, "entries": entries}
+    return {"schema": "telegram_active_requests.v1", "entries": []}
+
+
+def active_registry_entries(registry: dict[str, Any], *, now: dt.datetime | None = None) -> list[dict[str, Any]]:
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    entries = registry.get("entries", [])
+    if not isinstance(entries, list):
+        return []
+    active: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("status") != "pending":
+            continue
+        expires_at = parse_utc_datetime(entry.get("expires_at"))
+        if expires_at is not None and expires_at < now:
+            continue
+        active.append(entry)
+    return active
+
+
+def write_active_registry(path: pathlib.Path, entries: list[dict[str, Any]]) -> None:
+    write_json(
+        path,
+        {
+            "schema": "telegram_active_requests.v1",
+            "updated_at": utc_now(),
+            "entries": entries,
+        },
+    )
+
+
+def register_active_request(
+    path: pathlib.Path,
+    *,
+    state: dict[str, Any],
+    request_id: str,
+    message_type: str,
+    target_chat_id_hash: str,
+    timeout_sec: int,
+) -> dict[str, Any]:
+    now = dt.datetime.now(dt.timezone.utc)
+    registry = load_active_registry(path)
+    active = [
+        entry
+        for entry in active_registry_entries(registry, now=now)
+        if entry.get("key") != active_request_key(state)
+    ]
+    expires_at = now + dt.timedelta(seconds=max(1, timeout_sec))
+    entry = {
+        "key": active_request_key(state),
+        "request_id_hash": hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:16],
+        "message_type": message_type,
+        "state_path": str(state.get("state_path") or ""),
+        "out_path": str(state.get("out_path") or ""),
+        "target_chat_id_hash": target_chat_id_hash,
+        "status": "pending",
+        "created_at": utc_now(),
+        "expires_at": expires_at.isoformat(),
+    }
+    entries = [*active, entry]
+    write_active_registry(path, entries)
+    return {
+        "registry_path": str(path.resolve()),
+        "current_key_hash": hashlib.sha256(entry["key"].encode("utf-8")).hexdigest()[:16],
+        "active_request_count": len(entries),
+        "free_text_policy": "request_id_or_reply_or_single_active_request",
+    }
+
+
+def complete_active_request(path: pathlib.Path, state: dict[str, Any], *, status: str) -> None:
+    registry = load_active_registry(path)
+    key = active_request_key(state)
+    active = active_registry_entries(registry)
+    entries = [entry for entry in active if entry.get("key") != key]
+    if status in {"ambiguous_input", "awaiting_input"}:
+        current = next((entry for entry in active if entry.get("key") == key), None)
+        if current:
+            current = dict(current)
+            current["status"] = "pending"
+            current["updated_at"] = utc_now()
+            entries.append(current)
+    write_active_registry(path, entries)
+
+
+def active_request_count(path: pathlib.Path) -> int:
+    return len(active_registry_entries(load_active_registry(path)))
 
 
 def list_values(value: Any, *, limit: int = 5) -> list[str]:
@@ -457,6 +596,16 @@ def decision_impacts_for_request(request: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def canonical_recommendation_for_request(request: dict[str, Any], recommendation: Any) -> str:
+    value = str(recommendation or "").strip()
+    if not value:
+        return ""
+    if is_direction_choice(request):
+        option_ids = {option["id"] for option in direction_options(request)}
+        return value if value in option_ids else ""
+    return value
+
+
 def default_reply_examples(request: dict[str, Any]) -> dict[str, str]:
     examples: dict[str, str] = {}
     decisions = set(natural_input_decisions(request))
@@ -472,9 +621,12 @@ def default_reply_examples(request: dict[str, Any]) -> dict[str, str]:
 def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
     council = raw.get("council") if isinstance(raw.get("council"), dict) else {}
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
-    recommendation = str(raw.get("recommendation") or council.get("recommendation") or "").strip()
+    raw_recommendation = str(raw.get("recommendation") or council.get("recommendation") or "").strip()
+    recommendation = canonical_recommendation_for_request(request, raw_recommendation)
     failure = raw.get("failure") if isinstance(raw.get("failure"), dict) else {}
     primary_reason = str(raw.get("primary_reason") or "").strip()
+    if not primary_reason and raw_recommendation and not recommendation:
+        primary_reason = raw_recommendation
     if not primary_reason:
         primary_reason = primary_reason_from_failure(failure, str(raw.get("why_it_matters") or ""))
     evidence = raw.get("evidence")
@@ -495,7 +647,8 @@ def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> di
     normalized["context"] = context
     normalized["council"] = {
         **council,
-        "recommendation": recommendation or council.get("recommendation"),
+        "recommendation": recommendation
+        or ("" if is_direction_choice(request) else council.get("recommendation")),
     }
     if "decision_impacts" not in normalized or not isinstance(normalized.get("decision_impacts"), dict):
         normalized["decision_impacts"] = decision_impacts_for_request(request)
@@ -507,6 +660,168 @@ def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> di
     )
     normalized["question"] = str(raw.get("question") or approval_question(request))
     return normalized
+
+
+def approval_brief_text_fields(brief: dict[str, Any]) -> list[tuple[str, str]]:
+    fields: list[tuple[str, str]] = []
+    for key in ("recommendation", "subject", "primary_reason", "scope", "question"):
+        value = str(brief.get(key) or "").strip()
+        if value:
+            fields.append((key, value))
+    for key in ("summary_lines", "why_recommendation", "evidence", "key_evidence", "next_action"):
+        for index, value in enumerate(list_values(brief.get(key), limit=12)):
+            fields.append((f"{key}[{index}]", value))
+    options = brief.get("options")
+    if isinstance(options, list):
+        for index, option in enumerate(options):
+            if not isinstance(option, dict):
+                continue
+            for key in ("id", "label", "description", "natural_input_prompt", "prompt"):
+                value = str(option.get(key) or "").strip()
+                if value:
+                    fields.append((f"options[{index}].{key}", value))
+    impacts = brief.get("decision_impacts")
+    if isinstance(impacts, dict):
+        for key, value in impacts.items():
+            text = str(value or "").strip()
+            if text:
+                fields.append((f"decision_impacts.{key}", text))
+    examples = brief.get("reply_examples")
+    if isinstance(examples, dict):
+        for key, value in examples.items():
+            text = str(value or "").strip()
+            if text:
+                fields.append((f"reply_examples.{key}", text))
+    elif isinstance(examples, list):
+        for index, value in enumerate(list_values(examples, limit=12)):
+            fields.append((f"reply_examples[{index}]", value))
+    return fields
+
+
+def forbidden_artifact_basenames(request: dict[str, Any]) -> set[str]:
+    artifacts = request.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return set()
+    basenames: set[str] = set()
+    for value in artifacts.values():
+        if not isinstance(value, str):
+            continue
+        if "/" not in value and "\\" not in value:
+            continue
+        name = pathlib.Path(value).name.strip()
+        if name:
+            basenames.add(name)
+    return basenames
+
+
+def unsafe_user_text_failures(request: dict[str, Any], brief: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    request_id = request_id_for(request, "")
+    artifact_basenames = forbidden_artifact_basenames(request)
+    trace_keys = (
+        "decision_request_id",
+        "request_id",
+        "state_path",
+        "callback_data",
+        "raw_text_preview",
+        "telegram_decision_state",
+    )
+    for field, text in approval_brief_text_fields(brief):
+        lowered = text.lower()
+        if "<pre>" in lowered:
+            failures.append(f"{field}:raw_json_or_pre_dump")
+        if re.search(r"(^|[\s'\"(])(/home/|/tmp/|/var/|/Users/|[A-Za-z]:\\)", text):
+            failures.append(f"{field}:raw_path")
+        if re.search(r"\b[A-Za-z0-9_./-]+\.json\b", text) and any(name in text for name in artifact_basenames):
+            failures.append(f"{field}:artifact_filename")
+        if request_id and request_id in text:
+            failures.append(f"{field}:request_id_leak")
+        if any(key in text for key in trace_keys):
+            failures.append(f"{field}:trace_key_leak")
+        if re.search(r"(TELEGRAM_BOT_TOKEN|sk-[A-Za-z0-9_-]{8,}|fake-token)", text, re.IGNORECASE):
+            failures.append(f"{field}:secret_like")
+    return failures
+
+
+def approval_scope_has_boundary(scope: str) -> bool:
+    lowered = scope.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "does not",
+            "not approve",
+            "not authorize",
+            "별도 승인",
+            "승인하지",
+            "승인되지",
+        )
+    )
+
+
+def validate_approval_brief(request: dict[str, Any], *, explicit: bool) -> dict[str, Any]:
+    brief = brief_for(request)
+    failures: list[str] = []
+    warnings: list[str] = []
+    if not brief:
+        failures.append("approval_brief:missing")
+        return {
+            "schema": None,
+            "mode": "explicit" if explicit else "inferred",
+            "valid": False,
+            "failures": failures if explicit else [],
+            "warnings": [] if explicit else failures,
+        }
+
+    schema = str(brief.get("schema") or "").strip()
+    message_type = message_type_for(request)
+    allowed_schemas = {"approval_brief.v1"}
+    if message_type == "ondesk_handoff":
+        allowed_schemas.add("ondesk_handoff_brief.v1")
+    if schema not in allowed_schemas:
+        failures.append(f"schema:unsupported:{schema or 'missing'}")
+
+    required_text_fields = ("recommendation", "subject", "scope", "question")
+    for field in required_text_fields:
+        if not str(brief.get(field) or "").strip():
+            failures.append(f"{field}:missing")
+
+    summary_lines = brief.get("summary_lines")
+    if not isinstance(summary_lines, list) or not list_values(summary_lines, limit=5):
+        failures.append("summary_lines:missing")
+    elif len(list_values(summary_lines, limit=8)) > 3:
+        warnings.append("summary_lines:too_many_for_compact_card")
+
+    scope = str(brief.get("scope") or "").strip()
+    if scope and not approval_scope_has_boundary(scope):
+        failures.append("scope:missing_non_authorized_boundary")
+
+    recommendation = str(brief.get("recommendation") or "").strip()
+    if recommendation:
+        available_decisions = {action["decision"] for action in action_specs_for(request)}
+        if recommendation not in available_decisions:
+            failures.append(f"recommendation:not_available_action:{recommendation}")
+
+    options = brief.get("options")
+    if options is not None:
+        if not isinstance(options, list) or not options:
+            failures.append("options:not_non_empty_list")
+        elif isinstance(options, list):
+            for index, option in enumerate(options):
+                if not isinstance(option, dict):
+                    failures.append(f"options[{index}]:not_object")
+                    continue
+                for field in ("id", "label", "description"):
+                    if not str(option.get(field) or "").strip():
+                        failures.append(f"options[{index}].{field}:missing")
+
+    failures.extend(unsafe_user_text_failures(request, brief))
+    return {
+        "schema": schema or None,
+        "mode": "explicit" if explicit else "inferred",
+        "valid": not failures,
+        "failures": failures if explicit else [],
+        "warnings": warnings if explicit else [*failures, *warnings],
+    }
 
 
 def approval_brief_from_operator_brief(request: dict[str, Any], operator_brief: dict[str, Any]) -> dict[str, Any]:
@@ -1267,6 +1582,8 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
     recommendation = brief_recommendation(request)
     if is_ondesk_handoff(request):
         headline = "Ondesk 전환 상세"
+    elif is_direction_choice(request):
+        headline = "방향 선택 상세"
     else:
         headline = f"{display_decision(recommendation)} 권고의 근거" if recommendation else "승인 요청의 근거"
     if brief:
@@ -1764,6 +2081,13 @@ def callback_message_id(callback: dict[str, Any]) -> int | None:
     return None
 
 
+def reply_to_message_id(message: dict[str, Any]) -> int | None:
+    reply = message.get("reply_to_message")
+    if isinstance(reply, dict) and isinstance(reply.get("message_id"), int):
+        return int(reply["message_id"])
+    return None
+
+
 def parse_callback_action(data: str, state: dict[str, Any]) -> dict[str, str] | None:
     tokens = state.get("tokens", {})
     actions = state.get("actions", {})
@@ -1775,6 +2099,52 @@ def parse_callback_action(data: str, state: dict[str, Any]) -> dict[str, str] | 
     return None
 
 
+def text_decision_scope(
+    parsed: dict[str, Any],
+    *,
+    message: dict[str, Any] | None,
+    state: dict[str, Any],
+    active_registry_path: pathlib.Path,
+) -> dict[str, Any]:
+    if parsed.get("matched_request_id"):
+        return {"accepted": True, "reason": "request_id"}
+    if message is not None:
+        reply_id = reply_to_message_id(message)
+        current_message_id = state.get("telegram_message_id")
+        if isinstance(current_message_id, int) and reply_id == current_message_id:
+            return {"accepted": True, "reason": "telegram_reply_to_decision_card"}
+    count = active_request_count(active_registry_path)
+    if count <= 1:
+        return {"accepted": True, "reason": "single_active_request", "active_request_count": count}
+    return {
+        "accepted": False,
+        "reason": "unscoped_text_matches_multiple_active_requests",
+        "active_request_count": count,
+    }
+
+
+def ambiguous_input_result(
+    base_result: dict[str, Any],
+    parsed: dict[str, Any],
+    *,
+    input_mode: str,
+    text_scope: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        **base_result,
+        "status": "ambiguous_input",
+        "received_at": utc_now(),
+        "decision": None,
+        "candidate_decision": parsed.get("decision"),
+        "decision_label": parsed.get("decision_label") or display_decision(parsed.get("decision")),
+        "reason": text_scope.get("reason") or "unscoped_text_requires_request_context",
+        "matched_request_id": parsed.get("matched_request_id"),
+        "input_mode": input_mode,
+        "text_scope": text_scope,
+        "raw_text_preview": parsed.get("raw_text_preview"),
+    }
+
+
 def poll_for_decision(
     *,
     token: str,
@@ -1784,6 +2154,8 @@ def poll_for_decision(
     offset: int,
     timeout_sec: int,
     poll_interval_sec: float,
+    active_registry_path: pathlib.Path,
+    base_result: dict[str, Any],
 ) -> dict[str, Any]:
     deadline = time.time() + max(0, timeout_sec)
     next_offset = offset
@@ -1939,6 +2311,27 @@ def poll_for_decision(
             )
             if parsed is None:
                 continue
+            text_scope = text_decision_scope(
+                parsed,
+                message=message,
+                state=state,
+                active_registry_path=active_registry_path,
+            )
+            if not text_scope.get("accepted"):
+                send_message(
+                    token,
+                    chat_id,
+                    (
+                        "어느 요청에 대한 답장인지 확인이 필요합니다.\n"
+                        "해당 의사결정 카드에 reply로 답하거나 버튼을 눌러주세요."
+                    ),
+                )
+                return ambiguous_input_result(
+                    base_result,
+                    parsed,
+                    input_mode="message",
+                    text_scope=text_scope,
+                )
             prompt = natural_input_prompt(state.get("request", {}), str(parsed.get("decision") or ""))
             if prompt and not str(parsed.get("reason") or "").strip():
                 message_id = state.get("telegram_message_id")
@@ -1978,6 +2371,7 @@ def poll_for_decision(
                 "chat_id_hash": chat_hash(chat_id),
                 "input_mode": "message",
                 "natural_language_required": bool(prompt),
+                "text_scope": text_scope,
                 **parsed,
             }
         if time.time() < deadline:
@@ -1991,10 +2385,18 @@ def poll_for_decision(
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    request = load_json(args.request)
-    if not isinstance(request, dict):
+    raw_request = load_json(args.request)
+    if not isinstance(raw_request, dict):
         raise RelayError("request JSON must be an object")
-    request = request_with_approval_brief(request)
+    explicit_approval_brief = isinstance(raw_request.get("approval_brief"), dict)
+    request = request_with_approval_brief(raw_request)
+    approval_brief_validation = validate_approval_brief(
+        raw_request if explicit_approval_brief else request,
+        explicit=explicit_approval_brief,
+    )
+    if approval_brief_validation.get("failures"):
+        failures = "; ".join(str(item) for item in approval_brief_validation["failures"])
+        raise RelayError(f"approval_brief_validation_failed: {failures}")
     request_id = request_id_for(request, args.request.stem)
     message = render_message(request, request_id)
     state = build_decision_state(request, request_id, args.out)
@@ -2003,6 +2405,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     link_specs = link_specs_for(request)
 
     config = resolve_telegram_config(args.env_file)
+    active_registry_path = resolve_active_request_registry(args)
+    active_guard = register_active_request(
+        active_registry_path,
+        state=state,
+        request_id=request_id,
+        message_type=message_type_for(request),
+        target_chat_id_hash=chat_hash(config["target_chat_id"]),
+        timeout_sec=max(1, args.timeout_sec),
+    )
+    state["active_request_guard"] = active_guard
+    write_json(decision_state_path(args.out), state)
     base_result = {
         "created_at": utc_now(),
         "request_path": str(args.request.resolve()),
@@ -2014,6 +2427,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "message_preview": compact(message, 1800),
         "state_path": state["state_path"],
         "approval_brief_schema": brief_for(request).get("schema"),
+        "approval_brief_validation": approval_brief_validation,
         "keyboard": {
             "inline": True,
             "actions": [action["decision"] for action in action_specs] + ["more_details"],
@@ -2032,6 +2446,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "attempted": False,
             "status": "not_sent",
         },
+        "active_request_guard": active_guard,
         "dry_run": bool(args.dry_run),
         "timeout_sec": max(0, args.timeout_sec),
     }
@@ -2047,14 +2462,34 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "input_mode": "manual",
             }
             finalize_decision_state(state, args.out, result)
+            complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
+            return result
+        text_scope = text_decision_scope(
+            parsed,
+            message=None,
+            state=state,
+            active_registry_path=active_registry_path,
+        )
+        if not text_scope.get("accepted"):
+            result = ambiguous_input_result(
+                base_result,
+                parsed,
+                input_mode="manual",
+                text_scope=text_scope,
+            )
+            finalize_decision_state(state, args.out, result)
+            complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
             return result
         result = {**base_result, "status": "accepted", "received_at": utc_now(), "input_mode": "manual", **parsed}
+        result["text_scope"] = text_scope
         finalize_decision_state(state, args.out, result)
+        complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
         return result
 
     if args.dry_run:
         result = {**base_result, "status": "dry_run", "decision": None, "reason": "dry_run_no_message_sent"}
         finalize_decision_state(state, args.out, result)
+        complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
         return result
 
     offset = current_update_offset(config["token"])
@@ -2080,6 +2515,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         offset=offset,
         timeout_sec=max(0, args.timeout_sec),
         poll_interval_sec=max(0.2, args.poll_interval_sec),
+        active_registry_path=active_registry_path,
+        base_result=base_result,
     )
     result = {
         **base_result,
@@ -2089,6 +2526,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         **result,
     }
     finalize_decision_state(state, args.out, result)
+    complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
     return result
 
 

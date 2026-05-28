@@ -59,6 +59,14 @@ Minimum recommended request:
 The relay preserves unknown fields internally, but unknown fields should not be
 assumed to render.
 
+Explicit producer-provided briefs are validated before the Telegram card is
+sent. Validation failures stop the relay when required fields are missing, the
+recommendation does not map to a visible action, the scope lacks a clear
+non-authorized boundary, or user-facing fields include raw paths, request ids,
+secret-like strings, trace keys, artifact filenames, or raw JSON dumps. Briefs
+inferred from legacy `summary`, `operator_brief`, or artifacts keep running but
+surface validation gaps as warnings in the relay result.
+
 ## Decisions
 
 The default relay supports:
@@ -83,6 +91,45 @@ approvals. The default choices are `start_ondesk_review`, `keep_pending`, and
 `defer_ondesk`; `start_ondesk_review` should lead the operator into WebUI or an
 equivalent review surface, while destructive cleanup, wiki promotion, provider
 changes, and file movement remain separately approved.
+
+## Decision Card Quality Rubric
+
+Golden tests should not blindly preserve the current wording. They should
+preserve the operator decision quality of the card. A good card answers these
+questions without requiring the operator to open raw logs:
+
+- What happened?
+- Why does this need a human decision now?
+- What does Council or the system recommend?
+- What will each visible choice change?
+- What does this choice not authorize?
+- Where should deeper review continue?
+
+The compact Telegram card uses an information budget, not a fixed line count.
+The budget is type-specific:
+
+| Message type | Compact-card budget |
+| --- | --- |
+| `approval_request` | Short recommendation, 1-3 summary lines, direct question, explicit scope. |
+| `council_decision` | Recommendation, failure/reason, Council agreement, direct question, explicit scope. |
+| `direction_choice` | Decision object, visible option list, direct question, explicit scope. |
+| `ondesk_handoff` | Handoff time, closeout summary, remaining decisions, WebUI entry question, explicit scope. |
+
+The detail card should hold the dense material: recommendation rationale,
+failure summary, evidence, Council details, choice impacts, and reply examples.
+If the detail card has insufficient structured data, it should say that
+explicitly instead of dumping request JSON.
+
+All user-facing card surfaces must reject raw paths, request ids, secret-like
+values, raw JSON key dumps, and trace-only state. Those values belong in the
+relay state, result JSON, or producer artifacts.
+
+Free-form Telegram replies are a convenience layer, not the authority model.
+The relay should accept unscoped natural language only when there is exactly one
+active decision request for the operator. If multiple requests are active, a
+free-form reply must be scoped by replying to the decision card, using a button,
+or including the request id. Otherwise the result is `ambiguous_input` and no
+decision is applied.
 
 ## Telegram Rendering
 

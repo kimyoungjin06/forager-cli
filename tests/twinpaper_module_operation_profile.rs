@@ -19,6 +19,100 @@ fn write_file(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+const GENERIC_FORBIDDEN_CARD_SNIPPETS: &[&str] = &[
+    "<pre>",
+    "decision_request_id",
+    "request_id",
+    "state_path",
+    "telegram_decision_state",
+    "callback_data",
+    "raw_text_preview",
+    "fake-token-for-test",
+    "123456789",
+    "telegram.env",
+];
+
+struct TelegramCardQualitySpec<'a> {
+    message_type: &'a str,
+    required_message: &'a [&'a str],
+    required_detail: &'a [&'a str],
+    required_buttons: &'a [&'a str],
+    forbidden_user_surface: &'a [&'a str],
+    max_primary_lines: usize,
+}
+
+fn assert_contains_all(surface: &str, text: &str, snippets: &[&str]) {
+    for snippet in snippets {
+        assert!(
+            text.contains(snippet),
+            "{surface} should contain {snippet:?}; actual:\n{text}"
+        );
+    }
+}
+
+fn assert_contains_none(surface: &str, text: &str, snippets: &[&str]) {
+    for snippet in snippets {
+        assert!(
+            !text.contains(snippet),
+            "{surface} should not contain {snippet:?}; actual:\n{text}"
+        );
+    }
+}
+
+fn non_empty_line_count(text: &str) -> usize {
+    text.lines().filter(|line| !line.trim().is_empty()).count()
+}
+
+fn assert_telegram_card_quality(result: &Value, spec: TelegramCardQualitySpec<'_>) {
+    assert_eq!(result["message_type"], spec.message_type);
+    let message_preview = result["message_preview"].as_str().expect("message preview");
+    let detail_preview = result["detail_preview"].as_str().expect("detail preview");
+    let labels: Vec<String> = result["keyboard"]["labels"]
+        .as_array()
+        .expect("keyboard labels")
+        .iter()
+        .map(|label| label.as_str().unwrap_or_default().to_string())
+        .collect();
+
+    assert_contains_all("message_preview", message_preview, &["<b>", "질문", "범위"]);
+    assert_contains_all("message_preview", message_preview, spec.required_message);
+    assert_contains_all("detail_preview", detail_preview, &["<b>", "선택별 의미"]);
+    assert_contains_all("detail_preview", detail_preview, spec.required_detail);
+    assert_contains_none(
+        "message_preview",
+        message_preview,
+        GENERIC_FORBIDDEN_CARD_SNIPPETS,
+    );
+    assert_contains_none(
+        "detail_preview",
+        detail_preview,
+        GENERIC_FORBIDDEN_CARD_SNIPPETS,
+    );
+    assert_contains_none(
+        "message_preview",
+        message_preview,
+        spec.forbidden_user_surface,
+    );
+    assert_contains_none(
+        "detail_preview",
+        detail_preview,
+        spec.forbidden_user_surface,
+    );
+    for expected in spec.required_buttons {
+        assert!(
+            labels.iter().any(|label| label == expected),
+            "keyboard labels should include {expected:?}; actual: {labels:?}"
+        );
+    }
+    assert!(
+        non_empty_line_count(message_preview) <= spec.max_primary_lines,
+        "primary card exceeded line budget ({} > {}):\n{}",
+        non_empty_line_count(message_preview),
+        spec.max_primary_lines,
+        message_preview
+    );
+}
+
 fn write_synthetic_twinpaper(repo: &Path) -> Result<()> {
     write_file(
         &repo.join("AGENTS.md"),
@@ -594,6 +688,30 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
     );
     let result_text = fs::read_to_string(&out)?;
     let result: Value = serde_json::from_str(&result_text)?;
+    assert_telegram_card_quality(
+        &result,
+        TelegramCardQualitySpec {
+            message_type: "council_decision",
+            required_message: &[
+                "수정 권고",
+                "보고 가능성 상태 점검",
+                "현재 결과는 reportable claim으로 승격할 수 없습니다",
+                "Council: 수정 권고, 리뷰어 합의",
+                "어떻게 진행할까요",
+                "다음 episode 진행 방식만 승인",
+            ],
+            required_detail: &[
+                "왜 이 추천인가",
+                "실패 요약",
+                "핵심 근거",
+                "Council 판단",
+                "답장 예시",
+            ],
+            required_buttons: &["계속", "수정(권장)", "보류", "중단", "근거 보기"],
+            forbidden_user_surface: &["relay-test-1", "episode.json", "council_decision"],
+            max_primary_lines: 14,
+        },
+    );
     assert_eq!(result["status"], "accepted");
     assert_eq!(result["decision"], "continue");
     assert!(result["target_chat_id_hash"]
@@ -741,10 +859,33 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
         String::from_utf8_lossy(&explicit_output.stderr)
     );
     let explicit: Value = serde_json::from_slice(&fs::read(&explicit_out)?)?;
+    assert_telegram_card_quality(
+        &explicit,
+        TelegramCardQualitySpec {
+            message_type: "approval_request",
+            required_message: &[
+                "승인 권고: provider fallback",
+                "Provider/model retargeting is waiting for operator approval",
+                "선택지",
+                "Approve this provider fallback retargeting?",
+                "does not approve runtime dispatch",
+            ],
+            required_detail: &["왜 이 추천인가", "핵심 근거", "선택별 의미", "답장 예시"],
+            required_buttons: &[
+                "1. Approve fallback(권장)",
+                "2. Deny fallback",
+                "3. Need more detail",
+                "근거 보기",
+            ],
+            forbidden_user_surface: &["approval-test-1"],
+            max_primary_lines: 16,
+        },
+    );
     assert_eq!(explicit["status"], "accepted");
     assert_eq!(explicit["decision"], "deny");
     assert_eq!(explicit["message_type"], "approval_request");
     assert_eq!(explicit["approval_brief_schema"], "approval_brief.v1");
+    assert_eq!(explicit["approval_brief_validation"]["valid"], true);
     assert!(explicit["keyboard"]["labels"]
         .as_array()
         .expect("explicit labels")
@@ -767,6 +908,56 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
     assert!(explicit_detail.contains("승인 권고의 근거"));
     assert!(explicit_detail.contains("선택별 의미"));
     assert!(explicit_detail.contains("fallback 후보와 비용 한계를 정리할 때까지 거부"));
+
+    let invalid_request_path = temp.path().join("invalid_approval_request.json");
+    write_file(
+        &invalid_request_path,
+        &serde_json::to_string_pretty(&json!({
+            "decision_request_id": "invalid-approval-1",
+            "message_type": "approval_request",
+            "approval_brief": {
+                "schema": "approval_brief.v1",
+                "recommendation": "approve",
+                "subject": "provider fallback",
+                "summary_lines": [
+                    "Read /tmp/raw/episode.json for invalid-approval-1 before deciding."
+                ],
+                "scope": "Approves all requested actions.",
+                "options": [
+                    {
+                        "id": "approve",
+                        "label": "Approve fallback",
+                        "description": "Approve everything."
+                    }
+                ]
+            },
+            "artifacts": {
+                "episode_record": "/tmp/raw/episode.json"
+            }
+        }))?,
+    )?;
+    let invalid_out = temp.path().join("invalid_approval_result.json");
+    let invalid_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&invalid_request_path)
+        .arg("--out")
+        .arg(&invalid_out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--dry-run")
+        .output()?;
+
+    assert_eq!(invalid_output.status.code(), Some(3));
+    let invalid: Value = serde_json::from_slice(&fs::read(&invalid_out)?)?;
+    assert_eq!(invalid["status"], "error");
+    let invalid_error = invalid["error"].as_str().expect("invalid error");
+    assert!(invalid_error.contains("approval_brief_validation_failed"));
+    assert!(invalid_error.contains("question:missing"));
+    assert!(invalid_error.contains("scope:missing_non_authorized_boundary"));
+    assert!(invalid_error.contains("summary_lines[0]:raw_path"));
+    assert!(invalid_error.contains("summary_lines[0]:artifact_filename"));
+    assert!(invalid_error.contains("summary_lines[0]:request_id_leak"));
 
     let producer_probe = temp.path().join("producer_probe.py");
     write_file(
@@ -872,6 +1063,52 @@ print(json.dumps(request, ensure_ascii=False))
     assert_eq!(natural["status"], "accepted");
     assert_eq!(natural["decision"], "continue");
     assert_eq!(natural["matched_request_id"], false);
+    assert_eq!(natural["text_scope"]["reason"], "single_active_request");
+
+    let ambiguous_registry = temp.path().join("ambiguous_active_requests.json");
+    write_file(
+        &ambiguous_registry,
+        &serde_json::to_string_pretty(&json!({
+            "schema": "telegram_active_requests.v1",
+            "entries": [
+                {
+                    "key": "other-active-request",
+                    "status": "pending",
+                    "message_type": "council_decision",
+                    "request_id_hash": "other",
+                    "target_chat_id_hash": "sha256:other",
+                    "created_at": "2026-05-28T00:00:00+00:00",
+                    "expires_at": "2999-01-01T00:00:00+00:00"
+                }
+            ]
+        }))?,
+    )?;
+    let ambiguous_out = temp.path().join("relay_result_ambiguous.json");
+    let ambiguous_output = Command::new("python3")
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg("--request")
+        .arg(&request_path)
+        .arg("--out")
+        .arg(&ambiguous_out)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--active-request-registry")
+        .arg(&ambiguous_registry)
+        .arg("--decision-text")
+        .arg("좋아 진행해")
+        .arg("--dry-run")
+        .output()?;
+
+    assert_eq!(ambiguous_output.status.code(), Some(2));
+    let ambiguous: Value = serde_json::from_slice(&fs::read(&ambiguous_out)?)?;
+    assert_eq!(ambiguous["status"], "ambiguous_input");
+    assert_eq!(ambiguous["decision"], Value::Null);
+    assert_eq!(ambiguous["candidate_decision"], "continue");
+    assert_eq!(
+        ambiguous["reason"],
+        "unscoped_text_matches_multiple_active_requests"
+    );
+    assert_eq!(ambiguous["text_scope"]["active_request_count"], 2);
 
     let revise_out = temp.path().join("relay_result_revise.json");
     let revise_output = Command::new("python3")
@@ -946,6 +1183,24 @@ print(json.dumps(request, ensure_ascii=False))
         String::from_utf8_lossy(&direction_output.stderr)
     );
     let direction: Value = serde_json::from_slice(&fs::read(&direction_out)?)?;
+    assert_telegram_card_quality(
+        &direction,
+        TelegramCardQualitySpec {
+            message_type: "direction_choice",
+            required_message: &[
+                "방향 선택",
+                "선택지",
+                "1. 안정화 먼저",
+                "2. 템플릿 확장",
+                "기타",
+                "어떤 방향으로 진행할까요",
+            ],
+            required_detail: &["상세 정보 부족", "선택별 의미"],
+            required_buttons: &["1. 안정화 먼저", "2. 템플릿 확장", "기타", "근거 보기"],
+            forbidden_user_surface: &["plan-choice-1"],
+            max_primary_lines: 16,
+        },
+    );
     assert_eq!(direction["status"], "accepted");
     assert_eq!(direction["message_type"], "direction_choice");
     assert_eq!(direction["decision"], "custom_direction");
@@ -1082,6 +1337,42 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     );
     let result_text = fs::read_to_string(&out)?;
     let result: Value = serde_json::from_str(&result_text)?;
+    let temp_path_string = temp.path().to_string_lossy().to_string();
+    let ondesk_forbidden = [
+        "closeout_test",
+        "closeout_plan.json",
+        "ondesk_prompt_package.md",
+        temp_path_string.as_str(),
+    ];
+    assert_telegram_card_quality(
+        &result,
+        TelegramCardQualitySpec {
+            message_type: "ondesk_handoff",
+            required_message: &[
+                "Ondesk 전환 브리핑: TwinPaper",
+                "08:30 Asia/Seoul",
+                "Closeout 요약",
+                "남은 사용자 결정 3건",
+                "WebUI에서 ondesk 검토를 시작할까요",
+                "Telegram은 ondesk 검토 진입/대기만 기록",
+            ],
+            required_detail: &[
+                "Ondesk 전환 상세",
+                "왜 이 추천인가",
+                "핵심 근거",
+                "선택별 의미",
+            ],
+            required_buttons: &[
+                "WebUI 열기",
+                "1. WebUI 검토 시작(권장)",
+                "2. 대기 유지",
+                "3. 나중에",
+                "근거 보기",
+            ],
+            forbidden_user_surface: &ondesk_forbidden,
+            max_primary_lines: 16,
+        },
+    );
     assert_eq!(result["status"], "accepted");
     assert_eq!(result["message_type"], "ondesk_handoff");
     assert_eq!(result["decision"], "start_ondesk_review");
