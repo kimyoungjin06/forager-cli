@@ -1,5 +1,6 @@
 use crate::cli::{self, Cli, Commands, LEGACY_BINARY_NAME, PRIMARY_BINARY_NAME};
 use crate::migrations;
+use crate::session::{load_config_read_only, normalize_profile_name};
 use crate::tui;
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
@@ -17,7 +18,9 @@ pub async fn run_cli() -> Result<()> {
     let profile = explicit_profile
         .clone()
         .or_else(|| std::env::var("AGENT_OF_EMPIRES_PROFILE").ok())
+        .or_else(configured_default_profile)
         .unwrap_or_default();
+    let profile = normalize_profile_name(&profile)?;
     maybe_warn_legacy_alias(&cli);
 
     // Handle commands that don't need app data or migrations.
@@ -85,6 +88,14 @@ fn completion_binary_name() -> &'static str {
 
 fn debug_logging_enabled() -> bool {
     std::env::var("FORAGER_DEBUG").is_ok() || std::env::var("AGENT_OF_EMPIRES_DEBUG").is_ok()
+}
+
+fn configured_default_profile() -> Option<String> {
+    load_config_read_only()
+        .ok()
+        .flatten()
+        .map(|config| config.default_profile)
+        .filter(|profile| !profile.trim().is_empty())
 }
 
 fn maybe_warn_legacy_alias(cli: &Cli) {

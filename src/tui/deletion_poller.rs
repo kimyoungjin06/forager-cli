@@ -15,6 +15,8 @@ pub struct DeletionRequest {
     pub delete_branch: bool,
     pub delete_sandbox: bool,
     pub force_delete: bool,
+    pub force_delete_branch: bool,
+    pub delete_empty_group_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -22,6 +24,7 @@ pub struct DeletionResult {
     pub session_id: String,
     pub success: bool,
     pub error: Option<String>,
+    pub delete_empty_group_path: Option<String>,
 }
 
 pub struct DeletionPoller {
@@ -98,7 +101,12 @@ impl DeletionPoller {
                 !request.delete_worktree || !errors.iter().any(|e| e.starts_with("Worktree:"));
             if worktree_ok {
                 if let Ok(git_wt) = GitWorktree::new(main_repo) {
-                    if let Err(e) = git_wt.delete_branch(&branch) {
+                    let result = if request.force_delete_branch {
+                        git_wt.force_delete_branch(&branch)
+                    } else {
+                        git_wt.delete_branch(&branch)
+                    };
+                    if let Err(e) = result {
                         errors.push(format!("Branch: {}", e));
                     }
                 }
@@ -137,6 +145,7 @@ impl DeletionPoller {
             } else {
                 Some(errors.join("; "))
             },
+            delete_empty_group_path: request.delete_empty_group_path.clone(),
         }
     }
 
@@ -174,6 +183,8 @@ mod tests {
             delete_branch: false,
             delete_sandbox: false,
             force_delete: false,
+            force_delete_branch: false,
+            delete_empty_group_path: None,
         };
 
         let result = DeletionPoller::perform_deletion(&request);
@@ -193,6 +204,8 @@ mod tests {
             delete_branch: false,
             delete_sandbox: false,
             force_delete: false,
+            force_delete_branch: false,
+            delete_empty_group_path: None,
         };
 
         let result = DeletionPoller::perform_deletion(&request);
@@ -214,6 +227,8 @@ mod tests {
             delete_branch: false,
             delete_sandbox: false,
             force_delete: false,
+            force_delete_branch: false,
+            delete_empty_group_path: None,
         });
 
         let mut result = None;
@@ -249,6 +264,8 @@ mod tests {
             delete_branch: false,
             delete_sandbox: false,
             force_delete: false,
+            force_delete_branch: false,
+            delete_empty_group_path: None,
         };
 
         let result = DeletionPoller::perform_deletion(&request);

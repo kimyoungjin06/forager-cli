@@ -76,13 +76,15 @@ async fn list_profiles() -> Result<()> {
 }
 
 async fn create_profile(name: &str) -> Result<()> {
-    session::create_profile(name)?;
+    let name = session::normalize_profile_name(name)?;
+    session::create_profile(&name)?;
     println!("✓ Created profile: {}", name);
     println!("  Use with: forager -p {}", name);
     Ok(())
 }
 
 async fn delete_profile(name: &str) -> Result<()> {
+    let name = session::normalize_profile_name(name)?;
     print!(
         "Are you sure you want to delete profile '{}'? This will remove all sessions in this profile. [y/N] ",
         name
@@ -97,7 +99,7 @@ async fn delete_profile(name: &str) -> Result<()> {
         return Ok(());
     }
 
-    session::delete_profile(name)?;
+    session::delete_profile(&name)?;
     println!("✓ Deleted profile: {}", name);
     Ok(())
 }
@@ -113,13 +115,14 @@ async fn show_default_profile() -> Result<()> {
 }
 
 async fn set_default_profile(name: &str) -> Result<()> {
+    let name = session::normalize_profile_name(name)?;
     // Verify profile exists
     let profiles = session::list_profiles()?;
-    if !profiles.contains(&name.to_string()) {
+    if !profiles.contains(&name) {
         bail!("Profile '{}' does not exist", name);
     }
 
-    session::set_default_profile(name)?;
+    session::set_default_profile(&name)?;
     println!("✓ Default profile set to: {}", name);
     Ok(())
 }

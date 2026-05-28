@@ -324,7 +324,8 @@ impl GitWorktree {
     }
 
     /// Delete a local git branch.
-    /// Returns an error if the branch doesn't exist or is currently checked out.
+    /// Returns an error if the branch doesn't exist, is currently checked out,
+    /// or has unmerged changes.
     pub fn delete_branch(&self, branch: &str) -> Result<()> {
         let output = std::process::Command::new("git")
             .args(["branch", "-d", branch])
@@ -332,20 +333,29 @@ impl GitWorktree {
             .output()?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // If the branch has unmerged changes, try force delete
-            if stderr.contains("not fully merged") {
-                let force_output = std::process::Command::new("git")
-                    .args(["branch", "-D", branch])
-                    .current_dir(&self.repo_path)
-                    .output()?;
-
-                if !force_output.status.success() {
-                    return Err(GitError::BranchNotFound(branch.to_string()));
-                }
-            } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if stderr.contains("not found") {
                 return Err(GitError::BranchNotFound(branch.to_string()));
             }
+            return Err(GitError::BranchCommandFailed(stderr));
+        }
+
+        Ok(())
+    }
+
+    /// Force delete a local git branch. Use only after explicit user approval.
+    pub fn force_delete_branch(&self, branch: &str) -> Result<()> {
+        let output = std::process::Command::new("git")
+            .args(["branch", "-D", branch])
+            .current_dir(&self.repo_path)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if stderr.contains("not found") {
+                return Err(GitError::BranchNotFound(branch.to_string()));
+            }
+            return Err(GitError::BranchCommandFailed(stderr));
         }
 
         Ok(())
@@ -937,6 +947,56 @@ mod tests {
         // Verify branch no longer exists
         assert!(repo
             .find_branch("to-delete", git2::BranchType::Local)
+            .is_err());
+    }
+
+    #[test]
+    fn test_delete_branch_does_not_force_delete_unmerged_branch() {
+        let (dir, repo) = setup_test_repo();
+        let repo_path = repo.path().parent().unwrap();
+        let original_ref = repo.head().unwrap().name().unwrap().to_string();
+
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("unmerged", &base_commit, false).unwrap();
+
+        repo.set_head("refs/heads/unmerged").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        std::fs::write(dir.path().join("unmerged.txt"), "unmerged\n").unwrap();
+
+        let tree_id = {
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new("unmerged.txt")).unwrap();
+            index.write().unwrap();
+            index.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Unmerged commit",
+            &tree,
+            &[&base_commit],
+        )
+        .unwrap();
+
+        repo.set_head(&original_ref).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+
+        let git_wt = GitWorktree::new(repo_path.to_path_buf()).unwrap();
+        let result = git_wt.delete_branch("unmerged");
+
+        assert!(result.is_err());
+        assert!(repo
+            .find_branch("unmerged", git2::BranchType::Local)
+            .is_ok());
+
+        git_wt.force_delete_branch("unmerged").unwrap();
+        assert!(repo
+            .find_branch("unmerged", git2::BranchType::Local)
             .is_err());
     }
 

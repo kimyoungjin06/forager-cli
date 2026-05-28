@@ -15,6 +15,9 @@ pub enum GitError {
     #[error("Branch '{0}' not found")]
     BranchNotFound(String),
 
+    #[error("Git branch command failed: {0}")]
+    BranchCommandFailed(String),
+
     #[error("Git error: {0}")]
     Git2Error(#[from] git2::Error),
 

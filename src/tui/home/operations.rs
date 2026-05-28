@@ -1,7 +1,7 @@
 //! Session operations for HomeView (create, delete, rename)
 
 use crate::session::builder::{self, InstanceParams};
-use crate::session::{flatten_tree, list_profiles, GroupTree, Status, Storage};
+use crate::session::{list_profiles, GroupTree, Status, Storage};
 use crate::tui::deletion_poller::DeletionRequest;
 use crate::tui::dialogs::{DeleteOptions, GroupDeleteOptions, NewSessionData};
 
@@ -60,6 +60,8 @@ impl HomeView {
                     delete_branch: options.delete_branch,
                     delete_sandbox: options.delete_sandbox,
                     force_delete: options.force_delete,
+                    force_delete_branch: options.force_delete_branch,
+                    delete_empty_group_path: None,
                 };
                 self.deletion_poller.request_deletion(request);
             }
@@ -68,7 +70,7 @@ impl HomeView {
     }
 
     pub(super) fn delete_selected_group(&mut self) -> anyhow::Result<()> {
-        if let Some(group_path) = self.selected_group.take() {
+        if let Some(group_path) = self.selected_group.clone() {
             let prefix = format!("{}/", group_path);
             for inst in &mut self.instances {
                 if inst.group_path == group_path || inst.group_path.starts_with(&prefix) {
@@ -101,15 +103,11 @@ impl HomeView {
                 .collect();
 
             for session_id in sessions_to_delete {
-                // Clear group_path when marking for deletion so these instances
-                // won't cause the group to be recreated during tree rebuilds
                 if let Some(inst) = self.instance_map.get_mut(&session_id) {
                     inst.status = Status::Deleting;
-                    inst.group_path = String::new();
                 }
                 if let Some(inst) = self.instances.iter_mut().find(|i| i.id == session_id) {
                     inst.status = Status::Deleting;
-                    inst.group_path = String::new();
                 }
 
                 if let Some(inst) = self.instance_map.get(&session_id) {
@@ -132,16 +130,13 @@ impl HomeView {
                         delete_branch,
                         delete_sandbox,
                         force_delete: options.force_delete_worktrees,
+                        force_delete_branch: options.force_delete_branches,
+                        delete_empty_group_path: Some(group_path.clone()),
                     };
                     self.deletion_poller.request_deletion(request);
                 }
             }
-
-            self.group_tree.delete_group(&group_path);
-            self.groups = self.group_tree.get_all_groups();
-            self.storage
-                .save_with_groups(&self.instances, &self.group_tree)?;
-            self.flat_items = flatten_tree(&self.group_tree, &self.instances);
+            self.selected_group = None;
         }
         Ok(())
     }

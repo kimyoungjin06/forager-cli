@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use forager::session::{
-    create_profile, delete_profile, list_profiles, set_default_profile, Config, Instance, Storage,
+    create_profile, delete_profile, list_profiles, normalize_profile_name, set_default_profile,
+    Config, Instance, Storage,
 };
 use serial_test::serial;
 
@@ -66,6 +67,38 @@ fn test_cannot_delete_default_profile() -> Result<()> {
         .unwrap_err()
         .to_string()
         .contains("Cannot delete the default profile"));
+
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn test_profile_names_cannot_escape_profile_directory() -> Result<()> {
+    let temp = setup_temp_home();
+    let escaped_path = temp.path().join(".config").join("outside");
+
+    let result = Storage::new("../../outside");
+
+    assert!(result.is_err());
+    assert!(result
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Profile name cannot contain path separators"));
+    assert!(!escaped_path.exists());
+
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn test_profile_mutations_reject_path_like_names() -> Result<()> {
+    let _temp = setup_temp_home();
+
+    assert!(create_profile("../work").is_err());
+    assert!(delete_profile("../work").is_err());
+    assert!(set_default_profile("../work").is_err());
+    assert!(normalize_profile_name("work/group").is_err());
 
     Ok(())
 }
