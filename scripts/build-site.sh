@@ -28,6 +28,7 @@ echo "Copying assets to website..."
 mkdir -p "$ROOT_DIR/website/public/assets"
 cp "$ROOT_DIR/assets/logo.svg" "$ROOT_DIR/website/public/assets/"
 cp "$ROOT_DIR/assets/logo.png" "$ROOT_DIR/website/public/assets/"
+cp "$ROOT_DIR/assets/kisti-logo-en.png" "$ROOT_DIR/website/public/assets/"
 cp "$ROOT_DIR/assets/social-preview.png" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
 cp "$ROOT_DIR/assets/social-preview.svg" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
 cp "$ROOT_DIR/theme/favicon.png" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
@@ -65,7 +66,7 @@ cat > "$DIST_DIR/404.html" << 'EOF'
     <img src="/forager-cli/assets/logo.svg" alt="Forager" class="w-16 h-16 mx-auto mb-6 opacity-50">
     <h1 class="text-4xl font-bold mb-4">404</h1>
     <p class="text-gray-400 mb-8">Page not found</p>
-    <a href="/forager-cli/" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
+    <a href="/forager-cli/" class="bg-sky-700 hover:bg-sky-600 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
       Go Home
     </a>
   </div>

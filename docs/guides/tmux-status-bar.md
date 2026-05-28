@@ -6,7 +6,7 @@ Forager can display session information in your tmux status bar, showing:
 
 ## How It Works
 
-When you start a session, Forager sets tmux user options (`@forager_title`, `@forager_branch`) and configures the status bar to display this information with Forager's phosphor green theme. Stored legacy sandbox metadata may also appear through `@forager_sandbox`. During the rename transition, Forager also writes and reads legacy `@aoe_*` options for existing integrations.
+When you start a session, Forager sets tmux user options (`@forager_title`, `@forager_branch`) and configures the status bar to display this information with Forager's KISTI-aligned blue theme. Stored legacy sandbox metadata may also appear through `@forager_sandbox`. During the rename transition, Forager also writes and reads legacy `@aoe_*` options for existing integrations.
 
 **Example status bars:**
 ```

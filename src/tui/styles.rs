@@ -32,33 +32,33 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::phosphor()
+        Self::kisti()
     }
 }
 
 impl Theme {
-    pub fn phosphor() -> Self {
+    pub fn kisti() -> Self {
         Self {
-            background: Color::Rgb(16, 20, 18),
-            border: Color::Rgb(45, 70, 55),
-            terminal_border: Color::Rgb(70, 130, 180),
-            selection: Color::Rgb(30, 50, 40),
-            session_selection: Color::Rgb(60, 60, 60),
+            background: Color::Rgb(8, 22, 37),
+            border: Color::Rgb(0, 84, 132),
+            terminal_border: Color::Rgb(0, 117, 186),
+            selection: Color::Rgb(14, 39, 62),
+            session_selection: Color::Rgb(36, 50, 65),
 
-            title: Color::Rgb(57, 255, 20),
-            text: Color::Rgb(180, 255, 180),
-            dimmed: Color::Rgb(80, 120, 90),
-            hint: Color::Rgb(100, 160, 120),
+            title: Color::Rgb(56, 189, 248),
+            text: Color::Rgb(200, 232, 248),
+            dimmed: Color::Rgb(112, 142, 162),
+            hint: Color::Rgb(136, 176, 198),
 
-            running: Color::Rgb(0, 255, 180),
-            waiting: Color::Rgb(180, 255, 80),
-            idle: Color::Rgb(60, 100, 70),
+            running: Color::Rgb(34, 211, 238),
+            waiting: Color::Rgb(218, 33, 40),
+            idle: Color::Rgb(86, 118, 138),
             error: Color::Rgb(255, 100, 80),
             terminal_active: Color::Rgb(130, 170, 255),
 
-            group: Color::Rgb(100, 220, 160),
-            search: Color::Rgb(180, 255, 200),
-            accent: Color::Rgb(57, 255, 20),
+            group: Color::Rgb(125, 211, 252),
+            search: Color::Rgb(186, 230, 253),
+            accent: Color::Rgb(0, 117, 186),
         }
     }
 }

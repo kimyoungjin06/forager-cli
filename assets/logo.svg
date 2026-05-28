@@ -6,8 +6,8 @@
     </linearGradient>
     <linearGradient id="route" x1="30" y1="94" x2="99" y2="32" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#38bdf8"/>
-      <stop offset="0.5" stop-color="#34d399"/>
-      <stop offset="1" stop-color="#a3e635"/>
+      <stop offset="0.58" stop-color="#0075ba"/>
+      <stop offset="1" stop-color="#da2128"/>
     </linearGradient>
   </defs>
 
@@ -15,9 +15,9 @@
   <rect x="5" y="5" width="118" height="24" rx="16" fill="#0d1420"/>
   <path d="M5 21h118v8H5z" fill="#0d1420"/>
 
-  <circle cx="18" cy="17" r="4" fill="#ef4444"/>
-  <circle cx="31" cy="17" r="4" fill="#eab308"/>
-  <circle cx="44" cy="17" r="4" fill="#22c55e"/>
+  <circle cx="18" cy="17" r="4" fill="#da2128"/>
+  <circle cx="31" cy="17" r="4" fill="#38bdf8"/>
+  <circle cx="44" cy="17" r="4" fill="#0075ba"/>
 
   <path d="M27 87l17-19 18 12 20-25 19-16" fill="none" stroke="#1f2937" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M27 87l17-19 18 12 20-25 19-16" fill="none" stroke="url(#route)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -27,11 +27,11 @@
   <path d="M72 95h24" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
 
   <circle cx="27" cy="87" r="8" fill="#38bdf8" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="44" cy="68" r="7" fill="#34d399" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="62" cy="80" r="7" fill="#22c55e" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="82" cy="55" r="7" fill="#84cc16" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="101" cy="39" r="8" fill="#a3e635" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="44" cy="68" r="7" fill="#0ea5e9" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="62" cy="80" r="7" fill="#0075ba" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="82" cy="55" r="7" fill="#0b5f94" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="101" cy="39" r="8" fill="#da2128" stroke="#0f172a" stroke-width="3"/>
 
-  <path d="M88 37c4-10 13-15 25-15-2 12-8 20-20 24" fill="none" stroke="#34d399" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M88 37c8 1 14 4 18 10" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/>
+  <path d="M88 37c4-10 13-15 25-15-2 12-8 20-20 24" fill="none" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M88 37c8 1 14 4 18 10" fill="none" stroke="#0075ba" stroke-width="4" stroke-linecap="round"/>
 </svg>
