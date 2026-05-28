@@ -47,6 +47,7 @@ pub fn apply_status_bar(
 
     // Configure the status bar format using Forager's phosphor green theme
     // colour46 = bright green (matches Forager accent), colour48 = cyan (matches running)
+    // colour154 = phosphor lime (matches waiting)
     // colour235 = dark background
     //
     // Format: "forager: Title | branch | [legacy container] | 14:30"
@@ -57,7 +58,7 @@ pub fn apply_status_bar(
         " #[fg=colour46,bold]forager#[fg=colour252,nobold]: ",
         "#{@forager_title}",
         "#{?#{@forager_branch}, #[fg=colour48]| #{@forager_branch}#[fg=colour252],}",
-        "#{?#{@forager_sandbox}, #[fg=colour214]⬡ #{@forager_sandbox}#[fg=colour252],}",
+        "#{?#{@forager_sandbox}, #[fg=colour154]⬡ #{@forager_sandbox}#[fg=colour252],}",
         " | %H:%M "
     );
 

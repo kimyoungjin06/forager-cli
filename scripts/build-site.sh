@@ -65,7 +65,7 @@ cat > "$DIST_DIR/404.html" << 'EOF'
     <img src="/forager-cli/assets/logo.svg" alt="Forager" class="w-16 h-16 mx-auto mb-6 opacity-50">
     <h1 class="text-4xl font-bold mb-4">404</h1>
     <p class="text-gray-400 mb-8">Page not found</p>
-    <a href="/forager-cli/" class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
+    <a href="/forager-cli/" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
       Go Home
     </a>
   </div>
