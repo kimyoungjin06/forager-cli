@@ -1709,7 +1709,17 @@ def render_decision_card(
 
 
 def decision_state_path(out_path: pathlib.Path) -> pathlib.Path:
-    return out_path.with_name("telegram_decision_state.json")
+    stem = out_path.stem or "telegram_decision"
+    return out_path.with_name(f"{stem}.telegram_decision_state.json")
+
+
+def decision_state_path_for_state(state: dict[str, Any], out_path: pathlib.Path) -> pathlib.Path:
+    raw_path = str(state.get("state_path") or "").strip()
+    return pathlib.Path(raw_path) if raw_path else decision_state_path(out_path)
+
+
+def write_decision_state(state: dict[str, Any], out_path: pathlib.Path) -> None:
+    write_json(decision_state_path_for_state(state, out_path), state)
 
 
 def build_decision_state(request: dict[str, Any], request_id: str, out_path: pathlib.Path) -> dict[str, Any]:
@@ -1745,7 +1755,7 @@ def finalize_decision_state(state: dict[str, Any], out_path: pathlib.Path, resul
     if result.get("ambiguous_events"):
         final_state["ambiguous_events"] = result.get("ambiguous_events")
     final_state["completed_at"] = utc_now()
-    write_json(decision_state_path(out_path), final_state)
+    write_decision_state(final_state, out_path)
 
 
 def inline_keyboard(state: dict[str, Any], _request_id: str) -> dict[str, Any]:
@@ -2521,7 +2531,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     request_id = request_id_for(request, args.request.stem)
     message = render_message(request, request_id)
     state = build_decision_state(request, request_id, args.out)
-    write_json(decision_state_path(args.out), state)
+    write_decision_state(state, args.out)
     action_specs = action_specs_for(request)
     link_specs = link_specs_for(request)
 
@@ -2536,7 +2546,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         timeout_sec=max(1, args.timeout_sec),
     )
     state["active_request_guard"] = active_guard
-    write_json(decision_state_path(args.out), state)
+    write_decision_state(state, args.out)
     base_result = {
         "created_at": utc_now(),
         "request_path": str(args.request.resolve()),
@@ -2572,82 +2582,83 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "timeout_sec": max(0, args.timeout_sec),
     }
 
-    if args.decision_text:
-        parsed = parse_operator_decision_text(args.decision_text, request, request_id, require_request_id=False)
-        if parsed is None:
-            result = {
-                **base_result,
-                "status": "ignored",
-                "decision": None,
-                "reason": "decision_text_did_not_match_request",
-                "input_mode": "manual",
-            }
-            finalize_decision_state(state, args.out, result)
-            complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
-            return result
-        text_scope = text_decision_scope(
-            parsed,
-            message=None,
+    registry_completion_status: str | None = None
+
+    def finish(result: dict[str, Any]) -> dict[str, Any]:
+        nonlocal registry_completion_status
+        finalize_decision_state(state, args.out, result)
+        registry_completion_status = str(result.get("status") or "")
+        return result
+
+    try:
+        if args.decision_text:
+            parsed = parse_operator_decision_text(args.decision_text, request, request_id, require_request_id=False)
+            if parsed is None:
+                result = {
+                    **base_result,
+                    "status": "ignored",
+                    "decision": None,
+                    "reason": "decision_text_did_not_match_request",
+                    "input_mode": "manual",
+                }
+                return finish(result)
+            text_scope = text_decision_scope(
+                parsed,
+                message=None,
+                state=state,
+                active_registry_path=active_registry_path,
+            )
+            if not text_scope.get("accepted"):
+                result = ambiguous_input_result(
+                    base_result,
+                    parsed,
+                    input_mode="manual",
+                    text_scope=text_scope,
+                )
+                return finish(result)
+            result = {**base_result, "status": "accepted", "received_at": utc_now(), "input_mode": "manual", **parsed}
+            result["text_scope"] = text_scope
+            return finish(result)
+
+        if args.dry_run:
+            result = {**base_result, "status": "dry_run", "decision": None, "reason": "dry_run_no_message_sent"}
+            return finish(result)
+
+        offset = current_update_offset(config["token"])
+        cleanup_report = cleanup_reply_keyboard(
+            config["token"],
+            config["target_chat_id"],
+            enabled=not bool(args.keep_reply_keyboard),
+        )
+        message_id = send_message(
+            config["token"],
+            config["target_chat_id"],
+            message,
+            reply_markup=inline_keyboard(state, request_id),
+        )
+        state["telegram_message_id"] = message_id
+        state["target_chat_id_hash"] = chat_hash(config["target_chat_id"])
+        write_decision_state(state, args.out)
+        result = poll_for_decision(
+            token=config["token"],
+            accepted_chat_ids=set(config["accepted_chat_ids"]),
+            request_id=request_id,
             state=state,
+            offset=offset,
+            timeout_sec=max(0, args.timeout_sec),
+            poll_interval_sec=max(0.2, args.poll_interval_sec),
             active_registry_path=active_registry_path,
         )
-        if not text_scope.get("accepted"):
-            result = ambiguous_input_result(
-                base_result,
-                parsed,
-                input_mode="manual",
-                text_scope=text_scope,
-            )
-            finalize_decision_state(state, args.out, result)
-            complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
-            return result
-        result = {**base_result, "status": "accepted", "received_at": utc_now(), "input_mode": "manual", **parsed}
-        result["text_scope"] = text_scope
-        finalize_decision_state(state, args.out, result)
-        complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
-        return result
-
-    if args.dry_run:
-        result = {**base_result, "status": "dry_run", "decision": None, "reason": "dry_run_no_message_sent"}
-        finalize_decision_state(state, args.out, result)
-        complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
-        return result
-
-    offset = current_update_offset(config["token"])
-    cleanup_report = cleanup_reply_keyboard(
-        config["token"],
-        config["target_chat_id"],
-        enabled=not bool(args.keep_reply_keyboard),
-    )
-    message_id = send_message(
-        config["token"],
-        config["target_chat_id"],
-        message,
-        reply_markup=inline_keyboard(state, request_id),
-    )
-    state["telegram_message_id"] = message_id
-    state["target_chat_id_hash"] = chat_hash(config["target_chat_id"])
-    write_json(decision_state_path(args.out), state)
-    result = poll_for_decision(
-        token=config["token"],
-        accepted_chat_ids=set(config["accepted_chat_ids"]),
-        request_id=request_id,
-        state=state,
-        offset=offset,
-        timeout_sec=max(0, args.timeout_sec),
-        poll_interval_sec=max(0.2, args.poll_interval_sec),
-        active_registry_path=active_registry_path,
-    )
-    result = {
-        **base_result,
-        "message_sent": True,
-        "telegram_message_id": message_id,
-        "reply_keyboard_cleanup": cleanup_report,
-        **result,
-    }
-    finalize_decision_state(state, args.out, result)
-    complete_active_request(active_registry_path, state, status=str(result.get("status") or ""))
-    return result
+        result = {
+            **base_result,
+            "message_sent": True,
+            "telegram_message_id": message_id,
+            "reply_keyboard_cleanup": cleanup_report,
+            **result,
+        }
+        return finish(result)
+    finally:
+        complete_active_request(active_registry_path, state, status=registry_completion_status or "error")
 
 
 def main() -> int:

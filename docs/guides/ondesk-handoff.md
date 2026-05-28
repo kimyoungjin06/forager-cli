@@ -128,4 +128,7 @@ scripts/offdesk_telegram_decision_relay.py \
 ```
 
 The rendered message hides raw paths and ids. Those remain in the request,
-state, and result JSON for audit/debugging.
+state, and result JSON for audit/debugging. The relay writes the state beside
+the result as `<result-stem>.telegram_decision_state.json`, so simultaneous
+handoff and council prompts in the same directory do not overwrite each other's
+state artifacts.

@@ -138,9 +138,27 @@ Relay processes update it under a short file lock, write through same-directory
 atomic replacement, and prune expired or completed entries during register and
 complete operations. Request identity is scoped by request id and output path so
 parallel requests in the same run directory cannot collapse into one registry
-slot. Result JSON records the registry write mode and stale cleanup count so
-active-request ambiguity can be audited without exposing raw request ids or paths
-in Telegram.
+slot, and decision-state files are written beside the result as
+`<result-stem>.telegram_decision_state.json` instead of a shared fixed filename.
+If live Telegram sending or polling fails after registration, the relay removes
+the active request immediately instead of waiting for expiry. Result JSON records
+the registry write mode and stale cleanup count so active-request ambiguity can
+be audited without exposing raw request ids or paths in Telegram.
+
+Optional live smoke should use the same relay, a short timeout, and a disposable
+request. A timeout is acceptable for this smoke because it proves the Bot API
+send path, registry cleanup, and state artifact path without requiring the
+operator to answer:
+
+```bash
+scripts/offdesk_telegram_decision_relay.py \
+  --request "$SMOKE_REQUEST_JSON" \
+  --out "$SMOKE_RESULT_JSON" \
+  --timeout-sec 5 \
+  --poll-interval-sec 0.2
+status=$?
+test "$status" -eq 0 -o "$status" -eq 2
+```
 
 ## Telegram Rendering
 

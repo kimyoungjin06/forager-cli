@@ -752,6 +752,13 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
         first_state["request"]["approval_brief"]["source"],
         "operator_brief"
     );
+    assert_eq!(
+        first_state_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("state file name"),
+        "relay_result.telegram_decision_state.json"
+    );
     let message_preview = result["message_preview"].as_str().expect("message preview");
     assert!(message_preview.contains("수정 권고"));
     assert!(message_preview.contains("보고 가능성 상태 점검"));
@@ -1397,6 +1404,92 @@ print(json.dumps({"guards": guards, "final_registry": final_registry}, ensure_as
         String::from_utf8_lossy(&registry_output.stderr)
     );
 
+    let failure_cleanup_probe = temp.path().join("telegram_failure_cleanup_probe.py");
+    write_file(
+        &failure_cleanup_probe,
+        r#"
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+
+script, root = sys.argv[1:]
+root = pathlib.Path(root)
+spec = importlib.util.spec_from_file_location("relay", script)
+relay = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = relay
+spec.loader.exec_module(relay)
+
+env_path = root / "failure_cleanup.env"
+env_path.write_text("TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n", encoding="utf-8")
+request_path = root / "failure_cleanup_request.json"
+out_path = root / "failure_cleanup_result.json"
+registry = root / "failure_cleanup_active_requests.json"
+relay.write_json(request_path, {
+    "decision_request_id": "failure-cleanup-1",
+    "message_type": "council_decision",
+    "approval_brief": {
+        "schema": "approval_brief.v1",
+        "recommendation": "continue",
+        "subject": "send failure cleanup",
+        "summary_lines": ["A live Telegram send failure must not leave an active request behind."],
+        "scope": "다음 polling decision만 승인합니다. 파일 변경, cleanup, provider 변경, wiki 승인은 별도 승인입니다.",
+        "question": "Proceed with this failure cleanup probe?",
+    },
+})
+
+relay.current_update_offset = lambda _token: 0
+relay.cleanup_reply_keyboard = lambda *_args, **_kwargs: {
+    "enabled": True,
+    "attempted": True,
+    "status": "mocked",
+}
+
+def fail_send_message(*_args, **_kwargs):
+    raise relay.RelayError("mock_send_failure")
+
+relay.send_message = fail_send_message
+args = types.SimpleNamespace(
+    request=request_path,
+    out=out_path,
+    env_file=env_path,
+    timeout_sec=60,
+    poll_interval_sec=0.2,
+    dry_run=False,
+    keep_reply_keyboard=False,
+    decision_text=None,
+    active_request_registry=registry,
+)
+try:
+    relay.run(args)
+except relay.RelayError as error:
+    assert "mock_send_failure" in str(error), error
+else:
+    raise AssertionError("expected mocked send failure")
+
+registry_json = relay.load_active_registry(registry)
+assert relay.active_request_count(registry) == 0, registry_json
+assert registry_json["write_mode"] == "locked_atomic", registry_json
+state_files = sorted(path.name for path in root.glob("failure_cleanup_result.telegram_decision_state.json"))
+assert state_files == ["failure_cleanup_result.telegram_decision_state.json"], state_files
+assert not (root / "telegram_decision_state.json").exists()
+print(json.dumps({"registry": registry_json, "state_files": state_files}, ensure_ascii=False))
+"#,
+    )?;
+    let failure_cleanup_output = Command::new("python3")
+        .arg(&failure_cleanup_probe)
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg(temp.path())
+        .output()?;
+
+    assert!(
+        failure_cleanup_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&failure_cleanup_output.stdout),
+        String::from_utf8_lossy(&failure_cleanup_output.stderr)
+    );
+
     let revise_out = temp.path().join("relay_result_revise.json");
     let revise_output = Command::new("python3")
         .arg(script_path("offdesk_telegram_decision_relay.py"))
@@ -1507,8 +1600,21 @@ print(json.dumps({"guards": guards, "final_registry": final_registry}, ensure_as
         .as_str()
         .expect("custom reason")
         .contains("안정화를 먼저"));
-    let state_text = fs::read_to_string(temp.path().join("telegram_decision_state.json"))?;
+    let direction_state_path = PathBuf::from(
+        direction["state_path"]
+            .as_str()
+            .expect("direction state path"),
+    );
+    let state_text = fs::read_to_string(&direction_state_path)?;
     let state: Value = serde_json::from_str(&state_text)?;
+    assert_eq!(
+        direction_state_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("direction state file name"),
+        "direction_result.telegram_decision_state.json"
+    );
+    assert!(!temp.path().join("telegram_decision_state.json").exists());
     assert_eq!(state["status"], "accepted");
     assert!(state.get("tokens").is_none());
     assert!(state["token_hashes"].is_object());
