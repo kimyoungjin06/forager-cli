@@ -1247,6 +1247,156 @@ print(json.dumps({"result": result, "sent": sent}, ensure_ascii=False))
         String::from_utf8_lossy(&live_output.stderr)
     );
 
+    let registry_probe = temp.path().join("telegram_registry_probe.py");
+    write_file(
+        &registry_probe,
+        r#"
+import importlib.util
+import json
+import multiprocessing
+import pathlib
+import subprocess
+import sys
+
+script, registry_path = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("relay", script)
+relay = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = relay
+spec.loader.exec_module(relay)
+
+registry = pathlib.Path(registry_path)
+
+def build_state(name):
+    request = relay.request_with_approval_brief({
+        "decision_request_id": f"registry-{name}",
+        "message_type": "council_decision",
+        "approval_brief": {
+            "schema": "approval_brief.v1",
+            "recommendation": "continue",
+            "subject": f"registry probe {name}",
+            "summary_lines": [f"Registry probe request {name} is waiting."],
+            "scope": "다음 polling decision만 승인합니다. 파일 변경, cleanup, provider 변경, wiki 승인은 별도 승인입니다.",
+            "question": "Proceed with this registry probe?",
+        },
+    })
+    request_id = relay.request_id_for(request, f"registry-{name}")
+    state = relay.build_decision_state(request, request_id, registry.with_name(f"registry_{name}.json"))
+    return state, request_id
+
+relay.write_json(registry, {
+    "schema": "telegram_active_requests.v1",
+    "entries": [
+        {
+            "key": "expired-request",
+            "status": "pending",
+            "message_type": "council_decision",
+            "request_id_hash": "expired",
+            "target_chat_id_hash": "sha256:expired",
+            "created_at": "2026-05-28T00:00:00+00:00",
+            "expires_at": "2000-01-01T00:00:00+00:00",
+        },
+        {
+            "key": "completed-request",
+            "status": "accepted",
+            "message_type": "council_decision",
+            "request_id_hash": "accepted",
+            "target_chat_id_hash": "sha256:accepted",
+            "created_at": "2026-05-28T00:00:00+00:00",
+            "expires_at": "2999-01-01T00:00:00+00:00",
+        },
+        "malformed-entry",
+    ],
+})
+
+def register(name):
+    state, request_id = build_state(name)
+    return relay.register_active_request(
+        registry,
+        state=state,
+        request_id=request_id,
+        message_type="council_decision",
+        target_chat_id_hash="sha256:test-chat",
+        timeout_sec=60,
+    )
+
+with multiprocessing.Pool(2) as pool:
+    guards = pool.map(register, ["a", "b"])
+
+active = relay.active_registry_entries(relay.load_active_registry(registry))
+active_outs = {pathlib.Path(entry["out_path"]).name for entry in active}
+assert active_outs == {"registry_a.json", "registry_b.json"}, active
+assert relay.active_request_count(registry) == 2, relay.load_active_registry(registry)
+assert any(guard["stale_removed"] >= 1 for guard in guards), guards
+assert all(guard["write_mode"] == "locked_atomic" for guard in guards), guards
+assert not list(registry.parent.glob(f".{registry.name}.*.tmp"))
+
+lock_snippet = """
+import importlib.util
+import pathlib
+import sys
+
+script, registry_path = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("relay", script)
+relay = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = relay
+spec.loader.exec_module(relay)
+with relay.locked_active_registry(pathlib.Path(registry_path), timeout_sec=0.1):
+    print("unexpected-lock")
+"""
+lock_test = subprocess.run(
+    [
+        sys.executable,
+        "-c",
+        lock_snippet,
+        script,
+        str(registry),
+    ],
+    capture_output=True,
+    text=True,
+)
+with relay.locked_active_registry(registry, timeout_sec=0.1):
+    blocked = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            lock_snippet,
+            script,
+            str(registry),
+        ],
+        capture_output=True,
+        text=True,
+    )
+assert lock_test.returncode == 0, lock_test.stderr
+assert blocked.returncode != 0, blocked.stdout + blocked.stderr
+assert "active_request_registry_lock_timeout" in blocked.stderr, blocked.stdout + blocked.stderr
+
+state_a, _ = build_state("a")
+relay.complete_active_request(registry, state_a, status="accepted")
+assert relay.active_request_count(registry) == 1, relay.load_active_registry(registry)
+state_b, _ = build_state("b")
+relay.complete_active_request(registry, state_b, status="ambiguous_input")
+assert relay.active_request_count(registry) == 1, relay.load_active_registry(registry)
+relay.complete_active_request(registry, state_b, status="accepted")
+assert relay.active_request_count(registry) == 0, relay.load_active_registry(registry)
+final_registry = relay.load_active_registry(registry)
+assert final_registry["write_mode"] == "locked_atomic", final_registry
+assert relay.active_registry_lock_path(registry).exists()
+print(json.dumps({"guards": guards, "final_registry": final_registry}, ensure_ascii=False))
+"#,
+    )?;
+    let registry_output = Command::new("python3")
+        .arg(&registry_probe)
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg(temp.path().join("registry_atomic_probe.json"))
+        .output()?;
+
+    assert!(
+        registry_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&registry_output.stdout),
+        String::from_utf8_lossy(&registry_output.stderr)
+    );
+
     let revise_out = temp.path().join("relay_result_revise.json");
     let revise_output = Command::new("python3")
         .arg(script_path("offdesk_telegram_decision_relay.py"))

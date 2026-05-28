@@ -10,7 +10,9 @@ canonical state.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
+import fcntl
 import hashlib
 import html
 import json
@@ -38,6 +40,7 @@ DEFAULT_LIVE_ACTIVE_REQUEST_REGISTRY = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "telegram_active_requests.json"),
     )
 )
+ACTIVE_REQUEST_REGISTRY_LOCK_TIMEOUT_SEC = 5.0
 VALID_DECISIONS = ("continue", "revise", "block", "stop")
 CUSTOM_DIRECTION_DECISION = "custom_direction"
 DECISION_LABELS = {
@@ -280,7 +283,12 @@ def resolve_active_request_registry(args: argparse.Namespace) -> pathlib.Path:
 
 
 def active_request_key(state: dict[str, Any]) -> str:
-    raw = str(state.get("state_path") or state.get("request_id") or "")
+    parts = [
+        str(state.get(field) or "").strip()
+        for field in ("request_id", "out_path", "state_path")
+        if str(state.get(field) or "").strip()
+    ]
+    raw = "\n".join(parts) if parts else json.dumps(state, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -293,31 +301,90 @@ def load_active_registry(path: pathlib.Path) -> dict[str, Any]:
     return {"schema": "telegram_active_requests.v1", "entries": []}
 
 
-def active_registry_entries(registry: dict[str, Any], *, now: dt.datetime | None = None) -> list[dict[str, Any]]:
+def prune_active_registry_entries(
+    registry: dict[str, Any],
+    *,
+    now: dt.datetime | None = None,
+) -> tuple[list[dict[str, Any]], int]:
     if now is None:
         now = dt.datetime.now(dt.timezone.utc)
     entries = registry.get("entries", [])
     if not isinstance(entries, list):
-        return []
+        return [], 0
     active: list[dict[str, Any]] = []
+    pruned = 0
     for entry in entries:
         if not isinstance(entry, dict):
+            pruned += 1
             continue
         if entry.get("status") != "pending":
+            pruned += 1
             continue
         expires_at = parse_utc_datetime(entry.get("expires_at"))
         if expires_at is not None and expires_at < now:
+            pruned += 1
             continue
         active.append(entry)
+    return active, pruned
+
+
+def active_registry_entries(registry: dict[str, Any], *, now: dt.datetime | None = None) -> list[dict[str, Any]]:
+    active, _pruned = prune_active_registry_entries(registry, now=now)
     return active
 
 
-def write_active_registry(path: pathlib.Path, entries: list[dict[str, Any]]) -> None:
-    write_json(
+def active_registry_lock_path(path: pathlib.Path) -> pathlib.Path:
+    return path.with_name(f"{path.name}.lock")
+
+
+@contextlib.contextmanager
+def locked_active_registry(
+    path: pathlib.Path,
+    *,
+    timeout_sec: float = ACTIVE_REQUEST_REGISTRY_LOCK_TIMEOUT_SEC,
+):
+    lock_path = active_registry_lock_path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as error:
+                if time.monotonic() >= deadline:
+                    raise RelayError(f"active_request_registry_lock_timeout: {lock_path}") from error
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def write_json_atomic(path: pathlib.Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(6)}.tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def write_active_registry(path: pathlib.Path, entries: list[dict[str, Any]], *, stale_removed: int = 0) -> None:
+    write_json_atomic(
         path,
         {
             "schema": "telegram_active_requests.v1",
             "updated_at": utc_now(),
+            "stale_removed": stale_removed,
+            "write_mode": "locked_atomic",
             "entries": entries,
         },
     )
@@ -332,48 +399,50 @@ def register_active_request(
     target_chat_id_hash: str,
     timeout_sec: int,
 ) -> dict[str, Any]:
-    now = dt.datetime.now(dt.timezone.utc)
-    registry = load_active_registry(path)
-    active = [
-        entry
-        for entry in active_registry_entries(registry, now=now)
-        if entry.get("key") != active_request_key(state)
-    ]
-    expires_at = now + dt.timedelta(seconds=max(1, timeout_sec))
-    entry = {
-        "key": active_request_key(state),
-        "request_id_hash": hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:16],
-        "message_type": message_type,
-        "state_path": str(state.get("state_path") or ""),
-        "out_path": str(state.get("out_path") or ""),
-        "target_chat_id_hash": target_chat_id_hash,
-        "status": "pending",
-        "created_at": utc_now(),
-        "expires_at": expires_at.isoformat(),
-    }
-    entries = [*active, entry]
-    write_active_registry(path, entries)
+    with locked_active_registry(path):
+        now = dt.datetime.now(dt.timezone.utc)
+        registry = load_active_registry(path)
+        active, stale_removed = prune_active_registry_entries(registry, now=now)
+        key = active_request_key(state)
+        active = [entry for entry in active if entry.get("key") != key]
+        expires_at = now + dt.timedelta(seconds=max(1, timeout_sec))
+        entry = {
+            "key": key,
+            "request_id_hash": hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:16],
+            "message_type": message_type,
+            "state_path": str(state.get("state_path") or ""),
+            "out_path": str(state.get("out_path") or ""),
+            "target_chat_id_hash": target_chat_id_hash,
+            "status": "pending",
+            "created_at": utc_now(),
+            "expires_at": expires_at.isoformat(),
+        }
+        entries = [*active, entry]
+        write_active_registry(path, entries, stale_removed=stale_removed)
     return {
         "registry_path": str(path.resolve()),
         "current_key_hash": hashlib.sha256(entry["key"].encode("utf-8")).hexdigest()[:16],
         "active_request_count": len(entries),
+        "stale_removed": stale_removed,
+        "write_mode": "locked_atomic",
         "free_text_policy": "request_id_or_reply_or_single_active_request",
     }
 
 
 def complete_active_request(path: pathlib.Path, state: dict[str, Any], *, status: str) -> None:
-    registry = load_active_registry(path)
-    key = active_request_key(state)
-    active = active_registry_entries(registry)
-    entries = [entry for entry in active if entry.get("key") != key]
-    if status in {"ambiguous_input", "awaiting_input"}:
-        current = next((entry for entry in active if entry.get("key") == key), None)
-        if current:
-            current = dict(current)
-            current["status"] = "pending"
-            current["updated_at"] = utc_now()
-            entries.append(current)
-    write_active_registry(path, entries)
+    with locked_active_registry(path):
+        registry = load_active_registry(path)
+        key = active_request_key(state)
+        active, stale_removed = prune_active_registry_entries(registry)
+        entries = [entry for entry in active if entry.get("key") != key]
+        if status in {"ambiguous_input", "awaiting_input"}:
+            current = next((entry for entry in active if entry.get("key") == key), None)
+            if current:
+                current = dict(current)
+                current["status"] = "pending"
+                current["updated_at"] = utc_now()
+                entries.append(current)
+        write_active_registry(path, entries, stale_removed=stale_removed)
 
 
 def active_request_count(path: pathlib.Path) -> int:

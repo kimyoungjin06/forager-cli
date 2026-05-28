@@ -133,6 +133,15 @@ an `ambiguous_events` entry and the relay keeps waiting for a scoped follow-up.
 In one-shot manual modes such as `--decision-text`, the result may end as
 `ambiguous_input` because there is no polling loop to recover.
 
+The active request registry is an operator-safety surface, not a log archive.
+Relay processes update it under a short file lock, write through same-directory
+atomic replacement, and prune expired or completed entries during register and
+complete operations. Request identity is scoped by request id and output path so
+parallel requests in the same run directory cannot collapse into one registry
+slot. Result JSON records the registry write mode and stale cleanup count so
+active-request ambiguity can be audited without exposing raw request ids or paths
+in Telegram.
+
 ## Telegram Rendering
 
 The compact card renders:
