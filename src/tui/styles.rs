@@ -51,7 +51,7 @@ impl Theme {
             hint: Color::Rgb(100, 160, 120),
 
             running: Color::Rgb(0, 255, 180),
-            waiting: Color::Rgb(255, 180, 60),
+            waiting: Color::Rgb(180, 255, 80),
             idle: Color::Rgb(60, 100, 70),
             error: Color::Rgb(255, 100, 80),
             terminal_active: Color::Rgb(130, 170, 255),
