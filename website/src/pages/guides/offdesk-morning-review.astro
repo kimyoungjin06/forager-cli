@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
+import { sitePath } from '../../lib/paths';
 ---
 
 <Base
@@ -59,7 +60,7 @@ forager offdesk closeout --dry-run</code></pre>
           The review record is the durable evidence that the closeout packet was inspected. Packet generation alone does not approve file cleanup.
         </p>
         <p>
-          Read the <a href="/guides/offdesk-closeout/">Offdesk Closeout Guide</a> when file cleanup, archive candidates, or handoff context are part of the return path.
+          Read the <a href={sitePath('/guides/offdesk-closeout/')}>Offdesk Closeout Guide</a> when file cleanup, archive candidates, or handoff context are part of the return path.
         </p>
       </section>
 

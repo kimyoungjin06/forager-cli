@@ -3,7 +3,8 @@ import sitemap from '@astrojs/sitemap';
 import tailwind from '@astrojs/tailwind';
 
 export default defineConfig({
-  site: 'https://kimyoungjin06.github.io/forager-cli',
+  site: 'https://kimyoungjin06.github.io',
+  base: '/forager-cli',
   integrations: [
     tailwind(),
     sitemap({

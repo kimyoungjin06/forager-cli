@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
+import { sitePath } from '../../lib/paths';
 ---
 
 <Base
@@ -32,7 +33,7 @@ import Footer from '../../components/Footer.astro';
       <section>
         <h2>The Single-Window Workflow</h2>
         <p>
-          <a href="/">Forager</a> organizes your tmux sessions into two views:
+          <a href={sitePath('/')}>Forager</a> organizes your tmux sessions into two views:
         </p>
         <ul>
           <li><strong>Agent view</strong>: The TUI dashboard showing all sessions, their status, and metadata. Navigate with keyboard shortcuts, add or remove sessions, and jump into any agent.</li>
@@ -87,7 +88,7 @@ import Footer from '../../components/Footer.astro';
           <li><strong>Dashboard view</strong> with real-time status for each session</li>
           <li><strong>Session groups</strong> for organization</li>
           <li><strong>Status detection</strong> that shows agent activity without entering each session</li>
-          <li><strong>Integrated lifecycle</strong> for <a href="/guides/git-worktrees-ai-development/">git worktrees</a></li>
+          <li><strong>Integrated lifecycle</strong> for <a href={sitePath('/guides/git-worktrees-ai-development/')}>git worktrees</a></li>
         </ul>
         <p>
           You get the reliability of tmux with the usability of a purpose-built interface.
@@ -107,12 +108,12 @@ apt install tmux     # Debian/Ubuntu</code></pre>
         <pre><code>curl -fsSL https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/scripts/install.sh | bash
 forager</code></pre>
         <p>
-          See the <a href="/docs/">documentation</a> for the full setup guide. Related guides:
+          See the <a href={sitePath('/docs/')}>documentation</a> for the full setup guide. Related guides:
         </p>
         <ul>
-          <li><a href="/guides/manage-ai-coding-agents/">Managing multiple AI coding agents</a></li>
-          <li><a href="/guides/git-worktrees-ai-development/">Git worktrees for parallel development</a></li>
-          <li><a href="/guides/claude-code-session-manager/">AI coding agent session manager</a></li>
+          <li><a href={sitePath('/guides/manage-ai-coding-agents/')}>Managing multiple AI coding agents</a></li>
+          <li><a href={sitePath('/guides/git-worktrees-ai-development/')}>Git worktrees for parallel development</a></li>
+          <li><a href={sitePath('/guides/claude-code-session-manager/')}>AI coding agent session manager</a></li>
         </ul>
       </section>
     </div>
