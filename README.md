@@ -18,7 +18,7 @@ Run multiple AI agents in parallel across different branches of your codebase, e
 
 > If you find this project useful, please consider giving it a star on GitHub: it helps others discover the project!
 
-![Forager Demo](docs/assets/demo.gif)
+![Forager TUI preview](docs/assets/tui.png)
 
 ## Features
 

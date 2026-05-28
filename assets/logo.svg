@@ -1,70 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Forager">
   <defs>
-    <!-- Muted, professional color palette -->
-    <linearGradient id="copperGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#d97706"/>
-      <stop offset="50%" style="stop-color:#b45309"/>
-      <stop offset="100%" style="stop-color:#92400e"/>
+    <linearGradient id="shell" x1="10" y1="6" x2="118" y2="122" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#182433"/>
+      <stop offset="1" stop-color="#0b111a"/>
     </linearGradient>
-    <linearGradient id="bronzeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#ca8a04"/>
-      <stop offset="100%" style="stop-color:#a16207"/>
-    </linearGradient>
-    <linearGradient id="steelGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#1e293b"/>
-      <stop offset="100%" style="stop-color:#0f172a"/>
+    <linearGradient id="route" x1="30" y1="94" x2="99" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="0.5" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#f59e0b"/>
     </linearGradient>
   </defs>
-  
-  <!-- Terminal window frame - subtle, professional -->
-  <rect x="4" y="4" width="120" height="120" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
-  
-  <!-- Terminal header bar - understated -->
-  <rect x="4" y="4" width="120" height="18" rx="8" fill="#0f172a"/>
-  <rect x="4" y="14" width="120" height="8" fill="#0f172a"/>
-  
-  <!-- Window controls -->
-  <circle cx="16" cy="13" r="3" fill="#ef4444"/>
-  <circle cx="26" cy="13" r="3" fill="#eab308"/>
-  <circle cx="36" cy="13" r="3" fill="#22c55e"/>
-  
-  <!-- === Circuit Network Hex === -->
-  <g transform="translate(64, 72)">
-    <!-- Background hex - clean stroke -->
-    <polygon points="0,-40 35,-20 35,20 0,40 -35,20 -35,-20" 
-             fill="#0f172a" stroke="url(#copperGrad)" stroke-width="2"/>
-    
-    <!-- Circuit lines - subtle -->
-    <path d="M0,-32 L0,-20 M-25,-10 L-14,-10 M25,-10 L14,-10 M-25,10 L-14,10 M25,10 L14,10 M0,20 L0,32" 
-          stroke="#475569" stroke-width="1"/>
-    
-    <!-- Circuit junction nodes -->
-    <circle cx="0" cy="-20" r="1.5" fill="#64748b"/>
-    <circle cx="-14" cy="-10" r="1.5" fill="#64748b"/>
-    <circle cx="14" cy="-10" r="1.5" fill="#64748b"/>
-    <circle cx="-14" cy="10" r="1.5" fill="#64748b"/>
-    <circle cx="14" cy="10" r="1.5" fill="#64748b"/>
-    <circle cx="0" cy="20" r="1.5" fill="#64748b"/>
-    
-    <!-- Crown - bronze/copper, no glow -->
-    <path d="M-16,16 L-16,-4 L-8,-12 L0,-4 L8,-12 L16,-4 L16,16 Z" 
-          fill="url(#bronzeGrad)" stroke="#a16207" stroke-width="0.5"/>
-    
-    <!-- Agent nodes - muted teal, no glow -->
-    <circle cx="0" cy="-46" r="4.5" fill="#0d9488" stroke="#115e59" stroke-width="1"/>
-    <path d="M0,-41.5 L0,-32" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="3,2"/>
-    
-    <circle cx="42" cy="0" r="4.5" fill="#0d9488" stroke="#115e59" stroke-width="1"/>
-    <path d="M37.5,0 L25,0" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="3,2"/>
-    
-    <circle cx="-42" cy="0" r="4.5" fill="#0d9488" stroke="#115e59" stroke-width="1"/>
-    <path d="M-37.5,0 L-25,0" stroke="#0d9488" stroke-width="1.5" stroke-dasharray="3,2"/>
-    
-    <!-- Bottom nodes - smaller, subtle -->
-    <circle cx="26" cy="38" r="3" fill="#0d9488" stroke="#115e59" stroke-width="0.75"/>
-    <path d="M23.5,35.5 L16,26" stroke="#0d9488" stroke-width="1" stroke-dasharray="3,2"/>
-    
-    <circle cx="-26" cy="38" r="3" fill="#0d9488" stroke="#115e59" stroke-width="0.75"/>
-    <path d="M-23.5,35.5 L-16,26" stroke="#0d9488" stroke-width="1" stroke-dasharray="3,2"/>
-  </g>
+
+  <rect x="5" y="5" width="118" height="118" rx="16" fill="url(#shell)" stroke="#304257" stroke-width="2"/>
+  <rect x="5" y="5" width="118" height="24" rx="16" fill="#0d1420"/>
+  <path d="M5 21h118v8H5z" fill="#0d1420"/>
+
+  <circle cx="18" cy="17" r="4" fill="#ef4444"/>
+  <circle cx="31" cy="17" r="4" fill="#f59e0b"/>
+  <circle cx="44" cy="17" r="4" fill="#22c55e"/>
+
+  <path d="M27 87l17-19 18 12 20-25 19-16" fill="none" stroke="#1f2937" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M27 87l17-19 18 12 20-25 19-16" fill="none" stroke="url(#route)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M34 46h20" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
+  <path d="M34 58h13" stroke="#64748b" stroke-width="4" stroke-linecap="round"/>
+  <path d="M72 95h24" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
+
+  <circle cx="27" cy="87" r="8" fill="#38bdf8" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="44" cy="68" r="7" fill="#34d399" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="62" cy="80" r="7" fill="#22c55e" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="82" cy="55" r="7" fill="#fbbf24" stroke="#0f172a" stroke-width="3"/>
+  <circle cx="101" cy="39" r="8" fill="#f59e0b" stroke="#0f172a" stroke-width="3"/>
+
+  <path d="M88 37c4-10 13-15 25-15-2 12-8 20-20 24" fill="none" stroke="#34d399" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M88 37c8 1 14 4 18 10" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/>
 </svg>

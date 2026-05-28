@@ -49,7 +49,7 @@ Sleep 1000ms
 
 # Type a prompt
 Set TypingSpeed 10ms
-Type "Write me a short story about age of empires 2."
+Type "Draft a compact rollout checklist for this API change."
 Set TypingSpeed 50ms
 Enter
 Sleep 1000ms
@@ -114,7 +114,7 @@ Sleep 1000ms
 
 # Type a prompt
 Set TypingSpeed 10ms
-Type "Quick! Ask me a multi choice question about age of empires 2, use your tool"
+Type "Ask me which deployment path to take and summarize the tradeoffs."
 Set TypingSpeed 50ms
 Enter
 Sleep 1000ms
