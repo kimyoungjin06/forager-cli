@@ -1326,7 +1326,7 @@ def register(name):
         timeout_sec=60,
     )
 
-with multiprocessing.Pool(2) as pool:
+with multiprocessing.get_context("fork").Pool(2) as pool:
     guards = pool.map(register, ["a", "b"])
 
 active = relay.active_registry_entries(relay.load_active_registry(registry))
