@@ -7,14 +7,17 @@ interface Props {
   ogImage?: string;
 }
 
+import { sitePath } from '../lib/paths';
+
 const siteUrl = Astro.site?.toString().replace(/\/$/, '') ?? '';
+const publicSiteUrl = `${siteUrl}${sitePath('/')}`.replace(/\/$/, '');
 
 const {
   title,
   description,
   ogTitle = 'Forager',
   ogDescription = 'Offdesk agent orchestration for AI coding agents. Approvals, recovery, git worktrees, and a TUI.',
-  ogImage = `${siteUrl}/assets/social-preview.png`
+  ogImage = `${publicSiteUrl}/assets/social-preview.png`
 } = Astro.props;
 
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
@@ -24,7 +27,7 @@ const structuredData = {
   "@type": "SoftwareApplication",
   "name": "Forager",
   "description": "Offdesk agent orchestration for Linux and macOS using tmux to manage, approve, recover, and monitor AI coding agent work.",
-  "url": siteUrl,
+  "url": publicSiteUrl,
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS",
   "programmingLanguage": "Rust",
@@ -74,8 +77,8 @@ const structuredData = {
   <meta name="twitter:image" content={ogImage}>
 
   <!-- Favicon -->
-  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
-  <link rel="icon" type="image/png" href="/assets/logo.png">
+  <link rel="icon" type="image/svg+xml" href={sitePath('/assets/logo.svg')}>
+  <link rel="icon" type="image/png" href={sitePath('/assets/logo.png')}>
 
   <!-- Structured Data -->
   <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
@@ -86,10 +89,10 @@ const structuredData = {
   <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" as="style">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href={sitePath('/styles.css')}>
 </head>
 <body class="gradient-bg min-h-screen text-gray-100 antialiased">
   <slot />
-  <script is:inline src="/main.js"></script>
+  <script is:inline src={sitePath('/main.js')}></script>
 </body>
 </html>

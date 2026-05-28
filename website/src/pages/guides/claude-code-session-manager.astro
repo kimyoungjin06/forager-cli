@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
+import { sitePath } from '../../lib/paths';
 ---
 
 <Base
@@ -35,7 +36,7 @@ import Footer from '../../components/Footer.astro';
           Real productivity comes from running several agents in parallel. One might be refactoring a module, another writing tests, and a third exploring an API integration. Each needs its own terminal session and its own working directory to avoid conflicts.
         </p>
         <p>
-          <a href="/">Forager</a> handles this by creating tmux sessions for each agent instance. Each session can point at a different directory or branch. The TUI dashboard shows all your instances at a glance, regardless of which coding agent you are using.
+          <a href={sitePath('/')}>Forager</a> handles this by creating tmux sessions for each agent instance. Each session can point at a different directory or branch. The TUI dashboard shows all your instances at a glance, regardless of which coding agent you are using.
         </p>
       </section>
 
@@ -57,7 +58,7 @@ import Footer from '../../components/Footer.astro';
       <section>
         <h2>Git Worktrees for Parallel Sessions</h2>
         <p>
-          When you have multiple agents working on different branches of the same repo, <a href="/guides/git-worktrees-ai-development/">git worktrees</a> keep them isolated. Forager creates a separate worktree for each session, so each agent gets its own branch and working directory.
+          When you have multiple agents working on different branches of the same repo, <a href={sitePath('/guides/git-worktrees-ai-development/')}>git worktrees</a> keep them isolated. Forager creates a separate worktree for each session, so each agent gets its own branch and working directory.
         </p>
         <p>
           This avoids the common problem of two agents trying to modify the same files. Each instance works independently, and you merge the results when they are done.
@@ -82,12 +83,12 @@ import Footer from '../../components/Footer.astro';
         <pre><code>curl -fsSL https://raw.githubusercontent.com/kimyoungjin06/forager-cli/main/scripts/install.sh | bash
 forager</code></pre>
         <p>
-          The TUI will guide you through creating sessions. It works with whichever coding agent you prefer. See the <a href="/docs/">documentation</a> for the full setup guide. Related guides:
+          The TUI will guide you through creating sessions. It works with whichever coding agent you prefer. See the <a href={sitePath('/docs/')}>documentation</a> for the full setup guide. Related guides:
         </p>
         <ul>
-          <li><a href="/guides/manage-ai-coding-agents/">Managing multiple AI coding agents</a></li>
-          <li><a href="/guides/git-worktrees-ai-development/">Git worktrees for parallel development</a></li>
-          <li><a href="/guides/tmux-ai-coding-workflow/">tmux workflow for AI coding</a></li>
+          <li><a href={sitePath('/guides/manage-ai-coding-agents/')}>Managing multiple AI coding agents</a></li>
+          <li><a href={sitePath('/guides/git-worktrees-ai-development/')}>Git worktrees for parallel development</a></li>
+          <li><a href={sitePath('/guides/tmux-ai-coding-workflow/')}>tmux workflow for AI coding</a></li>
         </ul>
       </section>
     </div>

@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
+import { sitePath } from '../../lib/paths';
 ---
 
 <Base
@@ -62,7 +63,7 @@ git worktree add ../repo-feature feature</code></pre>
       <section>
         <h2>How Forager Automates Worktrees</h2>
         <p>
-          When you add a session in <a href="/">Forager</a> with worktree mode enabled, Forager handles the full lifecycle:
+          When you add a session in <a href={sitePath('/')}>Forager</a> with worktree mode enabled, Forager handles the full lifecycle:
         </p>
         <ol>
           <li>Creates the worktree from your configured base repository</li>
@@ -93,12 +94,12 @@ git worktree add ../repo-feature feature</code></pre>
       <section>
         <h2>Getting Started</h2>
         <p>
-          Enable worktree mode in the Forager settings and configure your base repository. See the <a href="/docs/">documentation</a> for detailed setup instructions. Related guides:
+          Enable worktree mode in the Forager settings and configure your base repository. See the <a href={sitePath('/docs/')}>documentation</a> for detailed setup instructions. Related guides:
         </p>
         <ul>
-          <li><a href="/guides/manage-ai-coding-agents/">Managing multiple AI coding agents</a></li>
-          <li><a href="/guides/claude-code-session-manager/">AI coding agent session manager</a></li>
-          <li><a href="/guides/tmux-ai-coding-workflow/">tmux workflow for AI coding</a></li>
+          <li><a href={sitePath('/guides/manage-ai-coding-agents/')}>Managing multiple AI coding agents</a></li>
+          <li><a href={sitePath('/guides/claude-code-session-manager/')}>AI coding agent session manager</a></li>
+          <li><a href={sitePath('/guides/tmux-ai-coding-workflow/')}>tmux workflow for AI coding</a></li>
         </ul>
       </section>
     </div>

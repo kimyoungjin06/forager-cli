@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import Nav from '../../components/Nav.astro';
 import Footer from '../../components/Footer.astro';
+import { sitePath } from '../../lib/paths';
 ---
 
 <Base
@@ -88,7 +89,7 @@ import Footer from '../../components/Footer.astro';
           Use <code>RETURN_PACKAGE.md</code> to start the next Ondesk harness. Read the listed result artifacts first, inspect open decisions, and run the verification commands before continuing work.
         </p>
         <p>
-          Pair this with the <a href="/guides/offdesk-morning-review/">Offdesk Morning Review Workflow</a> when reviewing overnight work.
+          Pair this with the <a href={sitePath('/guides/offdesk-morning-review/')}>Offdesk Morning Review Workflow</a> when reviewing overnight work.
         </p>
       </section>
     </div>
