@@ -1110,6 +1110,143 @@ print(json.dumps(request, ensure_ascii=False))
     );
     assert_eq!(ambiguous["text_scope"]["active_request_count"], 2);
 
+    let live_probe = temp.path().join("telegram_live_probe.py");
+    write_file(
+        &live_probe,
+        r#"
+import importlib.util
+import json
+import pathlib
+import sys
+
+script, registry_path = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("relay", script)
+relay = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = relay
+spec.loader.exec_module(relay)
+
+registry = pathlib.Path(registry_path)
+out_path = registry.with_name("live_poll_result.json")
+request = relay.request_with_approval_brief({
+    "decision_request_id": "relay-live-1",
+    "message_type": "council_decision",
+    "approval_brief": {
+        "schema": "approval_brief.v1",
+        "recommendation": "revise",
+        "subject": "보고 가능성 상태 점검",
+        "summary_lines": [
+            "현재 결과는 reportable claim으로 승격할 수 없습니다.",
+            "Council: 수정 권고, 리뷰어 합의."
+        ],
+        "scope": "다음 episode 진행 방식만 승인합니다. 파일 변경, cleanup, provider 변경, wiki 승인은 별도 승인입니다.",
+        "question": "어떻게 진행할까요?",
+        "decision_impacts": {
+            "continue": "현재 경고를 감수하고 다음 episode로 진행합니다.",
+            "revise": "자연어로 수정 방향을 남기고 다음 episode를 그 방향으로 진행합니다.",
+            "block": "지금은 멈추고 재개 조건이나 추가 확인이 필요하다고 기록합니다.",
+            "stop": "이 런을 닫고 closeout 또는 별도 검토로 전환합니다."
+        }
+    }
+})
+request_id = relay.request_id_for(request, "relay-live-1")
+state = relay.build_decision_state(request, request_id, out_path)
+state["telegram_message_id"] = 777
+current_key = relay.active_request_key(state)
+relay.write_json(registry, {
+    "schema": "telegram_active_requests.v1",
+    "entries": [
+        {
+            "key": "other-active-request",
+            "status": "pending",
+            "message_type": "council_decision",
+            "request_id_hash": "other",
+            "target_chat_id_hash": "sha256:other",
+            "created_at": "2026-05-28T00:00:00+00:00",
+            "expires_at": "2999-01-01T00:00:00+00:00"
+        },
+        {
+            "key": current_key,
+            "status": "pending",
+            "message_type": "council_decision",
+            "request_id_hash": "current",
+            "target_chat_id_hash": "sha256:current",
+            "created_at": "2026-05-28T00:00:00+00:00",
+            "expires_at": "2999-01-01T00:00:00+00:00"
+        }
+    ]
+})
+
+updates = [
+    [
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 11,
+                "chat": {"id": 123},
+                "text": "좋아 진행해"
+            }
+        }
+    ],
+    [
+        {
+            "update_id": 2,
+            "message": {
+                "message_id": 12,
+                "chat": {"id": 123},
+                "reply_to_message": {"message_id": 777},
+                "text": "좋아 진행해"
+            }
+        }
+    ]
+]
+sent = []
+
+def fake_get_updates(_token, *, offset, poll_timeout_sec):
+    del offset, poll_timeout_sec
+    return updates.pop(0) if updates else []
+
+def fake_send_message(_token, chat_id, message, **kwargs):
+    sent.append({"chat_id": str(chat_id), "message": message, "kwargs": kwargs})
+    return 900 + len(sent)
+
+relay.get_updates = fake_get_updates
+relay.send_message = fake_send_message
+relay.time.sleep = lambda _seconds: None
+
+result = relay.poll_for_decision(
+    token="fake-token",
+    accepted_chat_ids={"123"},
+    request_id=request_id,
+    state=state,
+    offset=0,
+    timeout_sec=2,
+    poll_interval_sec=0.2,
+    active_registry_path=registry,
+)
+assert result["status"] == "accepted", result
+assert result["decision"] == "continue", result
+assert result["text_scope"]["reason"] == "telegram_reply_to_decision_card", result
+assert len(result["ambiguous_events"]) == 1, result
+assert result["ambiguous_events"][0]["reason"] == "unscoped_text_matches_multiple_active_requests", result
+assert result["ambiguous_events"][0]["text_scope"]["active_request_count"] == 2, result
+assert len(sent) == 1, sent
+assert "확인이 필요" in sent[0]["message"], sent
+print(json.dumps({"result": result, "sent": sent}, ensure_ascii=False))
+"#,
+    )?;
+    let live_output = Command::new("python3")
+        .arg(&live_probe)
+        .arg(script_path("offdesk_telegram_decision_relay.py"))
+        .arg(temp.path().join("live_active_requests.json"))
+        .output()?;
+
+    assert!(
+        live_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&live_output.stdout),
+        String::from_utf8_lossy(&live_output.stderr)
+    );
+
     let revise_out = temp.path().join("relay_result_revise.json");
     let revise_output = Command::new("python3")
         .arg(script_path("offdesk_telegram_decision_relay.py"))

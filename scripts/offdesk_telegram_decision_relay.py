@@ -1673,6 +1673,8 @@ def finalize_decision_state(state: dict[str, Any], out_path: pathlib.Path, resul
     final_state["reason"] = result.get("reason")
     final_state["input_mode"] = result.get("input_mode")
     final_state["received_at"] = result.get("received_at")
+    if result.get("ambiguous_events"):
+        final_state["ambiguous_events"] = result.get("ambiguous_events")
     final_state["completed_at"] = utc_now()
     write_json(decision_state_path(out_path), final_state)
 
@@ -2130,11 +2132,33 @@ def ambiguous_input_result(
     input_mode: str,
     text_scope: dict[str, Any],
 ) -> dict[str, Any]:
+    event = ambiguous_event(parsed, input_mode=input_mode, text_scope=text_scope)
     return {
         **base_result,
         "status": "ambiguous_input",
-        "received_at": utc_now(),
+        "received_at": event["received_at"],
         "decision": None,
+        "candidate_decision": event["candidate_decision"],
+        "decision_label": event["decision_label"],
+        "reason": event["reason"],
+        "matched_request_id": event["matched_request_id"],
+        "input_mode": input_mode,
+        "text_scope": text_scope,
+        "raw_text_preview": event.get("raw_text_preview"),
+        "ambiguous_events": [event],
+    }
+
+
+def ambiguous_event(
+    parsed: dict[str, Any],
+    *,
+    input_mode: str,
+    text_scope: dict[str, Any],
+    source_update_id: Any = None,
+    chat_id_hash: str | None = None,
+) -> dict[str, Any]:
+    event = {
+        "received_at": utc_now(),
         "candidate_decision": parsed.get("decision"),
         "decision_label": parsed.get("decision_label") or display_decision(parsed.get("decision")),
         "reason": text_scope.get("reason") or "unscoped_text_requires_request_context",
@@ -2143,6 +2167,18 @@ def ambiguous_input_result(
         "text_scope": text_scope,
         "raw_text_preview": parsed.get("raw_text_preview"),
     }
+    if source_update_id is not None:
+        event["source_update_id"] = source_update_id
+    if chat_id_hash:
+        event["chat_id_hash"] = chat_id_hash
+    return event
+
+
+def with_ambiguous_events(result: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
+    if events:
+        result = dict(result)
+        result["ambiguous_events"] = events
+    return result
 
 
 def poll_for_decision(
@@ -2155,11 +2191,11 @@ def poll_for_decision(
     timeout_sec: int,
     poll_interval_sec: float,
     active_registry_path: pathlib.Path,
-    base_result: dict[str, Any],
 ) -> dict[str, Any]:
     deadline = time.time() + max(0, timeout_sec)
     next_offset = offset
     pending_natural_input: dict[str, Any] | None = None
+    ambiguous_events: list[dict[str, Any]] = []
     while time.time() <= deadline:
         updates = get_updates(token, offset=next_offset, poll_timeout_sec=min(10, max(1, int(poll_interval_sec))))
         for update in updates:
@@ -2246,18 +2282,21 @@ def poll_for_decision(
                             )
                         except RelayError:
                             pass
-                    return {
-                        "status": "accepted",
-                        "received_at": utc_now(),
-                        "source_update_id": update_id,
-                        "chat_id_hash": chat_hash(chat_id),
-                        "decision": decision,
-                        "decision_label": decision_label,
-                        "reason": reason,
-                        "matched_request_id": True,
-                        "input_mode": "callback",
-                        "callback_data_hash": hashlib.sha256(data.encode("utf-8")).hexdigest()[:16],
-                    }
+                    return with_ambiguous_events(
+                        {
+                            "status": "accepted",
+                            "received_at": utc_now(),
+                            "source_update_id": update_id,
+                            "chat_id_hash": chat_hash(chat_id),
+                            "decision": decision,
+                            "decision_label": decision_label,
+                            "reason": reason,
+                            "matched_request_id": True,
+                            "input_mode": "callback",
+                            "callback_data_hash": hashlib.sha256(data.encode("utf-8")).hexdigest()[:16],
+                        },
+                        ambiguous_events,
+                    )
             message = update.get("message")
             if not isinstance(message, dict):
                 continue
@@ -2288,21 +2327,24 @@ def poll_for_decision(
                         )
                     except RelayError:
                         pass
-                return {
-                    "status": "accepted",
-                    "received_at": utc_now(),
-                    "source_update_id": update_id,
-                    "chat_id_hash": chat_hash(chat_id),
-                    "decision": decision,
-                    "decision_label": decision_label,
-                    "reason": reason,
-                    "matched_request_id": False,
-                    "input_mode": "callback_then_message",
-                    "natural_language_required": True,
-                    "prompted_at": pending_natural_input.get("prompted_at"),
-                    "callback_data_hash": pending_natural_input.get("callback_data_hash"),
-                    "raw_text_preview": raw_text[:240],
-                }
+                return with_ambiguous_events(
+                    {
+                        "status": "accepted",
+                        "received_at": utc_now(),
+                        "source_update_id": update_id,
+                        "chat_id_hash": chat_hash(chat_id),
+                        "decision": decision,
+                        "decision_label": decision_label,
+                        "reason": reason,
+                        "matched_request_id": False,
+                        "input_mode": "callback_then_message",
+                        "natural_language_required": True,
+                        "prompted_at": pending_natural_input.get("prompted_at"),
+                        "callback_data_hash": pending_natural_input.get("callback_data_hash"),
+                        "raw_text_preview": raw_text[:240],
+                    },
+                    ambiguous_events,
+                )
             parsed = parse_operator_decision_text(
                 raw_text,
                 state.get("request", {}),
@@ -2318,6 +2360,15 @@ def poll_for_decision(
                 active_registry_path=active_registry_path,
             )
             if not text_scope.get("accepted"):
+                ambiguous_events.append(
+                    ambiguous_event(
+                        parsed,
+                        input_mode="message",
+                        text_scope=text_scope,
+                        source_update_id=update_id,
+                        chat_id_hash=chat_hash(chat_id),
+                    )
+                )
                 send_message(
                     token,
                     chat_id,
@@ -2326,12 +2377,7 @@ def poll_for_decision(
                         "해당 의사결정 카드에 reply로 답하거나 버튼을 눌러주세요."
                     ),
                 )
-                return ambiguous_input_result(
-                    base_result,
-                    parsed,
-                    input_mode="message",
-                    text_scope=text_scope,
-                )
+                continue
             prompt = natural_input_prompt(state.get("request", {}), str(parsed.get("decision") or ""))
             if prompt and not str(parsed.get("reason") or "").strip():
                 message_id = state.get("telegram_message_id")
@@ -2364,24 +2410,30 @@ def poll_for_decision(
                     except RelayError:
                         pass
                 continue
-            return {
-                "status": "accepted",
-                "received_at": utc_now(),
-                "source_update_id": update_id,
-                "chat_id_hash": chat_hash(chat_id),
-                "input_mode": "message",
-                "natural_language_required": bool(prompt),
-                "text_scope": text_scope,
-                **parsed,
-            }
+            return with_ambiguous_events(
+                {
+                    "status": "accepted",
+                    "received_at": utc_now(),
+                    "source_update_id": update_id,
+                    "chat_id_hash": chat_hash(chat_id),
+                    "input_mode": "message",
+                    "natural_language_required": bool(prompt),
+                    "text_scope": text_scope,
+                    **parsed,
+                },
+                ambiguous_events,
+            )
         if time.time() < deadline:
             time.sleep(max(0.2, poll_interval_sec))
-    return {
-        "status": "timeout",
-        "received_at": None,
-        "decision": None,
-        "reason": "",
-    }
+    return with_ambiguous_events(
+        {
+            "status": "timeout",
+            "received_at": None,
+            "decision": None,
+            "reason": "",
+        },
+        ambiguous_events,
+    )
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -2516,7 +2568,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         timeout_sec=max(0, args.timeout_sec),
         poll_interval_sec=max(0.2, args.poll_interval_sec),
         active_registry_path=active_registry_path,
-        base_result=base_result,
     )
     result = {
         **base_result,

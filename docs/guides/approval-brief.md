@@ -128,8 +128,10 @@ Free-form Telegram replies are a convenience layer, not the authority model.
 The relay should accept unscoped natural language only when there is exactly one
 active decision request for the operator. If multiple requests are active, a
 free-form reply must be scoped by replying to the decision card, using a button,
-or including the request id. Otherwise the result is `ambiguous_input` and no
-decision is applied.
+or including the request id. In live polling, unscoped ambiguous input becomes
+an `ambiguous_events` entry and the relay keeps waiting for a scoped follow-up.
+In one-shot manual modes such as `--decision-text`, the result may end as
+`ambiguous_input` because there is no polling loop to recover.
 
 ## Telegram Rendering
 
