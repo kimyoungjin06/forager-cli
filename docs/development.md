@@ -50,4 +50,6 @@ mkdir -p /tmp/demo-projects/api-server /tmp/demo-projects/web-app
 vhs assets/demo.tape
 ```
 
-This creates `docs/assets/demo.gif`. The demo uses `-p demo` to run in a separate profile.
+This creates an uncommitted `docs/assets/demo.gif`. The committed static preview
+is `docs/assets/tui.png`, and the demo uses `-p demo` to run in a separate
+profile.

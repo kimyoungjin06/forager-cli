@@ -29,14 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          lfs: true
 
-      - name: Verify LFS files
+      - name: Verify preview asset
         run: |
-          echo "Checking LFS files..."
-          git lfs ls-files
-          ls -lh docs/assets/demo.gif || echo "demo.gif not found"
+          test -s docs/assets/tui.png
+          ls -lh docs/assets/tui.png
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

@@ -10,6 +10,9 @@ __pycache__/
 # Documentation build output
 /book/
 
+# Generated VHS capture. The committed docs preview is docs/assets/tui.png.
+docs/assets/demo.gif
+
 # Website build output
 /dist/
 
@@ -35,7 +38,7 @@ Thumbs.db
 .env
 .env.local
 
-# Agent of Empires data (for development)
+# Legacy compatibility data created by older development runs
 .agent-of-empires/
 
 # VS Code extensions data
@@ -44,8 +47,8 @@ Thumbs.db
 # AI coding tools
 .opencode/
 
-# Per-repo aoe config (created by `aoe init`, should be committed per-repo by users)
-# Ignored here since this is the aoe tool repo itself
+# Per-repo legacy config. This repository keeps compatibility support but should
+# not commit local compatibility config generated during development.
 .aoe/
 
 # Spec Kit

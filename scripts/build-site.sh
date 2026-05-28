@@ -31,15 +31,7 @@ cp "$ROOT_DIR/assets/logo.png" "$ROOT_DIR/website/public/assets/"
 cp "$ROOT_DIR/assets/social-preview.png" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
 cp "$ROOT_DIR/assets/social-preview.svg" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
 cp "$ROOT_DIR/theme/favicon.png" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
-if [ -f "$ROOT_DIR/docs/assets/demo.gif" ]; then
-  if head -c 6 "$ROOT_DIR/docs/assets/demo.gif" | grep -q "GIF8"; then
-    cp "$ROOT_DIR/docs/assets/demo.gif" "$ROOT_DIR/website/public/assets/"
-    echo "  - demo.gif copied ($(du -h "$ROOT_DIR/docs/assets/demo.gif" | cut -f1))"
-  else
-    echo "WARNING: demo.gif appears to be a Git LFS pointer, not actual content"
-    echo "  Content: $(head -c 50 "$ROOT_DIR/docs/assets/demo.gif")"
-  fi
-fi
+cp "$ROOT_DIR/docs/assets/tui.png" "$ROOT_DIR/website/public/assets/"
 
 # 3. Build Astro website
 echo "Building Astro website..."

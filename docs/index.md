@@ -10,7 +10,7 @@ approval, run long workloads under tmux, preserve evidence, and build a return
 package for the next Ondesk session. The recommended lifecycle is described in
 the [Operation Cycle Guide](guides/operation-cycle.md).
 
-![Forager Demo](assets/demo.gif)
+![Forager TUI preview](assets/tui.png)
 
 ## Why Forager?
 
