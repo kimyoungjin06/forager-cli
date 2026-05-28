@@ -3,6 +3,10 @@
 !.claude/skills/
 # Rust build artifacts
 /target/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
 # Documentation build output
 /book/
 
