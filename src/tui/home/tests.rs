@@ -477,6 +477,91 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
 
 #[test]
 #[serial]
+fn home_view_loads_offdesk_summary_fixture_and_renders_next_safe_action() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "active-task",
+                "request_id": "request-active",
+                "project_key": "project",
+                "status": "running",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_background",
+                "command": "true",
+                "workdir": "/tmp",
+                "created_at": now,
+                "updated_at": now
+            },
+            {
+                "task_id": "completed-task",
+                "request_id": "request-completed",
+                "project_key": "project",
+                "status": "completed",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_background",
+                "command": "true",
+                "workdir": "/tmp",
+                "created_at": now,
+                "updated_at": now
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let storage = Storage::new("test").unwrap();
+    let tools = AvailableTools::with_tools(&["claude"]);
+    let mut view = HomeView::new(storage, tools).unwrap();
+
+    assert_eq!(view.offdesk_resume.active_tasks, 1);
+    assert_eq!(view.offdesk_resume.closeout_required, 1);
+    assert_eq!(
+        view.offdesk_resume.next_safe_actions[0].kind,
+        "review_required"
+    );
+
+    let rendered = render_home_text(&mut view, 200, 32);
+
+    assert!(
+        rendered.contains("Offdesk Morning Review"),
+        "fixture-backed home view should render the morning-review card:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("closeout required"),
+        "fixture-backed home view should render closeout focus:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("p/q/a/r/f/c 0/0/1/0/0/0"),
+        "fixture-backed home view should render task counts:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("1 tasks require closeout"),
+        "fixture-backed home view should render closeout count:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("Next:  Review: forager offdesk closeout"),
+        "fixture-backed home view should render loaded next action:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("Action forager offdesk closeout"),
+        "fixture-backed home view should render status-bar action:\n{}",
+        rendered
+    );
+}
+
+#[test]
+#[serial]
 fn test_initial_cursor_position() {
     let env = create_test_env_with_sessions(3);
     assert_eq!(env.view.cursor, 0);
