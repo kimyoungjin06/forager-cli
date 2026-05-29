@@ -46,6 +46,8 @@
 
 - Prefer "let the tools decide": keep code `cargo fmt`-clean and `cargo clippy`-clean.
 - **Never use emdashes (—)** in documentation or comments.
+- Brand work must follow `docs/brand-system.md`; in the local `98.Harness`
+  workspace, shared KISTI color and logo guidance lives in `../BRAND.md`.
 - Rust naming: `snake_case` for modules/functions, `CamelCase` for types, `SCREAMING_SNAKE_CASE` for constants.
 - Keep OS-specific logic in `src/process/{macos,linux}.rs` rather than sprinkling `cfg` checks.
 - Do not be concerned about maintaining backwards compatibility. You should not assume that it needs to be backwards compatible, but you should mention when you make a change that breaks backwards compatibility.
