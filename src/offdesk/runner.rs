@@ -20,6 +20,7 @@ use super::background::{
 use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::redaction::operator_safe_text;
 use super::scheduler::{SchedulerGate, SchedulerGateOutcome, SchedulerGateRequest};
+use super::task_queue::{next_safe_action_for_background_poll, OffdeskNextSafeAction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackgroundLaunchRequest {
@@ -86,6 +87,7 @@ pub struct BackgroundPollOutcome {
     pub decision: BackgroundRecoveryDecision,
     #[serde(flatten)]
     pub mode_assessment: OffdeskModeAssessment,
+    pub next_safe_action: OffdeskNextSafeAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notification: Option<NotificationDecision>,
 }
@@ -268,10 +270,16 @@ pub fn poll_background_runs(
             probe.agent_mode,
             background_mode_lifecycle(&decision, probe.result_artifact_present),
         );
+        let next_safe_action = next_safe_action_for_background_poll(
+            probe,
+            &decision,
+            mode_assessment.review_stage_required,
+        );
         outcomes.push(BackgroundPollOutcome {
             probe: probe.clone(),
             decision,
             mode_assessment,
+            next_safe_action,
             notification,
         });
     }

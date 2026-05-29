@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use super::adaptive_wiki::AdaptiveWikiAgentMode;
 use super::approval::ExecutionBrief;
-use super::background::BackgroundRunnerKind;
+use super::background::{
+    BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunnerKind, BackgroundRunnerPhase,
+};
 use super::capability::CapabilityArtifactRef;
 use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::provider::{ProviderFallbackCandidate, ProviderFallbackRecommendation};
@@ -259,11 +261,37 @@ pub struct OffdeskTaskView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct OffdeskTaskNextSafeAction {
+pub struct OffdeskNextSafeAction {
     pub kind: String,
     pub detail: String,
+    pub scope: String,
     pub commands: Vec<String>,
     pub requires_operator_review: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub does_not_authorize: Vec<String>,
+}
+
+pub type OffdeskTaskNextSafeAction = OffdeskNextSafeAction;
+
+impl OffdeskNextSafeAction {
+    fn new(
+        kind: impl Into<String>,
+        detail: impl Into<String>,
+        commands: Vec<String>,
+        requires_operator_review: bool,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            detail: detail.into(),
+            scope: "operator_next_step".to_string(),
+            commands,
+            requires_operator_review,
+            does_not_authorize: vec![
+                "unrelated cleanup, file movement, wiki promotion, provider retargeting, or accepting Offdesk output without separate review"
+                    .to_string(),
+            ],
+        }
+    }
 }
 
 fn task_mode_lifecycle(
@@ -300,83 +328,252 @@ fn next_safe_action_for_task(
         .unwrap_or_else(|| command_task_id.clone());
 
     match status {
-        OffdeskTaskStatus::Queued => OffdeskTaskNextSafeAction {
-            kind: "dispatch_pending".to_string(),
-            detail: "Task is queued; run one tick when ready or cancel only if the work should stop."
-                .to_string(),
-            commands: vec![
+        OffdeskTaskStatus::Queued => OffdeskNextSafeAction::new(
+            "dispatch_pending",
+            "Task is queued; run one tick when ready or cancel only if the work should stop.",
+            vec![
                 "forager offdesk tick".to_string(),
                 format!("forager offdesk cancel-task {command_task_id}"),
             ],
-            requires_operator_review: false,
-        },
-        OffdeskTaskStatus::PendingApproval => OffdeskTaskNextSafeAction {
-            kind: "approval_pending".to_string(),
-            detail: "Task is waiting for operator approval before launch.".to_string(),
-            commands: vec![
+            false,
+        ),
+        OffdeskTaskStatus::PendingApproval => OffdeskNextSafeAction::new(
+            "approval_pending",
+            "Task is waiting for operator approval before launch.",
+            vec![
                 "forager offdesk pending".to_string(),
                 format!("forager offdesk cancel-task {command_task_id}"),
             ],
-            requires_operator_review: true,
-        },
-        OffdeskTaskStatus::Launched | OffdeskTaskStatus::Running => OffdeskTaskNextSafeAction {
-            kind: "runtime_monitoring".to_string(),
-            detail: "Background work is active or recently launched; poll before judging completion."
-                .to_string(),
-            commands: vec![
+            true,
+        ),
+        OffdeskTaskStatus::Launched | OffdeskTaskStatus::Running => OffdeskNextSafeAction::new(
+            "runtime_monitoring",
+            "Background work is active or recently launched; poll before judging completion.",
+            vec![
                 format!("forager offdesk poll {poll_target}"),
                 format!("forager offdesk cancel-task {command_task_id}"),
             ],
-            requires_operator_review: false,
-        },
-        OffdeskTaskStatus::Failed => OffdeskTaskNextSafeAction {
-            kind: "recovery_required".to_string(),
-            detail: "Task failed; inspect the failure, then retry with the existing approval scope or request a new approval."
-                .to_string(),
-            commands: vec![
+            false,
+        ),
+        OffdeskTaskStatus::Failed => OffdeskNextSafeAction::new(
+            "recovery_required",
+            "Task failed; inspect the failure, then retry with the existing approval scope or request a new approval.",
+            vec![
                 format!("forager offdesk retry-task {command_task_id}"),
                 format!("forager offdesk retry-task {command_task_id} --new-approval"),
             ],
-            requires_operator_review: true,
-        },
-        OffdeskTaskStatus::ResumePending => OffdeskTaskNextSafeAction {
-            kind: "resume_review_required".to_string(),
-            detail: "Task needs recovery review before the harness resumes or abandons it.".to_string(),
-            commands: vec![
+            true,
+        ),
+        OffdeskTaskStatus::ResumePending => OffdeskNextSafeAction::new(
+            "resume_review_required",
+            "Task needs recovery review before the harness resumes or abandons it.",
+            vec![
                 format!("forager offdesk resume-task {command_task_id}"),
                 format!("forager offdesk retry-task {command_task_id}"),
                 format!("forager offdesk abandon-task {command_task_id}"),
             ],
-            requires_operator_review: true,
-        },
-        OffdeskTaskStatus::Completed if review_stage_required => OffdeskTaskNextSafeAction {
-            kind: "review_required".to_string(),
-            detail: "Completed Offdesk output still needs closeout and Ondesk review before it is treated as accepted."
-                .to_string(),
-            commands: vec![
+            true,
+        ),
+        OffdeskTaskStatus::Completed if review_stage_required => OffdeskNextSafeAction::new(
+            "review_required",
+            "Completed Offdesk output still needs closeout and Ondesk review before it is treated as accepted.",
+            vec![
                 format!(
                     "forager offdesk closeout --project-key {command_project_key} --task-id {command_task_id}"
                 ),
                 format!("forager ondesk prompt-package --project-key {command_project_key}"),
             ],
-            requires_operator_review: true,
-        },
-        OffdeskTaskStatus::Completed => OffdeskTaskNextSafeAction {
-            kind: "closeout_check".to_string(),
-            detail:
-                "Dispatch is terminal; verify closeout before treating Offdesk output as accepted."
-                    .to_string(),
-            commands: vec![format!(
+            true,
+        ),
+        OffdeskTaskStatus::Completed => OffdeskNextSafeAction::new(
+            "closeout_check",
+            "Dispatch is terminal; verify closeout before treating Offdesk output as accepted.",
+            vec![format!(
                 "forager offdesk closeout --project-key {command_project_key} --task-id {command_task_id}"
             )],
-            requires_operator_review: true,
-        },
-        OffdeskTaskStatus::Cancelled => OffdeskTaskNextSafeAction {
-            kind: "cancelled".to_string(),
-            detail: "Task is cancelled; no dispatch action is needed.".to_string(),
-            commands: Vec::new(),
-            requires_operator_review: false,
-        },
+            true,
+        ),
+        OffdeskTaskStatus::Cancelled => OffdeskNextSafeAction::new(
+            "cancelled",
+            "Task is cancelled; no dispatch action is needed.",
+            Vec::new(),
+            false,
+        ),
+    }
+}
+
+pub fn next_safe_action_for_background_poll(
+    probe: &BackgroundProbe,
+    decision: &BackgroundRecoveryDecision,
+    review_stage_required: bool,
+) -> OffdeskNextSafeAction {
+    let ticket_id = operator_safe_text(&probe.ticket_id);
+    let task_id = probe.task_id.as_deref().map(operator_safe_text);
+    let project_key = probe.project_key.as_deref().map(operator_safe_text);
+
+    match decision.phase {
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived
+            if !probe.result_artifact_present =>
+        {
+            OffdeskNextSafeAction::new(
+                "result_artifact_missing",
+                "Background runner reached a terminal phase, but the result artifact is missing; inspect logs before closeout.",
+                vec![format!("forager offdesk poll {ticket_id}"), "forager offdesk background".to_string()],
+                true,
+            )
+        }
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived
+            if review_stage_required =>
+        {
+            OffdeskNextSafeAction::new(
+                "review_required",
+                "Background result is present; close out the matched Offdesk work and return through Ondesk review before trusting output.",
+                closeout_and_ondesk_commands(project_key.as_deref(), task_id.as_deref()),
+                true,
+            )
+        }
+        BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived => {
+            OffdeskNextSafeAction::new(
+                "closeout_check",
+                "Background dispatch is terminal; verify closeout before treating output as accepted.",
+                closeout_commands(project_key.as_deref(), task_id.as_deref()),
+                true,
+            )
+        }
+        BackgroundRunnerPhase::Failed
+        | BackgroundRunnerPhase::StaleNoAck
+        | BackgroundRunnerPhase::StaleLostCallback
+        | BackgroundRunnerPhase::Reconstructable => {
+            let commands = task_id.as_deref().map_or_else(
+                || vec![format!("forager offdesk poll {ticket_id}"), "forager offdesk background".to_string()],
+                |task_id| {
+                    vec![
+                        format!("forager offdesk resume-task {task_id}"),
+                        format!("forager offdesk retry-task {task_id}"),
+                        format!("forager offdesk abandon-task {task_id}"),
+                    ]
+                },
+            );
+            OffdeskNextSafeAction::new(
+                "resume_review_required",
+                "Background runner needs recovery review before the harness resumes, retries, or abandons it.",
+                commands,
+                true,
+            )
+        }
+        BackgroundRunnerPhase::Launched
+        | BackgroundRunnerPhase::HandoffEmitted
+        | BackgroundRunnerPhase::PickupAcknowledged => OffdeskNextSafeAction::new(
+            "runtime_monitoring",
+            "Background work is still active or awaiting a result; poll before judging completion.",
+            vec![format!("forager offdesk poll {ticket_id}")],
+            false,
+        ),
+    }
+}
+
+pub fn tick_next_safe_actions_from_report(
+    report: &OffdeskTickReportInput,
+) -> Vec<OffdeskNextSafeAction> {
+    let mut actions = Vec::new();
+    if report.pending_approval > 0 || report.expired_approvals > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "approval_pending",
+            "One or more Offdesk approvals need operator attention before launch can proceed.",
+            vec!["forager offdesk pending".to_string()],
+            true,
+        ));
+    }
+    if report.resume_pending > 0 || report.failed > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "recovery_required",
+            "One or more Offdesk tasks need recovery review before retry, resume, or abandon.",
+            vec![
+                "forager offdesk resume".to_string(),
+                "forager offdesk tasks --status resume-pending".to_string(),
+                "forager offdesk tasks --status failed".to_string(),
+            ],
+            true,
+        ));
+    }
+    if report.completed > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "review_required",
+            "One or more Offdesk tasks completed; run closeout before returning through Ondesk review.",
+            vec!["forager offdesk closeout".to_string()],
+            true,
+        ));
+    }
+    if report.launched > 0
+        || (report.polled_background > 0
+            && report.completed == 0
+            && report.resume_pending == 0
+            && report.failed == 0)
+    {
+        actions.push(OffdeskNextSafeAction::new(
+            "runtime_monitoring",
+            "Background runners were launched or polled; continue polling until a result or recovery state is clear.",
+            vec!["forager offdesk poll".to_string()],
+            false,
+        ));
+    }
+    if report.provider_deferred > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "provider_attention",
+            "Provider capacity deferred one or more tasks; inspect fallback recommendations before retargeting.",
+            vec![
+                "forager offdesk provider-capacity".to_string(),
+                "forager offdesk provider-fallback".to_string(),
+            ],
+            true,
+        ));
+    }
+    if report.skipped > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "dispatch_pending",
+            "The tick limit left due tasks queued; run another tick when ready.",
+            vec!["forager offdesk tick".to_string()],
+            false,
+        ));
+    }
+    actions
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OffdeskTickReportInput {
+    pub expired_approvals: usize,
+    pub polled_background: usize,
+    pub launched: usize,
+    pub pending_approval: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub resume_pending: usize,
+    pub provider_deferred: usize,
+    pub skipped: usize,
+}
+
+fn closeout_and_ondesk_commands(project_key: Option<&str>, task_id: Option<&str>) -> Vec<String> {
+    let mut commands = closeout_commands(project_key, task_id);
+    if let Some(project_key) = project_key {
+        commands.push(format!(
+            "forager ondesk prompt-package --project-key {project_key}"
+        ));
+    }
+    commands
+}
+
+fn closeout_commands(project_key: Option<&str>, task_id: Option<&str>) -> Vec<String> {
+    match (project_key, task_id) {
+        (Some(project_key), Some(task_id)) => vec![format!(
+            "forager offdesk closeout --project-key {project_key} --task-id {task_id}"
+        )],
+        (Some(project_key), None) => {
+            vec![format!(
+                "forager offdesk closeout --project-key {project_key}"
+            )]
+        }
+        (None, Some(task_id)) => vec![format!("forager offdesk closeout --task-id {task_id}")],
+        (None, None) => vec!["forager offdesk closeout".to_string()],
     }
 }
 

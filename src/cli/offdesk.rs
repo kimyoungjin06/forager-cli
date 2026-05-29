@@ -38,9 +38,9 @@ use crate::offdesk::{
     BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
     ExecutionBrief, LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan,
     MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
-    OffdeskModeLifecycle, OffdeskTask, OffdeskTaskInput, OffdeskTaskLifecycleReport,
-    OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView, OffdeskTickOptions,
-    PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
+    OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskTask, OffdeskTaskInput,
+    OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
+    OffdeskTickOptions, PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
     ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate, SchedulerGateRequest,
     SchedulerGateStatus, TaskResumeState, TaskResumeStore,
 };
@@ -2225,6 +2225,7 @@ async fn tick(profile: &str, args: TickArgs) -> Result<()> {
     if report.skipped > 0 {
         println!("  skipped by limit: {}", report.skipped);
     }
+    print_next_safe_actions(&report.next_safe_actions);
     Ok(())
 }
 
@@ -5243,6 +5244,7 @@ async fn poll(profile: &str, args: PollArgs) -> Result<()> {
         if let Some(tail) = outcome.probe.last_log_tail.as_deref() {
             println!("  tail: {tail}");
         }
+        print_next_safe_action(&outcome.next_safe_action);
     }
     Ok(())
 }
@@ -9074,10 +9076,27 @@ fn print_task_rows(tasks: &[&OffdeskTaskView]) {
                 format!("{:?}", last_gate_status).to_lowercase()
             );
         }
-        println!("  next:    {}", task.next_safe_action.detail);
-        if !task.next_safe_action.commands.is_empty() {
-            println!("  command: {}", task.next_safe_action.commands.join(" | "));
-        }
+        print_next_safe_action(&task.next_safe_action);
+    }
+}
+
+fn print_next_safe_actions(actions: &[OffdeskNextSafeAction]) {
+    if actions.is_empty() {
+        return;
+    }
+    println!("Next safe actions:");
+    for action in actions {
+        print_next_safe_action(action);
+    }
+}
+
+fn print_next_safe_action(action: &OffdeskNextSafeAction) {
+    println!("  next:    {}", action.detail);
+    if !action.commands.is_empty() {
+        println!("  command: {}", action.commands.join(" | "));
+    }
+    if action.requires_operator_review {
+        println!("  review:  operator review required");
     }
 }
 
