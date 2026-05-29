@@ -562,6 +562,79 @@ fn home_view_loads_offdesk_summary_fixture_and_renders_next_safe_action() {
 
 #[test]
 #[serial]
+fn home_view_loads_pending_approval_fixture_and_renders_review_action() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("pending_action_approvals.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "approval_id": "approval-runtime-dispatch",
+                "action_id": "action-runtime-dispatch",
+                "status": "pending",
+                "scope": "once",
+                "project_key": "project",
+                "request_id": "request-approval",
+                "task_id": "task-approval",
+                "action": "dispatch.runtime",
+                "risk_level": "runtime_mutation",
+                "approval_mode": "operator_required",
+                "preview": "Launch bounded runtime command",
+                "reason": "Operator approval is required before dispatch.",
+                "created_at": now,
+                "expires_at": now + Duration::minutes(10),
+                "source_surface": "test"
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let storage = Storage::new("test").unwrap();
+    let tools = AvailableTools::with_tools(&["claude"]);
+    let mut view = HomeView::new(storage, tools).unwrap();
+
+    assert_eq!(view.offdesk_resume.pending_approvals, 1);
+    assert_eq!(
+        view.offdesk_resume.next_safe_actions[0].kind,
+        "approval_pending"
+    );
+    assert!(view.offdesk_resume.needs_operator_attention());
+
+    let rendered = render_home_text(&mut view, 200, 32);
+
+    assert!(
+        rendered.contains("Offdesk Morning Review"),
+        "approval-backed home view should render the morning-review card:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("approvals waiting"),
+        "approval-backed home view should render approval focus:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("p/q/a/r/f/c 1/0/0/0/0/0"),
+        "approval-backed home view should render approval count:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("Next:  Review: forager offdesk pending"),
+        "approval-backed home view should render approval next action:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("Action forager offdesk pending"),
+        "approval-backed home view should render status-bar action:\n{}",
+        rendered
+    );
+}
+
+#[test]
+#[serial]
 fn test_initial_cursor_position() {
     let env = create_test_env_with_sessions(3);
     assert_eq!(env.view.cursor, 0);
