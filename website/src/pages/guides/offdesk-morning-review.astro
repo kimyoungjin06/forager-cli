@@ -44,6 +44,9 @@ forager offdesk closeout --dry-run</code></pre>
         <p>
           These commands answer the operational questions: what ran, what is waiting, what failed, what needs recovery, what requires explicit approval, and what must be cleaned up before Ondesk return.
         </p>
+        <p>
+          The TUI morning-review card and status bar now use the same <code>next_safe_actions</code> contract as <code>forager status</code>, <code>offdesk pending</code>, <code>offdesk poll</code>, and <code>offdesk maintenance-report</code>. Treat the first action as the next bounded operator step, not as broad permission to clean up files, promote wiki entries, or accept results.
+        </p>
       </section>
 
       <section>

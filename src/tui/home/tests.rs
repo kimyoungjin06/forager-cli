@@ -142,6 +142,11 @@ fn load_offdesk_summary_counts_recovery_tasks() {
     assert_eq!(summary.resume_pending_tasks, 1);
     assert_eq!(summary.cancelled_tasks, 1);
     assert!(summary.needs_operator_attention());
+    assert_eq!(summary.next_safe_actions[0].kind, "recovery_required");
+    assert_eq!(
+        summary.next_action_label(),
+        "Recover: forager offdesk resume"
+    );
 }
 
 #[test]
@@ -178,8 +183,9 @@ fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
     assert_eq!(summary.focus_label(), "closeout required");
     assert_eq!(
         summary.next_action_label(),
-        "Closeout: forager offdesk closeout"
+        "Review: forager offdesk closeout"
     );
+    assert_eq!(summary.next_safe_actions[0].kind, "review_required");
 
     let closeout_dir = profile_dir.join("offdesk_closeouts").join("latest");
     fs::create_dir_all(&closeout_dir).unwrap();
@@ -230,6 +236,45 @@ fn offdesk_attention_includes_failed_and_resume_pending_tasks() {
         ..OffdeskResumeSummary::default()
     }
     .needs_operator_attention());
+}
+
+#[test]
+#[serial]
+fn load_offdesk_summary_adds_next_action_for_resume_store_only() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("task_resume_state.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "resume_id": "resume-test",
+                "task_id": "task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "resume_pending",
+                "phase": "launched",
+                "runner_target": "bg_task",
+                "next_safe_resume_step": "inspect latest heartbeat before continuing",
+                "interrupted_at": now,
+                "interruption_reason": "test",
+                "fresh_until": now + Duration::minutes(10)
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let summary = super::load_offdesk_summary("test");
+
+    assert_eq!(summary.fresh_pending, 1);
+    assert_eq!(summary.next_safe_actions[0].kind, "resume_review_required");
+    assert_eq!(
+        summary.next_action_label(),
+        "Recover: forager offdesk resume"
+    );
 }
 
 #[test]

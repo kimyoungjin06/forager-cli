@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use tui_input::Input;
 
+use crate::offdesk::OffdeskNextSafeAction;
 use crate::session::{
     config::{load_config, save_config},
     flatten_tree, get_profile_dir, resolve_config, Group, GroupTree, Instance, Item, Storage,
@@ -81,7 +82,7 @@ pub(super) const ICON_DELETING: &str = "✗";
 pub(super) const ICON_COLLAPSED: &str = "▶";
 pub(super) const ICON_EXPANDED: &str = "▼";
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct OffdeskResumeSummary {
     pub(super) fresh_pending: usize,
     pub(super) stale_pending: usize,
@@ -94,6 +95,7 @@ pub(super) struct OffdeskResumeSummary {
     pub(super) stale_background: usize,
     pub(super) failed_background: usize,
     pub(super) closeout_required: usize,
+    pub(super) next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
 impl OffdeskResumeSummary {
@@ -147,7 +149,21 @@ impl OffdeskResumeSummary {
         }
     }
 
-    pub(super) fn next_action_label(&self) -> &'static str {
+    pub(super) fn next_action_label(&self) -> String {
+        if let Some(action) = self.next_safe_actions.first() {
+            return tui_next_action_label(action);
+        }
+        self.fallback_next_action_label().to_string()
+    }
+
+    pub(super) fn next_action_command(&self) -> Option<&str> {
+        self.next_safe_actions
+            .first()
+            .and_then(|action| action.commands.first())
+            .map(String::as_str)
+    }
+
+    fn fallback_next_action_label(&self) -> &'static str {
         if self.pending_approvals > 0 {
             "Review: forager offdesk pending"
         } else if self.failed_tasks > 0 || self.resume_pending_tasks > 0 {
@@ -166,6 +182,26 @@ impl OffdeskResumeSummary {
             "Plan: forager offdesk maintenance-report"
         }
     }
+}
+
+fn tui_next_action_label(action: &OffdeskNextSafeAction) -> String {
+    let command = action
+        .commands
+        .first()
+        .map(String::as_str)
+        .unwrap_or(action.detail.as_str());
+    let prefix = match action.kind.as_str() {
+        "approval_pending" | "approval_expired" | "approval_denied" => "Review",
+        "recovery_required" | "resume_review_required" => "Recover",
+        "review_required" | "closeout_check" => "Review",
+        "runtime_monitoring" => "Monitor",
+        "dispatch_pending" => "Dispatch",
+        "provider_attention" => "Provider",
+        "cancelled" => "Review",
+        _ if action.requires_operator_review => "Review",
+        _ => "Next",
+    };
+    format!("{prefix}: {command}")
 }
 
 pub struct HomeView {
@@ -748,6 +784,32 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
         summary.stale_background = offdesk.background_stale;
         summary.failed_background = offdesk.background_failed;
         summary.closeout_required = offdesk.closeout_required;
+        summary.next_safe_actions = offdesk.next_safe_actions;
+    }
+    if summary.fresh_pending > 0 || summary.stale_pending > 0 {
+        add_resume_next_safe_action(&mut summary.next_safe_actions);
     }
     summary
+}
+
+fn add_resume_next_safe_action(actions: &mut Vec<OffdeskNextSafeAction>) {
+    if actions.iter().any(|action| {
+        matches!(
+            action.kind.as_str(),
+            "recovery_required" | "resume_review_required"
+        )
+    }) {
+        return;
+    }
+    let action = OffdeskNextSafeAction::new(
+        "resume_review_required",
+        "Resume records are waiting; inspect the resume evidence before continuing Offdesk work.",
+        vec!["forager offdesk resume".to_string()],
+        true,
+    );
+    let insert_at = actions
+        .iter()
+        .position(|action| action.kind != "approval_pending")
+        .unwrap_or(actions.len());
+    actions.insert(insert_at, action);
 }
