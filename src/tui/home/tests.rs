@@ -53,6 +53,25 @@ fn buffer_text(buffer: &Buffer) -> String {
     text
 }
 
+fn offdesk_task_fixture(
+    task_id: &str,
+    status: &str,
+    now: chrono::DateTime<Utc>,
+) -> serde_json::Value {
+    json!({
+        "task_id": task_id,
+        "request_id": format!("request-{task_id}"),
+        "project_key": "project",
+        "status": status,
+        "capability_id": "dispatch.runtime",
+        "runner_kind": "local_background",
+        "command": "true",
+        "workdir": "/tmp",
+        "created_at": now,
+        "updated_at": now
+    })
+}
+
 struct TestEnv {
     _temp: TempDir,
     view: HomeView,
@@ -360,6 +379,69 @@ fn status_json_and_home_view_agree_on_resume_store_next_safe_action() {
     assert!(
         rendered.contains("Next:  Recover: forager offdesk resume"),
         "home view should render the same resume next action as status json:\n{}",
+        rendered
+    );
+}
+
+#[test]
+#[serial]
+fn status_json_and_home_view_agree_on_mixed_next_safe_action_priority() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            offdesk_task_fixture("approval-task", "pending_approval", now),
+            offdesk_task_fixture("failed-task", "failed", now),
+            offdesk_task_fixture("completed-task", "completed", now),
+            offdesk_task_fixture("running-task", "running", now),
+            offdesk_task_fixture("queued-task", "queued", now)
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let status_json = crate::cli::status::status_json_value_for_test("test");
+    let storage = Storage::new("test").unwrap();
+    let tools = AvailableTools::with_tools(&["claude"]);
+    let mut view = HomeView::new(storage, tools).unwrap();
+    let status_kinds: Vec<String> = status_json["offdesk_next_safe_actions"]
+        .as_array()
+        .expect("status next safe actions")
+        .iter()
+        .map(|action| {
+            action["kind"]
+                .as_str()
+                .expect("status action kind")
+                .to_string()
+        })
+        .collect();
+    let tui_kinds: Vec<String> = view
+        .offdesk_resume
+        .next_safe_actions
+        .iter()
+        .map(|action| action.kind.clone())
+        .collect();
+
+    assert_eq!(
+        status_kinds,
+        vec![
+            "approval_pending",
+            "recovery_required",
+            "review_required",
+            "runtime_monitoring",
+            "dispatch_pending",
+        ]
+    );
+    assert_eq!(status_kinds, tui_kinds);
+
+    let rendered = render_home_text(&mut view, 200, 32);
+    assert!(
+        rendered.contains("Next:  Review: forager offdesk pending"),
+        "home view should render the highest-priority mixed next action:\n{}",
         rendered
     );
 }
