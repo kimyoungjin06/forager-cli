@@ -4031,8 +4031,10 @@ fn offdesk_tasks_human_includes_recovery_commands_and_redacts_secrets() -> Resul
     assert!(stdout.contains("forager offdesk retry-task failed-task --new-approval"));
     assert!(stdout.contains("forager offdesk resume-task resume-task"));
     assert!(stdout.contains("forager offdesk abandon-task resume-task"));
+    assert!(stdout.contains("forager offdesk tick"));
     assert!(stdout.contains("forager offdesk cancel-task queued-task"));
-    assert!(stdout.contains("terminal: no action needed"));
+    assert!(stdout.contains("verify closeout before treating Offdesk output as accepted"));
+    assert!(stdout.contains("forager offdesk closeout --project-key project --task-id done-task"));
     assert!(!stdout.contains("sk-secret"));
     Ok(())
 }
@@ -7103,6 +7105,19 @@ fn offdesk_poll_reconciles_completed_background_task() -> Result<()> {
     assert_eq!(task_views[0]["mode_verdict"], "evidence_ready");
     assert_eq!(task_views[0]["mode_risk"], "operator_review_required");
     assert_eq!(task_views[0]["review_stage_required"], true);
+    assert_eq!(task_views[0]["next_safe_action"]["kind"], "review_required");
+    assert_eq!(
+        task_views[0]["next_safe_action"]["requires_operator_review"],
+        true
+    );
+    assert!(task_views[0]["next_safe_action"]["commands"]
+        .as_array()
+        .expect("next action commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .expect("next action command")
+            .contains("forager offdesk closeout --project-key project --task-id task")));
     Ok(())
 }
 

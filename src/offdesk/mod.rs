@@ -106,6 +106,7 @@ pub use scheduler::{
 };
 pub use task_queue::{
     count_tasks, OffdeskTask, OffdeskTaskCounts, OffdeskTaskInput, OffdeskTaskLifecycleAction,
-    OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
+    OffdeskTaskLifecycleReport, OffdeskTaskNextSafeAction, OffdeskTaskStatus, OffdeskTaskStore,
+    OffdeskTaskView,
 };
 pub use tick_lock::{OffdeskTickLockGuard, OffdeskTickLockMetadata};

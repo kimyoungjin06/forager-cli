@@ -9074,7 +9074,10 @@ fn print_task_rows(tasks: &[&OffdeskTaskView]) {
                 format!("{:?}", last_gate_status).to_lowercase()
             );
         }
-        println!("  next:    {}", recommended_task_command(task));
+        println!("  next:    {}", task.next_safe_action.detail);
+        if !task.next_safe_action.commands.is_empty() {
+            println!("  command: {}", task.next_safe_action.commands.join(" | "));
+        }
     }
 }
 
@@ -9179,28 +9182,6 @@ fn status_label(status: OffdeskTaskStatus) -> String {
         OffdeskTaskStatus::Cancelled => "cancelled",
     }
     .to_string()
-}
-
-fn recommended_task_command(task: &OffdeskTaskView) -> String {
-    match task.status {
-        OffdeskTaskStatus::Failed => format!(
-            "forager offdesk retry-task {} | forager offdesk retry-task {} --new-approval",
-            task.task_id, task.task_id
-        ),
-        OffdeskTaskStatus::ResumePending => format!(
-            "forager offdesk resume-task {} | forager offdesk retry-task {} | forager offdesk abandon-task {}",
-            task.task_id, task.task_id, task.task_id
-        ),
-        OffdeskTaskStatus::Queued
-        | OffdeskTaskStatus::PendingApproval
-        | OffdeskTaskStatus::Launched
-        | OffdeskTaskStatus::Running => {
-            format!("forager offdesk cancel-task {}", task.task_id)
-        }
-        OffdeskTaskStatus::Completed | OffdeskTaskStatus::Cancelled => {
-            "terminal: no action needed".to_string()
-        }
-    }
 }
 
 fn print_capabilities(capabilities: &[CapabilityDescriptor]) {
