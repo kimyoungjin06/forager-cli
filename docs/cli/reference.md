@@ -1081,7 +1081,7 @@ Create or reuse an approval request for a maintenance action
 * `--kind <KIND>` — Bounded maintenance action kind to request approval for
 * `--project-key <PROJECT_KEY>` — Project key for approval and audit correlation
 * `--request-id <REQUEST_ID>` — Request ID for approval and audit correlation
-* `--task-id <TASK_ID>` — Task ID for approval identity. Defaults to maintenance-<kind>-<target-id>
+* `--task-id <TASK_ID>` — Task ID for approval identity. Defaults to maintenance-{kind}-{target-id}
 * `--target-id <TARGET_ID>` — Optional target identifier used for approval deduplication and review
 * `--risk <RISK>` — Override the default risk for this maintenance kind
 * `--preview <PREVIEW>` — Operator-safe action preview

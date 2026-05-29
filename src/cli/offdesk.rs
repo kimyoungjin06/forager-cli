@@ -16,14 +16,14 @@ use uuid::Uuid;
 use crate::offdesk::{
     assess_offdesk_mode, build_graph_export_files, build_usage_records_with_policy,
     default_capability_registry, launch_background_command, launch_background_run,
-    operator_safe_report, poll_background_runs, recommend_provider_fallback,
-    reconcile_tasks_with_background_outcomes, run_offdesk_tick, ActionApprovalRequest,
-    AdaptiveWikiActivationMode, AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter,
-    AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord, AdaptiveWikiCandidate,
-    AdaptiveWikiCandidateInput, AdaptiveWikiConfidence, AdaptiveWikiCorrectionRecurrenceReport,
-    AdaptiveWikiEntry, AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiGraphReport,
-    AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiLintReport,
-    AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeTraceReport,
+    operator_safe_report, pending_approval_operator_views, poll_background_runs,
+    recommend_provider_fallback, reconcile_tasks_with_background_outcomes, run_offdesk_tick,
+    ActionApprovalRequest, AdaptiveWikiActivationMode, AdaptiveWikiAgentMode,
+    AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord,
+    AdaptiveWikiCandidate, AdaptiveWikiCandidateInput, AdaptiveWikiConfidence,
+    AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiEntry, AdaptiveWikiEpisodeEvaluationReport,
+    AdaptiveWikiGraphReport, AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiKind,
+    AdaptiveWikiLintReport, AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeTraceReport,
     AdaptiveWikiMarkdownExportReport, AdaptiveWikiOrigin, AdaptiveWikiProjectionBudget,
     AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionPolicy,
     AdaptiveWikiProjectionReport, AdaptiveWikiProjectionReviewExpiredPolicy,
@@ -38,11 +38,11 @@ use crate::offdesk::{
     BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
     ExecutionBrief, LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan,
     MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
-    OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskTask, OffdeskTaskInput,
-    OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
-    OffdeskTickOptions, PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
-    ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate, SchedulerGateRequest,
-    SchedulerGateStatus, TaskResumeState, TaskResumeStore,
+    OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskTask,
+    OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
+    OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
+    ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
+    SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -674,7 +674,7 @@ pub struct MaintenanceRequestArgs {
     #[arg(long)]
     request_id: String,
 
-    /// Task ID for approval identity. Defaults to maintenance-<kind>-<target-id>
+    /// Task ID for approval identity. Defaults to maintenance-{kind}-{target-id}
     #[arg(long)]
     task_id: Option<String>,
 
@@ -1847,6 +1847,8 @@ struct OffdeskMaintenanceReport {
     adaptive_wiki_runtime_policy_ack_attention_summary: WikiRuntimePolicyAckReportSummary,
     adaptive_wiki_review_after_attention_summary: WikiReviewAfterReportSummary,
     recommended_actions: Vec<MaintenanceRecommendedAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
 #[derive(Serialize)]
@@ -5251,24 +5253,26 @@ async fn poll(profile: &str, args: PollArgs) -> Result<()> {
 
 async fn pending(profile: &str, args: PendingArgs) -> Result<()> {
     let ledger = approval_ledger(profile)?;
-    ledger.expire_due(Utc::now())?;
+    let now = Utc::now();
+    ledger.expire_due(now)?;
     let approvals: Vec<PendingActionApproval> = ledger
         .load()?
         .into_iter()
         .filter(|approval| args.all || approval.status == ApprovalStatus::Pending)
         .collect();
+    let approval_views = pending_approval_operator_views(approvals, now);
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&approvals)?);
+        println!("{}", serde_json::to_string_pretty(&approval_views)?);
         return Ok(());
     }
 
-    if approvals.is_empty() {
+    if approval_views.is_empty() {
         println!("No offdesk approvals found.");
         return Ok(());
     }
 
-    print_approvals(&approvals);
+    print_approval_views(&approval_views);
     Ok(())
 }
 
@@ -7021,6 +7025,7 @@ fn build_maintenance_report(
         &adaptive_wiki_runtime_policy_ack_attention_summary,
         &adaptive_wiki_review_after_attention_summary,
     );
+    let next_safe_actions = maintenance_next_safe_actions(&recommended_actions);
 
     let profile_name = if profile.is_empty() {
         DEFAULT_PROFILE
@@ -7040,6 +7045,7 @@ fn build_maintenance_report(
         adaptive_wiki_runtime_policy_ack_attention_summary,
         adaptive_wiki_review_after_attention_summary,
         recommended_actions,
+        next_safe_actions,
     })
 }
 
@@ -7256,6 +7262,35 @@ fn maintenance_recommended_actions(
         });
     }
     actions
+}
+
+fn maintenance_next_safe_actions(
+    recommended_actions: &[MaintenanceRecommendedAction],
+) -> Vec<OffdeskNextSafeAction> {
+    recommended_actions
+        .iter()
+        .map(|action| {
+            OffdeskNextSafeAction::new(
+                maintenance_next_safe_action_kind(action.kind),
+                action.detail.clone(),
+                vec![action.command.to_string()],
+                true,
+            )
+        })
+        .collect()
+}
+
+fn maintenance_next_safe_action_kind(kind: &str) -> &'static str {
+    match kind {
+        "pending_approval" => "approval_pending",
+        "operator_review" => "review_required",
+        "missing_result_artifact" => "result_artifact_missing",
+        "runtime_recovery" => "recovery_required",
+        "missing_agent_mode" => "mode_scope_required",
+        "provider_capacity" => "provider_attention",
+        "wiki_runtime_ack" | "wiki_review_after" => "wiki_review_required",
+        _ => "maintenance_attention",
+    }
 }
 
 fn write_debug_bundle_export(
@@ -8810,12 +8845,13 @@ fn wiki_scope_label(scope: AdaptiveWikiScope, scope_ref: &str) -> String {
     format!("{:?}:{}", scope, scope_ref).to_lowercase()
 }
 
-fn print_approvals(approvals: &[PendingActionApproval]) {
+fn print_approval_views(approvals: &[OffdeskPendingApprovalView]) {
     println!(
         "{:<44} {:<44} {:<10} {:<18} {:<24} ACTION",
         "APPROVAL ID", "ACTION ID", "STATUS", "RISK", "TASK"
     );
-    for approval in approvals {
+    for approval_view in approvals {
+        let approval = &approval_view.approval;
         println!(
             "{:<44} {:<44} {:<10} {:<18} {:<24} {}",
             approval.approval_id,
@@ -8862,6 +8898,7 @@ fn print_approvals(approvals: &[PendingActionApproval]) {
                 );
             }
         }
+        print_next_safe_action(&approval_view.next_safe_action);
     }
 }
 
@@ -9364,6 +9401,7 @@ fn print_maintenance_report(report: &OffdeskMaintenanceReport) {
             println!("    command: {}", action.command);
         }
     }
+    print_next_safe_actions(&report.next_safe_actions);
 }
 
 fn print_maintenance_request_report(report: &MaintenanceApprovalRequestReport) {

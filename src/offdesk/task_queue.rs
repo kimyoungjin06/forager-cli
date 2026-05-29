@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use super::adaptive_wiki::AdaptiveWikiAgentMode;
-use super::approval::ExecutionBrief;
+use super::approval::{ApprovalStatus, ExecutionBrief, PendingActionApproval};
 use super::background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunnerKind, BackgroundRunnerPhase,
 };
@@ -274,7 +274,7 @@ pub struct OffdeskNextSafeAction {
 pub type OffdeskTaskNextSafeAction = OffdeskNextSafeAction;
 
 impl OffdeskNextSafeAction {
-    fn new(
+    pub fn new(
         kind: impl Into<String>,
         detail: impl Into<String>,
         commands: Vec<String>,
@@ -292,6 +292,13 @@ impl OffdeskNextSafeAction {
             ],
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OffdeskPendingApprovalView {
+    #[serde(flatten)]
+    pub approval: PendingActionApproval,
+    pub next_safe_action: OffdeskNextSafeAction,
 }
 
 fn task_mode_lifecycle(
@@ -472,6 +479,86 @@ pub fn next_safe_action_for_background_poll(
     }
 }
 
+pub fn pending_approval_operator_views(
+    approvals: Vec<PendingActionApproval>,
+    now: DateTime<Utc>,
+) -> Vec<OffdeskPendingApprovalView> {
+    approvals
+        .into_iter()
+        .map(|approval| pending_approval_operator_view(approval, now))
+        .collect()
+}
+
+pub fn pending_approval_operator_view(
+    approval: PendingActionApproval,
+    now: DateTime<Utc>,
+) -> OffdeskPendingApprovalView {
+    let next_safe_action = next_safe_action_for_pending_approval(&approval, now);
+    OffdeskPendingApprovalView {
+        approval,
+        next_safe_action,
+    }
+}
+
+pub fn next_safe_action_for_pending_approval(
+    approval: &PendingActionApproval,
+    now: DateTime<Utc>,
+) -> OffdeskNextSafeAction {
+    let approval_id = operator_safe_text(&approval.approval_id);
+    let task_id = operator_safe_text(&approval.task_id);
+    match approval.status {
+        ApprovalStatus::Pending if approval.expires_at >= now => OffdeskNextSafeAction::new(
+            "approval_pending",
+            format!(
+                "Approval for `{}` needs an operator decision; approve only the bounded action shown in this approval.",
+                operator_safe_text(&approval.action)
+            ),
+            vec![
+                format!("forager offdesk ok {approval_id}"),
+                format!("forager offdesk cancel {approval_id}"),
+                "forager offdesk pending".to_string(),
+            ],
+            true,
+        ),
+        ApprovalStatus::Pending => OffdeskNextSafeAction::new(
+            "approval_expired",
+            "Approval is past its TTL; expire it, then re-run the gated action if it is still needed.",
+            vec![
+                "forager offdesk pending --all".to_string(),
+                "forager offdesk tick".to_string(),
+            ],
+            true,
+        ),
+        ApprovalStatus::Denied => OffdeskNextSafeAction::new(
+            "approval_denied",
+            "Approval was denied; retry only after revising the task or requesting a new approval.",
+            vec![
+                format!("forager offdesk retry-task {task_id} --new-approval"),
+                "forager offdesk tasks".to_string(),
+            ],
+            true,
+        ),
+        ApprovalStatus::Approved | ApprovalStatus::Superseded => OffdeskNextSafeAction::new(
+            "approval_resolved",
+            "Approval is resolved; run a tick or inspect tasks to see the resulting dispatch state.",
+            vec![
+                "forager offdesk tick".to_string(),
+                "forager offdesk tasks".to_string(),
+            ],
+            false,
+        ),
+        ApprovalStatus::Expired => OffdeskNextSafeAction::new(
+            "approval_expired",
+            "Approval expired; re-run the gated task path if this work is still wanted.",
+            vec![
+                "forager offdesk tasks".to_string(),
+                format!("forager offdesk retry-task {task_id} --new-approval"),
+            ],
+            true,
+        ),
+    }
+}
+
 pub fn tick_next_safe_actions_from_report(
     report: &OffdeskTickReportInput,
 ) -> Vec<OffdeskNextSafeAction> {
@@ -539,6 +626,65 @@ pub fn tick_next_safe_actions_from_report(
     actions
 }
 
+pub fn status_next_safe_actions_from_summary(
+    summary: &OffdeskStatusNextSafeActionInput,
+) -> Vec<OffdeskNextSafeAction> {
+    let mut actions = Vec::new();
+    if summary.pending_approvals > 0 || summary.tasks.pending_approval > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "approval_pending",
+            "Offdesk approvals are blocking dispatch; review the exact bounded action before approve/deny.",
+            vec!["forager offdesk pending".to_string()],
+            true,
+        ));
+    }
+    if summary.tasks.failed > 0
+        || summary.tasks.resume_pending > 0
+        || summary.background_stale > 0
+        || summary.background_failed > 0
+    {
+        actions.push(OffdeskNextSafeAction::new(
+            "recovery_required",
+            "One or more Offdesk tasks or background runners need recovery review before retry, resume, or abandon.",
+            vec![
+                "forager offdesk resume".to_string(),
+                "forager offdesk tasks --status resume-pending".to_string(),
+                "forager offdesk tasks --status failed".to_string(),
+                "forager offdesk poll".to_string(),
+            ],
+            true,
+        ));
+    }
+    if summary.closeout_required > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "review_required",
+            "Completed Offdesk output needs closeout and Ondesk review before it is treated as accepted.",
+            vec![
+                "forager offdesk closeout".to_string(),
+                "forager ondesk prompt-package".to_string(),
+            ],
+            true,
+        ));
+    }
+    if summary.background_active > 0 || summary.tasks.active > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "runtime_monitoring",
+            "Background work is active; poll before judging completion.",
+            vec!["forager offdesk poll".to_string()],
+            false,
+        ));
+    }
+    if summary.tasks.queued > 0 {
+        actions.push(OffdeskNextSafeAction::new(
+            "dispatch_pending",
+            "Queued Offdesk work remains; run a tick when ready to dispatch the next due task.",
+            vec!["forager offdesk tick".to_string()],
+            false,
+        ));
+    }
+    actions
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct OffdeskTickReportInput {
     pub expired_approvals: usize,
@@ -550,6 +696,16 @@ pub struct OffdeskTickReportInput {
     pub resume_pending: usize,
     pub provider_deferred: usize,
     pub skipped: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct OffdeskStatusNextSafeActionInput {
+    pub pending_approvals: usize,
+    pub tasks: OffdeskTaskCounts,
+    pub background_active: usize,
+    pub background_stale: usize,
+    pub background_failed: usize,
+    pub closeout_required: usize,
 }
 
 fn closeout_and_ondesk_commands(project_key: Option<&str>, task_id: Option<&str>) -> Vec<String> {

@@ -52,6 +52,7 @@ Minimum recommended request:
 | `failure` | no | Structured failure summary when the approval follows a gate failure. |
 | `council` | no | Council recommendation, reviewer agreement, evidence gaps, and reviewer decisions. |
 | `decision_impacts` | no | What happens if the operator selects each decision. |
+| `next_safe_actions` | no | Shared next-step objects with kind, detail, scope, commands, and non-authorization boundaries. |
 | `reply_examples` | no | Natural-language examples for decisions that require explanation. |
 | `context` | no | Safe small context such as iteration, case, claim status, or baseline status. |
 | `source` | no | Producer name, used for debugging and contract checks. |
@@ -116,9 +117,9 @@ The budget is type-specific:
 | `ondesk_handoff` | Handoff time, closeout summary, remaining decisions, WebUI entry question, explicit scope. |
 
 The detail card should hold the dense material: recommendation rationale,
-failure summary, evidence, Council details, choice impacts, and reply examples.
-If the detail card has insufficient structured data, it should say that
-explicitly instead of dumping request JSON.
+failure summary, evidence, Council details, shared next safe actions, choice
+impacts, and reply examples. If the detail card has insufficient structured
+data, it should say that explicitly instead of dumping request JSON.
 
 All user-facing card surfaces must reject raw paths, request ids, secret-like
 values, raw JSON key dumps, and trace-only state. Those values belong in the

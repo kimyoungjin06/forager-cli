@@ -119,6 +119,7 @@ FIELD_LABELS = {
     "episode": "Episode",
     "evidence": "근거",
     "next_action": "다음 행동",
+    "next_safe_actions": "다음 안전 행동",
     "operator_question": "확인할 점",
     "recommendation": "추천",
     "reason": "이유",
@@ -131,6 +132,7 @@ FIELD_PRIORITY = (
     "decision",
     "recommendation",
     "next_action",
+    "next_safe_actions",
     "operator_question",
     "blockers",
     "risks",
@@ -147,7 +149,7 @@ CARD_TEMPLATE = """<b>{headline}</b>
 {input_policy}{input_prompt_section}
 <b>범위</b>: {scope}"""
 DETAIL_TEMPLATE = """<b>{headline}</b>
-{why_recommendation_section}{failure_section}{evidence_section}{council_section}{decision_impact_section}{reply_example_section}"""
+{why_recommendation_section}{failure_section}{evidence_section}{council_section}{next_action_section}{decision_impact_section}{reply_example_section}"""
 SECTION_TEMPLATE = """
 
 <b>{title}</b>
@@ -458,6 +460,14 @@ def list_values(value: Any, *, limit: int = 5) -> list[str]:
     return [text] if text else []
 
 
+def list_items(value: Any, *, limit: int = 5) -> list[Any]:
+    if isinstance(value, list):
+        return [item for item in value[:limit] if item not in (None, "")]
+    if value in (None, ""):
+        return []
+    return [value]
+
+
 def nested_get(value: Any, *keys: str) -> Any:
     current = value
     for key in keys:
@@ -612,6 +622,8 @@ def display_evidence_line(value: Any) -> str:
 
 
 def display_next_action(value: Any) -> str:
+    if isinstance(value, dict):
+        return display_next_safe_action(value)
     text = str(value or "").strip()
     labels = {
         "diagnose why no-option primary objective gate fails": (
@@ -628,6 +640,17 @@ def display_next_action(value: Any) -> str:
         ),
     }
     return labels.get(text, text)
+
+
+def display_next_safe_action(value: Any) -> str:
+    if not isinstance(value, dict):
+        return display_next_action(value)
+    kind = str(value.get("kind") or "next").replace("_", " ").strip()
+    detail = str(value.get("detail") or "").strip()
+    review = value.get("requires_operator_review")
+    suffix = "operator review required" if review is True else "monitoring step" if review is False else ""
+    text = f"{kind}: {detail}" if detail else kind
+    return f"{text} ({suffix})" if suffix else text
 
 
 def subject_from_request(request: dict[str, Any], brief: dict[str, Any] | None = None) -> str:
@@ -704,6 +727,9 @@ def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> di
     next_action = raw.get("next_action")
     if next_action is None:
         next_action = raw.get("next_actions")
+    next_safe_actions = raw.get("next_safe_actions")
+    if next_safe_actions is None:
+        next_safe_actions = raw.get("next_safe_action")
     normalized = dict(raw)
     normalized["schema"] = str(raw.get("schema") or "approval_brief.v1")
     normalized["subject"] = subject_from_request(request, raw)
@@ -713,6 +739,7 @@ def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> di
     normalized["evidence"] = list_values(evidence, limit=8)
     normalized["key_evidence"] = normalized["evidence"]
     normalized["next_action"] = list_values(next_action, limit=6)
+    normalized["next_safe_actions"] = list_items(next_safe_actions, limit=6)
     normalized["context"] = context
     normalized["council"] = {
         **council,
@@ -740,6 +767,8 @@ def approval_brief_text_fields(brief: dict[str, Any]) -> list[tuple[str, str]]:
     for key in ("summary_lines", "why_recommendation", "evidence", "key_evidence", "next_action"):
         for index, value in enumerate(list_values(brief.get(key), limit=12)):
             fields.append((f"{key}[{index}]", value))
+    for index, value in enumerate(list_items(brief.get("next_safe_actions"), limit=12)):
+        fields.append((f"next_safe_actions[{index}]", display_next_safe_action(value)))
     options = brief.get("options")
     if isinstance(options, list):
         for index, option in enumerate(options):
@@ -1409,10 +1438,14 @@ def render_council_section(brief: dict[str, Any], *, detailed: bool = False) -> 
 
 
 def render_next_action_section(brief: dict[str, Any], *, detailed: bool = False) -> str:
-    actions = list_values(brief.get("next_action"), limit=5 if detailed else 3)
+    actions = [display_next_action(item) for item in list_values(brief.get("next_action"), limit=5 if detailed else 3)]
+    safe_actions = [
+        display_next_safe_action(item)
+        for item in list_items(brief.get("next_safe_actions"), limit=5 if detailed else 3)
+    ]
     return render_lines_section(
         "권장 다음 행동",
-        [display_next_action(item) for item in actions],
+        [*actions, *safe_actions],
         max_items=5 if detailed else 3,
         max_chars=300,
     )
@@ -1660,7 +1693,14 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
         failure_section = render_failure_section(brief)
         evidence_section = render_evidence_section(brief, detailed=True)
         council_section = render_council_section(brief, detailed=True)
-        if not (why_recommendation_section or failure_section or evidence_section or council_section):
+        next_action_section = render_next_action_section(brief, detailed=True)
+        if not (
+            why_recommendation_section
+            or failure_section
+            or evidence_section
+            or council_section
+            or next_action_section
+        ):
             return f"<b>{html.escape(headline)}</b>" + render_detail_fallback(request, request_id)
         return DETAIL_TEMPLATE.format(
             headline=html.escape(headline),
@@ -1668,6 +1708,7 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
             failure_section=failure_section,
             evidence_section=evidence_section,
             council_section=council_section,
+            next_action_section=next_action_section,
             decision_impact_section=render_decision_impact_section(request),
             reply_example_section=render_reply_example_section(request),
         )
