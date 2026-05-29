@@ -3677,6 +3677,11 @@ fn offdesk_poll_persists_background_phase_transition() -> Result<()> {
     assert!(output.status.success());
     let outcomes: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(outcomes[0]["decision"]["phase"], "completed");
+    assert_eq!(outcomes[0]["next_safe_action"]["kind"], "closeout_check");
+    assert_eq!(
+        outcomes[0]["next_safe_action"]["requires_operator_review"],
+        true
+    );
 
     let runs: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         profile_dir.join("background_runs.json"),
@@ -3720,6 +3725,18 @@ fn offdesk_poll_marks_stale_background_heartbeat() -> Result<()> {
     let outcomes: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(outcomes[0]["decision"]["phase"], "stale_lost_callback");
     assert_eq!(outcomes[0]["probe"]["worker_heartbeat_stale"], true);
+    assert_eq!(
+        outcomes[0]["next_safe_action"]["kind"],
+        "resume_review_required"
+    );
+    assert!(outcomes[0]["next_safe_action"]["commands"]
+        .as_array()
+        .expect("next action commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .expect("next action command")
+            .contains("forager offdesk poll ticket")));
 
     let runs: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         profile_dir.join("background_runs.json"),
@@ -5255,6 +5272,16 @@ fn offdesk_tick_launches_briefed_task_and_completes_from_sidecar() -> Result<()>
     assert!(complete_output.status.success());
     let complete: serde_json::Value = serde_json::from_slice(&complete_output.stdout)?;
     assert_eq!(complete["completed"], 1);
+    assert!(complete["next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "review_required"));
+    assert!(!complete["next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "runtime_monitoring"));
 
     let tasks: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         profile_dir(temp.path()).join("offdesk_tasks.json"),
@@ -6904,6 +6931,11 @@ fn offdesk_tick_pending_approval_then_ok_launches_next_tick() -> Result<()> {
     assert!(pending_output.status.success());
     let pending: serde_json::Value = serde_json::from_slice(&pending_output.stdout)?;
     assert_eq!(pending["pending_approval"], 1);
+    assert_eq!(pending["next_safe_actions"][0]["kind"], "approval_pending");
+    assert_eq!(
+        pending["next_safe_actions"][0]["requires_operator_review"],
+        true
+    );
 
     let approvals: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         profile_dir(temp.path()).join("pending_action_approvals.json"),
@@ -6921,6 +6953,11 @@ fn offdesk_tick_pending_approval_then_ok_launches_next_tick() -> Result<()> {
     assert!(launch_output.status.success());
     let launched: serde_json::Value = serde_json::from_slice(&launch_output.stdout)?;
     assert_eq!(launched["launched"], 1);
+    assert!(launched["next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "runtime_monitoring"));
 
     let approvals_after: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         profile_dir(temp.path()).join("pending_action_approvals.json"),
@@ -6983,6 +7020,11 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
     assert!(output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["resume_pending"], 1);
+    assert!(report["next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "recovery_required"));
 
     let tasks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(profile_dir.join("offdesk_tasks.json"))?)?;
@@ -7089,6 +7131,15 @@ fn offdesk_poll_reconciles_completed_background_task() -> Result<()> {
     assert_eq!(poll[0]["mode_verdict"], "evidence_ready");
     assert_eq!(poll[0]["mode_risk"], "operator_review_required");
     assert_eq!(poll[0]["review_stage_required"], true);
+    assert_eq!(poll[0]["next_safe_action"]["kind"], "review_required");
+    assert!(poll[0]["next_safe_action"]["commands"]
+        .as_array()
+        .expect("poll next action commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .expect("poll next action command")
+            .contains("forager offdesk closeout --project-key project --task-id task")));
 
     let tasks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(profile_dir.join("offdesk_tasks.json"))?)?;

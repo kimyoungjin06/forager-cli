@@ -105,8 +105,9 @@ pub use scheduler::{
     SchedulerGateRequest, SchedulerGateStatus,
 };
 pub use task_queue::{
-    count_tasks, OffdeskTask, OffdeskTaskCounts, OffdeskTaskInput, OffdeskTaskLifecycleAction,
-    OffdeskTaskLifecycleReport, OffdeskTaskNextSafeAction, OffdeskTaskStatus, OffdeskTaskStore,
-    OffdeskTaskView,
+    count_tasks, next_safe_action_for_background_poll, tick_next_safe_actions_from_report,
+    OffdeskNextSafeAction, OffdeskTask, OffdeskTaskCounts, OffdeskTaskInput,
+    OffdeskTaskLifecycleAction, OffdeskTaskLifecycleReport, OffdeskTaskNextSafeAction,
+    OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView, OffdeskTickReportInput,
 };
 pub use tick_lock::{OffdeskTickLockGuard, OffdeskTickLockMetadata};

@@ -25,7 +25,8 @@ use super::scheduler::{
     is_provider_capacity_block, SchedulerGate, SchedulerGateRequest, SchedulerGateStatus,
 };
 use super::task_queue::{
-    count_tasks, OffdeskTask, OffdeskTaskCounts, OffdeskTaskStatus, OffdeskTaskStore,
+    count_tasks, tick_next_safe_actions_from_report, OffdeskNextSafeAction, OffdeskTask,
+    OffdeskTaskCounts, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTickReportInput,
 };
 use super::tick_lock::OffdeskTickLockGuard;
 use super::{
@@ -69,6 +70,8 @@ pub struct OffdeskTickReport {
     pub skipped: usize,
     pub stale_lock_replaced: bool,
     pub updated_task_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -167,6 +170,7 @@ pub fn run_offdesk_tick(
     }
 
     approval_session.flush()?;
+    refresh_tick_next_safe_actions(&mut report);
     task_store.save(&tasks)?;
     Ok(report)
 }
@@ -192,10 +196,25 @@ pub fn reconcile_tasks_with_background_outcomes(
     for task in tasks.iter_mut() {
         apply_background_outcome(task, &background_by_ticket, &resume_store, now, &mut report)?;
     }
+    refresh_tick_next_safe_actions(&mut report);
     if !report.updated_task_ids.is_empty() {
         task_store.save(&tasks)?;
     }
     Ok(report)
+}
+
+fn refresh_tick_next_safe_actions(report: &mut OffdeskTickReport) {
+    report.next_safe_actions = tick_next_safe_actions_from_report(&OffdeskTickReportInput {
+        expired_approvals: report.expired_approvals,
+        polled_background: report.polled_background,
+        launched: report.launched,
+        pending_approval: report.pending_approval,
+        completed: report.completed,
+        failed: report.failed,
+        resume_pending: report.resume_pending,
+        provider_deferred: report.provider_deferred,
+        skipped: report.skipped,
+    });
 }
 
 pub fn load_offdesk_status_summary(
