@@ -2,6 +2,7 @@
 
 use chrono::{Duration, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
 use serde_json::json;
 use serial_test::serial;
 use std::fs;
@@ -9,10 +10,12 @@ use tempfile::TempDir;
 use tui_input::Input;
 
 use super::{HomeView, OffdeskResumeSummary, ViewMode};
+use crate::offdesk::OffdeskNextSafeAction;
 use crate::session::{Instance, Item, Storage};
 use crate::tmux::AvailableTools;
 use crate::tui::app::Action;
 use crate::tui::dialogs::{InfoDialog, NewSessionDialog};
+use crate::tui::styles::Theme;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -26,6 +29,28 @@ fn setup_test_home(temp: &TempDir) {
     std::env::set_var("HOME", temp.path());
     #[cfg(target_os = "linux")]
     std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config"));
+}
+
+fn render_home_text(view: &mut HomeView, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| view.render(frame, frame.area(), &Theme::default(), None))
+        .unwrap();
+    buffer_text(terminal.backend().buffer())
+}
+
+fn buffer_text(buffer: &Buffer) -> String {
+    let mut text = String::new();
+    for y in buffer.area.y..buffer.area.y + buffer.area.height {
+        for x in buffer.area.x..buffer.area.x + buffer.area.width {
+            if let Some(cell) = buffer.cell((x, y)) {
+                text.push_str(cell.symbol());
+            }
+        }
+        text.push('\n');
+    }
+    text
 }
 
 struct TestEnv {
@@ -333,6 +358,121 @@ fn offdesk_morning_review_prioritizes_approvals_before_running_work() {
         summary.next_action_label(),
         "Review: forager offdesk pending"
     );
+}
+
+#[test]
+#[serial]
+fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
+    struct Case {
+        name: &'static str,
+        summary: OffdeskResumeSummary,
+        expected_focus: &'static str,
+        expected_next: &'static str,
+        expected_action: &'static str,
+    }
+
+    let cases = [
+        Case {
+            name: "approval",
+            summary: OffdeskResumeSummary {
+                pending_approvals: 1,
+                active_tasks: 2,
+                next_safe_actions: vec![OffdeskNextSafeAction::new(
+                    "approval_pending",
+                    "Review the approval before dispatch.",
+                    vec!["forager offdesk pending".to_string()],
+                    true,
+                )],
+                ..OffdeskResumeSummary::default()
+            },
+            expected_focus: "approvals waiting",
+            expected_next: "Next:  Review: forager offdesk pending",
+            expected_action: "Action forager offdesk pending",
+        },
+        Case {
+            name: "recovery",
+            summary: OffdeskResumeSummary {
+                failed_tasks: 1,
+                next_safe_actions: vec![OffdeskNextSafeAction::new(
+                    "recovery_required",
+                    "Review recovery evidence before retry.",
+                    vec!["forager offdesk resume".to_string()],
+                    true,
+                )],
+                ..OffdeskResumeSummary::default()
+            },
+            expected_focus: "failed work needs review",
+            expected_next: "Next:  Recover: forager offdesk resume",
+            expected_action: "Action forager offdesk resume",
+        },
+        Case {
+            name: "closeout",
+            summary: OffdeskResumeSummary {
+                closeout_required: 1,
+                next_safe_actions: vec![OffdeskNextSafeAction::new(
+                    "review_required",
+                    "Close out completed work before accepting output.",
+                    vec!["forager offdesk closeout".to_string()],
+                    true,
+                )],
+                ..OffdeskResumeSummary::default()
+            },
+            expected_focus: "closeout required",
+            expected_next: "Next:  Review: forager offdesk closeout",
+            expected_action: "Action forager offdesk closeout",
+        },
+        Case {
+            name: "runtime",
+            summary: OffdeskResumeSummary {
+                active_tasks: 1,
+                next_safe_actions: vec![OffdeskNextSafeAction::new(
+                    "runtime_monitoring",
+                    "Poll before judging completion.",
+                    vec!["forager offdesk poll".to_string()],
+                    false,
+                )],
+                ..OffdeskResumeSummary::default()
+            },
+            expected_focus: "active offdesk work",
+            expected_next: "Next:  Monitor: forager offdesk poll",
+            expected_action: "Action forager offdesk poll",
+        },
+    ];
+
+    for case in cases {
+        let mut env = create_test_env_empty();
+        env.view.offdesk_resume = case.summary;
+
+        let rendered = render_home_text(&mut env.view, 200, 32);
+
+        assert!(
+            rendered.contains("Offdesk Morning Review"),
+            "{} should render the morning-review card:\n{}",
+            case.name,
+            rendered
+        );
+        assert!(
+            rendered.contains(case.expected_focus),
+            "{} should render focus `{}`:\n{}",
+            case.name,
+            case.expected_focus,
+            rendered
+        );
+        assert!(
+            rendered.contains(case.expected_next),
+            "{} should render next action `{}`:\n{}",
+            case.name,
+            case.expected_next,
+            rendered
+        );
+        assert!(
+            rendered.contains(case.expected_action),
+            "{} should render status-bar action `{}`:\n{}",
+            case.name,
+            case.expected_action,
+            rendered
+        );
+    }
 }
 
 #[test]
