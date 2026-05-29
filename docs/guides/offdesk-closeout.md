@@ -132,3 +132,7 @@ Use the smoke result as launch-path evidence, then close out any real Offdesk
 run before returning to Ondesk. See
 [`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md) for the
 validated short-run procedure.
+
+`forager offdesk tasks` also follows this boundary. Completed tasks expose a
+`next_safe_action` surface and the human output points to closeout, rather than
+claiming that terminal dispatch status means no operator action is needed.

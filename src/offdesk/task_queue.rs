@@ -131,6 +131,17 @@ impl OffdeskTask {
     }
 
     pub fn operator_view(&self) -> OffdeskTaskView {
+        let mode_assessment = assess_offdesk_mode(
+            self.agent_mode,
+            task_mode_lifecycle(self.status, self.result_artifact_path.as_deref()),
+        );
+        let next_safe_action = next_safe_action_for_task(
+            &self.task_id,
+            &self.project_key,
+            self.background_ticket_id.as_deref(),
+            self.status,
+            mode_assessment.review_stage_required,
+        );
         OffdeskTaskView {
             task_id: self.task_id.clone(),
             request_id: self.request_id.clone(),
@@ -155,10 +166,8 @@ impl OffdeskTask {
                 .collect(),
             artifact_kind: self.artifact_kind.as_deref().map(operator_safe_text),
             agent_mode: self.agent_mode,
-            mode_assessment: assess_offdesk_mode(
-                self.agent_mode,
-                task_mode_lifecycle(self.status, self.result_artifact_path.as_deref()),
-            ),
+            mode_assessment,
+            next_safe_action,
             provider_id: self.provider_id.as_deref().map(operator_safe_text),
             model: self.model.as_deref().map(operator_safe_text),
             last_provider_fallback: self
@@ -232,6 +241,7 @@ pub struct OffdeskTaskView {
     pub agent_mode: Option<AdaptiveWikiAgentMode>,
     #[serde(flatten)]
     pub mode_assessment: OffdeskModeAssessment,
+    pub next_safe_action: OffdeskTaskNextSafeAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -246,6 +256,14 @@ pub struct OffdeskTaskView {
     pub log_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OffdeskTaskNextSafeAction {
+    pub kind: String,
+    pub detail: String,
+    pub commands: Vec<String>,
+    pub requires_operator_review: bool,
 }
 
 fn task_mode_lifecycle(
@@ -265,6 +283,100 @@ fn task_mode_lifecycle(
             OffdeskModeLifecycle::Blocked
         }
         OffdeskTaskStatus::Cancelled => OffdeskModeLifecycle::Cancelled,
+    }
+}
+
+fn next_safe_action_for_task(
+    task_id: &str,
+    project_key: &str,
+    background_ticket_id: Option<&str>,
+    status: OffdeskTaskStatus,
+    review_stage_required: bool,
+) -> OffdeskTaskNextSafeAction {
+    let command_task_id = operator_safe_text(task_id);
+    let command_project_key = operator_safe_text(project_key);
+    let poll_target = background_ticket_id
+        .map(operator_safe_text)
+        .unwrap_or_else(|| command_task_id.clone());
+
+    match status {
+        OffdeskTaskStatus::Queued => OffdeskTaskNextSafeAction {
+            kind: "dispatch_pending".to_string(),
+            detail: "Task is queued; run one tick when ready or cancel only if the work should stop."
+                .to_string(),
+            commands: vec![
+                "forager offdesk tick".to_string(),
+                format!("forager offdesk cancel-task {command_task_id}"),
+            ],
+            requires_operator_review: false,
+        },
+        OffdeskTaskStatus::PendingApproval => OffdeskTaskNextSafeAction {
+            kind: "approval_pending".to_string(),
+            detail: "Task is waiting for operator approval before launch.".to_string(),
+            commands: vec![
+                "forager offdesk pending".to_string(),
+                format!("forager offdesk cancel-task {command_task_id}"),
+            ],
+            requires_operator_review: true,
+        },
+        OffdeskTaskStatus::Launched | OffdeskTaskStatus::Running => OffdeskTaskNextSafeAction {
+            kind: "runtime_monitoring".to_string(),
+            detail: "Background work is active or recently launched; poll before judging completion."
+                .to_string(),
+            commands: vec![
+                format!("forager offdesk poll {poll_target}"),
+                format!("forager offdesk cancel-task {command_task_id}"),
+            ],
+            requires_operator_review: false,
+        },
+        OffdeskTaskStatus::Failed => OffdeskTaskNextSafeAction {
+            kind: "recovery_required".to_string(),
+            detail: "Task failed; inspect the failure, then retry with the existing approval scope or request a new approval."
+                .to_string(),
+            commands: vec![
+                format!("forager offdesk retry-task {command_task_id}"),
+                format!("forager offdesk retry-task {command_task_id} --new-approval"),
+            ],
+            requires_operator_review: true,
+        },
+        OffdeskTaskStatus::ResumePending => OffdeskTaskNextSafeAction {
+            kind: "resume_review_required".to_string(),
+            detail: "Task needs recovery review before the harness resumes or abandons it.".to_string(),
+            commands: vec![
+                format!("forager offdesk resume-task {command_task_id}"),
+                format!("forager offdesk retry-task {command_task_id}"),
+                format!("forager offdesk abandon-task {command_task_id}"),
+            ],
+            requires_operator_review: true,
+        },
+        OffdeskTaskStatus::Completed if review_stage_required => OffdeskTaskNextSafeAction {
+            kind: "review_required".to_string(),
+            detail: "Completed Offdesk output still needs closeout and Ondesk review before it is treated as accepted."
+                .to_string(),
+            commands: vec![
+                format!(
+                    "forager offdesk closeout --project-key {command_project_key} --task-id {command_task_id}"
+                ),
+                format!("forager ondesk prompt-package --project-key {command_project_key}"),
+            ],
+            requires_operator_review: true,
+        },
+        OffdeskTaskStatus::Completed => OffdeskTaskNextSafeAction {
+            kind: "closeout_check".to_string(),
+            detail:
+                "Dispatch is terminal; verify closeout before treating Offdesk output as accepted."
+                    .to_string(),
+            commands: vec![format!(
+                "forager offdesk closeout --project-key {command_project_key} --task-id {command_task_id}"
+            )],
+            requires_operator_review: true,
+        },
+        OffdeskTaskStatus::Cancelled => OffdeskTaskNextSafeAction {
+            kind: "cancelled".to_string(),
+            detail: "Task is cancelled; no dispatch action is needed.".to_string(),
+            commands: Vec::new(),
+            requires_operator_review: false,
+        },
     }
 }
 
@@ -742,6 +854,13 @@ mod tests {
             OffdeskModeRisk::OperatorReviewRequired
         );
         assert!(view.mode_assessment.review_stage_required);
+        assert_eq!(view.next_safe_action.kind, "review_required");
+        assert!(view.next_safe_action.requires_operator_review);
+        assert!(view
+            .next_safe_action
+            .commands
+            .iter()
+            .any(|command| command.contains("forager offdesk closeout")));
     }
 
     fn resume_state(now: DateTime<Utc>) -> TaskResumeState {
