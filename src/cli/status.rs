@@ -5,7 +5,8 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::offdesk::{
-    load_offdesk_status_summary, OffdeskNextSafeAction, ResumeStatus, TaskResumeStore,
+    ensure_resume_review_next_safe_action, load_offdesk_status_summary, OffdeskNextSafeAction,
+    OffdeskStatusSummary, ResumeStatus, TaskResumeStore,
 };
 use crate::session::{get_profile_dir, Status, Storage};
 
@@ -61,6 +62,58 @@ struct ResumeCounts {
     stale_pending: usize,
 }
 
+fn build_status_json(
+    counts: StatusCounts,
+    resume_counts: ResumeCounts,
+    offdesk_summary: OffdeskStatusSummary,
+) -> StatusJson {
+    let offdesk_next_safe_actions =
+        offdesk_next_safe_actions_for_status(&resume_counts, &offdesk_summary);
+    StatusJson {
+        waiting: counts.waiting,
+        running: counts.running,
+        idle: counts.idle,
+        error: counts.error,
+        total: counts.total,
+        resume_pending_fresh: resume_counts.fresh_pending,
+        resume_pending_stale: resume_counts.stale_pending,
+        pending_approvals: offdesk_summary.pending_approvals,
+        queued_offdesk_tasks: offdesk_summary.tasks.queued,
+        active_offdesk_tasks: offdesk_summary.tasks.active,
+        offdesk_tasks_pending_approval: offdesk_summary.tasks.pending_approval,
+        failed_offdesk_tasks: offdesk_summary.tasks.failed,
+        resume_pending_offdesk_tasks: offdesk_summary.tasks.resume_pending,
+        cancelled_offdesk_tasks: offdesk_summary.tasks.cancelled,
+        stale_background_runs: offdesk_summary.background_stale,
+        failed_background_runs: offdesk_summary.background_failed,
+        closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
+        offdesk_next_safe_actions,
+    }
+}
+
+fn offdesk_next_safe_actions_for_status(
+    resume_counts: &ResumeCounts,
+    offdesk_summary: &OffdeskStatusSummary,
+) -> Vec<OffdeskNextSafeAction> {
+    let mut actions = offdesk_summary.next_safe_actions.clone();
+    if resume_counts.fresh_pending > 0 || resume_counts.stale_pending > 0 {
+        ensure_resume_review_next_safe_action(&mut actions);
+    }
+    actions
+}
+
+#[cfg(test)]
+pub(crate) fn status_json_value_for_test(profile: &str) -> serde_json::Value {
+    let resume_counts = count_resume_state(profile);
+    let offdesk_summary = count_offdesk_state(profile);
+    serde_json::to_value(build_status_json(
+        StatusCounts::default(),
+        resume_counts,
+        offdesk_summary,
+    ))
+    .expect("status json should serialize")
+}
+
 pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
     let storage = Storage::new(profile)?;
     let (mut instances, _) = storage.load_with_groups()?;
@@ -69,26 +122,8 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
         if args.json {
             let resume_counts = count_resume_state(storage.profile());
             let offdesk_summary = count_offdesk_state(storage.profile());
-            let status_json = StatusJson {
-                waiting: 0,
-                running: 0,
-                idle: 0,
-                error: 0,
-                total: 0,
-                resume_pending_fresh: resume_counts.fresh_pending,
-                resume_pending_stale: resume_counts.stale_pending,
-                pending_approvals: offdesk_summary.pending_approvals,
-                queued_offdesk_tasks: offdesk_summary.tasks.queued,
-                active_offdesk_tasks: offdesk_summary.tasks.active,
-                offdesk_tasks_pending_approval: offdesk_summary.tasks.pending_approval,
-                failed_offdesk_tasks: offdesk_summary.tasks.failed,
-                resume_pending_offdesk_tasks: offdesk_summary.tasks.resume_pending,
-                cancelled_offdesk_tasks: offdesk_summary.tasks.cancelled,
-                stale_background_runs: offdesk_summary.background_stale,
-                failed_background_runs: offdesk_summary.background_failed,
-                closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
-                offdesk_next_safe_actions: offdesk_summary.next_safe_actions,
-            };
+            let status_json =
+                build_status_json(StatusCounts::default(), resume_counts, offdesk_summary);
             println!("{}", serde_json::to_string(&status_json)?);
         } else if args.quiet {
             println!("0");
@@ -102,7 +137,9 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
                     resume_counts.fresh_pending, resume_counts.stale_pending
                 );
             }
-            print_offdesk_summary(&offdesk_summary);
+            let offdesk_next_safe_actions =
+                offdesk_next_safe_actions_for_status(&resume_counts, &offdesk_summary);
+            print_offdesk_summary(&offdesk_summary, &offdesk_next_safe_actions);
         }
         return Ok(());
     }
@@ -120,26 +157,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
     let offdesk_summary = count_offdesk_state(storage.profile());
 
     if args.json {
-        let status_json = StatusJson {
-            waiting: counts.waiting,
-            running: counts.running,
-            idle: counts.idle,
-            error: counts.error,
-            total: counts.total,
-            resume_pending_fresh: resume_counts.fresh_pending,
-            resume_pending_stale: resume_counts.stale_pending,
-            pending_approvals: offdesk_summary.pending_approvals,
-            queued_offdesk_tasks: offdesk_summary.tasks.queued,
-            active_offdesk_tasks: offdesk_summary.tasks.active,
-            offdesk_tasks_pending_approval: offdesk_summary.tasks.pending_approval,
-            failed_offdesk_tasks: offdesk_summary.tasks.failed,
-            resume_pending_offdesk_tasks: offdesk_summary.tasks.resume_pending,
-            cancelled_offdesk_tasks: offdesk_summary.tasks.cancelled,
-            stale_background_runs: offdesk_summary.background_stale,
-            failed_background_runs: offdesk_summary.background_failed,
-            closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
-            offdesk_next_safe_actions: offdesk_summary.next_safe_actions,
-        };
+        let status_json = build_status_json(counts, resume_counts, offdesk_summary);
         println!("{}", serde_json::to_string(&status_json)?);
     } else if args.quiet {
         println!("{}", counts.waiting);
@@ -164,7 +182,9 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
                 resume_counts.fresh_pending, resume_counts.stale_pending
             );
         }
-        print_offdesk_summary(&offdesk_summary);
+        let offdesk_next_safe_actions =
+            offdesk_next_safe_actions_for_status(&resume_counts, &offdesk_summary);
+        print_offdesk_summary(&offdesk_summary, &offdesk_next_safe_actions);
     }
 
     // Show update notice if available (skip for JSON/quiet output)
@@ -182,30 +202,35 @@ fn count_offdesk_state(profile: &str) -> crate::offdesk::OffdeskStatusSummary {
     load_offdesk_status_summary(profile_dir, chrono::Utc::now()).unwrap_or_default()
 }
 
-fn print_offdesk_summary(summary: &crate::offdesk::OffdeskStatusSummary) {
-    if summary.pending_approvals == 0
-        && summary.tasks.queued == 0
-        && summary.tasks.active == 0
-        && summary.tasks.pending_approval == 0
-        && summary.tasks.failed == 0
-        && summary.tasks.resume_pending == 0
-        && summary.background_stale == 0
-        && summary.background_failed == 0
-        && summary.closeout_required == 0
-    {
+fn print_offdesk_summary(
+    summary: &crate::offdesk::OffdeskStatusSummary,
+    next_safe_actions: &[OffdeskNextSafeAction],
+) {
+    let has_offdesk_activity = summary.pending_approvals != 0
+        || summary.tasks.queued != 0
+        || summary.tasks.active != 0
+        || summary.tasks.pending_approval != 0
+        || summary.tasks.failed != 0
+        || summary.tasks.resume_pending != 0
+        || summary.background_stale != 0
+        || summary.background_failed != 0
+        || summary.closeout_required != 0;
+    if !has_offdesk_activity && next_safe_actions.is_empty() {
         return;
     }
-    println!(
-        "{} approvals • {} queued offdesk • {} active offdesk • {} resume-pending offdesk • {} failed offdesk • {} stale background • {} failed background • {} closeout required",
-        summary.pending_approvals,
-        summary.tasks.queued,
-        summary.tasks.active + summary.tasks.pending_approval,
-        summary.tasks.resume_pending,
-        summary.tasks.failed,
-        summary.background_stale,
-        summary.background_failed,
-        summary.closeout_required
-    );
+    if has_offdesk_activity {
+        println!(
+            "{} approvals • {} queued offdesk • {} active offdesk • {} resume-pending offdesk • {} failed offdesk • {} stale background • {} failed background • {} closeout required",
+            summary.pending_approvals,
+            summary.tasks.queued,
+            summary.tasks.active + summary.tasks.pending_approval,
+            summary.tasks.resume_pending,
+            summary.tasks.failed,
+            summary.background_stale,
+            summary.background_failed,
+            summary.closeout_required
+        );
+    }
     if summary.tasks.failed > 0 || summary.tasks.resume_pending > 0 {
         println!("Recovery: run `forager offdesk tasks` for retry, resume, and abandon commands.");
     }
@@ -214,7 +239,7 @@ fn print_offdesk_summary(summary: &crate::offdesk::OffdeskStatusSummary) {
             "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
         );
     }
-    print_offdesk_next_safe_actions(&summary.next_safe_actions);
+    print_offdesk_next_safe_actions(next_safe_actions);
 }
 
 fn print_offdesk_next_safe_actions(actions: &[OffdeskNextSafeAction]) {

@@ -685,6 +685,28 @@ pub fn status_next_safe_actions_from_summary(
     actions
 }
 
+pub fn ensure_resume_review_next_safe_action(actions: &mut Vec<OffdeskNextSafeAction>) {
+    if actions.iter().any(|action| {
+        matches!(
+            action.kind.as_str(),
+            "recovery_required" | "resume_review_required"
+        )
+    }) {
+        return;
+    }
+    let action = OffdeskNextSafeAction::new(
+        "resume_review_required",
+        "Resume records are waiting; inspect the resume evidence before continuing Offdesk work.",
+        vec!["forager offdesk resume".to_string()],
+        true,
+    );
+    let insert_at = actions
+        .iter()
+        .position(|action| action.kind != "approval_pending")
+        .unwrap_or(actions.len());
+    actions.insert(insert_at, action);
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct OffdeskTickReportInput {
     pub expired_approvals: usize,

@@ -303,6 +303,68 @@ fn load_offdesk_summary_adds_next_action_for_resume_store_only() {
 }
 
 #[test]
+#[serial]
+fn status_json_and_home_view_agree_on_resume_store_next_safe_action() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    fs::create_dir_all(&profile_dir).unwrap();
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("task_resume_state.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "resume_id": "resume-test",
+                "task_id": "task",
+                "request_id": "request",
+                "project_key": "project",
+                "status": "resume_pending",
+                "phase": "launched",
+                "runner_target": "bg_task",
+                "next_safe_resume_step": "inspect latest heartbeat before continuing",
+                "interrupted_at": now,
+                "interruption_reason": "test",
+                "fresh_until": now + Duration::minutes(10)
+            }
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let status_json = crate::cli::status::status_json_value_for_test("test");
+    let storage = Storage::new("test").unwrap();
+    let tools = AvailableTools::with_tools(&["claude"]);
+    let mut view = HomeView::new(storage, tools).unwrap();
+    let tui_action = view
+        .offdesk_resume
+        .next_safe_actions
+        .first()
+        .expect("tui next safe action");
+    let status_action = status_json["offdesk_next_safe_actions"][0].clone();
+
+    assert_eq!(status_json["resume_pending_fresh"], 1);
+    assert_eq!(
+        status_action["kind"].as_str(),
+        Some(tui_action.kind.as_str())
+    );
+    assert_eq!(
+        status_action["commands"][0].as_str(),
+        Some(tui_action.commands[0].as_str())
+    );
+    assert_eq!(
+        status_action["requires_operator_review"],
+        tui_action.requires_operator_review
+    );
+
+    let rendered = render_home_text(&mut view, 200, 32);
+    assert!(
+        rendered.contains("Next:  Recover: forager offdesk resume"),
+        "home view should render the same resume next action as status json:\n{}",
+        rendered
+    );
+}
+
+#[test]
 fn offdesk_morning_review_includes_cancelled_and_resume_states() {
     let summary = OffdeskResumeSummary {
         cancelled_tasks: 1,
