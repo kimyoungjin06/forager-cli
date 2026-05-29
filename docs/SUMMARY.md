@@ -28,6 +28,7 @@
 
 - [CLI Reference](cli/reference.md)
 - [Configuration Reference](guides/configuration.md)
+- [Brand System](brand-system.md)
 - [Offdesk Stabilization Patch Set](offdesk-stabilization-patchset.md)
 - [Offdesk Stabilization Review Note](offdesk-stabilization-review.md)
 - [Offdesk Safety Rail Baseline](offdesk-safety-rail-baseline.md)
