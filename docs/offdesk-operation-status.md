@@ -219,8 +219,9 @@ Acceptance checks:
 - stale callback, missing result, and closeout-required states are not hidden;
 - launch dry-run and closeout artifact paths are easy to find.
 
-Current implementation note: `offdesk tasks`, `offdesk poll`, and `offdesk
-tick` now expose a shared `next_safe_action` / `next_safe_actions` contract for
+Current implementation note: `offdesk tasks`, `offdesk poll`, `offdesk tick`,
+`offdesk pending`, `offdesk maintenance-report`, and `forager status` now
+expose a shared `next_safe_action` / `next_safe_actions` contract for
 operator-facing next steps. Remaining surfaces should reuse the same contract
 rather than inventing separate wording.
 

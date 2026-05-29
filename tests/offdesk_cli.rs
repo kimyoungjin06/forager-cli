@@ -237,6 +237,15 @@ fn offdesk_pending_and_ok_resolve_approval() -> Result<()> {
     let pending: serde_json::Value = serde_json::from_slice(&pending_output.stdout)?;
     assert_eq!(pending.as_array().expect("array").len(), 1);
     assert_eq!(pending[0]["action_id"], serde_json::Value::Null);
+    assert_eq!(pending[0]["next_safe_action"]["kind"], "approval_pending");
+    assert!(pending[0]["next_safe_action"]["commands"]
+        .as_array()
+        .expect("next action commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .expect("next action command")
+            .contains("forager offdesk ok approval_one")));
 
     let ok_output = forager_command(temp.path())
         .args(["offdesk", "ok", "approval_one", "--json"])
@@ -4357,6 +4366,20 @@ fn offdesk_maintenance_report_json_is_read_only_and_summarizes_mode_risks() -> R
     assert!(action_kinds.contains(&"operator_review"));
     assert!(action_kinds.contains(&"missing_agent_mode"));
     assert!(action_kinds.contains(&"provider_capacity"));
+    let next_action_kinds = report["next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .filter_map(|action| action["kind"].as_str())
+        .collect::<Vec<_>>();
+    assert!(next_action_kinds.contains(&"approval_pending"));
+    assert!(next_action_kinds.contains(&"review_required"));
+    assert!(next_action_kinds.contains(&"provider_attention"));
+    assert!(report["next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .all(|action| action["requires_operator_review"] == true));
     assert_eq!(
         fs::read_to_string(profile_dir.join("background_runs.json"))?,
         background_runs_json
@@ -6686,6 +6709,10 @@ fn offdesk_tick_creates_provider_fallback_approval_then_retargets_and_launches()
     let pending_json: serde_json::Value = serde_json::from_slice(&pending_json_output.stdout)?;
     assert_eq!(pending_json.as_array().expect("pending approvals").len(), 1);
     assert_eq!(pending_json[0]["metadata"], approvals[0]["metadata"]);
+    assert_eq!(
+        pending_json[0]["next_safe_action"]["kind"],
+        "approval_pending"
+    );
 
     let pending_output = forager_command(temp.path())
         .args(["offdesk", "pending"])
@@ -6697,6 +6724,8 @@ fn offdesk_tick_creates_provider_fallback_approval_then_retargets_and_launches()
     assert!(pending_stdout.contains("does not approve runtime dispatch"));
     assert!(pending_stdout.contains("fallback target: openai model gpt-4.1"));
     assert!(pending_stdout.contains("gpt-4.1-mini"));
+    assert!(pending_stdout.contains("forager offdesk ok"));
+    assert!(pending_stdout.contains("forager offdesk cancel"));
 
     let mut tasks_before_ok: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&tasks_path)?)?;
@@ -7678,6 +7707,11 @@ fn status_json_includes_closeout_required_count() -> Result<()> {
     assert!(status_output.status.success());
     let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
     assert_eq!(status["closeout_required_offdesk_tasks"], 1);
+    assert!(status["offdesk_next_safe_actions"]
+        .as_array()
+        .expect("offdesk next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "review_required"));
 
     let status_output = forager_command(temp.path()).args(["status"]).output()?;
     assert!(status_output.status.success());
@@ -7686,6 +7720,8 @@ fn status_json_includes_closeout_required_count() -> Result<()> {
     assert!(stdout.contains(
         "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
     ));
+    assert!(stdout.contains("Next safe actions:"));
+    assert!(stdout.contains("forager ondesk prompt-package"));
 
     let closeout_dir = profile_dir.join("offdesk_closeouts").join("latest");
     fs::create_dir_all(&closeout_dir)?;

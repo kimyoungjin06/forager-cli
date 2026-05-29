@@ -133,7 +133,9 @@ run before returning to Ondesk. See
 [`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md) for the
 validated short-run procedure.
 
-`forager offdesk tasks`, `forager offdesk poll`, and `forager offdesk tick`
-also follow this boundary. They expose `next_safe_action` / `next_safe_actions`
-surfaces and the human output points to closeout or recovery review, rather
-than claiming that terminal dispatch status means no operator action is needed.
+`forager offdesk tasks`, `forager offdesk poll`, `forager offdesk tick`,
+`forager offdesk pending`, `forager offdesk maintenance-report`, and
+`forager status` also follow this boundary. They expose `next_safe_action` /
+`next_safe_actions` surfaces and the human output points to closeout, approval,
+or recovery review, rather than claiming that terminal dispatch status means no
+operator action is needed.

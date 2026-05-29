@@ -25,8 +25,9 @@ use super::scheduler::{
     is_provider_capacity_block, SchedulerGate, SchedulerGateRequest, SchedulerGateStatus,
 };
 use super::task_queue::{
-    count_tasks, tick_next_safe_actions_from_report, OffdeskNextSafeAction, OffdeskTask,
-    OffdeskTaskCounts, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTickReportInput,
+    count_tasks, status_next_safe_actions_from_summary, tick_next_safe_actions_from_report,
+    OffdeskNextSafeAction, OffdeskStatusNextSafeActionInput, OffdeskTask, OffdeskTaskCounts,
+    OffdeskTaskStatus, OffdeskTaskStore, OffdeskTickReportInput,
 };
 use super::tick_lock::OffdeskTickLockGuard;
 use super::{
@@ -82,6 +83,8 @@ pub struct OffdeskStatusSummary {
     pub background_stale: usize,
     pub background_failed: usize,
     pub closeout_required: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
 pub fn run_offdesk_tick(
@@ -249,6 +252,15 @@ pub fn load_offdesk_status_summary(
             | BackgroundRunnerPhase::PickupAcknowledged => summary.background_active += 1,
         }
     }
+    summary.next_safe_actions =
+        status_next_safe_actions_from_summary(&OffdeskStatusNextSafeActionInput {
+            pending_approvals: summary.pending_approvals,
+            tasks: summary.tasks.clone(),
+            background_active: summary.background_active,
+            background_stale: summary.background_stale,
+            background_failed: summary.background_failed,
+            closeout_required: summary.closeout_required,
+        });
 
     Ok(summary)
 }

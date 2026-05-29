@@ -1706,6 +1706,10 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
         request["approval_brief"]["recommendation"],
         "start_ondesk_review"
     );
+    assert_eq!(
+        request["approval_brief"]["next_safe_actions"][0]["kind"],
+        "ondesk_review_entry"
+    );
     assert_eq!(request["summary"]["open_decisions"], 3);
 
     let out = temp.path().join("ondesk_relay_result.json");
@@ -1753,6 +1757,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
                 "Ondesk 전환 상세",
                 "왜 이 추천인가",
                 "핵심 근거",
+                "권장 다음 행동",
+                "ondesk review entry",
                 "선택별 의미",
             ],
             required_buttons: &[

@@ -166,6 +166,28 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
         "wiki projection/review 상태를 확인한 뒤 필요한 mutation만 별도 승인합니다.",
         "검토하지 못하면 pending ondesk review 상태로 유지합니다.",
     ]
+    next_safe_actions = [
+        {
+            "kind": "ondesk_review_entry",
+            "detail": "WebUI에서 closeout, RETURN_PACKAGE, wiki 상태를 함께 열어 아침 검토를 시작합니다.",
+            "scope": "operator_next_step",
+            "commands": ["Open the WebUI handoff link"],
+            "requires_operator_review": True,
+            "does_not_authorize": [
+                "cleanup, deletion, file movement, wiki promotion, provider retargeting, or accepting Offdesk output without separate review"
+            ],
+        },
+        {
+            "kind": "keep_pending",
+            "detail": "지금 검토하지 못하면 자동 전환하지 않고 pending ondesk review 상태로 남깁니다.",
+            "scope": "operator_next_step",
+            "commands": ["Reply with keep_pending or defer_ondesk"],
+            "requires_operator_review": False,
+            "does_not_authorize": [
+                "mutation, cleanup, deletion, provider changes, or wiki promotion"
+            ],
+        },
+    ]
 
     request: dict[str, Any] = {
         "decision_request_id": f"ondesk-handoff-{args.project_key}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}",
@@ -186,6 +208,7 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
             ],
             "evidence": evidence,
             "next_action": next_action,
+            "next_safe_actions": next_safe_actions,
             "decision_impacts": {
                 "start_ondesk_review": "WebUI에서 상세 검토를 시작합니다. 이 선택만으로 mutation은 승인되지 않습니다.",
                 "keep_pending": "자동 전환하지 않고 pending ondesk review로 남깁니다.",
@@ -215,6 +238,7 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
             "timezone": args.timezone,
             "closeout_review_verdict": review_verdict,
         },
+        "next_safe_actions": next_safe_actions,
     }
     if args.webui_url:
         request["links"] = [{"label": "WebUI 열기", "url": args.webui_url}]

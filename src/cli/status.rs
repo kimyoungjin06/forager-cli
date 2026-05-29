@@ -4,7 +4,9 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
-use crate::offdesk::{load_offdesk_status_summary, ResumeStatus, TaskResumeStore};
+use crate::offdesk::{
+    load_offdesk_status_summary, OffdeskNextSafeAction, ResumeStatus, TaskResumeStore,
+};
 use crate::session::{get_profile_dir, Status, Storage};
 
 #[derive(Args)]
@@ -50,6 +52,7 @@ struct StatusJson {
     stale_background_runs: usize,
     failed_background_runs: usize,
     closeout_required_offdesk_tasks: usize,
+    offdesk_next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
 #[derive(Default)]
@@ -84,6 +87,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
                 stale_background_runs: offdesk_summary.background_stale,
                 failed_background_runs: offdesk_summary.background_failed,
                 closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
+                offdesk_next_safe_actions: offdesk_summary.next_safe_actions,
             };
             println!("{}", serde_json::to_string(&status_json)?);
         } else if args.quiet {
@@ -134,6 +138,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
             stale_background_runs: offdesk_summary.background_stale,
             failed_background_runs: offdesk_summary.background_failed,
             closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
+            offdesk_next_safe_actions: offdesk_summary.next_safe_actions,
         };
         println!("{}", serde_json::to_string(&status_json)?);
     } else if args.quiet {
@@ -208,6 +213,23 @@ fn print_offdesk_summary(summary: &crate::offdesk::OffdeskStatusSummary) {
         println!(
             "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
         );
+    }
+    print_offdesk_next_safe_actions(&summary.next_safe_actions);
+}
+
+fn print_offdesk_next_safe_actions(actions: &[OffdeskNextSafeAction]) {
+    if actions.is_empty() {
+        return;
+    }
+    println!("Next safe actions:");
+    for action in actions {
+        println!("  next:    {}", action.detail);
+        if !action.commands.is_empty() {
+            println!("  command: {}", action.commands.join(" | "));
+        }
+        if action.requires_operator_review {
+            println!("  review:  operator review required");
+        }
     }
 }
 
