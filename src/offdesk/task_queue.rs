@@ -294,6 +294,23 @@ impl OffdeskNextSafeAction {
     }
 }
 
+fn next_safe_action_priority(kind: &str) -> u8 {
+    match kind {
+        "approval_pending" | "approval_expired" | "approval_denied" => 10,
+        "recovery_required" | "resume_review_required" | "result_artifact_missing" => 20,
+        "review_required" | "closeout_check" => 30,
+        "provider_attention" => 40,
+        "runtime_monitoring" => 50,
+        "dispatch_pending" => 60,
+        "approval_resolved" | "cancelled" => 70,
+        _ => 80,
+    }
+}
+
+fn order_next_safe_actions_by_priority(actions: &mut [OffdeskNextSafeAction]) {
+    actions.sort_by_key(|action| next_safe_action_priority(&action.kind));
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OffdeskPendingApprovalView {
     #[serde(flatten)]
@@ -623,6 +640,7 @@ pub fn tick_next_safe_actions_from_report(
             false,
         ));
     }
+    order_next_safe_actions_by_priority(&mut actions);
     actions
 }
 
@@ -682,6 +700,7 @@ pub fn status_next_safe_actions_from_summary(
             false,
         ));
     }
+    order_next_safe_actions_by_priority(&mut actions);
     actions
 }
 
@@ -692,6 +711,7 @@ pub fn ensure_resume_review_next_safe_action(actions: &mut Vec<OffdeskNextSafeAc
             "recovery_required" | "resume_review_required"
         )
     }) {
+        order_next_safe_actions_by_priority(actions);
         return;
     }
     let action = OffdeskNextSafeAction::new(
@@ -700,11 +720,8 @@ pub fn ensure_resume_review_next_safe_action(actions: &mut Vec<OffdeskNextSafeAc
         vec!["forager offdesk resume".to_string()],
         true,
     );
-    let insert_at = actions
-        .iter()
-        .position(|action| action.kind != "approval_pending")
-        .unwrap_or(actions.len());
-    actions.insert(insert_at, action);
+    actions.push(action);
+    order_next_safe_actions_by_priority(actions);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1249,6 +1266,111 @@ mod tests {
             interrupted_at: now,
             fresh_until: now + Duration::minutes(10),
         })
+    }
+
+    fn action_kinds(actions: &[OffdeskNextSafeAction]) -> Vec<&str> {
+        actions.iter().map(|action| action.kind.as_str()).collect()
+    }
+
+    #[test]
+    fn status_next_safe_actions_use_operator_priority_contract() {
+        let actions = status_next_safe_actions_from_summary(&OffdeskStatusNextSafeActionInput {
+            pending_approvals: 1,
+            tasks: OffdeskTaskCounts {
+                queued: 1,
+                pending_approval: 1,
+                active: 1,
+                completed: 1,
+                failed: 1,
+                resume_pending: 1,
+                cancelled: 1,
+            },
+            background_active: 1,
+            background_stale: 1,
+            background_failed: 1,
+            closeout_required: 1,
+        });
+
+        assert_eq!(
+            action_kinds(&actions),
+            vec![
+                "approval_pending",
+                "recovery_required",
+                "review_required",
+                "runtime_monitoring",
+                "dispatch_pending",
+            ]
+        );
+    }
+
+    #[test]
+    fn tick_next_safe_actions_use_operator_priority_contract() {
+        let actions = tick_next_safe_actions_from_report(&OffdeskTickReportInput {
+            expired_approvals: 1,
+            polled_background: 1,
+            launched: 1,
+            pending_approval: 1,
+            completed: 1,
+            failed: 1,
+            resume_pending: 1,
+            provider_deferred: 1,
+            skipped: 1,
+        });
+
+        assert_eq!(
+            action_kinds(&actions),
+            vec![
+                "approval_pending",
+                "recovery_required",
+                "review_required",
+                "provider_attention",
+                "runtime_monitoring",
+                "dispatch_pending",
+            ]
+        );
+    }
+
+    #[test]
+    fn resume_store_next_safe_action_is_ordered_after_approvals() {
+        let mut actions = vec![
+            OffdeskNextSafeAction::new(
+                "runtime_monitoring",
+                "poll",
+                vec!["forager offdesk poll".to_string()],
+                false,
+            ),
+            OffdeskNextSafeAction::new(
+                "review_required",
+                "closeout",
+                vec!["forager offdesk closeout".to_string()],
+                true,
+            ),
+            OffdeskNextSafeAction::new(
+                "approval_expired",
+                "approval expired",
+                vec!["forager offdesk pending --all".to_string()],
+                true,
+            ),
+            OffdeskNextSafeAction::new(
+                "dispatch_pending",
+                "tick",
+                vec!["forager offdesk tick".to_string()],
+                false,
+            ),
+        ];
+
+        ensure_resume_review_next_safe_action(&mut actions);
+
+        assert_eq!(
+            action_kinds(&actions),
+            vec![
+                "approval_expired",
+                "resume_review_required",
+                "review_required",
+                "runtime_monitoring",
+                "dispatch_pending",
+            ]
+        );
     }
 
     #[test]

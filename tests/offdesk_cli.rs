@@ -7717,6 +7717,80 @@ fn status_json_includes_resume_store_next_safe_action() -> Result<()> {
 
 #[test]
 #[serial]
+fn status_json_orders_resume_store_next_safe_action_by_priority() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            durable_task_with(
+                "approval-task",
+                "dispatch.runtime",
+                "pending_approval",
+                now,
+                "true",
+                temp.path(),
+            ),
+            durable_task_with(
+                "completed-task",
+                "dispatch.runtime",
+                "completed",
+                now,
+                "true",
+                temp.path(),
+            ),
+            durable_task_with(
+                "running-task",
+                "dispatch.runtime",
+                "running",
+                now,
+                "true",
+                temp.path(),
+            ),
+            durable_task_with(
+                "queued-task",
+                "dispatch.runtime",
+                "queued",
+                now,
+                "true",
+                temp.path(),
+            )
+        ]))?,
+    )?;
+    fs::write(
+        profile_dir.join("task_resume_state.json"),
+        serde_json::to_string_pretty(&json!([resume_state(now)]))?,
+    )?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    let action_kinds: Vec<&str> = status["offdesk_next_safe_actions"]
+        .as_array()
+        .expect("offdesk next safe actions")
+        .iter()
+        .map(|action| action["kind"].as_str().expect("action kind"))
+        .collect();
+
+    assert_eq!(
+        action_kinds,
+        vec![
+            "approval_pending",
+            "resume_review_required",
+            "review_required",
+            "runtime_monitoring",
+            "dispatch_pending",
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_includes_closeout_required_count() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
