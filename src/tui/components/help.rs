@@ -61,7 +61,7 @@ fn shortcuts() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
             vec![
                 ("p/q/a", "approval, queued, active task counts"),
                 ("r/f", "resume_pending and failed task counts"),
-                ("CLI", "forager offdesk tasks shows recovery commands"),
+                ("Action", "status bar shows the next safe offdesk command"),
             ],
         ),
     ]
@@ -159,8 +159,8 @@ mod tests {
         );
         assert!(
             keys.iter()
-                .any(|(_, desc)| desc.contains("forager offdesk tasks")),
-            "Offdesk section should point to the CLI recovery command"
+                .any(|(_, desc)| desc.contains("next safe offdesk command")),
+            "Offdesk section should describe the next safe action"
         );
     }
 

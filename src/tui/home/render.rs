@@ -521,7 +521,7 @@ impl HomeView {
         area: Rect,
         theme: &Theme,
     ) -> Rect {
-        const REVIEW_HEIGHT: u16 = 6;
+        const REVIEW_HEIGHT: u16 = 7;
 
         if !self.offdesk_resume.has_morning_review() || area.height < REVIEW_HEIGHT + 3 {
             return area;
@@ -686,6 +686,18 @@ impl HomeView {
                     ),
                     offdesk_style,
                 ),
+            ]);
+        }
+
+        if let Some(command) = self.offdesk_resume.next_action_command() {
+            let action_style = if self.offdesk_resume.needs_operator_attention() {
+                Style::default().fg(theme.waiting).bold()
+            } else {
+                Style::default().fg(theme.dimmed)
+            };
+            spans.extend([
+                Span::styled("│", sep_style),
+                Span::styled(format!(" Action {command} "), action_style),
             ]);
         }
 
