@@ -7761,6 +7761,166 @@ fn status_json_includes_offdesk_counts() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_harnesses_lists_supported_and_planned_profiles() -> Result<()> {
+    let temp = tempdir()?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "harnesses", "--json"])
+        .output()?;
+
+    assert!(output.status.success());
+    let profiles: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let profiles = profiles.as_array().expect("profiles array");
+    assert!(profiles
+        .iter()
+        .any(|profile| { profile["id"] == "codex" && profile["support_status"] == "supported" }));
+    assert!(profiles
+        .iter()
+        .any(|profile| { profile["id"] == "claude" && profile["support_status"] == "supported" }));
+    let claude = profiles
+        .iter()
+        .find(|profile| profile["id"] == "claude")
+        .expect("claude profile");
+    assert_eq!(
+        claude["prompt_contract"]["strategy"],
+        "compact_prompt_with_first_read_artifacts"
+    );
+    assert_eq!(claude["prompt_contract"]["first_read_required"], true);
+    assert_eq!(
+        claude["prompt_contract"]["first_read_total_budget_bytes"],
+        262_144
+    );
+    assert!(claude["prompt_contract"]["discouraged_inline_context"]
+        .as_array()
+        .expect("discouraged inline context")
+        .iter()
+        .any(|item| item == "full git diff"));
+    assert!(profiles
+        .iter()
+        .any(|profile| { profile["id"] == "gemini" && profile["support_status"] == "planned" }));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_harness_prompt_builds_first_read_packet() -> Result<()> {
+    let temp = tempdir()?;
+    let first_read = temp.path().join("RETURN_PACKAGE.md");
+    fs::write(&first_read, "return package")?;
+    let output_path = temp.path().join("claude_start.md");
+    let result_path = temp.path().join("result.json");
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            "Review the smoke result and report only missing evidence.",
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--result-artifact",
+            result_path.to_str().expect("utf-8 result path"),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 workdir"),
+            "--output",
+            output_path.to_str().expect("utf-8 output path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(output.status.success());
+    let packet: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(packet["harness_id"], "claude");
+    assert_eq!(
+        packet["prompt_strategy"],
+        "compact_prompt_with_first_read_artifacts"
+    );
+    assert_eq!(packet["first_reads"][0]["present"], true);
+    assert_eq!(packet["first_reads"][0]["size_bytes"], 14);
+    assert_eq!(packet["first_reads"][0]["over_file_budget"], false);
+    assert_eq!(packet["first_read_budget_status"], "ok");
+    assert_eq!(packet["first_read_total_bytes"], 14);
+    assert_eq!(
+        packet["result_artifact"],
+        result_path.to_str().expect("utf-8 result path")
+    );
+    assert_eq!(
+        packet["output_path"],
+        output_path.to_str().expect("utf-8 output path")
+    );
+    assert!(packet["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .is_empty());
+    let prompt = fs::read_to_string(output_path)?;
+    assert!(prompt.contains("## First-Read Artifacts"));
+    assert!(prompt.contains("Do not ask the operator to paste full git diffs"));
+    assert!(prompt.contains(first_read.to_str().expect("utf-8 first read")));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_harness_prompt_warns_and_strict_fails_on_budget() -> Result<()> {
+    let temp = tempdir()?;
+    let first_read = temp.path().join("large.md");
+    fs::write(&first_read, "0123456789")?;
+
+    let warning_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            "Review first-read budget.",
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--max-first-read-total-bytes",
+            "5",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(warning_output.status.success());
+    let packet: serde_json::Value = serde_json::from_slice(&warning_output.stdout)?;
+    assert_eq!(packet["first_read_total_bytes"], 10);
+    assert_eq!(packet["first_read_total_budget_bytes"], 5);
+    assert_eq!(packet["first_read_budget_status"], "warning");
+    assert!(packet["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .expect("warning text")
+            .contains("first-read artifacts total 10 bytes")));
+
+    let strict_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            "Review first-read budget.",
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--max-first-read-total-bytes",
+            "5",
+            "--strict-first-read-budget",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(!strict_output.status.success());
+    assert!(
+        String::from_utf8_lossy(&strict_output.stderr).contains("first-read budget guard failed")
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
     let temp = tempdir()?;
     fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;

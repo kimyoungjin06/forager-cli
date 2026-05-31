@@ -55,6 +55,58 @@ provide structured progress or result artifacts, Forager can still host it, but
 the run should be labeled with the missing evidence and reviewed more
 conservatively.
 
+Hosted harnesses should not receive large raw context as a single prompt. The
+default profile contract is:
+
+- use a compact task prompt;
+- keep inline context below the profile budget;
+- pass `RETURN_PACKAGE.md`, `closeout_plan.json`, `result.json`, focused briefs,
+  and selected source files as first-read artifacts;
+- keep first-read artifacts under the profile budget, currently 64 KiB per file
+  and 256 KiB total for supported Codex and Claude profiles;
+- avoid pasting full git diffs, large logs, raw scrollback, or repository-wide
+  inventories inline;
+- report missing evidence explicitly instead of guessing.
+
+Forager exposes the current built-in profile contract with:
+
+```bash
+forager offdesk harnesses
+forager offdesk harnesses --json
+```
+
+Forager can also build a compact start packet for a hosted harness:
+
+```bash
+forager offdesk harness-prompt claude \
+  --task "Review the closeout result and report missing evidence." \
+  --first-read target/offdesk/RETURN_PACKAGE.md \
+  --first-read target/offdesk/result.json \
+  --result-artifact target/offdesk/result.json \
+  --output target/offdesk/CLAUDE_START.md \
+  --strict-first-read-budget
+```
+
+That prompt is intentionally a pointer surface. The hosted harness should read
+the listed artifacts instead of asking the operator to paste the full diff or
+raw logs into the prompt.
+
+By default, `harness-prompt` reports missing or oversized first-read artifacts as
+warnings in JSON and human output. Add `--strict-first-read-budget` when a
+runtime smoke should fail before launch if the first-read packet is missing or
+too large. Use `--max-first-read-total-bytes` to lower the total budget for a
+specific smoke.
+
+The v1 support target is intentionally narrow:
+
+| Harness | Status | Reason |
+| --- | --- | --- |
+| Codex CLI | supported | Primary current golden-loop harness. |
+| Claude Code | supported | Primary current golden-loop harness alongside Codex. |
+| Gemini CLI | planned | Registry exists, but the hosted harness evidence contract still needs a disposable smoke task. |
+| OpenHands | planned | Future integration candidate. |
+| Aider | planned | Future integration candidate. |
+
 ## Preferred Integration Path
 
 1. Start with a read-only or disposable-worktree smoke task.

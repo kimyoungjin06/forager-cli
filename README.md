@@ -53,7 +53,7 @@ interaction style. Forager owns the local control plane around them:
   Codex CLI, Gemini CLI, local scripts, and future hosted harness agents
 - **TUI dashboard** -- create, monitor, attach, recover, and review sessions
 - **Agent + terminal views** -- toggle between AI agents and paired shell terminals with `t`
-- **Status detection** -- see which agents are running, waiting for input, idle, or failed
+- **Status detection** -- see which agents are running, waiting for input, idle, stopped, or failed
 - **Git worktrees** -- run parallel agents on different branches of the same repo
 - **Diff view** -- review git changes without leaving the TUI
 - **Per-repo config** -- `.forager/config.toml` for project-specific settings and hooks, with `.aoe/config.toml` fallback

@@ -28,6 +28,7 @@ pub enum Status {
     Waiting,
     #[default]
     Idle,
+    Stopped,
     Error,
     Starting,
     Deleting,
@@ -414,8 +415,16 @@ impl Instance {
             }
         };
 
-        if !session.exists() {
+        if !crate::tmux::is_tmux_available() {
             self.status = Status::Error;
+            self.last_error = Some("tmux is not available".to_string());
+            self.last_error_check = Some(std::time::Instant::now());
+            return;
+        }
+
+        if !session.exists() {
+            self.status = Status::Stopped;
+            self.last_error = None;
             self.last_error_check = Some(std::time::Instant::now());
             return;
         }
@@ -641,6 +650,7 @@ mod tests {
             Status::Running,
             Status::Waiting,
             Status::Idle,
+            Status::Stopped,
             Status::Error,
             Status::Starting,
             Status::Deleting,

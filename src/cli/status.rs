@@ -31,6 +31,7 @@ struct StatusCounts {
     running: usize,
     waiting: usize,
     idle: usize,
+    stopped: usize,
     error: usize,
     total: usize,
 }
@@ -47,6 +48,7 @@ struct StatusJson {
     waiting: usize,
     running: usize,
     idle: usize,
+    stopped: usize,
     error: usize,
     total: usize,
     resume_pending_fresh: usize,
@@ -91,6 +93,7 @@ fn build_status_json(
         waiting: counts.waiting,
         running: counts.running,
         idle: counts.idle,
+        stopped: counts.stopped,
         error: counts.error,
         total: counts.total,
         resume_pending_fresh: resume_counts.fresh_pending,
@@ -226,6 +229,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
         print_status_group("WAITING", "◐", Status::Waiting, &instances);
         print_status_group("RUNNING", "●", Status::Running, &instances);
         print_status_group("IDLE", "○", Status::Idle, &instances);
+        print_status_group("STOPPED", "□", Status::Stopped, &instances);
         print_status_group("ERROR", "✕", Status::Error, &instances);
         println!(
             "Total: {} sessions in profile '{}'",
@@ -234,11 +238,13 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
         );
         print_profile_storage_hint(storage.profile());
     } else {
-        println!(
-            "{} waiting • {} running • {} idle",
-            counts.waiting, counts.running, counts.idle
-        );
+        print_session_summary(&counts);
         print_profile_storage_hint(storage.profile());
+        if counts.error > 0 {
+            println!(
+                "Session recovery: run `forager status --verbose` to inspect errored sessions."
+            );
+        }
         if resume_counts.fresh_pending > 0 || resume_counts.stale_pending > 0 {
             println!(
                 "{} fresh resume • {} stale resume",
@@ -267,6 +273,21 @@ fn print_profile_storage_hint(profile: &str) {
         );
         println!("Storage hint: legacy AoE data is active; run `forager doctor` before migration.");
     }
+}
+
+fn print_session_summary(counts: &StatusCounts) {
+    let mut parts = vec![
+        format!("{} waiting", counts.waiting),
+        format!("{} running", counts.running),
+        format!("{} idle", counts.idle),
+    ];
+    if counts.stopped > 0 {
+        parts.push(format!("{} stopped", counts.stopped));
+    }
+    if counts.error > 0 {
+        parts.push(format!("{} error", counts.error));
+    }
+    println!("{}", parts.join(" • "));
 }
 
 fn count_offdesk_state(profile: &str) -> crate::offdesk::OffdeskStatusSummary {
@@ -383,6 +404,7 @@ fn count_by_status(instances: &[crate::session::Instance]) -> StatusCounts {
             Status::Running => counts.running += 1,
             Status::Waiting => counts.waiting += 1,
             Status::Idle => counts.idle += 1,
+            Status::Stopped => counts.stopped += 1,
             Status::Error => counts.error += 1,
             Status::Starting => counts.idle += 1,
             Status::Deleting => {}
@@ -420,4 +442,32 @@ fn shorten_path(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::{Instance, Status};
+
+    fn instance_with_status(status: Status) -> Instance {
+        let mut inst = Instance::new("test", "/tmp/test");
+        inst.status = status;
+        inst
+    }
+
+    #[test]
+    fn count_by_status_separates_stopped_from_error() {
+        let instances = vec![
+            instance_with_status(Status::Stopped),
+            instance_with_status(Status::Error),
+            instance_with_status(Status::Idle),
+        ];
+
+        let counts = count_by_status(&instances);
+
+        assert_eq!(counts.stopped, 1);
+        assert_eq!(counts.error, 1);
+        assert_eq!(counts.idle, 1);
+        assert_eq!(counts.total, 3);
+    }
 }

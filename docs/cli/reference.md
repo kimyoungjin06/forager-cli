@@ -40,6 +40,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager worktree info`↴](#forager-worktree-info)
 * [`forager worktree cleanup`↴](#forager-worktree-cleanup)
 * [`forager offdesk`↴](#forager-offdesk)
+* [`forager offdesk harnesses`↴](#forager-offdesk-harnesses)
+* [`forager offdesk harness-prompt`↴](#forager-offdesk-harness-prompt)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -659,6 +661,8 @@ Manage offdesk approvals and recovery artifacts
 
 ###### **Subcommands:**
 
+* `harnesses` — List hosted harness agent profile contracts
+* `harness-prompt` — Build a compact hosted harness start prompt from first-read artifacts
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -686,6 +690,41 @@ Manage offdesk approvals and recovery artifacts
 * `closeout` — Generate a mandatory closeout plan and commercial review packet
 * `closeout-review` — Record a reviewed closeout verdict without applying file operations
 * `wiki` — Inspect adaptive wiki candidates, entries, projections, and lint
+
+
+
+## `forager offdesk harnesses`
+
+List hosted harness agent profile contracts
+
+**Usage:** `forager offdesk harnesses [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk harness-prompt`
+
+Build a compact hosted harness start prompt from first-read artifacts
+
+**Usage:** `forager offdesk harness-prompt [OPTIONS] --task <TASK> <HARNESS_ID>`
+
+###### **Arguments:**
+
+* `<HARNESS_ID>` — Hosted harness ID from `forager offdesk harnesses`
+
+###### **Options:**
+
+* `--task <TASK>` — Short task instruction for the hosted harness
+* `--first-read <FIRST_READS>` — Artifact or source file the hosted harness must read first
+* `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path the hosted harness should write or inspect
+* `--workdir <WORKDIR>` — Working directory the hosted harness should treat as the task root
+* `--output <OUTPUT>` — Write the generated prompt markdown to this path
+* `--max-first-read-total-bytes <MAX_FIRST_READ_TOTAL_BYTES>` — Override the total first-read artifact budget in bytes
+* `--strict-first-read-budget` — Fail when first-read artifacts are missing or exceed the budget
+* `--json` — Output packet metadata as JSON
 
 
 
