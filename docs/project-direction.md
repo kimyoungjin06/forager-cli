@@ -20,7 +20,9 @@ The product direction is:
 3. Convert long-running work into small handoff artifacts.
 4. Preserve raw evidence while keeping human decision surfaces compact.
 5. Promote agent-created knowledge only through reviewable paths.
-6. Integrate with higher-level orchestration without surrendering local truth.
+6. Host different agent harnesses and model backends without making any one of
+   them the product boundary.
+7. Integrate with higher-level orchestration without surrendering local truth.
 
 ## What Forager Is
 
@@ -28,6 +30,8 @@ Forager is:
 
 - a tmux-backed manager for agent and terminal sessions;
 - an approval-gated Offdesk runtime for queued or long-running work;
+- a harness substrate that can run Claude Code, Codex, OpenCode, local LLM
+  scripts, or future agent loops as supervised workloads;
 - a local source of truth for task queues, approvals, runtime probes, recovery,
   result artifacts, closeout packages, and adaptive wiki state;
 - a handoff system that moves work from Ondesk to Offdesk and back through
@@ -40,6 +44,8 @@ Forager is:
 Forager is not:
 
 - a replacement for Claude Code, Codex, OpenCode, Gemini CLI, or other agents;
+- a product tied to one commercial model, local model, provider, or token
+  budget assumption;
 - a cloud orchestrator or cross-organization control plane;
 - an autonomous system that treats completed execution as accepted truth;
 - a hidden memory layer that mutates project knowledge without review;
@@ -63,6 +69,21 @@ Agents can work longer and more independently when the harness records:
 
 Forager should therefore improve autonomy by strengthening state, evidence,
 review, and handoff mechanics, not by bypassing them.
+
+## Harness-Agnostic Runtime
+
+Forager should be able to supervise other harnesses as workloads. A hosted
+workload may be a commercial CLI agent, a local LLM script, a deterministic
+review harness, or a future custom agent loop. The operator's token budget,
+latency needs, data boundary, and review standard should determine which harness
+is launched.
+
+This means local LLM use is an important operating mode, not the product's
+identity. When tokens and budget are abundant, Forager can run richer external
+harnesses. When tokens are constrained, it can run smaller local-model episodes,
+deterministic scripts, or staged review loops. In both cases, Forager should
+preserve the same approvals, runtime evidence, recovery state, closeout, and
+handoff contract.
 
 ## Operating Principles
 
