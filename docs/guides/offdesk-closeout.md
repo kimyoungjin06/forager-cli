@@ -126,6 +126,17 @@ verdict, when those artifacts exist. This makes the normal morning return path
 start from a fresh package instead of requiring the operator to manually paste
 the closeout artifact path.
 
+When no closeout exists, or when the next harness needs a current governance
+view, use:
+
+```bash
+forager ondesk prompt-package --project-key <project> --include-doc-audit
+```
+
+That adds a fresh `project audit-docs` recommendation summary to the prompt
+package while preserving the same review boundary: audit failures are reported
+as unavailable context, not treated as proof that the project is clean.
+
 Closeout also runs the documentation governance audit against the closeout
 workdir when one is available. `RETURN_PACKAGE.md` includes only the focused
 recommendations, such as deliverables to promote or outputs to record in

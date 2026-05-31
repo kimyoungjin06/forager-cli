@@ -49,22 +49,26 @@ decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
   decisions needed, capped first reads, grouped evidence, documentation
   governance recommendations, and a next safe action. Full inventories stay in
   `closeout_plan.json` and `cleanup_manifest.json`.
+- `forager ondesk prompt-package --include-doc-audit` now runs a fresh
+  project-level documentation governance audit and labels the governance source
+  as fresh audit, closeout return package, unavailable audit, or not requested.
 - Offdesk operation status remains the running status and candidate work queue
   for operator surfaces and safety rails.
 
 ## Current Gaps
 
-- Closeout consumes audit recommendations, but prompt packages still rely on
-  the closeout return package rather than running a fresh audit themselves.
 - The compact return package template is covered by fixture tests, but still
   needs validation on a real completed TwinPaper run.
+- Closeout return package freshness is explicit by source, but stale closeout
+  age policy still needs to be validated against real long-run artifacts.
 
 ## Next Work Candidates
 
-1. Consider whether `ondesk prompt-package` should optionally run a fresh
-   `project audit-docs` pass when no closeout package exists.
-2. Run closeout on a real completed TwinPaper workload and inspect whether the
+1. Run closeout on a real completed TwinPaper workload and inspect whether the
    compact return package is readable enough for morning handoff.
+2. Use `forager ondesk prompt-package --project-key twinpaper --include-doc-audit`
+   against that run and verify the next harness can start from the package
+   without raw chat history.
 
 ## Refresh Rule
 

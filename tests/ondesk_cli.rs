@@ -177,12 +177,82 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     let json: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
     assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
+    assert_eq!(
+        json["documentation_governance"]["source"],
+        "latest_closeout_return_package"
+    );
     let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Documentation Governance Source"));
+    assert!(content.contains("source: `latest_closeout_return_package`"));
     assert!(content.contains("Latest Offdesk Return Package"));
     assert!(content.contains("Night result summary"));
     assert!(content.contains("review_verdict: approved"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_prompt_package_can_include_fresh_documentation_audit_without_closeout() -> Result<()> {
+    let temp = tempdir()?;
+    let project = temp.path().join("project");
+    fs::create_dir_all(project.join("outputs"))?;
+    fs::write(project.join("README.md"), "# Project\n")?;
+    fs::write(
+        project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    fs::write(
+        project.join("outputs").join("unpromoted-report.html"),
+        "<h1>report</h1>",
+    )?;
+
+    let output = forager_command(temp.path())
+        .current_dir(&project)
+        .args([
+            "ondesk",
+            "prompt-package",
+            "--project-key",
+            "project",
+            "--include-doc-audit",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["documentation_governance"]["source"],
+        "fresh_project_audit"
+    );
+    assert_eq!(
+        json["documentation_governance"]["requested_fresh_audit"],
+        true
+    );
+    assert!(
+        json["documentation_governance"]["recommendation_count"]
+            .as_u64()
+            .expect("recommendation count")
+            >= 1
+    );
+    assert_eq!(
+        json["documentation_governance"]["recommendations"][0]["kind"],
+        "review_human_output_candidates"
+    );
+    let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Documentation Governance Source"));
+    assert!(content.contains("source: `fresh_project_audit`"));
+    assert!(content.contains("review_human_output_candidates"));
+    assert!(content.contains("outputs/unpromoted-report.html"));
     Ok(())
 }
 

@@ -122,6 +122,8 @@ The short TwinPaper smoke observed:
   overwrites existing project documents.
 - `forager offdesk closeout` carries focused documentation-governance
   recommendations into the Ondesk return package.
+- `forager ondesk prompt-package` now states the documentation governance source
+  and can run a fresh `project audit-docs` pass with `--include-doc-audit`.
 
 ### Adaptive Wiki Human Projection
 
@@ -143,30 +145,7 @@ The short TwinPaper smoke observed:
 
 ## Remaining Work
 
-### 1. Prompt Package Audit Freshness
-
-Goal: make Ondesk prompt packages explicit about whether their documentation
-governance view comes from the latest closeout package, a fresh audit, or an
-unavailable audit.
-
-Expected slice:
-
-- decide whether `ondesk prompt-package` should optionally run a fresh
-  `project audit-docs` pass when no closeout package exists;
-- decide how stale closeout return packages should be identified;
-- keep prompt-package documentation governance output focused on actions a
-  human can evaluate.
-
-Acceptance checks:
-
-- the prompt package states the documentation governance source;
-- stale or missing closeout packages do not silently suppress audit guidance;
-- documentation-governance recommendations remain visible without dumping the
-  full audit report;
-- prompt-package output does not imply that Offdesk output is trusted without
-  review.
-
-### 2. Longer TwinPaper Run With Council Enabled
+### 1. Longer TwinPaper Run With Council Enabled
 
 Goal: validate quality and direction control, not just launch mechanics.
 
@@ -187,7 +166,7 @@ Acceptance checks:
 - no system-critical mutation occurs;
 - the final report separates pass/fail from operator judgement.
 
-### 3. Offdesk Closeout On A Real Completed Run
+### 2. Offdesk Closeout On A Real Completed Run
 
 Goal: make the "finished process -> reviewable work" transition practical.
 
@@ -212,7 +191,7 @@ Acceptance checks:
 - required first reads for Ondesk return are complete;
 - any proposed cleanup requires separate review and approval.
 
-### 4. Ondesk Return Package Validation
+### 3. Ondesk Return Package Validation
 
 Goal: confirm a fresh live harness can resume from artifacts rather than raw
 chat history.
@@ -220,17 +199,19 @@ chat history.
 Expected slice:
 
 ```bash
-forager ondesk prompt-package --project-key twinpaper
+forager ondesk prompt-package --project-key twinpaper --include-doc-audit
 ```
 
 Acceptance checks:
 
 - the prompt package includes the latest project initialization summary;
 - the package includes the latest closeout return package when present;
+- the package states whether documentation governance came from closeout,
+  a fresh project audit, or an unavailable audit;
 - the package tells the harness what to read first;
 - the package does not imply that Offdesk output is trusted without review.
 
-### 5. Wiki Candidate Review And Promotion Loop
+### 4. Wiki Candidate Review And Promotion Loop
 
 Goal: prevent adaptive wiki from becoming hidden or noisy memory.
 
@@ -249,7 +230,7 @@ Acceptance checks:
 - no entry silently changes runtime approval, provider, command, or workdir
   behavior.
 
-### 6. Generalize Beyond TwinPaper
+### 5. Generalize Beyond TwinPaper
 
 Goal: verify that the pattern is not overfit to one project.
 
@@ -267,7 +248,7 @@ Acceptance checks:
 - prepare-time preflight catches missing evidence before enqueue;
 - Ondesk return remains understandable to a fresh harness.
 
-### 7. Improve Operator Surfaces
+### 6. Improve Operator Surfaces
 
 Goal: make the CLI/TUI reflect the operation cycle without requiring the
 operator to remember the docs.
@@ -299,14 +280,13 @@ rather than inventing separate wording.
 
 The next practical step is:
 
-1. implement or reject prompt-package fresh audit support;
-2. validate the compact return package on a real completed TwinPaper run;
-3. prepare a longer TwinPaper run with Council enabled;
-4. launch it through the existing `dispatch.runtime` approval path;
-5. monitor with `offdesk poll`, tmux, heartbeat, progress, and logs;
-6. run closeout after completion;
-7. validate the Ondesk return prompt package;
-8. review wiki candidates before promotion.
+1. validate the compact return package on a real completed TwinPaper run;
+2. prepare a longer TwinPaper run with Council enabled;
+3. launch it through the existing `dispatch.runtime` approval path;
+4. monitor with `offdesk poll`, tmux, heartbeat, progress, and logs;
+5. run closeout after completion;
+6. validate the Ondesk return prompt package with `--include-doc-audit`;
+7. review wiki candidates before promotion.
 
 Use the generated `LONG_RUN_VALIDATION.md` packet from
 `scripts/prepare_twinpaper_offdesk_task.py` as the checklist for this sequence.
