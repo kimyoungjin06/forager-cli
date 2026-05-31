@@ -141,6 +141,14 @@ from `project audit-docs` when the closeout workdir can be audited. This keeps
 the Ondesk return surface action-oriented while leaving full audit inventories
 in machine JSON.
 
+For a current project-level governance view, add `--include-doc-audit` to
+`forager ondesk prompt-package`. The prompt package will then identify the
+governance source as `fresh_project_audit`, `latest_closeout_return_package`, or
+`fresh_project_audit_unavailable` instead of leaving the next harness to infer
+freshness from artifact paths. When a matching closeout is present, the fresh
+audit uses the closeout workdir recorded in `closeout_plan.json` before falling
+back to the current session or shell directory.
+
 ## Wiki Boundary
 
 Offdesk can create wiki candidates or run-local trial entries, but it should

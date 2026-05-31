@@ -47,6 +47,20 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     fs::write(&result_path, "{\"status\":\"ok\"}")?;
     fs::write(&log_path, "runner log token=sk-secretsecretsecretsecret")?;
     fs::write(&report_path, "# Report\n")?;
+    let mut artifact_refs = vec![json!({
+        "artifact_id": "report",
+        "path": report_path.to_str().expect("utf-8 report path"),
+        "present": true
+    })];
+    for index in 0..8 {
+        let extra_path = artifact_dir.join(format!("extra-report-{index}.md"));
+        fs::write(&extra_path, format!("# Extra Report {index}\n"))?;
+        artifact_refs.push(json!({
+            "artifact_id": format!("extra-report-{index}"),
+            "path": extra_path.to_str().expect("utf-8 extra artifact path"),
+            "present": true
+        }));
+    }
     fs::write(temp.path().join("README.md"), "# Project\n")?;
     fs::write(
         temp.path().join("PROJECT_STATE.md"),
@@ -80,13 +94,7 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
                 "attempt_count": 1,
                 "created_at": now,
                 "updated_at": now,
-                "artifact_refs": [
-                    {
-                        "artifact_id": "report",
-                        "path": report_path.to_str().expect("utf-8 report path"),
-                        "present": true
-                    }
-                ],
+                "artifact_refs": artifact_refs,
                 "preview": "preview token=sk-secretsecretsecretsecret",
                 "reason": "closeout test",
                 "log_artifact_path": log_path.to_str().expect("utf-8 log path"),
@@ -206,11 +214,25 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
 
     let return_package = fs::read_to_string(return_package_path)?;
     assert!(return_package.contains("Ondesk Return Package"));
+    assert!(return_package.contains("## Status"));
+    assert!(return_package.contains("## Decision Needed"));
     assert!(return_package.contains("Required First Reads"));
+    assert!(return_package.contains("Result evidence"));
+    assert!(return_package
+        .contains("... 5 more first-read candidate(s) are listed in `closeout_plan.json`."));
+    assert!(return_package.contains("## What Changed"));
+    assert!(return_package.contains("## Evidence"));
+    assert!(return_package.contains("Kept review evidence"));
+    assert!(
+        return_package.contains("... 5 more `keep` item(s) are listed in `cleanup_manifest.json`.")
+    );
     assert!(return_package.contains("Documentation Governance Recommendations"));
     assert!(return_package.contains("review_human_output_candidates"));
     assert!(return_package.contains("RETENTION_REVIEW.md"));
     assert!(return_package.contains("outputs/doc-report-2.html"));
+    assert!(return_package.contains("## Next Safe Action"));
+    assert!(return_package.contains("documentation_governance_review"));
+    assert!(!return_package.contains("extra-report-7.md"));
     assert!(result_path.exists());
     assert!(log_path.exists());
 

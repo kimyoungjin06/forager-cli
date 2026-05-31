@@ -177,12 +177,185 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     let json: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
     assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
+    assert_eq!(
+        json["documentation_governance"]["source"],
+        "latest_closeout_return_package"
+    );
     let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Documentation Governance Source"));
+    assert!(content.contains("source: `latest_closeout_return_package`"));
     assert!(content.contains("Latest Offdesk Return Package"));
     assert!(content.contains("Night result summary"));
     assert!(content.contains("review_verdict: approved"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_prompt_package_can_include_fresh_documentation_audit_without_closeout() -> Result<()> {
+    let temp = tempdir()?;
+    let project = temp.path().join("project");
+    fs::create_dir_all(project.join("outputs"))?;
+    fs::write(project.join("README.md"), "# Project\n")?;
+    fs::write(
+        project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    fs::write(
+        project.join("outputs").join("unpromoted-report.html"),
+        "<h1>report</h1>",
+    )?;
+
+    let output = forager_command(temp.path())
+        .current_dir(&project)
+        .args([
+            "ondesk",
+            "prompt-package",
+            "--project-key",
+            "project",
+            "--include-doc-audit",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["documentation_governance"]["source"],
+        "fresh_project_audit"
+    );
+    assert_eq!(
+        json["documentation_governance"]["requested_fresh_audit"],
+        true
+    );
+    assert!(
+        json["documentation_governance"]["recommendation_count"]
+            .as_u64()
+            .expect("recommendation count")
+            >= 1
+    );
+    assert_eq!(
+        json["documentation_governance"]["recommendations"][0]["kind"],
+        "review_human_output_candidates"
+    );
+    let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Documentation Governance Source"));
+    assert!(content.contains("source: `fresh_project_audit`"));
+    assert!(content.contains("review_human_output_candidates"));
+    assert!(content.contains("outputs/unpromoted-report.html"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_prompt_package_prefers_closeout_workdir_for_fresh_documentation_audit() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    let closeout_dir = profile_dir
+        .join("offdesk_closeouts")
+        .join("20260522T000000Z_closeout_twinpaper");
+    fs::create_dir_all(&closeout_dir)?;
+
+    let target_project = temp.path().join("twinpaper_project");
+    fs::create_dir_all(target_project.join("outputs"))?;
+    fs::write(target_project.join("README.md"), "# TwinPaper\n")?;
+    fs::write(
+        target_project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(target_project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        target_project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    fs::write(
+        target_project.join("outputs").join("target-report.html"),
+        "<h1>target</h1>",
+    )?;
+
+    let harness_cwd = temp.path().join("harness_cwd");
+    fs::create_dir_all(harness_cwd.join("outputs"))?;
+    fs::write(harness_cwd.join("README.md"), "# Harness\n")?;
+    fs::write(
+        harness_cwd.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(harness_cwd.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        harness_cwd.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    fs::write(
+        harness_cwd.join("outputs").join("harness-report.html"),
+        "<h1>harness</h1>",
+    )?;
+
+    let return_package_path = closeout_dir.join("RETURN_PACKAGE.md");
+    fs::write(&return_package_path, "# Ondesk Return Package\n")?;
+    fs::write(
+        closeout_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_twinpaper",
+            "generated_at": Utc::now(),
+            "filters": {
+                "project_key": "twinpaper"
+            },
+            "documentation_governance": {
+                "workdir": target_project.to_str().expect("utf-8 target path"),
+                "audit_profile": "standard"
+            },
+            "tasks": [
+                {
+                    "project_key": "twinpaper",
+                    "request_id": "request",
+                    "task_id": "task",
+                    "workdir": harness_cwd.to_str().expect("utf-8 harness path")
+                }
+            ],
+            "artifacts": {
+                "return_package_markdown": return_package_path
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .current_dir(&harness_cwd)
+        .args([
+            "ondesk",
+            "prompt-package",
+            "--project-key",
+            "twinpaper",
+            "--include-doc-audit",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["documentation_governance"]["project_path"],
+        target_project.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        json["documentation_governance"]["source"],
+        "fresh_project_audit"
+    );
+    let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("target-report.html"));
+    assert!(!content.contains("harness-report.html"));
     Ok(())
 }
 

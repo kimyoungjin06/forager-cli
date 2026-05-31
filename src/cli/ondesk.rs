@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
+use super::project_audit::{
+    audit_recommendations_for_project, AuditRecommendation, DocumentationAuditProfile,
+};
 use crate::offdesk::operator_safe_text;
 use crate::session::{get_profile_dir, Instance, Storage};
 
@@ -27,6 +30,8 @@ const MAX_MODULE_PREFLIGHT_TARGETS: usize = 6;
 const MAX_MODULE_PREFLIGHT_BLOCKERS: usize = 8;
 const MAX_MODULE_PREFLIGHT_COMMANDS: usize = 8;
 const MAX_RECENT_NOTES: usize = 20;
+const MAX_DOC_AUDIT_RECOMMENDATIONS: usize = 5;
+const MAX_DOC_AUDIT_PATHS: usize = 3;
 
 #[derive(Subcommand)]
 pub enum OndeskCommands {
@@ -105,6 +110,10 @@ pub struct PromptPackageArgs {
     /// Stable project key used to filter notes
     #[arg(long)]
     project_key: Option<String>,
+
+    /// Include a fresh documentation governance audit from the latest closeout workdir or resolved project path
+    #[arg(long)]
+    include_doc_audit: bool,
 
     /// Write markdown package to a file instead of stdout
     #[arg(long)]
@@ -227,6 +236,7 @@ struct PromptPackageOutput {
     latest_closeout: Option<OndeskCloseoutSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     latest_project_initialization: Option<OndeskProjectInitializationSummary>,
+    documentation_governance: OndeskDocumentationGovernanceSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_path: Option<String>,
     content: String,
@@ -249,6 +259,7 @@ struct OndeskCloseoutSummary {
 struct OndeskCloseoutPackage {
     summary: OndeskCloseoutSummary,
     return_package: String,
+    audit_project_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -299,10 +310,36 @@ struct OndeskProjectInitializationPackage {
     start_package: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct OndeskDocumentationGovernanceSummary {
+    source: String,
+    requested_fresh_audit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    recommendation_count: usize,
+    recommendations: Vec<OndeskDocumentationRecommendation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closeout_return_package_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OndeskDocumentationRecommendation {
+    priority: String,
+    kind: String,
+    title: String,
+    suggested_action: String,
+    paths: Vec<String>,
+}
+
 struct ResolvedOndeskContext {
     profile: String,
     profile_dir: PathBuf,
     session: Option<Instance>,
+    project_path: PathBuf,
     project_key: String,
     mode: Option<String>,
 }
@@ -416,10 +453,17 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
 
     let project_initialization =
         latest_project_initialization(&context.profile_dir, &context.project_key)?;
+    let documentation_governance = prompt_documentation_governance(
+        false,
+        Some(context.project_path.as_path()),
+        &context.project_key,
+        None,
+    );
     let package = render_prompt_package(PromptPackageContext::Capture {
         capture: &record,
         closeout: None,
         project_initialization: project_initialization.as_ref(),
+        documentation_governance: &documentation_governance,
     });
     fs::write(&capture_path, serde_json::to_string_pretty(&record)?)?;
     fs::write(&prompt_package_path, package)?;
@@ -459,11 +503,21 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
         capture_id,
         latest_closeout,
         latest_project_initialization,
+        documentation_governance,
     ) = if let Some(capture_id) = args.capture_id {
         let capture = load_capture_by_id(&profile_dir, &capture_id)?;
         let closeout = latest_closeout_package(&profile_dir, &capture.project_key)?;
         let project_initialization =
             latest_project_initialization(&profile_dir, &capture.project_key)?;
+        let capture_audit_path = prompt_audit_path_for_capture(&capture)?;
+        let audit_path =
+            prompt_documentation_governance_project_path(closeout.as_ref(), &capture_audit_path);
+        let documentation_governance = prompt_documentation_governance(
+            args.include_doc_audit,
+            Some(audit_path.as_path()),
+            &capture.project_key,
+            closeout.as_ref(),
+        );
         let note_count = capture.notes.len();
         let project_key = capture.project_key.clone();
         (
@@ -471,12 +525,14 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
                 capture: &capture,
                 closeout: closeout.as_ref(),
                 project_initialization: project_initialization.as_ref(),
+                documentation_governance: &documentation_governance,
             }),
             project_key,
             note_count,
             Some(capture.id),
             closeout.map(|package| package.summary),
             project_initialization.map(|package| package.summary),
+            documentation_governance,
         )
     } else {
         let context = resolve_context(
@@ -490,6 +546,14 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
         let closeout = latest_closeout_package(&context.profile_dir, &context.project_key)?;
         let project_initialization =
             latest_project_initialization(&context.profile_dir, &context.project_key)?;
+        let audit_path =
+            prompt_documentation_governance_project_path(closeout.as_ref(), &context.project_path);
+        let documentation_governance = prompt_documentation_governance(
+            args.include_doc_audit,
+            Some(audit_path.as_path()),
+            &context.project_key,
+            closeout.as_ref(),
+        );
         let content = render_prompt_package(PromptPackageContext::Live {
             profile: &context.profile,
             project_key: &context.project_key,
@@ -498,6 +562,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             notes: &notes,
             closeout: closeout.as_ref(),
             project_initialization: project_initialization.as_ref(),
+            documentation_governance: &documentation_governance,
         });
         (
             content,
@@ -506,6 +571,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             None,
             closeout.map(|package| package.summary),
             project_initialization.map(|package| package.summary),
+            documentation_governance,
         )
     };
 
@@ -531,6 +597,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             note_count,
             latest_closeout,
             latest_project_initialization,
+            documentation_governance,
             output_path,
             content: if truncated {
                 format!("{}\n\n[package truncated for CLI output]", content)
@@ -562,6 +629,10 @@ fn resolve_context(
     let profile_dir = get_profile_dir(&profile_name)?;
     let instances = storage.load()?;
     let session = resolve_optional_session(identifier, &instances)?;
+    let project_path = session
+        .as_ref()
+        .map(|session| PathBuf::from(&session.project_path))
+        .unwrap_or(std::env::current_dir()?);
     let project_key = project_key
         .map(|value| safe(&value))
         .filter(|value| !value.trim().is_empty())
@@ -574,6 +645,7 @@ fn resolve_context(
         profile: profile_name,
         profile_dir,
         session,
+        project_path,
         project_key,
         mode,
     })
@@ -834,6 +906,7 @@ fn latest_closeout_package(
         .and_then(Value::as_str)
         .map(safe)
         .unwrap_or_else(|| "unknown".to_string());
+    let audit_project_path = closeout_plan_audit_project_path(&plan, project_key);
 
     Ok(Some(OndeskCloseoutPackage {
         summary: OndeskCloseoutSummary {
@@ -846,6 +919,7 @@ fn latest_closeout_package(
             review_record_path: review.map(|review| review.record_path),
         },
         return_package,
+        audit_project_path,
     }))
 }
 
@@ -969,6 +1043,140 @@ fn latest_project_initialization(
     }))
 }
 
+fn prompt_audit_path_for_capture(capture: &OndeskCaptureRecord) -> Result<PathBuf> {
+    if let Some(session) = &capture.session {
+        return Ok(PathBuf::from(&session.path));
+    }
+    Ok(std::env::current_dir()?)
+}
+
+fn prompt_documentation_governance_project_path(
+    closeout: Option<&OndeskCloseoutPackage>,
+    fallback: &Path,
+) -> PathBuf {
+    closeout
+        .and_then(|package| package.audit_project_path.clone())
+        .unwrap_or_else(|| fallback.to_path_buf())
+}
+
+fn prompt_documentation_governance(
+    include_doc_audit: bool,
+    project_path: Option<&Path>,
+    project_key: &str,
+    closeout: Option<&OndeskCloseoutPackage>,
+) -> OndeskDocumentationGovernanceSummary {
+    let closeout_return_package_path =
+        closeout.map(|package| package.summary.return_package_path.clone());
+    let project_path_label = project_path.map(|path| safe(path.to_string_lossy().as_ref()));
+
+    if include_doc_audit {
+        let Some(project_path) = project_path else {
+            return OndeskDocumentationGovernanceSummary {
+                source: "fresh_project_audit_unavailable".to_string(),
+                requested_fresh_audit: true,
+                project_path: None,
+                command: None,
+                recommendation_count: 0,
+                recommendations: Vec::new(),
+                closeout_return_package_path,
+                error: Some("no project path was available for documentation audit".to_string()),
+            };
+        };
+        let command = format!(
+            "forager project audit-docs {} --audit-profile standard --json",
+            shell_arg(project_path_label.as_deref().unwrap_or_default())
+        );
+        if !project_path.exists() {
+            return OndeskDocumentationGovernanceSummary {
+                source: "fresh_project_audit_unavailable".to_string(),
+                requested_fresh_audit: true,
+                project_path: project_path_label,
+                command: Some(command),
+                recommendation_count: 0,
+                recommendations: Vec::new(),
+                closeout_return_package_path,
+                error: Some("project path does not exist".to_string()),
+            };
+        }
+        return match audit_recommendations_for_project(
+            project_path,
+            DocumentationAuditProfile::Standard,
+            100_000,
+        ) {
+            Ok(recommendations) => {
+                let recommendation_count = recommendations.len();
+                OndeskDocumentationGovernanceSummary {
+                    source: "fresh_project_audit".to_string(),
+                    requested_fresh_audit: true,
+                    project_path: project_path_label,
+                    command: Some(command),
+                    recommendation_count,
+                    recommendations: recommendations
+                        .into_iter()
+                        .take(MAX_DOC_AUDIT_RECOMMENDATIONS)
+                        .map(ondesk_documentation_recommendation)
+                        .collect(),
+                    closeout_return_package_path,
+                    error: None,
+                }
+            }
+            Err(error) => OndeskDocumentationGovernanceSummary {
+                source: "fresh_project_audit_unavailable".to_string(),
+                requested_fresh_audit: true,
+                project_path: project_path_label,
+                command: Some(command),
+                recommendation_count: 0,
+                recommendations: Vec::new(),
+                closeout_return_package_path,
+                error: Some(safe(&error.to_string())),
+            },
+        };
+    }
+
+    if let Some(closeout) = closeout {
+        return OndeskDocumentationGovernanceSummary {
+            source: "latest_closeout_return_package".to_string(),
+            requested_fresh_audit: false,
+            project_path: project_path_label,
+            command: None,
+            recommendation_count: 0,
+            recommendations: Vec::new(),
+            closeout_return_package_path: Some(closeout.summary.return_package_path.clone()),
+            error: None,
+        };
+    }
+
+    OndeskDocumentationGovernanceSummary {
+        source: "not_requested".to_string(),
+        requested_fresh_audit: false,
+        project_path: project_path_label,
+        command: Some(format!(
+            "forager ondesk prompt-package --project-key {} --include-doc-audit",
+            shell_arg(&safe(project_key))
+        )),
+        recommendation_count: 0,
+        recommendations: Vec::new(),
+        closeout_return_package_path: None,
+        error: None,
+    }
+}
+
+fn ondesk_documentation_recommendation(
+    recommendation: AuditRecommendation,
+) -> OndeskDocumentationRecommendation {
+    OndeskDocumentationRecommendation {
+        priority: recommendation.priority,
+        kind: recommendation.kind,
+        title: recommendation.title,
+        suggested_action: recommendation.suggested_action,
+        paths: recommendation
+            .paths
+            .into_iter()
+            .take(MAX_DOC_AUDIT_PATHS)
+            .collect(),
+    }
+}
+
 fn summarize_module_operation_preflight(
     path: &Path,
 ) -> Option<OndeskModuleOperationPreflightSummary> {
@@ -1061,6 +1269,35 @@ fn closeout_plan_matches_project(plan: &Value, project_key: &str) -> bool {
         })
 }
 
+fn closeout_plan_audit_project_path(plan: &Value, project_key: &str) -> Option<PathBuf> {
+    plan.pointer("/documentation_governance/workdir")
+        .and_then(Value::as_str)
+        .and_then(non_empty_path)
+        .or_else(|| {
+            plan.get("tasks")
+                .and_then(Value::as_array)
+                .and_then(|tasks| {
+                    tasks.iter().find_map(|task| {
+                        if task.get("project_key").and_then(Value::as_str) != Some(project_key) {
+                            return None;
+                        }
+                        task.get("workdir")
+                            .and_then(Value::as_str)
+                            .and_then(non_empty_path)
+                    })
+                })
+        })
+}
+
+fn non_empty_path(value: &str) -> Option<PathBuf> {
+    let value = value.trim();
+    if value.is_empty() || value == "-" {
+        None
+    } else {
+        Some(PathBuf::from(value))
+    }
+}
+
 fn closeout_plan_generated_at(plan: &Value) -> DateTime<Utc> {
     plan.get("generated_at")
         .and_then(Value::as_str)
@@ -1121,6 +1358,7 @@ enum PromptPackageContext<'a> {
         capture: &'a OndeskCaptureRecord,
         closeout: Option<&'a OndeskCloseoutPackage>,
         project_initialization: Option<&'a OndeskProjectInitializationPackage>,
+        documentation_governance: &'a OndeskDocumentationGovernanceSummary,
     },
     Live {
         profile: &'a str,
@@ -1130,6 +1368,7 @@ enum PromptPackageContext<'a> {
         notes: &'a [OndeskNoteRecord],
         closeout: Option<&'a OndeskCloseoutPackage>,
         project_initialization: Option<&'a OndeskProjectInitializationPackage>,
+        documentation_governance: &'a OndeskDocumentationGovernanceSummary,
     },
 }
 
@@ -1139,6 +1378,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             capture,
             closeout,
             project_initialization,
+            documentation_governance,
         } => render_prompt_package_parts(PromptPackageParts {
             profile: &capture.profile,
             project_key: &capture.project_key,
@@ -1150,6 +1390,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             capture_id: Some(&capture.id),
             closeout,
             project_initialization,
+            documentation_governance,
         }),
         PromptPackageContext::Live {
             profile,
@@ -1159,6 +1400,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             notes,
             closeout,
             project_initialization,
+            documentation_governance,
         } => render_prompt_package_parts(PromptPackageParts {
             profile,
             project_key,
@@ -1170,6 +1412,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             capture_id: None,
             closeout,
             project_initialization,
+            documentation_governance,
         }),
     }
 }
@@ -1185,6 +1428,7 @@ struct PromptPackageParts<'a> {
     capture_id: Option<&'a str>,
     closeout: Option<&'a OndeskCloseoutPackage>,
     project_initialization: Option<&'a OndeskProjectInitializationPackage>,
+    documentation_governance: &'a OndeskDocumentationGovernanceSummary,
 }
 
 fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
@@ -1341,6 +1585,8 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
         }
     }
 
+    render_documentation_governance_prompt_section(&mut output, parts.documentation_governance);
+
     if let Some(closeout) = parts.closeout {
         output.push_str("\n## Latest Offdesk Return Package\n");
         output.push_str(&format!(
@@ -1373,6 +1619,67 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
     output
 }
 
+fn render_documentation_governance_prompt_section(
+    output: &mut String,
+    governance: &OndeskDocumentationGovernanceSummary,
+) {
+    output.push_str("\n## Documentation Governance Source\n");
+    output.push_str(&format!("- source: `{}`\n", governance.source));
+    output.push_str(&format!(
+        "- requested_fresh_audit: {}\n",
+        governance.requested_fresh_audit
+    ));
+    if let Some(path) = &governance.project_path {
+        output.push_str(&format!("- project_path: `{path}`\n"));
+    }
+    if let Some(path) = &governance.closeout_return_package_path {
+        output.push_str(&format!("- closeout_return_package: `{path}`\n"));
+    }
+    if let Some(command) = &governance.command {
+        output.push_str(&format!("- command: `{command}`\n"));
+    }
+    if let Some(error) = &governance.error {
+        output.push_str(&format!("- audit_unavailable: {error}\n"));
+        return;
+    }
+
+    if governance.recommendations.is_empty() {
+        match governance.source.as_str() {
+            "fresh_project_audit" => {
+                output.push_str("- recommendations: none from the fresh project audit.\n");
+            }
+            "latest_closeout_return_package" => {
+                output.push_str("- recommendations: use the focused list embedded in the return package below.\n");
+            }
+            _ => {
+                output.push_str("- recommendations: not included. Re-run with `--include-doc-audit` when a fresh audit is needed.\n");
+            }
+        }
+        return;
+    }
+
+    output.push_str(&format!(
+        "- recommendation_count: {}\n",
+        governance.recommendation_count
+    ));
+    for recommendation in &governance.recommendations {
+        output.push_str(&format!(
+            "- {}: {} (`{}`)\n  - action: {}\n",
+            recommendation.priority,
+            recommendation.title,
+            recommendation.kind,
+            recommendation.suggested_action
+        ));
+        if !recommendation.paths.is_empty() {
+            output.push_str("  - focus:");
+            for path in &recommendation.paths {
+                output.push_str(&format!(" `{path}`"));
+            }
+            output.push('\n');
+        }
+    }
+}
+
 fn fenced(language: &str, body: &str) -> String {
     format!("```{}\n{}\n```\n", language, body.trim_end())
 }
@@ -1384,6 +1691,17 @@ fn short_id(prefix: &str) -> String {
 
 fn safe(value: &str) -> String {
     operator_safe_text(value).trim().to_string()
+}
+
+fn shell_arg(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
 }
 
 fn safe_json_string_list(value: Option<&Value>, max_items: usize) -> Vec<String> {
