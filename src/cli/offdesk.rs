@@ -51,6 +51,12 @@ use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
 #[derive(Subcommand)]
 pub enum OffdeskCommands {
+    /// List hosted harness agent profile contracts
+    Harnesses(JsonArgs),
+
+    /// Build a compact hosted harness start prompt from first-read artifacts
+    HarnessPrompt(HarnessPromptArgs),
+
     /// List pending action approvals
     Pending(PendingArgs),
 
@@ -452,6 +458,206 @@ pub struct JsonArgs {
     /// Output as JSON
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Serialize)]
+struct HostedHarnessProfileView {
+    id: &'static str,
+    display_name: &'static str,
+    support_status: &'static str,
+    launch_command: Option<&'static str>,
+    runner: &'static str,
+    mutation_scope: &'static str,
+    prompt_contract: HostedHarnessPromptContract,
+    evidence_sources: &'static [&'static str],
+    result_artifact: &'static str,
+    failure_signal: &'static str,
+    closeout_package: &'static str,
+    retention_policy: &'static str,
+    notes: &'static str,
+}
+
+#[derive(Serialize)]
+struct HostedHarnessPromptContract {
+    strategy: &'static str,
+    inline_context_budget_bytes: usize,
+    first_read_required: bool,
+    preferred_first_reads: &'static [&'static str],
+    discouraged_inline_context: &'static [&'static str],
+    invocation_hint: &'static str,
+}
+
+const COMPACT_FIRST_READ_PROMPT_CONTRACT: HostedHarnessPromptContract = HostedHarnessPromptContract {
+    strategy: "compact_prompt_with_first_read_artifacts",
+    inline_context_budget_bytes: 4096,
+    first_read_required: true,
+    preferred_first_reads: &[
+        "RETURN_PACKAGE.md",
+        "closeout_plan.json",
+        "result.json",
+        "focused task brief",
+        "operator-selected source files",
+    ],
+    discouraged_inline_context: &[
+        "full git diff",
+        "large logs",
+        "raw scrollback",
+        "entire repository inventory",
+    ],
+    invocation_hint: "Pass a short task prompt, keep large context in artifacts, and make the harness read only the listed first-read paths.",
+};
+
+const PLANNED_PROMPT_CONTRACT: HostedHarnessPromptContract = HostedHarnessPromptContract {
+    strategy: "unvalidated",
+    inline_context_budget_bytes: 0,
+    first_read_required: true,
+    preferred_first_reads: &["to be defined by integration smoke"],
+    discouraged_inline_context: &["full git diff", "large logs", "raw scrollback"],
+    invocation_hint:
+        "Do not promote this harness until a compact prompt and first-read artifact smoke passes.",
+};
+
+const HOSTED_HARNESS_PROFILES: &[HostedHarnessProfileView] = &[
+    HostedHarnessProfileView {
+        id: "codex",
+        display_name: "Codex CLI",
+        support_status: "supported",
+        launch_command: Some("codex"),
+        runner: "local-tmux",
+        mutation_scope: "operator-selected repository or disposable worktree",
+        prompt_contract: COMPACT_FIRST_READ_PROMPT_CONTRACT,
+        evidence_sources: &[
+            "tmux pane capture",
+            "Forager background run record",
+            "runner log artifact when launched through offdesk",
+            "result artifact declared on the task",
+            "offdesk closeout package",
+        ],
+        result_artifact: "task-declared result sidecar or closeout RETURN_PACKAGE.md",
+        failure_signal: "missing tmux runtime, nonzero runner exit, stale heartbeat/progress, or missing result artifact",
+        closeout_package: "offdesk closeout plan plus Ondesk return package",
+        retention_policy: "preserve command summary, logs, result sidecar, closeout package, and review verdict",
+        notes: "Primary supported harness for current Forager golden-loop work.",
+    },
+    HostedHarnessProfileView {
+        id: "claude",
+        display_name: "Claude Code",
+        support_status: "supported",
+        launch_command: Some("claude"),
+        runner: "local-tmux",
+        mutation_scope: "operator-selected repository or disposable worktree",
+        prompt_contract: COMPACT_FIRST_READ_PROMPT_CONTRACT,
+        evidence_sources: &[
+            "tmux pane capture",
+            "Forager background run record",
+            "runner log artifact when launched through offdesk",
+            "result artifact declared on the task",
+            "offdesk closeout package",
+        ],
+        result_artifact: "task-declared result sidecar or closeout RETURN_PACKAGE.md",
+        failure_signal: "missing tmux runtime, nonzero runner exit, stale heartbeat/progress, or missing result artifact",
+        closeout_package: "offdesk closeout plan plus Ondesk return package",
+        retention_policy: "preserve command summary, logs, result sidecar, closeout package, and review verdict",
+        notes: "Primary supported harness alongside Codex for current Forager golden-loop work.",
+    },
+    HostedHarnessProfileView {
+        id: "gemini",
+        display_name: "Gemini CLI",
+        support_status: "planned",
+        launch_command: Some("gemini"),
+        runner: "local-tmux",
+        mutation_scope: "not yet part of the supported golden loop",
+        prompt_contract: PLANNED_PROMPT_CONTRACT,
+        evidence_sources: &["to be validated with a disposable smoke task"],
+        result_artifact: "planned",
+        failure_signal: "planned",
+        closeout_package: "planned",
+        retention_policy: "planned",
+        notes: "Registry entry exists, but the hosted harness evidence contract is not yet validated.",
+    },
+    HostedHarnessProfileView {
+        id: "openhands",
+        display_name: "OpenHands",
+        support_status: "planned",
+        launch_command: None,
+        runner: "external-or-local",
+        mutation_scope: "not yet part of the supported golden loop",
+        prompt_contract: PLANNED_PROMPT_CONTRACT,
+        evidence_sources: &["to be defined after integration smoke"],
+        result_artifact: "planned",
+        failure_signal: "planned",
+        closeout_package: "planned",
+        retention_policy: "planned",
+        notes: "Future integration candidate; not a current support target.",
+    },
+    HostedHarnessProfileView {
+        id: "aider",
+        display_name: "Aider",
+        support_status: "planned",
+        launch_command: None,
+        runner: "local-tmux",
+        mutation_scope: "not yet part of the supported golden loop",
+        prompt_contract: PLANNED_PROMPT_CONTRACT,
+        evidence_sources: &["to be defined after integration smoke"],
+        result_artifact: "planned",
+        failure_signal: "planned",
+        closeout_package: "planned",
+        retention_policy: "planned",
+        notes: "Future integration candidate; not a current support target.",
+    },
+];
+
+#[derive(Args)]
+pub struct HarnessPromptArgs {
+    /// Hosted harness ID from `forager offdesk harnesses`
+    harness_id: String,
+
+    /// Short task instruction for the hosted harness
+    #[arg(long)]
+    task: String,
+
+    /// Artifact or source file the hosted harness must read first
+    #[arg(long = "first-read")]
+    first_reads: Vec<PathBuf>,
+
+    /// Result sidecar path the hosted harness should write or inspect
+    #[arg(long)]
+    result_artifact: Option<PathBuf>,
+
+    /// Working directory the hosted harness should treat as the task root
+    #[arg(long)]
+    workdir: Option<PathBuf>,
+
+    /// Write the generated prompt markdown to this path
+    #[arg(long)]
+    output: Option<PathBuf>,
+
+    /// Output packet metadata as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Serialize)]
+struct HostedHarnessPromptPacket {
+    harness_id: String,
+    display_name: String,
+    support_status: String,
+    prompt_strategy: String,
+    inline_context_budget_bytes: usize,
+    first_read_required: bool,
+    task: String,
+    workdir: Option<String>,
+    first_reads: Vec<HostedHarnessFirstRead>,
+    result_artifact: Option<String>,
+    output_path: Option<String>,
+    warnings: Vec<String>,
+    prompt_markdown: String,
+}
+
+#[derive(Serialize)]
+struct HostedHarnessFirstRead {
+    path: String,
+    present: bool,
 }
 
 #[derive(Args)]
@@ -2147,6 +2353,8 @@ struct CloseoutReviewArtifactPaths {
 
 pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
     match command {
+        OffdeskCommands::Harnesses(args) => harnesses(args).await,
+        OffdeskCommands::HarnessPrompt(args) => harness_prompt(args).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -5550,6 +5758,188 @@ async fn capabilities(args: JsonArgs) -> Result<()> {
 
     print_capabilities(capabilities);
     Ok(())
+}
+
+async fn harnesses(args: JsonArgs) -> Result<()> {
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(HOSTED_HARNESS_PROFILES)?);
+        return Ok(());
+    }
+
+    println!("Hosted harness agent profiles");
+    println!("Current support target: Codex CLI and Claude Code");
+    println!();
+    for profile in HOSTED_HARNESS_PROFILES {
+        let command = profile.launch_command.unwrap_or("manual integration");
+        println!(
+            "- {} ({}) [{}]",
+            profile.display_name, profile.id, profile.support_status
+        );
+        println!("  launch:  {}", command);
+        println!("  runner:  {}", profile.runner);
+        println!("  scope:   {}", profile.mutation_scope);
+        println!(
+            "  prompt:  {} (inline <= {} bytes)",
+            profile.prompt_contract.strategy, profile.prompt_contract.inline_context_budget_bytes
+        );
+        println!(
+            "  reads:   {}",
+            profile.prompt_contract.preferred_first_reads.join(", ")
+        );
+        println!("  result:  {}", profile.result_artifact);
+        println!("  failure: {}", profile.failure_signal);
+        println!("  note:    {}", profile.notes);
+    }
+    Ok(())
+}
+
+async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
+    let profile = hosted_harness_profile(&args.harness_id)
+        .with_context(|| format!("unknown hosted harness id `{}`", args.harness_id))?;
+    let json = args.json;
+    let packet = build_harness_prompt_packet(profile, args)?;
+
+    if let Some(output_path) = packet.output_path.as_deref() {
+        let path = Path::new(output_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create prompt output dir {}", parent.display()))?;
+        }
+        write_new_file(path, packet.prompt_markdown.as_bytes())
+            .with_context(|| format!("write harness prompt {}", path.display()))?;
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&packet)?);
+        return Ok(());
+    }
+
+    if let Some(output_path) = packet.output_path.as_deref() {
+        println!("Wrote hosted harness prompt: {output_path}");
+    } else {
+        println!("{}", packet.prompt_markdown);
+    }
+    for warning in &packet.warnings {
+        println!("warning: {warning}");
+    }
+    Ok(())
+}
+
+fn hosted_harness_profile(id: &str) -> Option<&'static HostedHarnessProfileView> {
+    HOSTED_HARNESS_PROFILES
+        .iter()
+        .find(|profile| profile.id.eq_ignore_ascii_case(id))
+}
+
+fn build_harness_prompt_packet(
+    profile: &HostedHarnessProfileView,
+    args: HarnessPromptArgs,
+) -> Result<HostedHarnessPromptPacket> {
+    let first_reads = args
+        .first_reads
+        .iter()
+        .map(|path| HostedHarnessFirstRead {
+            path: path.display().to_string(),
+            present: path.exists(),
+        })
+        .collect::<Vec<_>>();
+    let workdir = args.workdir.map(|path| path.display().to_string());
+    let result_artifact = args.result_artifact.map(|path| path.display().to_string());
+    let output_path = args.output.map(|path| path.display().to_string());
+    let mut warnings = Vec::new();
+    if profile.prompt_contract.first_read_required && first_reads.is_empty() {
+        warnings.push("no first-read artifacts were provided".to_string());
+    }
+    if args.task.len() > profile.prompt_contract.inline_context_budget_bytes {
+        warnings.push(format!(
+            "task text is {} bytes; profile inline budget is {} bytes",
+            args.task.len(),
+            profile.prompt_contract.inline_context_budget_bytes
+        ));
+    }
+    let prompt_markdown = render_harness_prompt_markdown(
+        profile,
+        &args.task,
+        workdir.as_deref(),
+        &first_reads,
+        result_artifact.as_deref(),
+    );
+
+    Ok(HostedHarnessPromptPacket {
+        harness_id: profile.id.to_string(),
+        display_name: profile.display_name.to_string(),
+        support_status: profile.support_status.to_string(),
+        prompt_strategy: profile.prompt_contract.strategy.to_string(),
+        inline_context_budget_bytes: profile.prompt_contract.inline_context_budget_bytes,
+        first_read_required: profile.prompt_contract.first_read_required,
+        task: args.task,
+        workdir,
+        first_reads,
+        result_artifact,
+        output_path,
+        warnings,
+        prompt_markdown,
+    })
+}
+
+fn render_harness_prompt_markdown(
+    profile: &HostedHarnessProfileView,
+    task: &str,
+    workdir: Option<&str>,
+    first_reads: &[HostedHarnessFirstRead],
+    result_artifact: Option<&str>,
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Hosted Harness Start Packet\n\n");
+    output.push_str(&format!(
+        "- harness: {} (`{}`)\n",
+        profile.display_name, profile.id
+    ));
+    output.push_str(&format!(
+        "- strategy: `{}`\n",
+        profile.prompt_contract.strategy
+    ));
+    output.push_str(&format!(
+        "- inline_context_budget_bytes: `{}`\n",
+        profile.prompt_contract.inline_context_budget_bytes
+    ));
+    if let Some(workdir) = workdir {
+        output.push_str(&format!("- workdir: `{workdir}`\n"));
+    }
+    if let Some(result_artifact) = result_artifact {
+        output.push_str(&format!("- result_artifact: `{result_artifact}`\n"));
+    }
+    output.push_str("\n## Task\n\n");
+    output.push_str(task.trim());
+    output.push_str("\n\n## Operating Contract\n\n");
+    output.push_str("- Use this compact prompt as the instruction surface.\n");
+    output.push_str("- Read the first-read artifacts before making a decision.\n");
+    output.push_str(
+        "- Do not ask the operator to paste full git diffs, raw logs, or scrollback inline.\n",
+    );
+    output.push_str(
+        "- Summarize missing context as explicit missing evidence instead of guessing.\n",
+    );
+    output
+        .push_str("- Write or inspect the declared result artifact before reporting completion.\n");
+    output.push_str("\n## First-Read Artifacts\n\n");
+    if first_reads.is_empty() {
+        output.push_str(
+            "- None provided. Ask for a first-read artifact before using large inline context.\n",
+        );
+    } else {
+        for read in first_reads {
+            let present = if read.present { "present" } else { "missing" };
+            output.push_str(&format!("- `{}` ({present})\n", read.path));
+        }
+    }
+    output.push_str("\n## Response Contract\n\n");
+    output.push_str("- verdict: pass, caution, or fail\n");
+    output.push_str("- evidence_read: paths actually read\n");
+    output.push_str("- strongest_positive_signal\n");
+    output.push_str("- strongest_risk\n");
+    output.push_str("- one_next_action\n");
+    output
 }
 
 async fn snapshots(profile: &str, args: JsonArgs) -> Result<()> {
