@@ -1578,11 +1578,11 @@ Lint adaptive wiki state
 
 Export adaptive wiki state as a one-way markdown vault
 
-**Usage:** `forager offdesk wiki export-markdown [OPTIONS] --output <OUTPUT>`
+**Usage:** `forager offdesk wiki export-markdown [OPTIONS]`
 
 ###### **Options:**
 
-* `--output <OUTPUT>` — Directory to write the markdown vault into
+* `--output <OUTPUT>` — Directory to write the markdown vault into; defaults to the active profile's wiki-vault
 * `--dry-run` — Preview export files without writing them
 * `--json` — Output as JSON
 

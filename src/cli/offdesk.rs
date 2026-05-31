@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
+use super::project_audit::{
+    audit_recommendations_for_project, AuditRecommendation, DocumentationAuditProfile,
+};
 use crate::offdesk::{
     assess_offdesk_mode, build_graph_export_files, build_usage_records_with_policy,
     default_capability_registry, launch_background_command, launch_background_run,
@@ -1231,9 +1234,9 @@ pub struct WikiShowArgs {
 
 #[derive(Args)]
 pub struct WikiExportMarkdownArgs {
-    /// Directory to write the markdown vault into
+    /// Directory to write the markdown vault into; defaults to the active profile's wiki-vault
     #[arg(long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
 
     /// Preview export files without writing them
     #[arg(long)]
@@ -1939,6 +1942,8 @@ struct OffdeskCloseoutReport {
     required_first_reads: Vec<CloseoutReadRef>,
     open_decisions: Vec<CloseoutDecision>,
     verification_commands: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    documentation_governance: Option<CloseoutDocumentationGovernance>,
     review_contract: CloseoutReviewContract,
     #[serde(skip_serializing_if = "Option::is_none")]
     git_snapshot: Option<CloseoutGitSnapshot>,
@@ -2042,6 +2047,26 @@ struct CloseoutDecision {
     kind: &'static str,
     detail: String,
     suggested_command: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutDocumentationGovernance {
+    workdir: String,
+    audit_profile: String,
+    command: String,
+    recommendation_count: usize,
+    recommendations: Vec<CloseoutDocumentationRecommendation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CloseoutDocumentationRecommendation {
+    priority: String,
+    kind: String,
+    title: String,
+    suggested_action: String,
+    paths: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -4576,8 +4601,11 @@ async fn wiki_lint(profile: &str, args: JsonArgs) -> Result<()> {
 }
 
 async fn wiki_export_markdown(profile: &str, args: WikiExportMarkdownArgs) -> Result<()> {
-    let output = args.output;
-    let report = wiki_store(profile)?.export_markdown(&output, args.dry_run, Utc::now())?;
+    let store = wiki_store(profile)?;
+    let output = args
+        .output
+        .unwrap_or_else(|| store.default_markdown_vault_dir());
+    let report = store.export_markdown(&output, args.dry_run, Utc::now())?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -5839,9 +5867,16 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
     } else {
         None
     };
-    let open_decisions =
-        closeout_open_decisions(&tasks, &file_operations, git_snapshot.as_ref(), args);
-    let verification_commands = closeout_verification_commands(args);
+    let documentation_governance = closeout_documentation_governance(args, &tasks);
+    let open_decisions = closeout_open_decisions(
+        &tasks,
+        &file_operations,
+        git_snapshot.as_ref(),
+        args,
+        documentation_governance.as_ref(),
+    );
+    let verification_commands =
+        closeout_verification_commands(args, documentation_governance.as_ref());
 
     let artifacts = CloseoutArtifactPaths {
         closeout_plan_json: artifact_dir
@@ -5900,6 +5935,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         required_first_reads,
         open_decisions,
         verification_commands,
+        documentation_governance,
         review_contract,
         git_snapshot,
         artifacts,
@@ -6437,6 +6473,7 @@ fn closeout_open_decisions(
     operations: &[CloseoutFileOperation],
     git_snapshot: Option<&CloseoutGitSnapshot>,
     args: &CloseoutArgs,
+    documentation_governance: Option<&CloseoutDocumentationGovernance>,
 ) -> Vec<CloseoutDecision> {
     let mut decisions = Vec::new();
     let active_or_blocked = tasks
@@ -6498,16 +6535,40 @@ fn closeout_open_decisions(
             });
         }
     }
+    if let Some(governance) = documentation_governance {
+        if governance.error.is_some() {
+            decisions.push(CloseoutDecision {
+                kind: "documentation_governance_audit",
+                detail: "Documentation governance audit could not be completed for the closeout workdir.".to_string(),
+                suggested_command: governance.command.clone(),
+            });
+        } else if governance.recommendation_count > 0 {
+            decisions.push(CloseoutDecision {
+                kind: "documentation_governance_review",
+                detail: format!(
+                    "{} documentation governance recommendation(s) should be reviewed before Ondesk return.",
+                    governance.recommendation_count
+                ),
+                suggested_command: governance.command.clone(),
+            });
+        }
+    }
     decisions
 }
 
-fn closeout_verification_commands(args: &CloseoutArgs) -> Vec<String> {
+fn closeout_verification_commands(
+    args: &CloseoutArgs,
+    documentation_governance: Option<&CloseoutDocumentationGovernance>,
+) -> Vec<String> {
     let mut commands = vec![
         "forager offdesk poll --json".to_string(),
         "forager offdesk tasks --json".to_string(),
         "forager offdesk maintenance-report --json".to_string(),
         "forager offdesk wiki review --json".to_string(),
     ];
+    if let Some(governance) = documentation_governance {
+        commands.push(governance.command.clone());
+    }
     if let Some(project_key) = args.project_key.as_deref() {
         commands.push(format!(
             "forager ondesk prompt-package --project-key {}",
@@ -6515,6 +6576,73 @@ fn closeout_verification_commands(args: &CloseoutArgs) -> Vec<String> {
         ));
     }
     commands
+}
+
+fn closeout_documentation_governance(
+    args: &CloseoutArgs,
+    tasks: &[OffdeskTask],
+) -> Option<CloseoutDocumentationGovernance> {
+    let workdir = closeout_project_workdir(args, tasks)?;
+    let workdir_label = crate::offdesk::operator_safe_text(workdir.to_string_lossy().as_ref());
+    let command = format!(
+        "forager project audit-docs {} --audit-profile standard --json",
+        shell_arg(&workdir_label)
+    );
+    if !workdir.exists() {
+        return Some(CloseoutDocumentationGovernance {
+            workdir: workdir_label,
+            audit_profile: "standard".to_string(),
+            command,
+            recommendation_count: 0,
+            recommendations: Vec::new(),
+            error: Some("workdir does not exist".to_string()),
+        });
+    }
+
+    match audit_recommendations_for_project(&workdir, DocumentationAuditProfile::Standard, 100_000)
+    {
+        Ok(recommendations) => {
+            let recommendation_count = recommendations.len();
+            Some(CloseoutDocumentationGovernance {
+                workdir: workdir_label,
+                audit_profile: "standard".to_string(),
+                command,
+                recommendation_count,
+                recommendations: recommendations
+                    .into_iter()
+                    .take(5)
+                    .map(closeout_documentation_recommendation)
+                    .collect(),
+                error: None,
+            })
+        }
+        Err(error) => Some(CloseoutDocumentationGovernance {
+            workdir: workdir_label,
+            audit_profile: "standard".to_string(),
+            command,
+            recommendation_count: 0,
+            recommendations: Vec::new(),
+            error: Some(crate::offdesk::operator_safe_text(&error.to_string())),
+        }),
+    }
+}
+
+fn closeout_project_workdir(args: &CloseoutArgs, tasks: &[OffdeskTask]) -> Option<PathBuf> {
+    args.workdir
+        .clone()
+        .or_else(|| tasks.first().map(|task| PathBuf::from(&task.workdir)))
+}
+
+fn closeout_documentation_recommendation(
+    recommendation: AuditRecommendation,
+) -> CloseoutDocumentationRecommendation {
+    CloseoutDocumentationRecommendation {
+        priority: recommendation.priority,
+        kind: recommendation.kind,
+        title: recommendation.title,
+        suggested_action: recommendation.suggested_action,
+        paths: recommendation.paths.into_iter().take(5).collect(),
+    }
 }
 
 fn summarize_closeout(
@@ -6647,6 +6775,8 @@ fn render_closeout_plan_markdown(report: &OffdeskCloseoutReport) -> String {
             ));
         }
     }
+    output.push_str("\n## Documentation Governance\n");
+    render_documentation_governance_markdown(&mut output, report.documentation_governance.as_ref());
     output
 }
 
@@ -6672,6 +6802,8 @@ fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
             output.push_str(&format!("- {}: {}\n", decision.kind, decision.detail));
         }
     }
+    output.push_str("\n## Documentation Governance Recommendations\n");
+    render_documentation_governance_markdown(&mut output, report.documentation_governance.as_ref());
     output.push_str("\n## Verification Commands\n");
     for command in &report.verification_commands {
         output.push_str(&format!("- `{command}`\n"));
@@ -6681,6 +6813,42 @@ fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
     output.push_str("- Re-read listed artifacts before continuing work.\n");
     output.push_str("- Do not delete or move files until commercial review and human approval are both recorded.\n");
     output
+}
+
+fn render_documentation_governance_markdown(
+    output: &mut String,
+    governance: Option<&CloseoutDocumentationGovernance>,
+) {
+    let Some(governance) = governance else {
+        output.push_str("- No project workdir was available for documentation governance audit.\n");
+        return;
+    };
+    output.push_str(&format!("- workdir: `{}`\n", governance.workdir));
+    output.push_str(&format!("- audit: `{}`\n", governance.command));
+    if let Some(error) = &governance.error {
+        output.push_str(&format!("- audit_error: {}\n", error));
+        return;
+    }
+    if governance.recommendations.is_empty() {
+        output.push_str("- No documentation governance recommendations.\n");
+        return;
+    }
+    for recommendation in &governance.recommendations {
+        output.push_str(&format!(
+            "- {} `{}`: {}\n",
+            recommendation.priority, recommendation.kind, recommendation.title
+        ));
+        output.push_str(&format!(
+            "  - action: {}\n",
+            recommendation.suggested_action
+        ));
+        if !recommendation.paths.is_empty() {
+            output.push_str("  - focus paths:\n");
+            for path in &recommendation.paths {
+                output.push_str(&format!("    - `{path}`\n"));
+            }
+        }
+    }
 }
 
 fn render_commercial_review_packet(report: &OffdeskCloseoutReport) -> String {
@@ -6803,6 +6971,17 @@ fn truncate_closeout_text(value: &str, max_chars: usize) -> String {
             "{}...[truncated]",
             value.chars().take(max_chars).collect::<String>()
         )
+    }
+}
+
+fn shell_arg(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 
@@ -8544,6 +8723,10 @@ fn print_wiki_markdown_export(report: &AdaptiveWikiMarkdownExportReport) {
     println!(
         "Adaptive wiki markdown export {} {} files to {}",
         action, report.summary.files_planned, report.output_dir
+    );
+    println!(
+        "  status: {:?}  reexport_recommended={}",
+        report.projection_status.state, report.projection_status.reexport_recommended
     );
     println!(
         "  entries: {}  candidates: {}",

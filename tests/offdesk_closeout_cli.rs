@@ -47,6 +47,21 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     fs::write(&result_path, "{\"status\":\"ok\"}")?;
     fs::write(&log_path, "runner log token=sk-secretsecretsecretsecret")?;
     fs::write(&report_path, "# Report\n")?;
+    fs::write(temp.path().join("README.md"), "# Project\n")?;
+    fs::write(
+        temp.path().join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(temp.path().join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        temp.path().join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    for index in 0..3 {
+        let path = temp.path().join(format!("outputs/doc-report-{index}.html"));
+        fs::create_dir_all(path.parent().expect("output parent"))?;
+        fs::write(path, "x".repeat((index + 1) * 10))?;
+    }
 
     let now = Utc::now();
     fs::write(
@@ -120,6 +135,30 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     assert_eq!(report["review_contract"]["required"], true);
     assert_eq!(report["summary"]["delete_candidates"], 0);
     assert!(report["summary"]["archive_candidates"].as_u64().unwrap() >= 1);
+    assert!(
+        report["documentation_governance"]["recommendation_count"]
+            .as_u64()
+            .expect("documentation governance recommendation count")
+            >= 1
+    );
+    assert!(report["documentation_governance"]["recommendations"]
+        .as_array()
+        .expect("documentation governance recommendations")
+        .iter()
+        .any(|recommendation| recommendation["kind"] == "review_human_output_candidates"));
+    assert!(report["verification_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|command| command
+            .as_str()
+            .unwrap()
+            .contains("forager project audit-docs")));
+    assert!(report["open_decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|decision| decision["kind"] == "documentation_governance_review"));
 
     let plan_path = PathBuf::from(
         report["artifacts"]["closeout_plan_json"]
@@ -168,6 +207,10 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     let return_package = fs::read_to_string(return_package_path)?;
     assert!(return_package.contains("Ondesk Return Package"));
     assert!(return_package.contains("Required First Reads"));
+    assert!(return_package.contains("Documentation Governance Recommendations"));
+    assert!(return_package.contains("review_human_output_candidates"));
+    assert!(return_package.contains("RETENTION_REVIEW.md"));
+    assert!(return_package.contains("outputs/doc-report-2.html"));
     assert!(result_path.exists());
     assert!(log_path.exists());
 

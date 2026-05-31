@@ -120,6 +120,12 @@ verdict, when those artifacts exist. This makes the normal morning return path
 start from a fresh package instead of requiring the operator to manually paste
 the closeout artifact path.
 
+Closeout also runs the documentation governance audit against the closeout
+workdir when one is available. `RETURN_PACKAGE.md` includes only the focused
+recommendations, such as deliverables to promote or outputs to record in
+`RETENTION_REVIEW.md`; the full machine summary stays in
+`forager project audit-docs --json`.
+
 ## Runtime Smoke Interpretation
 
 A clean runtime smoke does not skip closeout. For example, the TwinPaper

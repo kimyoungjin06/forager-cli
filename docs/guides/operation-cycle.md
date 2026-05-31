@@ -136,6 +136,11 @@ is:
 5. Start the next harness from `RETURN_PACKAGE.md` or
    `forager ondesk prompt-package --project-key <project>`.
 
+`RETURN_PACKAGE.md` includes focused documentation governance recommendations
+from `project audit-docs` when the closeout workdir can be audited. This keeps
+the Ondesk return surface action-oriented while leaving full audit inventories
+in machine JSON.
+
 ## Wiki Boundary
 
 Offdesk can create wiki candidates or run-local trial entries, but it should

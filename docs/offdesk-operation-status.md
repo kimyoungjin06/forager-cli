@@ -3,24 +3,36 @@
 This page records the current Forager Offdesk operating baseline and the work
 that remains before treating the system as a dependable overnight operator.
 
-Snapshot date: 2026-05-27.
+Snapshot date: 2026-05-31.
 
 ## Current Baseline
 
-The current merged baseline is PR #139, which documented the operation cycle
-and the verified TwinPaper runtime smoke. At this point:
+The last merged runtime baseline is PR #139, which documented the operation
+cycle and the verified TwinPaper runtime smoke. The current local checkout adds
+documentation governance, adaptive wiki projection freshness, closeout return
+guidance, and Forager storage-path visibility. These changes are implemented
+and tested locally, but still need to be split into reviewable commits before
+push.
 
-- `main` and `origin/main` are synchronized in the local checkout;
-- there are no open PRs from the latest stabilization pass;
-- the `twinpaper-adaptive-debug` profile has no pending approvals;
-- the recent TwinPaper Offdesk tasks are completed, including the short runtime
-  smoke `twinpaper-autonomy-20260522T071200Z`;
-- the launch path has been validated through `dispatch.runtime` approval,
-  `local-tmux` execution, polling, result artifacts, and deterministic
-  post-run review.
+At this point:
 
-This baseline proves that the approval-gated runtime path works. It does not
-prove that a longer autonomous run will produce useful research output.
+- the default Forager profile is loaded from primary Forager storage, not legacy
+  AoE fallback storage;
+- the default profile has no pending approvals, queued tasks, active tasks,
+  failed tasks, resume-pending tasks, stale background runs, or closeout-required
+  tasks;
+- the `twinpaper-adaptive-debug` wiki markdown vault is fresh relative to
+  canonical adaptive wiki state;
+- `forager project audit-docs` reports no findings or recommendations for the
+  Forager checkout under the standard profile;
+- `forager project audit-docs` reports no findings or recommendations for the
+  TwinPaper checkout under the research-longrun profile;
+- `cargo test -q`, `cargo fmt --check`, `git diff --check`, and the
+  documentation-governance script syntax check pass locally.
+
+This baseline proves that the approval-gated runtime path and the governance
+surfaces can be inspected consistently. It still does not prove that a longer
+autonomous run will produce useful research output.
 
 ## Verified Flow
 
@@ -96,9 +108,64 @@ The short TwinPaper smoke observed:
   [`TwinPaper Offdesk Long-Run Validation`](guides/twinpaper-offdesk-long-run-validation.md)
   and `LONG_RUN_VALIDATION.md`.
 
+### Documentation And Artifact Governance
+
+- `PROJECT_STATE.md`, `DECISIONS.md`, and `DELIVERABLES.md` define the shallow
+  current surfaces for the Forager checkout.
+- `forager project audit-docs` audits current-state freshness, decision and
+  deliverable surfaces, human-facing output candidates, large logs, latest
+  aliases, and adaptive wiki markdown projection freshness.
+- `forager project init` writes `GOVERNANCE_SURFACE_HINTS.md` as a read-only
+  packet artifact.
+- `forager project apply-governance-hints` is dry-run by default, requires
+  `--reviewed` to write, creates only missing governance surfaces, and never
+  overwrites existing project documents.
+- `forager offdesk closeout` carries focused documentation-governance
+  recommendations into the Ondesk return package.
+
+### Adaptive Wiki Human Projection
+
+- `forager offdesk wiki export-markdown` now defaults to the active profile's
+  `wiki-vault/` directory.
+- The export report includes `projection_status` with `missing`, `stale`,
+  `fresh`, and `empty_canonical` states.
+- Project audits can recommend a wiki vault re-export when canonical adaptive
+  wiki state is newer than the markdown projection.
+
+### Rename And Storage Visibility
+
+- `forager doctor` reports active primary/legacy storage and repo-config
+  sources.
+- `forager status --json` exposes `profile_dir_source` and `app_dir_source` so
+  automation can detect legacy fallback.
+- The local machine has migrated global legacy AoE state into primary Forager
+  storage; legacy data remains as backup.
+
 ## Remaining Work
 
-### 1. Longer TwinPaper Run With Council Enabled
+### 1. Return Package And Prompt Package Polish
+
+Goal: make the handoff artifact concise enough to read first, while retaining
+links to inspectable evidence.
+
+Expected slice:
+
+- reduce raw artifact-path noise in `RETURN_PACKAGE.md`;
+- deduplicate and prioritize required first reads;
+- decide whether `ondesk prompt-package` should optionally run a fresh
+  `project audit-docs` pass when no closeout package exists;
+- keep closeout recommendations focused on actions a human can evaluate.
+
+Acceptance checks:
+
+- the first-read section is short and ordered;
+- raw paths are grouped behind human labels;
+- documentation-governance recommendations are visible without dumping the full
+  audit report;
+- prompt-package output does not imply that Offdesk output is trusted without
+  review.
+
+### 2. Longer TwinPaper Run With Council Enabled
 
 Goal: validate quality and direction control, not just launch mechanics.
 
@@ -115,11 +182,11 @@ Acceptance checks:
 
 - Council records are present and understandable;
 - non-`continue` decisions stop or hand off according to policy;
-- output quality is better than the one-iteration smoke;
+- output quality is materially better than the one-iteration smoke;
 - no system-critical mutation occurs;
 - the final report separates pass/fail from operator judgement.
 
-### 2. Offdesk Closeout On A Real Completed Run
+### 3. Offdesk Closeout On A Real Completed Run
 
 Goal: make the "finished process -> reviewable work" transition practical.
 
@@ -144,7 +211,7 @@ Acceptance checks:
 - required first reads for Ondesk return are complete;
 - any proposed cleanup requires separate review and approval.
 
-### 3. Ondesk Return Package Validation
+### 4. Ondesk Return Package Validation
 
 Goal: confirm a fresh live harness can resume from artifacts rather than raw
 chat history.
@@ -162,7 +229,7 @@ Acceptance checks:
 - the package tells the harness what to read first;
 - the package does not imply that Offdesk output is trusted without review.
 
-### 4. Wiki Candidate Review And Promotion Loop
+### 5. Wiki Candidate Review And Promotion Loop
 
 Goal: prevent adaptive wiki from becoming hidden or noisy memory.
 
@@ -181,7 +248,7 @@ Acceptance checks:
 - no entry silently changes runtime approval, provider, command, or workdir
   behavior.
 
-### 5. Generalize Beyond TwinPaper
+### 6. Generalize Beyond TwinPaper
 
 Goal: verify that the pattern is not overfit to one project.
 
@@ -199,7 +266,7 @@ Acceptance checks:
 - prepare-time preflight catches missing evidence before enqueue;
 - Ondesk return remains understandable to a fresh harness.
 
-### 6. Improve Operator Surfaces
+### 7. Improve Operator Surfaces
 
 Goal: make the CLI/TUI reflect the operation cycle without requiring the
 operator to remember the docs.
@@ -210,12 +277,14 @@ Candidate surfaces:
 - `offdesk poll`;
 - `offdesk pending`;
 - closeout-required TUI attention;
+- Telegram and WebUI operator cards;
 - prompt-package summaries.
 
 Acceptance checks:
 
 - each surface shows the next safe action;
 - review-required states are obvious;
+- Telegram and WebUI preserve the shared next-safe-action priority order;
 - stale callback, missing result, and closeout-required states are not hidden;
 - launch dry-run and closeout artifact paths are easy to find.
 
@@ -229,18 +298,21 @@ rather than inventing separate wording.
 
 The next practical step is:
 
-1. prepare a longer TwinPaper run with Council enabled;
-2. launch it through the existing `dispatch.runtime` approval path;
-3. monitor with `offdesk poll`, tmux, heartbeat, progress, and logs;
-4. run closeout after completion;
-5. validate the Ondesk return prompt package;
-6. review wiki candidates before promotion.
+1. split the current local changes into reviewable commits;
+2. improve return package summarization and prompt-package audit freshness;
+3. prepare a longer TwinPaper run with Council enabled;
+4. launch it through the existing `dispatch.runtime` approval path;
+5. monitor with `offdesk poll`, tmux, heartbeat, progress, and logs;
+6. run closeout after completion;
+7. validate the Ondesk return prompt package;
+8. review wiki candidates before promotion.
 
 Use the generated `LONG_RUN_VALIDATION.md` packet from
 `scripts/prepare_twinpaper_offdesk_task.py` as the checklist for this sequence.
 
-The launch path is no longer the main unknown. The remaining unknowns are
-output quality, Council usefulness, closeout ergonomics, and wiki review load.
+The launch path and local governance checks are no longer the main unknowns.
+The remaining unknowns are output quality, Council usefulness, return-package
+ergonomics, and wiki review load.
 
 ## Stop Conditions
 

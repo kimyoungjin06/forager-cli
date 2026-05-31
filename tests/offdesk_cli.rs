@@ -1461,6 +1461,94 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
 
 #[test]
 #[serial]
+fn offdesk_wiki_export_markdown_defaults_to_profile_vault_and_reports_stale_state() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("adaptive_wiki_entries.json"),
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [
+                {
+                    "id": "wiki_export_default",
+                    "kind": "procedure",
+                    "scope": "project",
+                    "scope_ref": "project",
+                    "status": "promoted",
+                    "activation_mode": "context_only",
+                    "claim": "Default vault export is inspectable",
+                    "ai_instruction": "Use the default vault for human projection checks.",
+                    "human_summary": "Default vault export note",
+                    "evidence_refs": ["task:export"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now
+                }
+            ]
+        }))?,
+    )?;
+
+    let dry_run_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "export-markdown", "--dry-run", "--json"])
+        .output()?;
+    assert!(
+        dry_run_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&dry_run_output.stdout),
+        String::from_utf8_lossy(&dry_run_output.stderr)
+    );
+    let dry_run: serde_json::Value = serde_json::from_slice(&dry_run_output.stdout)?;
+    assert_eq!(
+        reported_path(&dry_run["output_dir"]),
+        expected_path(&profile_dir.join("wiki-vault"))
+    );
+    assert_eq!(dry_run["projection_status"]["state"], "missing");
+    assert_eq!(dry_run["projection_status"]["reexport_recommended"], true);
+    assert!(!profile_dir.join("wiki-vault/index.md").exists());
+
+    let export_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "export-markdown", "--json"])
+        .output()?;
+    assert!(
+        export_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&export_output.stdout),
+        String::from_utf8_lossy(&export_output.stderr)
+    );
+    let export: serde_json::Value = serde_json::from_slice(&export_output.stdout)?;
+    assert_eq!(export["projection_status"]["state"], "fresh");
+    assert_eq!(export["projection_status"]["reexport_recommended"], false);
+    assert!(profile_dir.join("wiki-vault/index.md").exists());
+
+    thread::sleep(StdDuration::from_millis(1100));
+    fs::write(
+        profile_dir.join("adaptive_wiki_candidates.json"),
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "candidates": []
+        }))?,
+    )?;
+
+    let stale_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "export-markdown", "--dry-run", "--json"])
+        .output()?;
+    assert!(
+        stale_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&stale_output.stdout),
+        String::from_utf8_lossy(&stale_output.stderr)
+    );
+    let stale: serde_json::Value = serde_json::from_slice(&stale_output.stdout)?;
+    assert_eq!(stale["projection_status"]["state"], "stale");
+    assert_eq!(stale["projection_status"]["reexport_recommended"], true);
+    assert_eq!(stale["summary"]["files_written"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_wiki_episode_trace_links_task_usage_candidate_and_audit_evidence() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());

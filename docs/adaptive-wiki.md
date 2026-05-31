@@ -179,6 +179,23 @@ human summaries, evidence refs, counterexamples, status, activation mode,
 agent modes, confidence, and candidate hit counts. Operators can use this
 surface to promote, deprecate, rescope, or review entries.
 
+`forager offdesk wiki export-markdown` writes this human projection as a
+one-way markdown vault. If `--output` is omitted, the command uses the active
+profile's `wiki-vault/` directory:
+
+```bash
+forager -p <profile> offdesk wiki export-markdown
+```
+
+Use `--dry-run --json` to check whether the vault is `missing`, `stale`,
+`fresh`, or `empty_canonical` without writing files. The export report includes
+`projection_status.reexport_recommended` so Ondesk and project audits can turn
+stale projection state into an operator action.
+
+The vault is not canonical. If `adaptive_wiki_entries.json` or
+`adaptive_wiki_candidates.json` changes after export, re-export the vault
+instead of editing markdown pages by hand.
+
 ## Tag Graph Boundary
 
 Adaptive wiki entries and candidates can carry two tag classes:
@@ -391,8 +408,9 @@ The current CLI exposes both inspection and governed review mutation commands:
 - `forager offdesk wiki review-after-report --project-key <key> --artifact-kind <kind> --agent-mode <mode> --json`
 - `forager offdesk wiki ack-runtime-policy --session-id <request> --project-key <key> --artifact-kind <kind> --agent-mode <mode> --json`
 - `forager offdesk wiki lint --json`
+- `forager offdesk wiki export-markdown`
+- `forager offdesk wiki export-markdown --dry-run --json`
 - `forager offdesk wiki export-markdown --output <dir>`
-- `forager offdesk wiki export-markdown --output <dir> --dry-run --json`
 - `forager offdesk wiki review --json`
 - `forager offdesk wiki review --dry-run --json`
 - `forager offdesk wiki review --active-only --json`
@@ -424,8 +442,9 @@ approval state.
 
 ## Markdown Human Vault
 
-`forager offdesk wiki export-markdown --output <dir>` generates a one-way
-markdown vault for operator review:
+`forager offdesk wiki export-markdown` generates a one-way markdown vault for
+operator review. By default it writes to the active profile's `wiki-vault/`.
+Pass `--output <dir>` to write a separate review copy:
 
 ```text
 adaptive-wiki/
@@ -453,8 +472,9 @@ agent modes, and review reason.
 The markdown vault is not a writable source of truth in v0. Operators should
 continue to mutate wiki state through the CLI review commands.
 
-Use `--dry-run --json` to inspect planned files and content hashes without
-writing the vault.
+Use `--dry-run --json` to inspect planned files, content hashes, and
+`projection_status` without writing the vault. `projection_status.state`
+reports `missing`, `stale`, `fresh`, or `empty_canonical`.
 
 ## Curator Review Reports
 
