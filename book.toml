@@ -1,6 +1,6 @@
 [book]
 title = "Forager"
-description = "Offdesk agent orchestration with approvals, recovery, and audit trails"
+description = "Local meta-harness for harness-backed AI agents, with approvals, evidence, recovery, and reviewable handoffs"
 authors = ["Forager Contributors"]
 language = "en"
 src = "docs"

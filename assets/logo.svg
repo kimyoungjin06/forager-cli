@@ -1,37 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Forager">
   <defs>
-    <linearGradient id="shell" x1="10" y1="6" x2="118" y2="122" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#182433"/>
-      <stop offset="1" stop-color="#0b111a"/>
+    <linearGradient id="shell" x1="14" y1="10" x2="118" y2="122" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#102033"/>
+      <stop offset="1" stop-color="#020617"/>
     </linearGradient>
-    <linearGradient id="route" x1="30" y1="94" x2="99" y2="32" gradientUnits="userSpaceOnUse">
+    <linearGradient id="trail" x1="27" y1="92" x2="101" y2="34" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#38bdf8"/>
-      <stop offset="0.58" stop-color="#0075ba"/>
+      <stop offset="0.62" stop-color="#0075ba"/>
       <stop offset="1" stop-color="#da2128"/>
     </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
   </defs>
 
-  <rect x="5" y="5" width="118" height="118" rx="16" fill="url(#shell)" stroke="#304257" stroke-width="2"/>
-  <rect x="5" y="5" width="118" height="24" rx="16" fill="#0d1420"/>
-  <path d="M5 21h118v8H5z" fill="#0d1420"/>
+  <rect x="7" y="7" width="114" height="114" rx="18" fill="url(#shell)"/>
+  <rect x="7" y="7" width="114" height="114" rx="18" fill="none" stroke="#2f4056" stroke-width="2"/>
 
-  <circle cx="18" cy="17" r="4" fill="#da2128"/>
-  <circle cx="31" cy="17" r="4" fill="#38bdf8"/>
-  <circle cx="44" cy="17" r="4" fill="#0075ba"/>
+  <g opacity="0.16" stroke="#94a3b8" stroke-width="2">
+    <path d="M28 31h72"/>
+    <path d="M28 97h72"/>
+    <path d="M31 28v72"/>
+    <path d="M97 28v72"/>
+  </g>
 
-  <path d="M27 87l17-19 18 12 20-25 19-16" fill="none" stroke="#1f2937" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M27 87l17-19 18 12 20-25 19-16" fill="none" stroke="url(#route)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <g filter="url(#soft-shadow)">
+    <path d="M30 88l23-27 21 16 25-35" fill="none" stroke="#020617" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M30 88l23-27 21 16 25-35" fill="none" stroke="url(#trail)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <path d="M34 46h20" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
-  <path d="M34 58h13" stroke="#64748b" stroke-width="4" stroke-linecap="round"/>
-  <path d="M72 95h24" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="30" cy="88" r="10" fill="#38bdf8" stroke="#020617" stroke-width="4"/>
+    <circle cx="53" cy="61" r="9" fill="#0075ba" stroke="#020617" stroke-width="4"/>
+    <circle cx="74" cy="77" r="9" fill="#0a5f92" stroke="#020617" stroke-width="4"/>
+    <circle cx="99" cy="42" r="11" fill="#da2128" stroke="#020617" stroke-width="4"/>
+  </g>
 
-  <circle cx="27" cy="87" r="8" fill="#38bdf8" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="44" cy="68" r="7" fill="#0ea5e9" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="62" cy="80" r="7" fill="#0075ba" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="82" cy="55" r="7" fill="#0b5f94" stroke="#0f172a" stroke-width="3"/>
-  <circle cx="101" cy="39" r="8" fill="#da2128" stroke="#0f172a" stroke-width="3"/>
-
-  <path d="M88 37c4-10 13-15 25-15-2 12-8 20-20 24" fill="none" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M88 37c8 1 14 4 18 10" fill="none" stroke="#0075ba" stroke-width="4" stroke-linecap="round"/>
+  <path d="M88 42h20M99 31v22" stroke="#fff7ed" stroke-width="4" stroke-linecap="round" opacity="0.92"/>
 </svg>
