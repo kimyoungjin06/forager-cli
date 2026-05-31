@@ -62,6 +62,8 @@ default profile contract is:
 - keep inline context below the profile budget;
 - pass `RETURN_PACKAGE.md`, `closeout_plan.json`, `result.json`, focused briefs,
   and selected source files as first-read artifacts;
+- keep first-read artifacts under the profile budget, currently 64 KiB per file
+  and 256 KiB total for supported Codex and Claude profiles;
 - avoid pasting full git diffs, large logs, raw scrollback, or repository-wide
   inventories inline;
 - report missing evidence explicitly instead of guessing.
@@ -81,12 +83,19 @@ forager offdesk harness-prompt claude \
   --first-read target/offdesk/RETURN_PACKAGE.md \
   --first-read target/offdesk/result.json \
   --result-artifact target/offdesk/result.json \
-  --output target/offdesk/CLAUDE_START.md
+  --output target/offdesk/CLAUDE_START.md \
+  --strict-first-read-budget
 ```
 
 That prompt is intentionally a pointer surface. The hosted harness should read
 the listed artifacts instead of asking the operator to paste the full diff or
 raw logs into the prompt.
+
+By default, `harness-prompt` reports missing or oversized first-read artifacts as
+warnings in JSON and human output. Add `--strict-first-read-budget` when a
+runtime smoke should fail before launch if the first-read packet is missing or
+too large. Use `--max-first-read-total-bytes` to lower the total budget for a
+specific smoke.
 
 The v1 support target is intentionally narrow:
 

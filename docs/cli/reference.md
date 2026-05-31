@@ -722,6 +722,8 @@ Build a compact hosted harness start prompt from first-read artifacts
 * `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path the hosted harness should write or inspect
 * `--workdir <WORKDIR>` — Working directory the hosted harness should treat as the task root
 * `--output <OUTPUT>` — Write the generated prompt markdown to this path
+* `--max-first-read-total-bytes <MAX_FIRST_READ_TOTAL_BYTES>` — Override the total first-read artifact budget in bytes
+* `--strict-first-read-budget` — Fail when first-read artifacts are missing or exceed the budget
 * `--json` — Output packet metadata as JSON
 
 

@@ -481,6 +481,8 @@ struct HostedHarnessProfileView {
 struct HostedHarnessPromptContract {
     strategy: &'static str,
     inline_context_budget_bytes: usize,
+    first_read_file_budget_bytes: u64,
+    first_read_total_budget_bytes: u64,
     first_read_required: bool,
     preferred_first_reads: &'static [&'static str],
     discouraged_inline_context: &'static [&'static str],
@@ -490,6 +492,8 @@ struct HostedHarnessPromptContract {
 const COMPACT_FIRST_READ_PROMPT_CONTRACT: HostedHarnessPromptContract = HostedHarnessPromptContract {
     strategy: "compact_prompt_with_first_read_artifacts",
     inline_context_budget_bytes: 4096,
+    first_read_file_budget_bytes: 65_536,
+    first_read_total_budget_bytes: 262_144,
     first_read_required: true,
     preferred_first_reads: &[
         "RETURN_PACKAGE.md",
@@ -510,6 +514,8 @@ const COMPACT_FIRST_READ_PROMPT_CONTRACT: HostedHarnessPromptContract = HostedHa
 const PLANNED_PROMPT_CONTRACT: HostedHarnessPromptContract = HostedHarnessPromptContract {
     strategy: "unvalidated",
     inline_context_budget_bytes: 0,
+    first_read_file_budget_bytes: 65_536,
+    first_read_total_budget_bytes: 262_144,
     first_read_required: true,
     preferred_first_reads: &["to be defined by integration smoke"],
     discouraged_inline_context: &["full git diff", "large logs", "raw scrollback"],
@@ -632,6 +638,14 @@ pub struct HarnessPromptArgs {
     #[arg(long)]
     output: Option<PathBuf>,
 
+    /// Override the total first-read artifact budget in bytes
+    #[arg(long)]
+    max_first_read_total_bytes: Option<u64>,
+
+    /// Fail when first-read artifacts are missing or exceed the budget
+    #[arg(long)]
+    strict_first_read_budget: bool,
+
     /// Output packet metadata as JSON
     #[arg(long)]
     json: bool,
@@ -644,7 +658,11 @@ struct HostedHarnessPromptPacket {
     support_status: String,
     prompt_strategy: String,
     inline_context_budget_bytes: usize,
+    first_read_file_budget_bytes: u64,
+    first_read_total_budget_bytes: u64,
     first_read_required: bool,
+    first_read_total_bytes: u64,
+    first_read_budget_status: String,
     task: String,
     workdir: Option<String>,
     first_reads: Vec<HostedHarnessFirstRead>,
@@ -658,6 +676,8 @@ struct HostedHarnessPromptPacket {
 struct HostedHarnessFirstRead {
     path: String,
     present: bool,
+    size_bytes: Option<u64>,
+    over_file_budget: bool,
 }
 
 #[derive(Args)]
@@ -5779,8 +5799,10 @@ async fn harnesses(args: JsonArgs) -> Result<()> {
         println!("  runner:  {}", profile.runner);
         println!("  scope:   {}", profile.mutation_scope);
         println!(
-            "  prompt:  {} (inline <= {} bytes)",
-            profile.prompt_contract.strategy, profile.prompt_contract.inline_context_budget_bytes
+            "  prompt:  {} (inline <= {} bytes, first-read <= {} bytes total)",
+            profile.prompt_contract.strategy,
+            profile.prompt_contract.inline_context_budget_bytes,
+            profile.prompt_contract.first_read_total_budget_bytes
         );
         println!(
             "  reads:   {}",
@@ -5797,7 +5819,15 @@ async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
     let profile = hosted_harness_profile(&args.harness_id)
         .with_context(|| format!("unknown hosted harness id `{}`", args.harness_id))?;
     let json = args.json;
+    let strict = args.strict_first_read_budget;
     let packet = build_harness_prompt_packet(profile, args)?;
+
+    if strict && packet.first_read_budget_status != "ok" {
+        bail!(
+            "first-read budget guard failed: {}",
+            packet.warnings.join("; ")
+        );
+    }
 
     if let Some(output_path) = packet.output_path.as_deref() {
         let path = Path::new(output_path);
@@ -5835,20 +5865,63 @@ fn build_harness_prompt_packet(
     profile: &HostedHarnessProfileView,
     args: HarnessPromptArgs,
 ) -> Result<HostedHarnessPromptPacket> {
+    let first_read_total_budget_bytes = args
+        .max_first_read_total_bytes
+        .unwrap_or(profile.prompt_contract.first_read_total_budget_bytes);
+    let first_read_file_budget_bytes = profile.prompt_contract.first_read_file_budget_bytes;
     let first_reads = args
         .first_reads
         .iter()
-        .map(|path| HostedHarnessFirstRead {
-            path: path.display().to_string(),
-            present: path.exists(),
+        .map(|path| {
+            let size_bytes = path
+                .metadata()
+                .ok()
+                .filter(|meta| meta.is_file())
+                .map(|meta| meta.len());
+            HostedHarnessFirstRead {
+                path: path.display().to_string(),
+                present: path.exists(),
+                size_bytes,
+                over_file_budget: size_bytes
+                    .is_some_and(|size| size > first_read_file_budget_bytes),
+            }
         })
         .collect::<Vec<_>>();
+    let first_read_total_bytes = first_reads
+        .iter()
+        .filter_map(|read| read.size_bytes)
+        .sum::<u64>();
     let workdir = args.workdir.map(|path| path.display().to_string());
     let result_artifact = args.result_artifact.map(|path| path.display().to_string());
     let output_path = args.output.map(|path| path.display().to_string());
     let mut warnings = Vec::new();
+    let mut first_read_budget_warning = false;
     if profile.prompt_contract.first_read_required && first_reads.is_empty() {
+        first_read_budget_warning = true;
         warnings.push("no first-read artifacts were provided".to_string());
+    }
+    let missing_first_reads = first_reads.iter().filter(|read| !read.present).count();
+    if missing_first_reads > 0 {
+        first_read_budget_warning = true;
+        warnings.push(format!(
+            "{missing_first_reads} first-read artifact(s) are missing"
+        ));
+    }
+    for read in first_reads.iter().filter(|read| read.over_file_budget) {
+        if let Some(size) = read.size_bytes {
+            first_read_budget_warning = true;
+            warnings.push(format!(
+                "first-read artifact {} is {} bytes; profile file budget is {} bytes",
+                read.path, size, first_read_file_budget_bytes
+            ));
+        }
+    }
+    if first_read_total_bytes > first_read_total_budget_bytes {
+        first_read_budget_warning = true;
+        warnings.push(format!(
+            "first-read artifacts total {} bytes; budget is {} bytes",
+            first_read_total_bytes, first_read_total_budget_bytes
+        ));
     }
     if args.task.len() > profile.prompt_contract.inline_context_budget_bytes {
         warnings.push(format!(
@@ -5871,7 +5944,16 @@ fn build_harness_prompt_packet(
         support_status: profile.support_status.to_string(),
         prompt_strategy: profile.prompt_contract.strategy.to_string(),
         inline_context_budget_bytes: profile.prompt_contract.inline_context_budget_bytes,
+        first_read_file_budget_bytes,
+        first_read_total_budget_bytes,
         first_read_required: profile.prompt_contract.first_read_required,
+        first_read_total_bytes,
+        first_read_budget_status: if first_read_budget_warning {
+            "warning"
+        } else {
+            "ok"
+        }
+        .to_string(),
         task: args.task,
         workdir,
         first_reads,
@@ -5903,6 +5985,14 @@ fn render_harness_prompt_markdown(
         "- inline_context_budget_bytes: `{}`\n",
         profile.prompt_contract.inline_context_budget_bytes
     ));
+    output.push_str(&format!(
+        "- first_read_file_budget_bytes: `{}`\n",
+        profile.prompt_contract.first_read_file_budget_bytes
+    ));
+    output.push_str(&format!(
+        "- first_read_total_budget_bytes: `{}`\n",
+        profile.prompt_contract.first_read_total_budget_bytes
+    ));
     if let Some(workdir) = workdir {
         output.push_str(&format!("- workdir: `{workdir}`\n"));
     }
@@ -5930,7 +6020,16 @@ fn render_harness_prompt_markdown(
     } else {
         for read in first_reads {
             let present = if read.present { "present" } else { "missing" };
-            output.push_str(&format!("- `{}` ({present})\n", read.path));
+            let size = read
+                .size_bytes
+                .map(|bytes| format!(", {bytes} bytes"))
+                .unwrap_or_default();
+            let budget = if read.over_file_budget {
+                ", over file budget"
+            } else {
+                ""
+            };
+            output.push_str(&format!("- `{}` ({present}{size}{budget})\n", read.path));
         }
     }
     output.push_str("\n## Response Contract\n\n");

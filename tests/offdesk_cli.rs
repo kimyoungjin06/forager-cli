@@ -7786,6 +7786,10 @@ fn offdesk_harnesses_lists_supported_and_planned_profiles() -> Result<()> {
         "compact_prompt_with_first_read_artifacts"
     );
     assert_eq!(claude["prompt_contract"]["first_read_required"], true);
+    assert_eq!(
+        claude["prompt_contract"]["first_read_total_budget_bytes"],
+        262_144
+    );
     assert!(claude["prompt_contract"]["discouraged_inline_context"]
         .as_array()
         .expect("discouraged inline context")
@@ -7833,6 +7837,10 @@ fn offdesk_harness_prompt_builds_first_read_packet() -> Result<()> {
         "compact_prompt_with_first_read_artifacts"
     );
     assert_eq!(packet["first_reads"][0]["present"], true);
+    assert_eq!(packet["first_reads"][0]["size_bytes"], 14);
+    assert_eq!(packet["first_reads"][0]["over_file_budget"], false);
+    assert_eq!(packet["first_read_budget_status"], "ok");
+    assert_eq!(packet["first_read_total_bytes"], 14);
     assert_eq!(
         packet["result_artifact"],
         result_path.to_str().expect("utf-8 result path")
@@ -7849,6 +7857,65 @@ fn offdesk_harness_prompt_builds_first_read_packet() -> Result<()> {
     assert!(prompt.contains("## First-Read Artifacts"));
     assert!(prompt.contains("Do not ask the operator to paste full git diffs"));
     assert!(prompt.contains(first_read.to_str().expect("utf-8 first read")));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_harness_prompt_warns_and_strict_fails_on_budget() -> Result<()> {
+    let temp = tempdir()?;
+    let first_read = temp.path().join("large.md");
+    fs::write(&first_read, "0123456789")?;
+
+    let warning_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            "Review first-read budget.",
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--max-first-read-total-bytes",
+            "5",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(warning_output.status.success());
+    let packet: serde_json::Value = serde_json::from_slice(&warning_output.stdout)?;
+    assert_eq!(packet["first_read_total_bytes"], 10);
+    assert_eq!(packet["first_read_total_budget_bytes"], 5);
+    assert_eq!(packet["first_read_budget_status"], "warning");
+    assert!(packet["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .expect("warning text")
+            .contains("first-read artifacts total 10 bytes")));
+
+    let strict_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            "Review first-read budget.",
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--max-first-read-total-bytes",
+            "5",
+            "--strict-first-read-budget",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(!strict_output.status.success());
+    assert!(
+        String::from_utf8_lossy(&strict_output.stderr).contains("first-read budget guard failed")
+    );
     Ok(())
 }
 
