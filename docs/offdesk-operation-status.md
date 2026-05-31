@@ -10,9 +10,9 @@ Snapshot date: 2026-05-31.
 The last merged runtime baseline is PR #139, which documented the operation
 cycle and the verified TwinPaper runtime smoke. The current local checkout adds
 documentation governance, adaptive wiki projection freshness, closeout return
-guidance, and Forager storage-path visibility. These changes are implemented
-and tested locally, but still need to be split into reviewable commits before
-push.
+guidance, and Forager storage-path visibility. These changes are implemented,
+tested locally, and split into reviewable commits. They still need remote review
+or push.
 
 At this point:
 

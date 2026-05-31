@@ -5071,6 +5071,16 @@ fn forager_doctor_reports_new_primary_paths_without_creating_storage() -> Result
     assert!(output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["profile"]["active"], "default");
+    assert_eq!(report["profile"]["dir_source"], "new_primary");
+    assert_eq!(
+        reported_path(&report["profile"]["dir"]),
+        expected_path(&app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(
+        reported_path(&report["profile"]["primary_dir"]),
+        expected_path(&app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(report["profile"]["primary_exists"], false);
     assert_eq!(report["global_data"]["active_source"], "new_primary");
     assert_eq!(
         reported_path(&report["global_data"]["primary_path"]),
@@ -5106,6 +5116,17 @@ fn forager_doctor_reports_legacy_storage_and_repo_config() -> Result<()> {
 
     assert!(output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["profile"]["active"], "default");
+    assert_eq!(report["profile"]["dir_source"], "legacy");
+    assert_eq!(
+        reported_path(&report["profile"]["dir"]),
+        expected_path(&legacy_app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(
+        reported_path(&report["profile"]["primary_dir"]),
+        expected_path(&app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(report["profile"]["primary_exists"], false);
     assert_eq!(report["global_data"]["active_source"], "legacy");
     assert_eq!(
         reported_path(&report["global_data"]["active_path"]),
@@ -5141,6 +5162,7 @@ fn forager_doctor_reports_profile_env_precedence() -> Result<()> {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["profile"]["active"], "new-name");
     assert_eq!(report["profile"]["source"], "--profile/FORAGER_PROFILE");
+    assert_eq!(report["profile"]["dir_source"], "new_primary");
     assert_eq!(report["env"]["forager_profile_set"], true);
     assert_eq!(report["env"]["legacy_profile_set"], true);
     Ok(())
@@ -7712,12 +7734,59 @@ fn status_json_includes_offdesk_counts() -> Result<()> {
         .output()?;
     assert!(status_output.status.success());
     let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["profile"], "default");
+    assert_eq!(status["profile_dir_source"], "primary");
+    assert_eq!(
+        reported_path(&status["profile_dir"]),
+        expected_path(&profile_dir(temp.path()))
+    );
+    assert_eq!(
+        reported_path(&status["app_dir"]),
+        expected_path(&app_dir(temp.path()))
+    );
+    assert_eq!(status["app_dir_source"], "primary");
+    assert_eq!(
+        reported_path(&status["primary_app_dir"]),
+        expected_path(&app_dir(temp.path()))
+    );
+    assert_eq!(status["primary_app_dir_exists"], true);
     assert_eq!(status["queued_offdesk_tasks"], 1);
     assert_eq!(status["pending_approvals"], 0);
     assert_eq!(status["failed_offdesk_tasks"], 0);
     assert_eq!(status["resume_pending_offdesk_tasks"], 0);
     assert_eq!(status["cancelled_offdesk_tasks"], 0);
     assert_eq!(status["closeout_required_offdesk_tasks"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
+    let temp = tempdir()?;
+    fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["profile"], "default");
+    assert_eq!(status["profile_dir_source"], "legacy");
+    assert_eq!(
+        reported_path(&status["profile_dir"]),
+        expected_path(&legacy_app_dir(temp.path()).join("profiles").join("default"))
+    );
+    assert_eq!(
+        reported_path(&status["app_dir"]),
+        expected_path(&legacy_app_dir(temp.path()))
+    );
+    assert_eq!(status["app_dir_source"], "legacy");
+    assert_eq!(
+        reported_path(&status["primary_app_dir"]),
+        expected_path(&app_dir(temp.path()))
+    );
+    assert_eq!(status["primary_app_dir_exists"], false);
+    assert!(!app_dir(temp.path()).exists());
     Ok(())
 }
 

@@ -28,11 +28,13 @@ paths remain compatibility surfaces during the transition.
 
 ## Completed Phase 3
 
-- `forager doctor` reports the active profile source, global data path, and
-  repo config path without creating storage directories.
+- `forager doctor` reports the active profile source, active profile directory,
+  global data path, and repo config path without creating storage directories.
 - Human and JSON output both identify whether Forager is using primary paths,
   legacy AoE paths, or a new primary path that would be created by normal CLI
   commands.
+- `forager status --json` exposes the same active profile/app directory source
+  so scripts can detect when legacy compatibility storage is active.
 
 ## Completed Phase 4
 
@@ -238,7 +240,7 @@ features.
 | --- | --- | --- |
 | `aoe` compatibility binary | Keep with human-facing deprecation warning. | Remove only after a release notes cycle explicitly says the alias will be removed. |
 | `.aoe/config.toml` repo fallback | Keep readable and writable when no `.forager/config.toml` exists. | Remove only after `forager migrate aoe` has existed for at least one release cycle and docs show the migration path. |
-| Legacy global data paths (`agent-of-empires`, `.agent-of-empires`) | Keep as fallback when no Forager primary path exists. | Remove only after migration is the documented default and `forager doctor` reports stale legacy paths clearly. |
+| Legacy global data paths (`agent-of-empires`, `.agent-of-empires`) | Keep as fallback when no Forager primary path exists. | Remove only after migration is the documented default and `forager doctor` plus `forager status --json` report stale legacy paths clearly. |
 | `AGENT_OF_EMPIRES_PROFILE` / `AGENT_OF_EMPIRES_DEBUG` | Keep as lower-priority env fallbacks. | Remove after CLI/docs stop mentioning them except in migration notes. |
 | `aoe-*` release artifact fallback | Keep install-script fallback for older releases. | Remove after the installer no longer needs to support pre-Forager release names. |
 | `@aoe_*` tmux metadata and `aoe_*` tmux session discovery | Keep for attach/status/cleanup of running legacy sessions. | Remove only after Forager stops supporting in-place discovery of already-running AoE tmux sessions. |

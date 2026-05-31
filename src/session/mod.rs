@@ -44,8 +44,17 @@ const LEGACY_APP_DIR_NAME: &str = "agent-of-empires";
 const DOT_APP_DIR_NAME: &str = ".forager";
 const LEGACY_DOT_APP_DIR_NAME: &str = ".agent-of-empires";
 
+#[derive(Debug, Clone)]
+pub struct AppDirResolution {
+    pub active_path: PathBuf,
+    pub active_source: &'static str,
+    pub primary_path: PathBuf,
+    pub primary_exists: bool,
+    pub legacy_paths: Vec<PathBuf>,
+}
+
 pub fn get_app_dir() -> Result<PathBuf> {
-    let dir = resolved_app_dir_path()?;
+    let dir = app_dir_resolution()?.active_path;
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
     }
@@ -53,18 +62,41 @@ pub fn get_app_dir() -> Result<PathBuf> {
 }
 
 pub(crate) fn resolved_app_dir_path() -> Result<PathBuf> {
+    Ok(app_dir_resolution()?.active_path)
+}
+
+pub fn app_dir_resolution() -> Result<AppDirResolution> {
     let primary = primary_app_dir_path()?;
+    let primary_exists = primary.exists();
+    let legacy_paths = legacy_app_dir_paths();
+
     if primary.exists() {
-        return Ok(primary);
+        return Ok(AppDirResolution {
+            active_path: primary.clone(),
+            active_source: "primary",
+            primary_path: primary,
+            primary_exists,
+            legacy_paths,
+        });
     }
 
-    for legacy in legacy_app_dir_paths() {
-        if legacy.exists() {
-            return Ok(legacy);
-        }
+    if let Some(legacy) = legacy_paths.iter().find(|path| path.exists()).cloned() {
+        return Ok(AppDirResolution {
+            active_path: legacy,
+            active_source: "legacy",
+            primary_path: primary,
+            primary_exists,
+            legacy_paths,
+        });
     }
 
-    Ok(primary)
+    Ok(AppDirResolution {
+        active_path: primary.clone(),
+        active_source: "new_primary",
+        primary_path: primary,
+        primary_exists,
+        legacy_paths,
+    })
 }
 
 pub(crate) fn primary_app_dir_path() -> Result<PathBuf> {

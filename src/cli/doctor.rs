@@ -5,9 +5,7 @@ use clap::Args;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-use crate::session::{
-    legacy_app_dir_paths, primary_app_dir_path, repo_config, resolved_app_dir_path, DEFAULT_PROFILE,
-};
+use crate::session::{app_dir_resolution, normalize_profile_name, repo_config, DEFAULT_PROFILE};
 
 #[derive(Args)]
 pub struct DoctorArgs {
@@ -32,6 +30,11 @@ struct DoctorReport {
 struct ProfileReport {
     active: String,
     source: &'static str,
+    dir: String,
+    dir_source: &'static str,
+    primary_dir: String,
+    primary_exists: bool,
+    legacy_dirs: Vec<PathExistence>,
 }
 
 #[derive(Serialize)]
@@ -91,37 +94,63 @@ fn build_report(cli_profile: Option<&str>, project_path: &Path) -> Result<Doctor
     let legacy_profile = std::env::var("AGENT_OF_EMPIRES_PROFILE").ok();
     let profile = if let Some(profile) = cli_profile {
         ProfileReport {
-            active: profile.to_string(),
+            active: normalize_profile_name(profile)?,
             source: "--profile/FORAGER_PROFILE",
+            dir: String::new(),
+            dir_source: "",
+            primary_dir: String::new(),
+            primary_exists: false,
+            legacy_dirs: Vec::new(),
         }
     } else if let Some(profile) = legacy_profile {
         ProfileReport {
-            active: profile,
+            active: normalize_profile_name(&profile)?,
             source: "AGENT_OF_EMPIRES_PROFILE",
+            dir: String::new(),
+            dir_source: "",
+            primary_dir: String::new(),
+            primary_exists: false,
+            legacy_dirs: Vec::new(),
         }
     } else {
         ProfileReport {
             active: DEFAULT_PROFILE.to_string(),
             source: "default",
+            dir: String::new(),
+            dir_source: "",
+            primary_dir: String::new(),
+            primary_exists: false,
+            legacy_dirs: Vec::new(),
         }
     };
 
-    let primary_app_dir = primary_app_dir_path()?;
-    let resolved_app_dir = resolved_app_dir_path()?;
-    let primary_exists = primary_app_dir.exists();
-    let legacy_paths: Vec<PathExistence> = legacy_app_dir_paths()
-        .into_iter()
+    let app_dir = app_dir_resolution()?;
+    let legacy_paths: Vec<PathExistence> = app_dir
+        .legacy_paths
+        .iter()
         .map(|path| PathExistence {
             exists: path.exists(),
             path: display_path(path),
         })
         .collect();
-    let active_source = if primary_exists && resolved_app_dir == primary_app_dir {
-        "primary"
-    } else if resolved_app_dir.exists() {
-        "legacy"
-    } else {
-        "new_primary"
+    let primary_profile_dir = app_dir.primary_path.join("profiles").join(&profile.active);
+    let active_profile_dir = app_dir.active_path.join("profiles").join(&profile.active);
+    let legacy_profile_dirs = app_dir
+        .legacy_paths
+        .iter()
+        .map(|path| path.join("profiles").join(&profile.active))
+        .map(|path| PathExistence {
+            exists: path.exists(),
+            path: display_path(path),
+        })
+        .collect::<Vec<_>>();
+    let profile = ProfileReport {
+        dir: display_path(active_profile_dir),
+        dir_source: app_dir.active_source,
+        primary_dir: display_path(&primary_profile_dir),
+        primary_exists: primary_profile_dir.exists(),
+        legacy_dirs: legacy_profile_dirs,
+        ..profile
     };
 
     let project_path = normalize_project_path(project_path)?;
@@ -140,10 +169,10 @@ fn build_report(cli_profile: Option<&str>, project_path: &Path) -> Result<Doctor
     Ok(DoctorReport {
         profile,
         global_data: GlobalDataReport {
-            active_path: display_path(resolved_app_dir),
-            active_source,
-            primary_path: display_path(primary_app_dir),
-            primary_exists,
+            active_path: display_path(&app_dir.active_path),
+            active_source: app_dir.active_source,
+            primary_path: display_path(&app_dir.primary_path),
+            primary_exists: app_dir.primary_exists,
             legacy_paths,
         },
         repo_config: RepoConfigReport {
@@ -179,10 +208,31 @@ fn print_human(report: &DoctorReport) {
         report.profile.active, report.profile.source
     );
     println!(
+        "  dir:    {} ({})",
+        report.profile.dir, report.profile.dir_source
+    );
+    println!(
+        "  primary dir: {} ({})",
+        report.profile.primary_dir,
+        exists_label(report.profile.primary_exists)
+    );
+    for legacy in &report.profile.legacy_dirs {
+        println!(
+            "  legacy dir: {} ({})",
+            legacy.path,
+            exists_label(legacy.exists)
+        );
+    }
+    println!(
         "  env: FORAGER_PROFILE={} AGENT_OF_EMPIRES_PROFILE={}",
         set_label(report.env.forager_profile_set),
         set_label(report.env.legacy_profile_set)
     );
+    if report.profile.dir_source == "legacy" {
+        println!(
+            "  hint: this profile is currently loaded from legacy AoE storage; run `forager migrate aoe` after reviewing conflicts."
+        );
+    }
 
     println!("\nGlobal data");
     println!(
@@ -202,7 +252,9 @@ fn print_human(report: &DoctorReport) {
         );
     }
     if report.global_data.active_source == "legacy" {
-        println!("  hint: existing legacy data is still in use for compatibility.");
+        println!(
+            "  hint: existing legacy data is still in use for compatibility; primary Forager data will take precedence after migration."
+        );
     }
 
     println!("\nRepository config");

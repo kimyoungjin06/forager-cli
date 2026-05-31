@@ -8,7 +8,7 @@ use crate::offdesk::{
     ensure_resume_review_next_safe_action, load_offdesk_status_summary, OffdeskNextSafeAction,
     OffdeskStatusSummary, ResumeStatus, TaskResumeStore,
 };
-use crate::session::{get_profile_dir, Status, Storage};
+use crate::session::{app_dir_resolution, get_profile_dir, Status, Storage};
 
 #[derive(Args)]
 pub struct StatusArgs {
@@ -36,6 +36,13 @@ struct StatusCounts {
 
 #[derive(Serialize)]
 struct StatusJson {
+    profile: String,
+    profile_dir: String,
+    profile_dir_source: String,
+    app_dir: String,
+    app_dir_source: String,
+    primary_app_dir: String,
+    primary_app_dir_exists: bool,
     waiting: usize,
     running: usize,
     idle: usize,
@@ -63,13 +70,22 @@ struct ResumeCounts {
 }
 
 fn build_status_json(
+    profile: &str,
     counts: StatusCounts,
     resume_counts: ResumeCounts,
     offdesk_summary: OffdeskStatusSummary,
 ) -> StatusJson {
     let offdesk_next_safe_actions =
         offdesk_next_safe_actions_for_status(&resume_counts, &offdesk_summary);
+    let storage = status_storage_paths(profile);
     StatusJson {
+        profile: profile.to_string(),
+        profile_dir: storage.profile_dir,
+        profile_dir_source: storage.profile_dir_source,
+        app_dir: storage.app_dir,
+        app_dir_source: storage.app_dir_source,
+        primary_app_dir: storage.primary_app_dir,
+        primary_app_dir_exists: storage.primary_app_dir_exists,
         waiting: counts.waiting,
         running: counts.running,
         idle: counts.idle,
@@ -91,6 +107,41 @@ fn build_status_json(
     }
 }
 
+struct StatusStoragePaths {
+    profile_dir: String,
+    profile_dir_source: String,
+    app_dir: String,
+    app_dir_source: String,
+    primary_app_dir: String,
+    primary_app_dir_exists: bool,
+}
+
+fn status_storage_paths(profile: &str) -> StatusStoragePaths {
+    match app_dir_resolution() {
+        Ok(resolution) => StatusStoragePaths {
+            profile_dir: resolution
+                .active_path
+                .join("profiles")
+                .join(profile)
+                .display()
+                .to_string(),
+            profile_dir_source: resolution.active_source.to_string(),
+            app_dir: resolution.active_path.display().to_string(),
+            app_dir_source: resolution.active_source.to_string(),
+            primary_app_dir: resolution.primary_path.display().to_string(),
+            primary_app_dir_exists: resolution.primary_exists,
+        },
+        Err(error) => StatusStoragePaths {
+            profile_dir: format!("unavailable: {error}"),
+            profile_dir_source: "error".to_string(),
+            app_dir: format!("unavailable: {error}"),
+            app_dir_source: "error".to_string(),
+            primary_app_dir: String::new(),
+            primary_app_dir_exists: false,
+        },
+    }
+}
+
 fn offdesk_next_safe_actions_for_status(
     resume_counts: &ResumeCounts,
     offdesk_summary: &OffdeskStatusSummary,
@@ -107,6 +158,7 @@ pub(crate) fn status_json_value_for_test(profile: &str) -> serde_json::Value {
     let resume_counts = count_resume_state(profile);
     let offdesk_summary = count_offdesk_state(profile);
     serde_json::to_value(build_status_json(
+        profile,
         StatusCounts::default(),
         resume_counts,
         offdesk_summary,
@@ -122,13 +174,18 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
         if args.json {
             let resume_counts = count_resume_state(storage.profile());
             let offdesk_summary = count_offdesk_state(storage.profile());
-            let status_json =
-                build_status_json(StatusCounts::default(), resume_counts, offdesk_summary);
+            let status_json = build_status_json(
+                storage.profile(),
+                StatusCounts::default(),
+                resume_counts,
+                offdesk_summary,
+            );
             println!("{}", serde_json::to_string(&status_json)?);
         } else if args.quiet {
             println!("0");
         } else {
             println!("No sessions in profile '{}'.", storage.profile());
+            print_profile_storage_hint(storage.profile());
             let resume_counts = count_resume_state(storage.profile());
             let offdesk_summary = count_offdesk_state(storage.profile());
             if resume_counts.fresh_pending > 0 || resume_counts.stale_pending > 0 {
@@ -157,7 +214,8 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
     let offdesk_summary = count_offdesk_state(storage.profile());
 
     if args.json {
-        let status_json = build_status_json(counts, resume_counts, offdesk_summary);
+        let status_json =
+            build_status_json(storage.profile(), counts, resume_counts, offdesk_summary);
         println!("{}", serde_json::to_string(&status_json)?);
     } else if args.quiet {
         println!("{}", counts.waiting);
@@ -171,11 +229,13 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
             counts.total,
             storage.profile()
         );
+        print_profile_storage_hint(storage.profile());
     } else {
         println!(
             "{} waiting • {} running • {} idle",
             counts.waiting, counts.running, counts.idle
         );
+        print_profile_storage_hint(storage.profile());
         if resume_counts.fresh_pending > 0 || resume_counts.stale_pending > 0 {
             println!(
                 "{} fresh resume • {} stale resume",
@@ -193,6 +253,17 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_profile_storage_hint(profile: &str) {
+    let storage = status_storage_paths(profile);
+    if storage.profile_dir_source == "legacy" {
+        println!(
+            "Profile data: {} ({})",
+            storage.profile_dir, storage.profile_dir_source
+        );
+        println!("Storage hint: legacy AoE data is active; run `forager doctor` before migration.");
+    }
 }
 
 fn count_offdesk_state(profile: &str) -> crate::offdesk::OffdeskStatusSummary {
