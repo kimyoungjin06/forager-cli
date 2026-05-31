@@ -2,14 +2,16 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
+use super::project_audit::{run_audit_docs, ProjectAuditDocsArgs};
 use crate::offdesk::operator_safe_text;
 use crate::session::get_profile_dir;
 
@@ -18,6 +20,7 @@ const ONBOARDING_FILE: &str = "PROJECT_ONBOARDING.md";
 const MODULE_CANDIDATES_FILE: &str = "MODULE_CANDIDATES.json";
 const MODULE_PREFLIGHT_FILE: &str = "MODULE_OPERATION_PREFLIGHT.json";
 const EVIDENCE_PLAN_FILE: &str = "EVIDENCE_COLLECTOR_PLAN.md";
+const GOVERNANCE_HINTS_FILE: &str = "GOVERNANCE_SURFACE_HINTS.md";
 const WIKI_SEEDS_FILE: &str = "WIKI_SEED_CANDIDATES.json";
 const ONDESK_PACKAGE_FILE: &str = "ONDESK_START_PACKAGE.md";
 const OFFDESK_READY_FILE: &str = "OFFDESK_READY_CHECK.json";
@@ -26,6 +29,12 @@ const OFFDESK_READY_FILE: &str = "OFFDESK_READY_CHECK.json";
 pub enum ProjectCommands {
     /// Create a read-only project operation initialization packet
     Init(ProjectInitArgs),
+
+    /// Apply reviewed governance surface templates to a project
+    ApplyGovernanceHints(ProjectApplyGovernanceHintsArgs),
+
+    /// Audit documentation and human-facing artifact governance surfaces
+    AuditDocs(ProjectAuditDocsArgs),
 }
 
 #[derive(Args)]
@@ -58,6 +67,49 @@ pub struct ProjectInitArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct ProjectApplyGovernanceHintsArgs {
+    /// Project repository/root directory to update
+    path: PathBuf,
+
+    /// Stable project key to render into newly created surfaces
+    #[arg(long)]
+    project_key: String,
+
+    /// Surface role to create. Repeat to limit scope; defaults to all missing surfaces
+    #[arg(long, value_enum)]
+    surface: Vec<ProjectGovernanceSurfaceRole>,
+
+    /// Confirm that the operator reviewed the hints and approves creating missing files
+    #[arg(long)]
+    reviewed: bool,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, ValueEnum)]
+pub enum ProjectGovernanceSurfaceRole {
+    #[value(name = "current-state")]
+    CurrentState,
+    #[value(name = "next-actions")]
+    NextActions,
+    Decisions,
+    Deliverables,
+}
+
+impl ProjectGovernanceSurfaceRole {
+    fn role(self) -> &'static str {
+        match self {
+            ProjectGovernanceSurfaceRole::CurrentState => "current_state",
+            ProjectGovernanceSurfaceRole::NextActions => "next_actions",
+            ProjectGovernanceSurfaceRole::Decisions => "decisions",
+            ProjectGovernanceSurfaceRole::Deliverables => "deliverables",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct ProjectInitOutput {
     kind: String,
@@ -80,6 +132,7 @@ struct ProjectInitArtifacts {
     module_candidates_json: String,
     module_operation_preflight_json: String,
     evidence_collector_plan_markdown: String,
+    governance_surface_hints_markdown: String,
     wiki_seed_candidates_json: String,
     ondesk_start_package_markdown: String,
     offdesk_ready_check_json: String,
@@ -93,8 +146,36 @@ struct ProjectInitSummary {
     warning_count: usize,
     operation_target_count: usize,
     module_operation_preflight_blocker_count: usize,
+    governance_surface_missing_count: usize,
     ready_for_ondesk_start: bool,
     ready_for_offdesk_runtime: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectApplyGovernanceHintsOutput {
+    kind: String,
+    version: u32,
+    generated_at: DateTime<Utc>,
+    project_key: String,
+    project_root: String,
+    reviewed: bool,
+    writes_target_project_state: bool,
+    requires_operator_review: bool,
+    planned_count: usize,
+    created_count: usize,
+    skipped_existing_count: usize,
+    operations: Vec<ProjectGovernanceSurfaceOperation>,
+    audit_command: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectGovernanceSurfaceOperation {
+    role: String,
+    path: String,
+    status: String,
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +197,7 @@ struct ProjectOperationProfile {
     module_candidates_path: String,
     module_operation_preflight_path: String,
     evidence_plan_path: String,
+    governance_surface_hints_path: String,
     wiki_seed_candidates_path: String,
     ondesk_start_package_path: String,
     offdesk_ready_check_path: String,
@@ -175,6 +257,15 @@ struct EntryPointCandidate {
     path: String,
     kind: String,
     command_hint: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct GovernanceSurfaceHint {
+    role: String,
+    recommended_path: String,
+    alternatives: Vec<String>,
+    existing_paths: Vec<String>,
+    purpose: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -332,6 +423,8 @@ struct ReadinessGate {
 pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
     match command {
         ProjectCommands::Init(args) => run_init(profile, args).await,
+        ProjectCommands::ApplyGovernanceHints(args) => run_apply_governance_hints(args),
+        ProjectCommands::AuditDocs(args) => run_audit_docs(args),
     }
 }
 
@@ -415,6 +508,11 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         &project_scan,
         &module_report,
     );
+    let governance_hints = governance_surface_hints(&project_root);
+    let governance_surface_missing_count = governance_hints
+        .iter()
+        .filter(|hint| hint.existing_paths.is_empty())
+        .count();
     let profile_record = ProjectOperationProfile {
         kind: "forager_project_operation_profile".to_string(),
         version: 1,
@@ -437,6 +535,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
             first_reads: vec![
                 PROFILE_FILE.to_string(),
                 ONDESK_PACKAGE_FILE.to_string(),
+                GOVERNANCE_HINTS_FILE.to_string(),
                 EVIDENCE_PLAN_FILE.to_string(),
                 MODULE_CANDIDATES_FILE.to_string(),
                 MODULE_PREFLIGHT_FILE.to_string(),
@@ -464,6 +563,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         module_candidates_path: artifacts.module_candidates_json.clone(),
         module_operation_preflight_path: artifacts.module_operation_preflight_json.clone(),
         evidence_plan_path: artifacts.evidence_collector_plan_markdown.clone(),
+        governance_surface_hints_path: artifacts.governance_surface_hints_markdown.clone(),
         wiki_seed_candidates_path: artifacts.wiki_seed_candidates_json.clone(),
         ondesk_start_package_path: artifacts.ondesk_start_package_markdown.clone(),
         offdesk_ready_check_path: artifacts.offdesk_ready_check_json.clone(),
@@ -492,6 +592,15 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         &render_evidence_plan(&profile_record, &module_report),
     )?;
     write_text(
+        Path::new(&artifacts.governance_surface_hints_markdown),
+        &render_governance_surface_hints(
+            generated_at,
+            &project_key,
+            &project_root,
+            &governance_hints,
+        ),
+    )?;
+    write_text(
         Path::new(&artifacts.ondesk_start_package_markdown),
         &render_ondesk_start_package(&profile_record, &module_report, &ready_check),
     )?;
@@ -517,6 +626,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
             warning_count: warnings.len(),
             operation_target_count,
             module_operation_preflight_blocker_count: module_operation_preflight.blockers.len(),
+            governance_surface_missing_count,
             ready_for_ondesk_start: ready_check.ready_for_ondesk_start,
             ready_for_offdesk_runtime: ready_check.ready_for_offdesk_runtime,
         },
@@ -526,6 +636,107 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         print_project_init_output(&output);
+    }
+
+    Ok(())
+}
+
+fn run_apply_governance_hints(args: ProjectApplyGovernanceHintsArgs) -> Result<()> {
+    let project_key = sanitize_required("project key", &args.project_key)?;
+    let project_root = args
+        .path
+        .expanduser()
+        .canonicalize()
+        .with_context(|| format!("resolve project path {}", args.path.display()))?;
+    if !project_root.is_dir() {
+        bail!(
+            "project path is not a directory: {}",
+            project_root.display()
+        );
+    }
+
+    let generated_at = Utc::now();
+    let selected_roles: BTreeSet<String> = args
+        .surface
+        .iter()
+        .map(|role| role.role().to_string())
+        .collect();
+    let selected_all = selected_roles.is_empty();
+    let hints = governance_surface_hints(&project_root);
+    let mut operations = Vec::new();
+    let mut planned_count = 0usize;
+    let mut created_count = 0usize;
+    let mut skipped_existing_count = 0usize;
+
+    for hint in hints {
+        if !selected_all && !selected_roles.contains(&hint.role) {
+            continue;
+        }
+
+        if let Some(existing) = hint.existing_paths.first() {
+            skipped_existing_count += 1;
+            operations.push(ProjectGovernanceSurfaceOperation {
+                role: hint.role,
+                path: existing.clone(),
+                status: "skipped_existing".to_string(),
+                reason: "A governance surface for this role already exists; existing files are never overwritten.".to_string(),
+                content_preview: None,
+            });
+            continue;
+        }
+
+        planned_count += 1;
+        let content = governance_template(
+            &hint.role,
+            &hint.recommended_path,
+            &project_key,
+            generated_at,
+        );
+        let path = project_root.join(&hint.recommended_path);
+        let status = if args.reviewed {
+            write_new_text(&path, &content)?;
+            created_count += 1;
+            "created"
+        } else {
+            "planned_create"
+        };
+        operations.push(ProjectGovernanceSurfaceOperation {
+            role: hint.role,
+            path: hint.recommended_path,
+            status: status.to_string(),
+            reason: if args.reviewed {
+                "Operator reviewed the hints and approved creating this missing surface.".to_string()
+            } else {
+                "Dry run only. Re-run with --reviewed after operator approval to create this missing surface.".to_string()
+            },
+            content_preview: Some(markdown_preview(&content, 12)),
+        });
+    }
+
+    let audit_command = format!(
+        "forager project audit-docs {} --audit-profile standard --json",
+        shell_arg(&safe_path(&project_root))
+    );
+    let output = ProjectApplyGovernanceHintsOutput {
+        kind: "forager_project_governance_hints_application".to_string(),
+        version: 1,
+        generated_at,
+        project_key,
+        project_root: safe_path(&project_root),
+        reviewed: args.reviewed,
+        writes_target_project_state: args.reviewed && created_count > 0,
+        requires_operator_review: !args.reviewed,
+        planned_count,
+        created_count,
+        skipped_existing_count,
+        operations,
+        audit_command,
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_project_apply_governance_hints_output(&output);
     }
 
     Ok(())
@@ -567,6 +778,7 @@ fn artifact_paths(artifact_dir: &Path) -> ProjectInitArtifacts {
         module_candidates_json: safe_path(&artifact_dir.join(MODULE_CANDIDATES_FILE)),
         module_operation_preflight_json: safe_path(&artifact_dir.join(MODULE_PREFLIGHT_FILE)),
         evidence_collector_plan_markdown: safe_path(&artifact_dir.join(EVIDENCE_PLAN_FILE)),
+        governance_surface_hints_markdown: safe_path(&artifact_dir.join(GOVERNANCE_HINTS_FILE)),
         wiki_seed_candidates_json: safe_path(&artifact_dir.join(WIKI_SEEDS_FILE)),
         ondesk_start_package_markdown: safe_path(&artifact_dir.join(ONDESK_PACKAGE_FILE)),
         offdesk_ready_check_json: safe_path(&artifact_dir.join(OFFDESK_READY_FILE)),
@@ -614,6 +826,48 @@ fn collect_artifact_roots(root: &Path) -> Vec<PathSignal> {
     .into_iter()
     .map(|(path, kind)| path_signal(root, path, kind))
     .collect()
+}
+
+fn governance_surface_hints(root: &Path) -> Vec<GovernanceSurfaceHint> {
+    vec![
+        GovernanceSurfaceHint {
+            role: "current_state".to_string(),
+            recommended_path: "PROJECT_STATE.md".to_string(),
+            alternatives: vec!["CURRENT_STATE.md".to_string()],
+            existing_paths: existing_root_paths(root, &["PROJECT_STATE.md", "CURRENT_STATE.md"]),
+            purpose: "Small current surface: what is true enough to act on now.".to_string(),
+        },
+        GovernanceSurfaceHint {
+            role: "next_actions".to_string(),
+            recommended_path: "NEXT_ACTIONS.md".to_string(),
+            alternatives: Vec::new(),
+            existing_paths: existing_root_paths(root, &["NEXT_ACTIONS.md"]),
+            purpose: "Bounded work queue, blockers, and handoff-ready steps.".to_string(),
+        },
+        GovernanceSurfaceHint {
+            role: "decisions".to_string(),
+            recommended_path: "DECISIONS.md".to_string(),
+            alternatives: Vec::new(),
+            existing_paths: existing_root_paths(root, &["DECISIONS.md"]),
+            purpose: "Durable choices with rationale, source, and operational effect.".to_string(),
+        },
+        GovernanceSurfaceHint {
+            role: "deliverables".to_string(),
+            recommended_path: "DELIVERABLES.md".to_string(),
+            alternatives: Vec::new(),
+            existing_paths: existing_root_paths(root, &["DELIVERABLES.md"]),
+            purpose: "Human-facing outputs selected for inspection, handoff, or sharing."
+                .to_string(),
+        },
+    ]
+}
+
+fn existing_root_paths(root: &Path, candidates: &[&str]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|path| root.join(path).exists())
+        .map(|path| (*path).to_string())
+        .collect()
 }
 
 fn path_signal(root: &Path, rel: &str, kind: &str) -> PathSignal {
@@ -1402,6 +1656,108 @@ fn render_evidence_plan(
     output
 }
 
+fn render_governance_surface_hints(
+    generated_at: DateTime<Utc>,
+    project_key: &str,
+    project_root: &Path,
+    hints: &[GovernanceSurfaceHint],
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Governance Surface Hints\n\n");
+    output.push_str(
+        "This packet is read-only guidance. It does not write templates into the target project.\n\n",
+    );
+    output.push_str(&format!("- project_key: `{}`\n", project_key));
+    output.push_str(&format!("- project_root: `{}`\n", safe_path(project_root)));
+    output.push_str(&format!("- generated_at: `{}`\n\n", generated_at));
+    output.push_str("## Surface Status\n\n");
+    output.push_str("| Role | Status | Recommended path | Existing path(s) | Purpose |\n");
+    output.push_str("| --- | --- | --- | --- | --- |\n");
+    for hint in hints {
+        let status = if hint.existing_paths.is_empty() {
+            "missing"
+        } else {
+            "present"
+        };
+        let existing = if hint.existing_paths.is_empty() {
+            "-".to_string()
+        } else {
+            hint.existing_paths
+                .iter()
+                .map(|path| format!("`{path}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        output.push_str(&format!(
+            "| `{}` | `{}` | `{}` | {} | {} |\n",
+            hint.role, status, hint.recommended_path, existing, hint.purpose
+        ));
+    }
+
+    output.push_str("\n## Suggested First Step\n\n");
+    output.push_str(
+        "Create or refresh only the surfaces that are missing or stale. Keep these files compact and link out to raw logs, run folders, and generated outputs.\n\n",
+    );
+    output.push_str("After adding or updating surfaces, run:\n\n");
+    output.push_str("```bash\n");
+    output.push_str(&format!(
+        "forager project audit-docs {} --audit-profile standard --json\n",
+        shell_arg(&safe_path(project_root))
+    ));
+    output.push_str("```\n\n");
+
+    output.push_str("## Template Sketches\n\n");
+    for hint in hints {
+        output.push_str(&format!("### `{}`\n\n", hint.recommended_path));
+        if !hint.alternatives.is_empty() {
+            output.push_str(&format!(
+                "Alternative path(s): {}.\n\n",
+                hint.alternatives
+                    .iter()
+                    .map(|path| format!("`{path}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        output.push_str("```markdown\n");
+        output.push_str(&governance_template(
+            &hint.role,
+            &hint.recommended_path,
+            project_key,
+            generated_at,
+        ));
+        output.push_str("```\n\n");
+    }
+    output
+}
+
+fn governance_template(
+    role: &str,
+    recommended_path: &str,
+    project_key: &str,
+    generated_at: DateTime<Utc>,
+) -> String {
+    let updated = generated_at.format("%Y-%m-%d").to_string();
+    match role {
+        "current_state" => format!(
+            "# Project State\n\nUpdated: {updated}\n\nThis is the small current surface for `{project_key}`.\n\n## Current Focus\n\n- ...\n\n## First Reads\n\n- `AGENTS.md`\n- `README.md`\n\n## Current Gaps\n\n- ...\n\n## Next Work Candidates\n\n1. ...\n\n## Refresh Rule\n\nRefresh this file when the active focus, accepted decision, or next safe action changes.\n"
+        ),
+        "next_actions" => format!(
+            "# Next Actions\n\nUpdated: {updated}\n\n## Active Queue\n\n1. ...\n\n## Blockers\n\n- ...\n\n## Done Recently\n\n- ...\n"
+        ),
+        "decisions" => format!(
+            "# Decisions\n\nUpdated: {updated}\n\n| Decision | Status | Source | Operational effect |\n| --- | --- | --- | --- |\n| Add first reviewed decision here. | candidate | source reference | operational effect |\n\n## Refresh Rule\n\nUpdate this file when a decision changes authority, workflow, safety, or delivery semantics.\n"
+        ),
+        "deliverables" => format!(
+            "# Deliverables\n\nUpdated: {updated}\n\nThis is the compact inspection surface for `{project_key}` outputs.\n\n## Human-Facing Outputs\n\nAdd selected output paths here after review, with one sentence explaining why a human should inspect each.\n\n## Local Build Outputs\n\nList local validation artifacts only when they actually exist and are useful for inspection.\n\n## Promotion Rule\n\nAdd a path here when it is useful for inspection, handoff, release review, or external sharing.\n"
+        ),
+        _ => format!(
+            "# {}\n\nUpdated: {updated}\n\nAdd compact, current content for `{project_key}`.\n",
+            recommended_path.trim_end_matches(".md")
+        ),
+    }
+}
+
 fn render_ondesk_start_package(
     profile: &ProjectOperationProfile,
     modules: &ModuleCandidateReport,
@@ -1459,9 +1815,37 @@ fn print_project_init_output(output: &ProjectInitOutput) {
         output.summary.ready_for_offdesk_runtime, output.requires_operator_review
     );
     println!(
+        "  governance:  {} missing suggested surface(s)",
+        output.summary.governance_surface_missing_count
+    );
+    println!(
         "  start:       {}",
         output.artifacts.ondesk_start_package_markdown
     );
+}
+
+fn print_project_apply_governance_hints_output(output: &ProjectApplyGovernanceHintsOutput) {
+    println!("Project governance surface application");
+    println!("  project_key: {}", output.project_key);
+    println!("  project:     {}", output.project_root);
+    println!(
+        "  mode:        {}",
+        if output.reviewed {
+            "reviewed-apply"
+        } else {
+            "dry-run"
+        }
+    );
+    println!("  planned:     {}", output.planned_count);
+    println!("  created:     {}", output.created_count);
+    println!("  skipped:     {}", output.skipped_existing_count);
+    for operation in &output.operations {
+        println!(
+            "  - {} {} ({})",
+            operation.status, operation.path, operation.role
+        );
+    }
+    println!("  audit:       {}", output.audit_command);
 }
 
 fn git_snapshot(root: &Path) -> GitSnapshot {
@@ -1510,6 +1894,19 @@ fn write_text(path: &Path, content: &str) -> Result<()> {
     fs::write(path, content).with_context(|| format!("write {}", path.display()))
 }
 
+fn write_new_text(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| format!("create {}", path.display()))?;
+    file.write_all(content.as_bytes())
+        .with_context(|| format!("write {}", path.display()))
+}
+
 fn has_any_entry(path: &Path) -> Result<bool> {
     if !path.exists() {
         return Ok(false);
@@ -1527,6 +1924,15 @@ fn sanitize_required(label: &str, value: &str) -> Result<String> {
 
 fn safe_path(path: &Path) -> String {
     operator_safe_text(path.to_string_lossy().as_ref())
+}
+
+fn markdown_preview(content: &str, max_lines: usize) -> String {
+    let lines = content.lines().take(max_lines).collect::<Vec<_>>();
+    let mut preview = lines.join("\n");
+    if content.lines().count() > max_lines {
+        preview.push_str("\n...");
+    }
+    preview
 }
 
 fn shell_arg(value: &str) -> String {

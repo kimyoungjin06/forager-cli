@@ -7,7 +7,9 @@ In the full operation cycle, initialization is the first bounded artifact. It
 replaces "look around the repo again from scratch" with a durable first-read
 packet that later Ondesk prompt packages and Offdesk preflight checks can
 reference. See the [Operation Cycle Guide](operation-cycle.md) for the complete
-handoff path.
+handoff path and
+[`Documentation And Artifact Governance`](documentation-artifact-governance.md)
+for the long-running documentation and artifact model.
 
 ```bash
 forager project init /path/to/project \
@@ -27,6 +29,7 @@ project_initializations/<timestamp>_<project-key>/
   MODULE_CANDIDATES.json
   MODULE_OPERATION_PREFLIGHT.json
   EVIDENCE_COLLECTOR_PLAN.md
+  GOVERNANCE_SURFACE_HINTS.md
   WIKI_SEED_CANDIDATES.json
   ONDESK_START_PACKAGE.md
   OFFDESK_READY_CHECK.json
@@ -100,6 +103,26 @@ separate repository or standalone product/research unit.
 collector contract. It says what the collector should read, not what the
 project has proven.
 
+`GOVERNANCE_SURFACE_HINTS.md` checks whether the target project already has
+compact current-state, next-action, decision, and deliverables surfaces. It
+includes copy-ready template sketches, but it remains a packet artifact; it
+does not write files into the target project.
+
+After reviewing the hints, an operator may apply the missing template surfaces
+with an explicit reviewed workflow:
+
+```bash
+forager project apply-governance-hints /path/to/project \
+  --project-key my-project \
+  --reviewed
+```
+
+Without `--reviewed`, the command is a dry run and writes nothing. With
+`--reviewed`, it creates only missing governance surface files and never
+overwrites existing files. Use `--surface current-state`, `--surface
+next-actions`, `--surface decisions`, or `--surface deliverables` to limit the
+scope.
+
 `WIKI_SEED_CANDIDATES.json` contains candidate-only wiki seeds. They should be
 reviewed before promotion.
 
@@ -118,18 +141,24 @@ runtime blocked until operator review selects a scoped operation.
 ## Recommended Flow
 
 1. Run `forager project init`.
-2. Read `PROJECT_ONBOARDING.md` and `OFFDESK_READY_CHECK.json`.
-3. Review module candidates and decide which ones need a module operation
+2. Read `PROJECT_ONBOARDING.md`, `GOVERNANCE_SURFACE_HINTS.md`, and
+   `OFFDESK_READY_CHECK.json`.
+3. Apply missing governance surfaces only after operator review, for example
+   `forager project apply-governance-hints /path/to/project --project-key <project> --reviewed`.
+4. Manually refresh existing or stale governance surfaces when needed.
+5. Run `forager project audit-docs /path/to/project --audit-profile standard`
+   or `--audit-profile research-longrun` for long-running research projects.
+6. Review module candidates and decide which ones need a module operation
    profile.
-4. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
+7. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
    module-profile and evidence preflight commands where available.
-5. Turn the evidence collector plan into a project-specific deterministic
+8. Turn the evidence collector plan into a project-specific deterministic
    bundle builder.
-6. Promote only reviewed wiki seeds.
-7. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-8. Prepare Offdesk with a matching module operation preflight artifact, for
+9. Promote only reviewed wiki seeds.
+10. Start Ondesk from `ONDESK_START_PACKAGE.md`.
+11. Prepare Offdesk with a matching module operation preflight artifact, for
    example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
-9. Enqueue Offdesk only after runtime capability, evidence, and closeout
+12. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.
 
 ## Operator Interpretation
@@ -143,5 +172,10 @@ Treat the packet as a scope map, not as a green light:
 - `MODULE_OPERATION_PREFLIGHT.json` should be referenced by later prepare
   scripts, but it should not be copied wholesale into model prompts or operator
   output.
+- `GOVERNANCE_SURFACE_HINTS.md` can seed missing docs, but the initialization
+  command itself remains read-only with respect to the target project.
+- `forager project apply-governance-hints` is the reviewed bridge from packet
+  hints to target project files. It creates missing surfaces only and leaves
+  existing files for manual refresh.
 - A selected module target narrows operating context; it does not change the
   canonical project key or grant permission to mutate files.

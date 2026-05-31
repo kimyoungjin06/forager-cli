@@ -103,6 +103,7 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
         "module_candidates_json",
         "module_operation_preflight_json",
         "evidence_collector_plan_markdown",
+        "governance_surface_hints_markdown",
         "wiki_seed_candidates_json",
         "ondesk_start_package_markdown",
         "offdesk_ready_check_json",
@@ -139,9 +140,18 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
         .unwrap()
         .iter()
         .any(|item| item == "MODULE_OPERATION_PREFLIGHT.json"));
+    assert!(profile["ondesk_bridge"]["first_reads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item == "GOVERNANCE_SURFACE_HINTS.md"));
     assert_eq!(
         profile["module_operation_preflight_path"],
         artifacts["module_operation_preflight_json"]
+    );
+    assert_eq!(
+        profile["governance_surface_hints_path"],
+        artifacts["governance_surface_hints_markdown"]
     );
     assert!(profile["agent_modes"]
         .as_array()
@@ -214,6 +224,19 @@ fn project_init_writes_read_only_initialization_packet() -> Result<()> {
         .unwrap()
         .iter()
         .any(|item| item == "operation_targets_require_module_profile_review"));
+    assert_eq!(json["summary"]["governance_surface_missing_count"], 4);
+
+    let governance_hints = fs::read_to_string(
+        artifacts["governance_surface_hints_markdown"]
+            .as_str()
+            .expect("governance hints path"),
+    )?;
+    assert!(governance_hints.contains("Governance Surface Hints"));
+    assert!(governance_hints.contains("`PROJECT_STATE.md`"));
+    assert!(governance_hints.contains("`NEXT_ACTIONS.md`"));
+    assert!(governance_hints.contains("`DECISIONS.md`"));
+    assert!(governance_hints.contains("`DELIVERABLES.md`"));
+    assert!(governance_hints.contains("forager project audit-docs"));
 
     let start_package = fs::read_to_string(
         artifacts["ondesk_start_package_markdown"]
@@ -255,6 +278,168 @@ fn project_init_rejects_unknown_operation_target() -> Result<()> {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("operation target not found"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_apply_governance_hints_dry_run_does_not_write_surfaces() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "apply-governance-hints",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["kind"], "forager_project_governance_hints_application");
+    assert_eq!(json["reviewed"], false);
+    assert_eq!(json["writes_target_project_state"], false);
+    assert_eq!(json["requires_operator_review"], true);
+    assert_eq!(json["planned_count"], 4);
+    assert_eq!(json["created_count"], 0);
+    assert_eq!(json["skipped_existing_count"], 0);
+    assert!(json["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|operation| operation["status"] == "planned_create"));
+    for path in [
+        "PROJECT_STATE.md",
+        "NEXT_ACTIONS.md",
+        "DECISIONS.md",
+        "DELIVERABLES.md",
+    ] {
+        assert!(!repo.join(path).exists(), "dry-run wrote {path}");
+    }
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_apply_governance_hints_reviewed_creates_missing_surfaces() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "apply-governance-hints",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--reviewed",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["reviewed"], true);
+    assert_eq!(json["writes_target_project_state"], true);
+    assert_eq!(json["requires_operator_review"], false);
+    assert_eq!(json["planned_count"], 4);
+    assert_eq!(json["created_count"], 4);
+    assert_eq!(json["skipped_existing_count"], 0);
+    assert!(json["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|operation| operation["status"] == "created"));
+    for path in [
+        "PROJECT_STATE.md",
+        "NEXT_ACTIONS.md",
+        "DECISIONS.md",
+        "DELIVERABLES.md",
+    ] {
+        assert!(repo.join(path).exists(), "missing created {path}");
+    }
+
+    let audit = forager_command(temp.path())
+        .args([
+            "project",
+            "audit-docs",
+            repo.to_str().expect("utf-8 repo path"),
+            "--audit-profile",
+            "standard",
+            "--current-stale-days",
+            "36500",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        audit.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&audit.stdout),
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit_json: Value = serde_json::from_slice(&audit.stdout)?;
+    assert_eq!(audit_json["findings"].as_array().unwrap().len(), 0);
+    assert_eq!(audit_json["recommendations"].as_array().unwrap().len(), 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_apply_governance_hints_reviewed_never_overwrites_existing_surface() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    write_file(
+        repo.join("PROJECT_STATE.md").as_path(),
+        "# Project State\n\nsentinel-current-state\n",
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "apply-governance-hints",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--reviewed",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["planned_count"], 3);
+    assert_eq!(json["created_count"], 3);
+    assert_eq!(json["skipped_existing_count"], 1);
+    assert!(json["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|operation| operation["role"] == "current_state"
+            && operation["status"] == "skipped_existing"
+            && operation["path"] == "PROJECT_STATE.md"));
+    assert!(fs::read_to_string(repo.join("PROJECT_STATE.md"))?.contains("sentinel-current-state"));
     Ok(())
 }
 
@@ -368,5 +553,283 @@ fn project_init_refuses_non_empty_output_without_force() -> Result<()> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("output directory is not empty"));
     assert!(out_dir.join("existing.txt").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_audit_docs_accepts_clean_governance_surfaces() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_file(
+        repo.join("README.md").as_path(),
+        "# Synthetic Project\n\nStart with `PROJECT_STATE.md`.\n",
+    )?;
+    write_file(
+        repo.join("AGENTS.md").as_path(),
+        "First read `PROJECT_STATE.md`, `NEXT_ACTIONS.md`, `DECISIONS.md`, and `DELIVERABLES.md`.\n",
+    )?;
+    write_file(
+        repo.join("PROJECT_STATE.md").as_path(),
+        "# Project State\n\nUpdated: 2026-05-30\n",
+    )?;
+    write_file(repo.join("NEXT_ACTIONS.md").as_path(), "# Next Actions\n")?;
+    write_file(
+        repo.join("DECISIONS.md").as_path(),
+        "# Decisions\n\n- Source: `PROJECT_STATE.md`\n",
+    )?;
+    write_file(
+        repo.join("outputs/report.html").as_path(),
+        "<h1>Report</h1>\n",
+    )?;
+    write_file(
+        repo.join("DELIVERABLES.md").as_path(),
+        "# Deliverables\n\n- `outputs/report.html`: inspection report.\n",
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "audit-docs",
+            repo.to_str().expect("utf-8 repo path"),
+            "--audit-profile",
+            "research-longrun",
+            "--current-stale-days",
+            "36500",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["schema"], "documentation_governance_audit_v1");
+    assert_eq!(json["profile"], "research-longrun");
+    assert_eq!(json["findings"].as_array().unwrap().len(), 0);
+    assert_eq!(json["recommendations"].as_array().unwrap().len(), 0);
+    assert_eq!(json["summary"]["surfaces"]["current_present"], true);
+    assert_eq!(json["summary"]["deliverables"]["output_candidates"], 1);
+    assert_eq!(
+        json["summary"]["deliverables"]["referenced_human_outputs"],
+        1
+    );
+    assert_eq!(
+        json["summary"]["deliverables"]["unreferenced_human_outputs"],
+        0
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_audit_docs_rejects_missing_deliverable_path() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_file(
+        repo.join("README.md").as_path(),
+        "# Synthetic Project\n\nStart with `PROJECT_STATE.md`.\n",
+    )?;
+    write_file(
+        repo.join("PROJECT_STATE.md").as_path(),
+        "# Project State\n\nUpdated: 2026-05-30\n",
+    )?;
+    write_file(repo.join("DECISIONS.md").as_path(), "# Decisions\n")?;
+    write_file(
+        repo.join("DELIVERABLES.md").as_path(),
+        "# Deliverables\n\n- `outputs/missing.html`: missing report.\n",
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "audit-docs",
+            repo.to_str().expect("utf-8 repo path"),
+            "--audit-profile",
+            "standard",
+            "--current-stale-days",
+            "36500",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert!(json["findings"].as_array().unwrap().iter().any(|finding| {
+        finding["severity"] == "error" && finding["code"] == "missing_deliverable_path"
+    }));
+    assert!(json["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|recommendation| recommendation["kind"] == "repair_deliverables_surface"));
+    assert_eq!(
+        json["summary"]["deliverables"]["missing_paths"][0],
+        "outputs/missing.html"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("documentation governance audit found error findings"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_audit_docs_recommends_focused_output_review() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_file(
+        repo.join("README.md").as_path(),
+        "# Synthetic Project\n\nStart with `PROJECT_STATE.md`.\n",
+    )?;
+    write_file(
+        repo.join("PROJECT_STATE.md").as_path(),
+        "# Project State\n\nUpdated: 2026-05-30\n",
+    )?;
+    write_file(repo.join("DECISIONS.md").as_path(), "# Decisions\n")?;
+    write_file(
+        repo.join("DELIVERABLES.md").as_path(),
+        "# Deliverables\n\n- `README.md`: source overview.\n",
+    )?;
+    for index in 0..7 {
+        write_file(
+            repo.join(format!("outputs/report-{index}.html")).as_path(),
+            &"x".repeat((index + 1) * 10),
+        )?;
+    }
+    let markdown_path = temp.path().join("audit.md");
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "audit-docs",
+            repo.to_str().expect("utf-8 repo path"),
+            "--audit-profile",
+            "standard",
+            "--current-stale-days",
+            "36500",
+            "--md-out",
+            markdown_path.to_str().expect("utf-8 markdown path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["summary"]["deliverables"]["unreferenced_human_outputs"],
+        7
+    );
+    let recommendation = json["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|recommendation| recommendation["kind"] == "review_human_output_candidates")
+        .expect("focused output review recommendation");
+    assert_eq!(recommendation["priority"], "normal");
+    assert!(recommendation["suggested_action"]
+        .as_str()
+        .unwrap()
+        .contains("RETENTION_REVIEW.md"));
+    let paths = recommendation["paths"].as_array().unwrap();
+    assert_eq!(paths.len(), 5);
+    assert_eq!(paths[0], "outputs/report-6.html");
+    assert_eq!(paths[4], "outputs/report-2.html");
+
+    let markdown = fs::read_to_string(markdown_path)?;
+    assert!(markdown.contains("Recommendations"));
+    assert!(markdown.contains("review_human_output_candidates"));
+    assert!(markdown.contains("RETENTION_REVIEW.md"));
+    assert!(markdown.contains("For the full machine-readable summary"));
+    assert!(!markdown.contains("Machine Summary"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_audit_docs_recommends_adaptive_wiki_projection_export() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_file(
+        repo.join("README.md").as_path(),
+        "# Synthetic Project\n\nStart with `PROJECT_STATE.md`.\n",
+    )?;
+    write_file(
+        repo.join("AGENTS.md").as_path(),
+        "First read `PROJECT_STATE.md`, `NEXT_ACTIONS.md`, `DECISIONS.md`, and `DELIVERABLES.md`.\n",
+    )?;
+    write_file(
+        repo.join("PROJECT_STATE.md").as_path(),
+        "# Project State\n\nUpdated: 2026-05-30\n",
+    )?;
+    write_file(repo.join("NEXT_ACTIONS.md").as_path(), "# Next Actions\n")?;
+    write_file(repo.join("DECISIONS.md").as_path(), "# Decisions\n")?;
+    write_file(repo.join("DELIVERABLES.md").as_path(), "# Deliverables\n")?;
+
+    let adaptive_profile = temp
+        .path()
+        .join(".config")
+        .join("forager")
+        .join("profiles")
+        .join("demo");
+    write_file(
+        adaptive_profile
+            .join("adaptive_wiki_entries.json")
+            .as_path(),
+        r#"{"version":"2026-05-14.v0","entries":[]}"#,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "audit-docs",
+            repo.to_str().expect("utf-8 repo path"),
+            "--audit-profile",
+            "standard",
+            "--adaptive-profile-dir",
+            adaptive_profile.to_str().expect("utf-8 profile path"),
+            "--current-stale-days",
+            "36500",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["summary"]["adaptive_wiki"]["projection_state"],
+        "missing"
+    );
+    assert!(json["findings"].as_array().unwrap().iter().any(|finding| {
+        finding["severity"] == "warn" && finding["code"] == "missing_adaptive_wiki_projection"
+    }));
+    let recommendation = json["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|recommendation| recommendation["kind"] == "reexport_adaptive_wiki_projection")
+        .expect("adaptive wiki projection recommendation");
+    assert_eq!(recommendation["priority"], "normal");
+    assert_eq!(
+        recommendation["command"],
+        "forager -p demo offdesk wiki export-markdown"
+    );
     Ok(())
 }

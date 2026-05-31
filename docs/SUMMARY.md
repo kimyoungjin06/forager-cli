@@ -12,6 +12,7 @@
 - [Workflow](guides/workflow.md)
 - [Operation Cycle](guides/operation-cycle.md)
 - [Project Initialization](guides/project-initialization.md)
+- [Documentation And Artifact Governance](guides/documentation-artifact-governance.md)
 - [Ondesk Handoff](guides/ondesk-handoff.md)
 - [TwinPaper Offdesk Runtime Smoke](guides/twinpaper-offdesk-runtime-smoke.md)
 - [TwinPaper Offdesk Long-Run Validation](guides/twinpaper-offdesk-long-run-validation.md)

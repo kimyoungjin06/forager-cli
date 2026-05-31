@@ -4,6 +4,8 @@
 
 ## Project Structure & Module Organization
 
+- `PROJECT_STATE.md`: current development focus and next documentation/harness
+  work surface. Read this before deep status documents.
 - `src/bin/forager.rs`: primary binary entrypoint.
 - `src/bin/aoe.rs`: legacy compatibility binary entrypoint.
 - `src/entrypoint.rs`: shared CLI/TUI entrypoint logic.
