@@ -11,6 +11,7 @@ pub mod offdesk;
 pub mod ondesk;
 pub mod profile;
 pub mod project;
+pub mod project_audit;
 pub mod remove;
 pub mod session;
 pub mod sounds;

@@ -1461,6 +1461,94 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
 
 #[test]
 #[serial]
+fn offdesk_wiki_export_markdown_defaults_to_profile_vault_and_reports_stale_state() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("adaptive_wiki_entries.json"),
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [
+                {
+                    "id": "wiki_export_default",
+                    "kind": "procedure",
+                    "scope": "project",
+                    "scope_ref": "project",
+                    "status": "promoted",
+                    "activation_mode": "context_only",
+                    "claim": "Default vault export is inspectable",
+                    "ai_instruction": "Use the default vault for human projection checks.",
+                    "human_summary": "Default vault export note",
+                    "evidence_refs": ["task:export"],
+                    "confidence": "explicit",
+                    "created_at": now,
+                    "updated_at": now
+                }
+            ]
+        }))?,
+    )?;
+
+    let dry_run_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "export-markdown", "--dry-run", "--json"])
+        .output()?;
+    assert!(
+        dry_run_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&dry_run_output.stdout),
+        String::from_utf8_lossy(&dry_run_output.stderr)
+    );
+    let dry_run: serde_json::Value = serde_json::from_slice(&dry_run_output.stdout)?;
+    assert_eq!(
+        reported_path(&dry_run["output_dir"]),
+        expected_path(&profile_dir.join("wiki-vault"))
+    );
+    assert_eq!(dry_run["projection_status"]["state"], "missing");
+    assert_eq!(dry_run["projection_status"]["reexport_recommended"], true);
+    assert!(!profile_dir.join("wiki-vault/index.md").exists());
+
+    let export_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "export-markdown", "--json"])
+        .output()?;
+    assert!(
+        export_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&export_output.stdout),
+        String::from_utf8_lossy(&export_output.stderr)
+    );
+    let export: serde_json::Value = serde_json::from_slice(&export_output.stdout)?;
+    assert_eq!(export["projection_status"]["state"], "fresh");
+    assert_eq!(export["projection_status"]["reexport_recommended"], false);
+    assert!(profile_dir.join("wiki-vault/index.md").exists());
+
+    thread::sleep(StdDuration::from_millis(1100));
+    fs::write(
+        profile_dir.join("adaptive_wiki_candidates.json"),
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "candidates": []
+        }))?,
+    )?;
+
+    let stale_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "export-markdown", "--dry-run", "--json"])
+        .output()?;
+    assert!(
+        stale_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&stale_output.stdout),
+        String::from_utf8_lossy(&stale_output.stderr)
+    );
+    let stale: serde_json::Value = serde_json::from_slice(&stale_output.stdout)?;
+    assert_eq!(stale["projection_status"]["state"], "stale");
+    assert_eq!(stale["projection_status"]["reexport_recommended"], true);
+    assert_eq!(stale["summary"]["files_written"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_wiki_episode_trace_links_task_usage_candidate_and_audit_evidence() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -4983,6 +5071,16 @@ fn forager_doctor_reports_new_primary_paths_without_creating_storage() -> Result
     assert!(output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["profile"]["active"], "default");
+    assert_eq!(report["profile"]["dir_source"], "new_primary");
+    assert_eq!(
+        reported_path(&report["profile"]["dir"]),
+        expected_path(&app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(
+        reported_path(&report["profile"]["primary_dir"]),
+        expected_path(&app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(report["profile"]["primary_exists"], false);
     assert_eq!(report["global_data"]["active_source"], "new_primary");
     assert_eq!(
         reported_path(&report["global_data"]["primary_path"]),
@@ -5018,6 +5116,17 @@ fn forager_doctor_reports_legacy_storage_and_repo_config() -> Result<()> {
 
     assert!(output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["profile"]["active"], "default");
+    assert_eq!(report["profile"]["dir_source"], "legacy");
+    assert_eq!(
+        reported_path(&report["profile"]["dir"]),
+        expected_path(&legacy_app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(
+        reported_path(&report["profile"]["primary_dir"]),
+        expected_path(&app_dir(home.path()).join("profiles").join("default"))
+    );
+    assert_eq!(report["profile"]["primary_exists"], false);
     assert_eq!(report["global_data"]["active_source"], "legacy");
     assert_eq!(
         reported_path(&report["global_data"]["active_path"]),
@@ -5053,6 +5162,7 @@ fn forager_doctor_reports_profile_env_precedence() -> Result<()> {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["profile"]["active"], "new-name");
     assert_eq!(report["profile"]["source"], "--profile/FORAGER_PROFILE");
+    assert_eq!(report["profile"]["dir_source"], "new_primary");
     assert_eq!(report["env"]["forager_profile_set"], true);
     assert_eq!(report["env"]["legacy_profile_set"], true);
     Ok(())
@@ -7624,12 +7734,59 @@ fn status_json_includes_offdesk_counts() -> Result<()> {
         .output()?;
     assert!(status_output.status.success());
     let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["profile"], "default");
+    assert_eq!(status["profile_dir_source"], "primary");
+    assert_eq!(
+        reported_path(&status["profile_dir"]),
+        expected_path(&profile_dir(temp.path()))
+    );
+    assert_eq!(
+        reported_path(&status["app_dir"]),
+        expected_path(&app_dir(temp.path()))
+    );
+    assert_eq!(status["app_dir_source"], "primary");
+    assert_eq!(
+        reported_path(&status["primary_app_dir"]),
+        expected_path(&app_dir(temp.path()))
+    );
+    assert_eq!(status["primary_app_dir_exists"], true);
     assert_eq!(status["queued_offdesk_tasks"], 1);
     assert_eq!(status["pending_approvals"], 0);
     assert_eq!(status["failed_offdesk_tasks"], 0);
     assert_eq!(status["resume_pending_offdesk_tasks"], 0);
     assert_eq!(status["cancelled_offdesk_tasks"], 0);
     assert_eq!(status["closeout_required_offdesk_tasks"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
+    let temp = tempdir()?;
+    fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["profile"], "default");
+    assert_eq!(status["profile_dir_source"], "legacy");
+    assert_eq!(
+        reported_path(&status["profile_dir"]),
+        expected_path(&legacy_app_dir(temp.path()).join("profiles").join("default"))
+    );
+    assert_eq!(
+        reported_path(&status["app_dir"]),
+        expected_path(&legacy_app_dir(temp.path()))
+    );
+    assert_eq!(status["app_dir_source"], "legacy");
+    assert_eq!(
+        reported_path(&status["primary_app_dir"]),
+        expected_path(&app_dir(temp.path()))
+    );
+    assert_eq!(status["primary_app_dir_exists"], false);
+    assert!(!app_dir(temp.path()).exists());
     Ok(())
 }
 

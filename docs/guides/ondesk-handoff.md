@@ -52,7 +52,9 @@ preferred bridge from `forager project init` into a fresh Ondesk harness.
 When a matching Offdesk closeout exists, `prompt-package` also includes the
 latest `RETURN_PACKAGE.md` and closeout-review verdict for the same
 `project_key`. This is the preferred bridge from overnight Offdesk work back
-into a fresh Ondesk session.
+into a fresh Ondesk session. If closeout found documentation governance
+recommendations, the return package carries the focused action list rather than
+the full audit summary.
 
 ## Knowledge Policy
 

@@ -29,6 +29,7 @@ const ADAPTIVE_WIKI_CORRECTIONS_FILE: &str = "adaptive_wiki_corrections.jsonl";
 const ADAPTIVE_WIKI_REVIEW_EVENTS_FILE: &str = "adaptive_wiki_review_events.jsonl";
 const ADAPTIVE_WIKI_RUNTIME_POLICY_ACKS_FILE: &str =
     "adaptive_wiki_runtime_policy_acknowledgements.jsonl";
+const ADAPTIVE_WIKI_MARKDOWN_VAULT_DIR: &str = "wiki-vault";
 const ADAPTIVE_WIKI_REVIEW_REPORTS_DIR: &str = "adaptive_wiki_review_reports";
 const ADAPTIVE_WIKI_EPISODE_REPORTS_DIR: &str = "adaptive_wiki_episode_reports";
 const ADAPTIVE_WIKI_EPISODE_TRACES_DIR: &str = "adaptive_wiki_episode_traces";
@@ -790,11 +791,39 @@ pub struct AdaptiveWikiMarkdownExportSummary {
     pub files_written: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveWikiMarkdownProjectionState {
+    EmptyCanonical,
+    Missing,
+    Stale,
+    Fresh,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiMarkdownProjectionStatus {
+    pub profile_dir: String,
+    pub entries_path: String,
+    pub candidates_path: String,
+    pub vault_index_path: String,
+    pub entries_present: bool,
+    pub candidates_present: bool,
+    pub vault_index_present: bool,
+    pub entries_modified_at: Option<DateTime<Utc>>,
+    pub candidates_modified_at: Option<DateTime<Utc>>,
+    pub vault_index_modified_at: Option<DateTime<Utc>>,
+    pub canonical_modified_at: Option<DateTime<Utc>>,
+    pub state: AdaptiveWikiMarkdownProjectionState,
+    pub reexport_recommended: bool,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdaptiveWikiMarkdownExportReport {
     pub generated_at: DateTime<Utc>,
     pub output_dir: String,
     pub dry_run: bool,
+    pub projection_status: AdaptiveWikiMarkdownProjectionStatus,
     pub summary: AdaptiveWikiMarkdownExportSummary,
     pub files: Vec<AdaptiveWikiMarkdownExportFile>,
 }
@@ -1247,6 +1276,10 @@ impl AdaptiveWikiStore {
 
     pub fn runtime_policy_acknowledgements_path(&self) -> PathBuf {
         self.root.join(ADAPTIVE_WIKI_RUNTIME_POLICY_ACKS_FILE)
+    }
+
+    pub fn default_markdown_vault_dir(&self) -> PathBuf {
+        self.root.join(ADAPTIVE_WIKI_MARKDOWN_VAULT_DIR)
     }
 
     pub fn load_entries(&self) -> Result<AdaptiveWikiEntryState> {
@@ -1876,14 +1909,28 @@ impl AdaptiveWikiStore {
         if !dry_run {
             write_markdown_export(output_dir, &files)?;
         }
+        let projection_status = self.markdown_projection_status(output_dir);
         Ok(markdown_export_report(
             output_dir,
             dry_run,
             now,
+            projection_status,
             entries.len(),
             candidates.len(),
             &files,
         ))
+    }
+
+    pub fn markdown_projection_status(
+        &self,
+        output_dir: &Path,
+    ) -> AdaptiveWikiMarkdownProjectionStatus {
+        markdown_projection_status(
+            &self.root,
+            &self.entries_path(),
+            &self.candidates_path(),
+            &output_dir.join("index.md"),
+        )
     }
 
     pub fn graph_report(&self, now: DateTime<Utc>) -> Result<AdaptiveWikiGraphReport> {
@@ -3914,6 +3961,7 @@ fn markdown_export_report(
     output_dir: &Path,
     dry_run: bool,
     now: DateTime<Utc>,
+    projection_status: AdaptiveWikiMarkdownProjectionStatus,
     entries_exported: usize,
     candidates_exported: usize,
     files: &[(String, String)],
@@ -3922,6 +3970,7 @@ fn markdown_export_report(
         generated_at: now,
         output_dir: output_dir.display().to_string(),
         dry_run,
+        projection_status,
         summary: AdaptiveWikiMarkdownExportSummary {
             entries_exported,
             candidates_exported,
@@ -3937,6 +3986,68 @@ fn markdown_export_report(
             })
             .collect(),
     }
+}
+
+fn markdown_projection_status(
+    profile_dir: &Path,
+    entries_path: &Path,
+    candidates_path: &Path,
+    vault_index_path: &Path,
+) -> AdaptiveWikiMarkdownProjectionStatus {
+    let entries_modified_at = file_modified_at(entries_path);
+    let candidates_modified_at = file_modified_at(candidates_path);
+    let vault_index_modified_at = file_modified_at(vault_index_path);
+    let canonical_modified_at = [entries_modified_at, candidates_modified_at]
+        .into_iter()
+        .flatten()
+        .max();
+
+    let (state, reason) = match (canonical_modified_at, vault_index_modified_at) {
+        (None, _) => (
+            AdaptiveWikiMarkdownProjectionState::EmptyCanonical,
+            "No canonical adaptive wiki entries or candidates were found.".to_string(),
+        ),
+        (Some(_), None) => (
+            AdaptiveWikiMarkdownProjectionState::Missing,
+            "Canonical adaptive wiki state exists without a markdown vault index.".to_string(),
+        ),
+        (Some(canonical), Some(index)) if canonical > index => (
+            AdaptiveWikiMarkdownProjectionState::Stale,
+            "Canonical adaptive wiki state is newer than the markdown vault index.".to_string(),
+        ),
+        (Some(_), Some(_)) => (
+            AdaptiveWikiMarkdownProjectionState::Fresh,
+            "Markdown vault index is current with canonical adaptive wiki state.".to_string(),
+        ),
+    };
+
+    AdaptiveWikiMarkdownProjectionStatus {
+        profile_dir: profile_dir.display().to_string(),
+        entries_path: entries_path.display().to_string(),
+        candidates_path: candidates_path.display().to_string(),
+        vault_index_path: vault_index_path.display().to_string(),
+        entries_present: entries_path.exists(),
+        candidates_present: candidates_path.exists(),
+        vault_index_present: vault_index_path.exists(),
+        entries_modified_at,
+        candidates_modified_at,
+        vault_index_modified_at,
+        canonical_modified_at,
+        state,
+        reexport_recommended: matches!(
+            state,
+            AdaptiveWikiMarkdownProjectionState::Missing
+                | AdaptiveWikiMarkdownProjectionState::Stale
+        ),
+        reason,
+    }
+}
+
+fn file_modified_at(path: &Path) -> Option<DateTime<Utc>> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .map(DateTime::<Utc>::from)
 }
 
 pub fn build_review_proposals(

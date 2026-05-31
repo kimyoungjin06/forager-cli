@@ -33,6 +33,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager profile default`↴](#forager-profile-default)
 * [`forager project`↴](#forager-project)
 * [`forager project init`↴](#forager-project-init)
+* [`forager project apply-governance-hints`↴](#forager-project-apply-governance-hints)
+* [`forager project audit-docs`↴](#forager-project-audit-docs)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -524,6 +526,8 @@ Initialize and inspect project operation packets
 ###### **Subcommands:**
 
 * `init` — Create a read-only project operation initialization packet
+* `apply-governance-hints` — Apply reviewed governance surface templates to a project
+* `audit-docs` — Audit documentation and human-facing artifact governance surfaces
 
 
 
@@ -545,6 +549,59 @@ Create a read-only project operation initialization packet
 * `--include-git` — Include read-only git branch/status/diff-stat evidence
 * `--force` — Overwrite known initialization files when --out already contains files
 * `--json` — Output machine-readable JSON
+
+
+
+## `forager project apply-governance-hints`
+
+Apply reviewed governance surface templates to a project
+
+**Usage:** `forager project apply-governance-hints [OPTIONS] --project-key <PROJECT_KEY> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory to update
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key to render into newly created surfaces
+* `--surface <SURFACE>` — Surface role to create. Repeat to limit scope; defaults to all missing surfaces
+
+  Possible values: `current-state`, `next-actions`, `decisions`, `deliverables`
+
+* `--reviewed` — Confirm that the operator reviewed the hints and approves creating missing files
+* `--json` — Output machine-readable JSON
+
+
+
+## `forager project audit-docs`
+
+Audit documentation and human-facing artifact governance surfaces
+
+**Usage:** `forager project audit-docs [OPTIONS] <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory to audit
+
+###### **Options:**
+
+* `--audit-profile <AUDIT_PROFILE>` — Governance profile to apply
+
+  Default value: `standard`
+
+  Possible values: `light`, `standard`, `research-longrun`
+
+* `--adaptive-profile-dir <ADAPTIVE_PROFILE_DIR>` — Optional profile directory containing adaptive wiki state
+* `--current-stale-days <CURRENT_STALE_DAYS>` — Allowed day gap before the current-state surface is considered stale
+
+  Default value: `0`
+* `--large-log-lines <LARGE_LOG_LINES>` — Line threshold for large-log warnings
+
+  Default value: `1000`
+* `--json` — Output machine-readable JSON to stdout
+* `--json-out <JSON_OUT>` — Write JSON report to this path
+* `--md-out <MD_OUT>` — Write Markdown report to this path
 
 
 
@@ -1521,11 +1578,11 @@ Lint adaptive wiki state
 
 Export adaptive wiki state as a one-way markdown vault
 
-**Usage:** `forager offdesk wiki export-markdown [OPTIONS] --output <OUTPUT>`
+**Usage:** `forager offdesk wiki export-markdown [OPTIONS]`
 
 ###### **Options:**
 
-* `--output <OUTPUT>` — Directory to write the markdown vault into
+* `--output <OUTPUT>` — Directory to write the markdown vault into; defaults to the active profile's wiki-vault
 * `--dry-run` — Preview export files without writing them
 * `--json` — Output as JSON
 

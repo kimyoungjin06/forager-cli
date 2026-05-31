@@ -10,8 +10,11 @@ Forager still reads and writes the existing legacy paths when they
 already exist: `~/.agent-of-empires`, `~/.config/agent-of-empires`, and
 `.aoe/config.toml`.
 
-Run `forager doctor` to see which global data path, repo config path, and
-profile environment source are active on the current machine.
+Run `forager doctor` to see which global data path, active profile directory,
+repo config path, and profile environment source are active on the current
+machine. `forager status --json` also reports `profile_dir`,
+`profile_dir_source`, `app_dir`, and `app_dir_source` so automation can tell
+whether compatibility storage is currently active.
 
 Run `forager migrate aoe` to copy existing legacy global data and the
 current repo's `.aoe/config.toml` into the new Forager paths. The migration keeps
