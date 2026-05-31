@@ -7,15 +7,17 @@ from the public product README and from the mdBook user guides.
 
 ## Current Focus
 
-Forager is an approval-gated offdesk runtime harness around tmux-backed agent
-work. The current development focus is long-running offdesk safety, operator
-decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
-The product direction is defined in `docs/project-direction.md`.
+Forager is a local autonomy meta-harness around tmux-supervised,
+harness-backed agent work. The current development focus is long-running
+offdesk safety, operator decision surfaces, adaptive wiki governance, and
+documentation/artifact hygiene. The product direction is defined in
+`docs/project-direction.md`.
 
 ## First Reads For Development
 
 - repository rules: `AGENTS.md`
 - project direction: `docs/project-direction.md`
+- hosted harness contract: `docs/hosted-harness-agents.md`
 - product overview: `README.md`
 - documentation governance guide:
   `docs/guides/documentation-artifact-governance.md`
@@ -26,6 +28,9 @@ The product direction is defined in `docs/project-direction.md`.
 
 ## Active Documentation Work
 
+- Public README, mdBook introduction, brand system, and Astro landing page now
+  lead with the north star and local meta-harness positioning instead of only
+  feature inventory.
 - Documentation and artifact governance is now captured as a guide under
   `docs/guides/documentation-artifact-governance.md`.
 - `forager project audit-docs` now provides the v1 audit for governance

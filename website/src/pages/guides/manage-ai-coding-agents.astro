@@ -7,7 +7,7 @@ import { sitePath } from '../../lib/paths';
 
 <Base
   title="How to Manage Multiple AI Coding Agents - Forager"
-  description="Learn how to run and manage multiple AI coding agents simultaneously using a terminal session manager. Git worktrees and a TUI dashboard."
+  description="Learn how to run multiple harness-backed AI coding agents with tmux persistence, git worktrees, a TUI dashboard, and Forager's local review model."
 >
   <Nav />
 
@@ -33,7 +33,7 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>A Session Manager Built for AI Agents</h2>
         <p>
-          <a href={sitePath('/')}>Forager</a> is a terminal session manager designed specifically for this workflow. It gives you a TUI dashboard where every agent session is visible at a glance with real-time status detection. You can see which agents are actively generating code, which are waiting for your input, and which have finished.
+          <a href={sitePath('/')}>Forager</a> is a local meta-harness designed specifically for this workflow. It starts with a TUI dashboard where every agent session is visible at a glance with real-time status detection. You can see which agents are actively generating code, which are waiting for your input, and which have finished.
         </p>
         <p>
           Sessions are organized into groups, so you can keep your work project agents separate from your side project experiments. Everything runs in tmux underneath, which means sessions persist even if you close the TUI. Your agents keep running.
@@ -84,7 +84,7 @@ import { sitePath } from '../../lib/paths';
         </p>
         <ul>
           <li><a href={sitePath('/guides/git-worktrees-ai-development/')}>Git worktrees for parallel development</a></li>
-          <li><a href={sitePath('/guides/claude-code-session-manager/')}>AI coding agent session manager</a></li>
+          <li><a href={sitePath('/docs/hosted-harness-agents.html')}>Hosted harness agents</a></li>
           <li><a href={sitePath('/guides/tmux-ai-coding-workflow/')}>tmux workflow for AI coding</a></li>
         </ul>
       </section>

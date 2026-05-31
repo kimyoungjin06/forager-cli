@@ -4,6 +4,8 @@
 
 [Project Direction](project-direction.md)
 
+[Hosted Harness Agents](hosted-harness-agents.md)
+
 # Getting Started
 
 - [Installation](installation.md)

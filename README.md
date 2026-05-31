@@ -12,33 +12,72 @@
   </p>
 </p>
 
-Offdesk agent orchestration with approvals, recovery, and audit trails. Built on tmux, written in Rust.
+Local meta-harness for harness-backed AI agents. Built on tmux, written in Rust.
 
-Run multiple AI agents in parallel across different branches of your codebase, each in its own isolated session. `aoe` remains available as a legacy compatibility alias while the project moves to `forager`.
+> Forager lets people entrust meaningful work to agents and return to evidence,
+> choices, and continuity instead of mystery.
+
+Forager does not try to replace Claude Code, Codex, OpenCode, Gemini CLI,
+Mistral Vibe, OpenHands, or local LLM scripts. It supervises harness-backed
+agents with local approvals, durable runtime evidence, recovery state,
+reviewable handoffs, and deliberate knowledge promotion.
+
+Run multiple harness-backed agents in parallel across different branches of your
+codebase, each in its own isolated session. Send bounded work Offdesk, return to
+evidence, and hand the next step to a fresh harness without reconstructing state
+from chat scrollback. `aoe` remains available as a legacy compatibility alias
+while the project moves to `forager`.
 
 > If you find this project useful, please consider giving it a star on GitHub: it helps others discover the project!
 
 ![Forager TUI preview](docs/assets/tui.png)
 
-## Features
+## Why Forager Exists
 
-- **Multi-agent support** -- Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI
-- **TUI dashboard** -- visual interface to create, monitor, and manage sessions
-- **Agent + terminal views** -- toggle between your AI agents and paired shell terminals with `t`
-- **Status detection** -- see which agents are running, waiting for input, or idle
+AI coding agents are getting stronger, but long-running agent work is still hard
+to trust after the fact. Forager keeps the useful autonomy while making the
+operational boundary explicit:
+
+- **Entrust** meaningful work to a chosen harness-backed agent.
+- **Observe** what actually ran through local state, tmux, heartbeat, progress,
+  logs, and result artifacts.
+- **Return** to evidence, risks, next choices, and reusable handoff packages.
+- **Promote** only reviewed lessons into durable project knowledge.
+
+## What Forager Owns
+
+Hosted harnesses own their agent loops, prompts, model calls, tools, and
+interaction style. Forager owns the local control plane around them:
+
+- **Harness-backed agent support** -- Claude Code, OpenCode, Mistral Vibe,
+  Codex CLI, Gemini CLI, local scripts, and future hosted harness agents
+- **TUI dashboard** -- create, monitor, attach, recover, and review sessions
+- **Agent + terminal views** -- toggle between AI agents and paired shell terminals with `t`
+- **Status detection** -- see which agents are running, waiting for input, idle, or failed
 - **Git worktrees** -- run parallel agents on different branches of the same repo
-- **Diff view** -- review git changes and edit files without leaving the TUI
+- **Diff view** -- review git changes without leaving the TUI
 - **Per-repo config** -- `.forager/config.toml` for project-specific settings and hooks, with `.aoe/config.toml` fallback
 - **Profiles** -- separate workspaces for different projects or clients
-- **Rename diagnostics** -- `forager doctor` shows active Forager paths and legacy AoE compatibility state
-- **Safe AoE migration** -- `forager migrate aoe` copies legacy paths without overwriting Forager targets
 - **Offdesk recovery** -- durable task queueing, approval retry, lifecycle recovery, and audit trails
 - **Ondesk/Offdesk handoff** -- project initialization, prompt packages,
   launch dry runs, runtime approvals, closeout packets, and wiki review
   surfaces for longer autonomous work
+- **Reviewed knowledge** -- adaptive wiki candidates become reusable guidance
+  only after explicit review and promotion
 - **CLI and TUI** -- full functionality from both interfaces
 
-## How It Works
+## The Operating Loop
+
+```text
+observe current state
+  -> prepare bounded work
+  -> request approval
+  -> run under durable local supervision
+  -> collect evidence
+  -> close out and review
+  -> return to a fresh Ondesk harness
+  -> promote durable knowledge deliberately
+```
 
 Forager wraps [tmux](https://github.com/tmux/tmux/wiki). Each session is a tmux session, so agents keep running when you close the TUI. Reopen `forager` and everything is still there.
 
@@ -81,6 +120,7 @@ In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal v
 ## Documentation
 
 - **[Project Direction](https://kimyoungjin06.github.io/forager-cli/docs/project-direction.html)** -- product direction and operating principles
+- **[Hosted Harness Agents](https://kimyoungjin06.github.io/forager-cli/docs/hosted-harness-agents.html)** -- contract for supervising agents built by other harnesses
 - **[Installation](https://kimyoungjin06.github.io/forager-cli/docs/installation.html)** -- prerequisites and install methods
 - **[Quick Start](https://kimyoungjin06.github.io/forager-cli/docs/quick-start.html)** -- first steps and basic usage
 - **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/docs/guides/workflow.html)** -- recommended setup with bare repos and worktrees
@@ -96,9 +136,10 @@ In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal v
 
 Nothing. Sessions are tmux sessions running in the background. Open and close `forager` as often as you like. Sessions only get removed when you explicitly delete them.
 
-### Which AI tools are supported?
+### Which harness-backed agents are supported?
 
-Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. Forager auto-detects which are installed on your system.
+Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. Forager
+auto-detects which are installed on your system.
 
 ## Troubleshooting
 

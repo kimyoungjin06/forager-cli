@@ -9,179 +9,252 @@ import { sitePath } from '../lib/paths';
 
 const features = [
   {
-    icon: 'dashboard',
-    title: 'TUI Ondesk Cockpit',
-    description: 'Create, monitor, attach, review diffs, and recover agent sessions from one keyboard-driven dashboard.',
-  },
-  {
-    icon: 'worktrees',
-    title: 'Git Worktrees',
-    description: 'Run parallel agents on different branches of the same repo. Automatic worktree creation and cleanup.',
-  },
-  {
     icon: 'status',
-    title: 'Approval Gates',
-    description: 'Queue durable background tasks with explicit approvals for runtime dispatch, provider fallback, and maintenance actions.',
-  },
-  {
-    icon: 'status',
-    title: 'Adaptive Wiki',
-    description: 'Project knowledge is captured as reviewable candidates, promoted with audit trails, and projected back into scoped agent modes.',
-  },
-  {
-    icon: 'groups',
-    title: 'Morning Review',
-    description: 'Turn overnight runs into inspectable decisions: what completed, what failed, what needs closeout, and what knowledge should be promoted.',
+    title: 'Local control plane',
+    description: 'Keep intent, approvals, runtime state, recovery decisions, and review outcomes in Forager-owned local state.',
   },
   {
     icon: 'tmux',
-    title: 'tmux Integration',
-    description: 'Sessions persist in tmux for reliability. Close Forager anytime and your agents keep running.',
+    title: 'Hosted harness agents',
+    description: 'Run Claude Code, Codex, OpenCode, Gemini CLI, Mistral Vibe, local scripts, and future harnesses under one supervision contract.',
   },
+  {
+    icon: 'groups',
+    title: 'Evidence-first Offdesk',
+    description: 'Return to heartbeat, progress, logs, result artifacts, closeout packets, and decision surfaces instead of a long terminal scrollback.',
+  },
+  {
+    icon: 'dashboard',
+    title: 'Ondesk cockpit',
+    description: 'Create sessions, attach to agents, toggle paired terminals, inspect diffs, and recover state from a keyboard-driven dashboard.',
+  },
+  {
+    icon: 'worktrees',
+    title: 'Worktree isolation',
+    description: 'Give parallel agents separate branches and working directories so experiments, fixes, and reviews do not collide.',
+  },
+  {
+    icon: 'status',
+    title: 'Reviewed knowledge',
+    description: 'Capture agent lessons as adaptive wiki candidates, then promote only reviewed guidance into reusable project knowledge.',
+  },
+];
+
+const promises = [
+  ['Entrust', 'choose a harness-backed agent and bound the work before it runs'],
+  ['Observe', 'capture runtime evidence while the agent works away from the desk'],
+  ['Return', 'resume from evidence, choices, and continuity instead of mystery'],
 ];
 ---
 
 <Base
-  title="Forager - Offdesk Agent Orchestration"
-  description="Safe offdesk autonomy for Linux and macOS using tmux to manage, approve, recover, and review AI coding agent work. Git worktrees, adaptive wiki, and a TUI. Written in Rust."
+  title="Forager - Local Meta-Harness for AI Agents"
+  description="Forager lets people entrust meaningful work to harness-backed AI agents and return to evidence, choices, and continuity instead of mystery."
+  ogTitle="Forager - Local Meta-Harness for AI Agents"
+  ogDescription="Run Claude Code, Codex, OpenCode, local LLM scripts, and future harness-backed agents under local approval, evidence, recovery, and review control."
 >
   <Nav />
 
   <main>
-  <!-- Hero Section -->
-  <section class="relative pt-32 pb-8 px-6 hero-glow">
-    <div class="max-w-6xl mx-auto text-center">
-      <div class="mb-10 flex justify-center">
-        <a href="https://www.kisti.re.kr/" class="institution-badge inline-flex items-center gap-4 rounded-xl px-5 py-3" aria-label="KISTI">
-          <img src={sitePath('/assets/kisti-logo-en.png')} alt="KISTI">
-          <span class="hidden sm:block h-7 w-px bg-slate-300"></span>
-          <span class="hidden sm:block text-sm font-semibold uppercase tracking-[0.18em] text-slate-700">Research Operations</span>
-        </a>
-      </div>
+    <section
+      class="brand-hero relative min-h-screen px-6 pt-28 pb-16"
+      style={`--hero-image: url("${sitePath('/assets/tui.png')}")`}
+    >
+      <div class="mx-auto flex min-h-[calc(100vh-9rem)] max-w-6xl flex-col justify-between">
+        <div class="flex flex-col gap-10">
+          <div class="flex flex-col gap-6">
+            <a href="https://www.kisti.re.kr/" class="institution-badge inline-flex w-fit items-center gap-4 rounded-lg px-4 py-3" aria-label="KISTI">
+              <img src={sitePath('/assets/kisti-logo-en.png')} alt="KISTI">
+              <span class="hidden h-7 w-px bg-slate-300 sm:block"></span>
+              <span class="hidden text-sm font-semibold uppercase text-slate-700 sm:block">Local Agent Operations</span>
+            </a>
 
-      <!-- Logo -->
-      <div class="mb-8">
-        <img src={sitePath('/assets/logo.svg')} alt="Forager" class="w-20 h-20 mx-auto mb-8 drop-shadow-2xl" width="80" height="80" fetchpriority="high">
-        <h1 class="text-5xl md:text-6xl lg:text-7xl font-bold mb-6 tracking-tight">
-          <span class="text-gradient">Forager</span>
-        </h1>
-        <p class="text-xl md:text-2xl text-gray-400 max-w-2xl mx-auto leading-relaxed">
-          Safe offdesk autonomy for AI coding agents
+            <div class="max-w-4xl">
+              <p class="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-brand-300">Forager</p>
+              <h1 class="max-w-4xl text-5xl font-bold leading-[1.02] tracking-tight text-white md:text-7xl">
+                Entrust agent work. Return to evidence, choices, and continuity.
+              </h1>
+              <p class="mt-7 max-w-3xl text-xl leading-relaxed text-slate-200 md:text-2xl">
+                Forager is a local meta-harness for harness-backed agents. It does
+                not replace Claude Code, Codex, OpenHands, OpenCode, or local LLM
+                scripts. It supervises them with approval gates, durable runtime
+                evidence, reviewable handoffs, and deliberate knowledge promotion.
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-4 sm:flex-row">
+            <a href={sitePath('/docs/project-direction.html')} class="bg-brand-700 px-7 py-3.5 text-center text-base font-semibold text-white transition-colors hover:bg-brand-600">
+              Read the direction
+            </a>
+            <a href={sitePath('/docs/guides/operation-cycle.html')} class="border border-white/20 bg-white/10 px-7 py-3.5 text-center text-base font-semibold text-white transition-colors hover:border-brand-300 hover:bg-white/15">
+              See the operating loop
+            </a>
+            <a href="https://github.com/kimyoungjin06/forager-cli" target="_blank" rel="noopener" class="inline-flex items-center justify-center gap-2 border border-white/20 bg-surface-950/80 px-7 py-3.5 text-base font-semibold text-white transition-colors hover:border-brand-300 hover:bg-surface-900">
+              <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+        </div>
+
+        <div class="mt-12 grid gap-4 md:grid-cols-3">
+          {promises.map(([title, description]) => (
+            <div class="promise-panel border border-white/[0.14] bg-surface-950/[0.78] p-5">
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">{title}</p>
+              <p class="mt-3 text-base leading-relaxed text-slate-200">{description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="border-y border-surface-200 bg-white px-6 py-16 text-surface-950">
+      <div class="mx-auto grid max-w-6xl gap-8 md:grid-cols-[1.05fr_1fr] md:items-center">
+        <div>
+          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">The product boundary</p>
+          <h2 class="text-3xl font-bold leading-tight md:text-5xl">
+            Forager is not trying to be the smartest agent.
+          </h2>
+        </div>
+        <p class="text-lg leading-relaxed text-slate-700">
+          It is trying to make agent work governable, inspectable, recoverable,
+          and transferable. Hosted harnesses own their agent loops. Forager owns
+          the local approval, evidence, recovery, review, and knowledge-promotion
+          contract around them.
         </p>
       </div>
+    </section>
 
-      <!-- Subtitle -->
-      <p class="text-xl text-gray-300 max-w-3xl mx-auto mb-12 leading-relaxed">
-        Manage multiple <span class="text-white font-medium">Claude Code</span>, <span class="text-white font-medium">Gemini CLI</span>, <span class="text-white font-medium">OpenCode</span>, <span class="text-white font-medium">Mistral Vibe</span>, and <span class="text-white font-medium">Codex</span> sessions with a TUI built for on-desk review and off-desk execution.
-        <span class="text-gray-400">Approvals, recovery, audit trails, adaptive wiki guidance, git worktrees, and tmux persistence.</span>
-      </p>
-
-      <!-- Install Command -->
-      <InstallBlock />
-
-      <!-- CTA Buttons -->
-      <div class="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-        <a href={sitePath('/docs/quick-start.html')} class="bg-brand-700 hover:bg-brand-600 text-white font-semibold px-8 py-3.5 rounded-xl transition-all hover:shadow-lg hover:shadow-brand-600/25 text-base">
-          Get Started
-        </a>
-        <a href={sitePath('/guides/offdesk-morning-review/')} class="bg-surface-800 hover:bg-surface-700 text-white font-semibold px-8 py-3.5 rounded-xl transition-colors border border-surface-700 hover:border-brand-500/50 text-base">
-          See the Offdesk Loop
-        </a>
-        <a href="https://github.com/kimyoungjin06/forager-cli" target="_blank" rel="noopener" class="group bg-surface-800 hover:bg-surface-700 text-white font-semibold px-8 py-3.5 rounded-xl transition-colors flex items-center justify-center gap-2 border border-surface-700 hover:border-brand-500/50 text-base" title="Star on GitHub">
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          <svg class="w-4 h-4 text-brand-400 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/></svg>
-          <span id="star-count">...</span> Stars
-        </a>
-      </div>
-    </div>
-  </section>
-
-  <!-- Demo Section -->
-  <section class="py-8 px-6">
-    <div class="max-w-5xl mx-auto">
-      <div class="terminal-window rounded-2xl overflow-hidden">
-        <div class="flex items-center gap-2 px-5 py-4 bg-surface-850 border-b border-surface-700/50">
-          <div class="w-3 h-3 rounded-full bg-kisti-red"></div>
-          <div class="w-3 h-3 rounded-full bg-kisti-cyan"></div>
-          <div class="w-3 h-3 rounded-full bg-kisti-blue"></div>
-          <span class="ml-3 text-sm text-gray-400 font-mono">forager</span>
+    <section class="bg-slate-50 px-6 py-20 text-surface-950">
+      <div class="mx-auto max-w-6xl">
+        <div class="mb-12 max-w-3xl">
+          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">What it supervises</p>
+          <h2 class="text-3xl font-bold md:text-5xl">Different harnesses, one local contract.</h2>
+          <p class="mt-5 text-lg leading-relaxed text-slate-700">
+            Use stronger commercial harnesses when budget and latency allow it,
+            local-model episodes when constraints require it, and deterministic
+            scripts when a task should be auditable before it is intelligent.
+          </p>
         </div>
-        <img src={sitePath('/assets/tui.png')} alt="Forager terminal user interface showing offdesk queueing, approval gates, and wiki review" class="w-full" width="1200" height="760" loading="lazy">
-      </div>
-    </div>
-  </section>
 
-  <!-- Features Section -->
-  <section class="py-24 px-6">
-    <div class="max-w-6xl mx-auto">
-      <div class="text-center mb-16">
-        <h2 class="text-3xl md:text-4xl font-bold mb-4">Everything you need to operate AI agents</h2>
-        <p class="text-gray-400 text-lg max-w-2xl mx-auto">Built for developers who want parallel coding agents, durable offdesk runs, and evidence they can review later.</p>
+        <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {['Claude Code', 'Codex', 'OpenCode', 'Gemini CLI', 'Mistral Vibe', 'OpenHands-ready', 'Local LLM scripts', 'Future agent loops'].map((name) => (
+            <div class="harness-chip border border-slate-200 bg-white px-5 py-4 text-base font-semibold text-slate-800">
+              {name}
+            </div>
+          ))}
+        </div>
       </div>
+    </section>
 
-      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {features.map((feature) => (
-          <FeatureCard
-            icon={feature.icon}
-            title={feature.title}
-            description={feature.description}
-          />
-        ))}
+    <section class="px-6 py-20">
+      <div class="mx-auto max-w-6xl">
+        <div class="mb-12 max-w-3xl">
+          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">Core surfaces</p>
+          <h2 class="text-3xl font-bold text-white md:text-5xl">The work is only useful if it can come back cleanly.</h2>
+          <p class="mt-5 text-lg leading-relaxed text-slate-400">
+            Forager gives operators compact human surfaces and durable machine
+            evidence, so long-running work can be reviewed instead of guessed at.
+          </p>
+        </div>
+
+        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {features.map((feature) => (
+            <FeatureCard
+              icon={feature.icon}
+              title={feature.title}
+              description={feature.description}
+            />
+          ))}
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- How it Works Section -->
-  <section class="py-24 px-6 bg-surface-900/50">
-    <div class="max-w-4xl mx-auto">
-      <div class="text-center mb-16">
-        <h2 class="text-3xl md:text-4xl font-bold mb-4">Ondesk to Offdesk Loop</h2>
-        <p class="text-gray-400 text-lg">Plan while you are present, run while you are away, review before knowledge becomes durable.</p>
-      </div>
-
-      <div class="space-y-12">
-        <Step number={1} title="Plan from the TUI">
-          <div class="code-block rounded-xl px-5 py-3 font-mono text-base inline-block">
-            <span class="text-gray-500">$</span> <span class="text-white">forager</span>
+    <section class="border-y border-surface-800/70 bg-surface-900/70 px-6 py-20">
+      <div class="mx-auto grid max-w-6xl gap-12 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+        <div>
+          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">Ondesk to Offdesk to Ondesk</p>
+          <h2 class="text-3xl font-bold leading-tight text-white md:text-5xl">The loop keeps autonomy bounded.</h2>
+          <p class="mt-5 text-lg leading-relaxed text-slate-400">
+            The operator stays in control at the transitions that matter:
+            preparing work, approving runtime mutation, reviewing evidence,
+            closing out, and promoting reusable knowledge.
+          </p>
+          <div class="mt-8">
+            <InstallBlock />
           </div>
-          <p class="text-gray-400 leading-relaxed mt-4">Create scoped sessions, isolate branches with worktrees, inspect status, and decide what is safe to hand to Offdesk.</p>
-        </Step>
+        </div>
 
-        <Step number={2} title="Queue approved Offdesk work">
-          <p class="text-gray-400 leading-relaxed">Durable tasks run behind approval gates, recovery records, provider fallback checks, and redacted audit output.</p>
-        </Step>
+        <div class="space-y-9">
+          <Step number={1} title="Prepare bounded work">
+            <p class="leading-relaxed text-slate-400">Capture intent, target repo, branch/worktree, agent mode, required artifacts, and approval scope.</p>
+          </Step>
 
-        <Step number={3} title="Review the morning evidence">
-          <p class="text-gray-400 leading-relaxed">Use task status, debug bundles, maintenance reports, closeout packets, Council decisions, and wiki review reports before claiming completion.</p>
-        </Step>
+          <Step number={2} title="Launch under explicit approval">
+            <p class="leading-relaxed text-slate-400">Run hosted harness agents through local supervision, preserving the command summary, runtime handle, and evidence paths.</p>
+          </Step>
 
-        <Step number={4} title="Close out before returning Ondesk">
-          <p class="text-gray-400 leading-relaxed">Completed tasks that still need closeout stay visible until a dry-run cleanup plan and return package have been generated.</p>
-          <a href={sitePath('/guides/offdesk-closeout/')} class="inline-flex mt-4 text-brand-400 hover:text-brand-300 font-medium transition-colors">Read the closeout guide</a>
-        </Step>
+          <Step number={3} title="Return to evidence">
+            <p class="leading-relaxed text-slate-400">Inspect heartbeat, progress, logs, result artifacts, stale or failed state, and review recommendations.</p>
+          </Step>
 
-        <Step number={5} title="Promote only reviewed knowledge" showLine={false}>
-          <p class="text-gray-400 leading-relaxed">Adaptive wiki candidates and provisional overnight notes become durable guidance only through explicit review and audited CLI actions.</p>
-        </Step>
+          <Step number={4} title="Hand off to a fresh harness">
+            <p class="leading-relaxed text-slate-400">Use return packages and prompt packages so the next Codex, Claude Code, OpenHands, or local-model session starts from durable state.</p>
+          </Step>
+
+          <Step number={5} title="Promote only reviewed knowledge" showLine={false}>
+            <p class="leading-relaxed text-slate-400">Keep lessons provisional until they are reviewed and promoted into the adaptive wiki.</p>
+          </Step>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- CTA Section -->
-  <section class="py-24 px-6">
-    <div class="max-w-4xl mx-auto text-center">
-      <h2 class="text-3xl md:text-4xl font-bold mb-4">Ready to manage your AI agents?</h2>
-      <p class="text-gray-400 text-lg mb-10">Get started in under a minute. Free and open source.</p>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center">
-        <a href={sitePath('/docs/installation.html')} class="bg-brand-700 hover:bg-brand-600 text-white font-semibold px-10 py-4 rounded-xl transition-all hover:shadow-lg hover:shadow-brand-600/25 text-lg">
-          Install Now
-        </a>
-        <a href={sitePath('/docs/')} class="bg-surface-800 hover:bg-surface-700 text-white font-semibold px-10 py-4 rounded-xl transition-colors border border-surface-700 text-lg">
-          Read the Docs
-        </a>
+    <section class="bg-white px-6 py-20 text-surface-950">
+      <div class="mx-auto max-w-6xl">
+        <div class="grid gap-10 lg:grid-cols-[1fr_1.2fr] lg:items-center">
+          <div>
+            <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">The operator promise</p>
+            <h2 class="text-3xl font-bold leading-tight md:text-5xl">
+              The next morning should take minutes, not archaeology.
+            </h2>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            {[
+              ['Telegram', 'compact decisions and alerts'],
+              ['WebUI', 'richer evidence and comparison review'],
+              ['TUI', 'live session control and recovery'],
+              ['CLI/JSON', 'automation and audit source of truth'],
+            ].map(([surface, role]) => (
+              <div class="surface-role border border-slate-200 bg-slate-50 p-5">
+                <p class="text-lg font-bold text-slate-950">{surface}</p>
+                <p class="mt-2 leading-relaxed text-slate-600">{role}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
+
+    <section class="px-6 py-20">
+      <div class="mx-auto max-w-4xl text-center">
+        <img src={sitePath('/assets/logo.svg')} alt="Forager" class="mx-auto mb-8 h-16 w-16" width="64" height="64" loading="lazy">
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-brand-300">Start small</p>
+        <h2 class="mt-4 text-3xl font-bold leading-tight text-white md:text-5xl">Run one agent session. Then make it recoverable.</h2>
+        <p class="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-slate-400">
+          Forager still starts as a tmux-backed session manager. The deeper value
+          appears as your work gets longer, more parallel, and more expensive to
+          reconstruct from memory.
+        </p>
+        <div class="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+          <a href={sitePath('/docs/quick-start.html')} class="bg-brand-700 px-8 py-4 text-lg font-semibold text-white transition-colors hover:bg-brand-600">
+            Quick start
+          </a>
+          <a href={sitePath('/docs/')} class="border border-white/20 bg-surface-800 px-8 py-4 text-lg font-semibold text-white transition-colors hover:border-brand-300 hover:bg-surface-700">
+            Read the docs
+          </a>
+        </div>
+      </div>
+    </section>
   </main>
 
   <Footer />

@@ -13,6 +13,7 @@ html {
 
 body {
   font-family: 'Inter', 'Inter Fallback', system-ui, sans-serif;
+  overflow-x: hidden;
 }
 
 :root {
@@ -23,6 +24,16 @@ body {
 
 .gradient-bg {
   background: linear-gradient(180deg, #081625 0%, #020617 100%);
+}
+
+.brand-hero {
+  background-image:
+    linear-gradient(90deg, rgba(2, 6, 23, 0.96) 0%, rgba(2, 6, 23, 0.86) 38%, rgba(2, 6, 23, 0.46) 70%, rgba(2, 6, 23, 0.78) 100%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.16) 0%, rgba(2, 6, 23, 0.92) 100%),
+    var(--hero-image);
+  background-position: center, center, 58% center;
+  background-size: cover, cover, cover;
+  background-repeat: no-repeat;
 }
 
 .hero-glow {
@@ -60,6 +71,16 @@ body {
   border-color: rgba(0, 117, 186, 0.45);
   background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.5) 100%);
   transform: translateY(-2px);
+}
+
+.promise-panel,
+.harness-chip,
+.surface-role {
+  border-radius: 8px;
+}
+
+.promise-panel {
+  box-shadow: 0 20px 60px -48px rgba(56, 189, 248, 0.9);
 }
 
 .step-line {

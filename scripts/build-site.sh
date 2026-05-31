@@ -28,6 +28,7 @@ echo "Copying assets to website..."
 mkdir -p "$ROOT_DIR/website/public/assets"
 cp "$ROOT_DIR/assets/logo.svg" "$ROOT_DIR/website/public/assets/"
 cp "$ROOT_DIR/assets/logo.png" "$ROOT_DIR/website/public/assets/"
+cp "$ROOT_DIR/assets/logo-lockup.svg" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
 cp "$ROOT_DIR/assets/kisti-logo-en.png" "$ROOT_DIR/website/public/assets/"
 cp "$ROOT_DIR/assets/social-preview.png" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
 cp "$ROOT_DIR/assets/social-preview.svg" "$ROOT_DIR/website/public/assets/" 2>/dev/null || true
@@ -81,7 +82,10 @@ echo "Directory structure:"
 find "$DIST_DIR" -type f -print 2>/dev/null | head -20 | sed "s|$DIST_DIR|dist|" || true
 echo ""
 echo "To preview locally:"
-echo "  cd $DIST_DIR && python3 -m http.server 8000"
+echo "  mkdir -p $ROOT_DIR/target/site-preview"
+echo "  ln -sfn $DIST_DIR $ROOT_DIR/target/site-preview/forager-cli"
+echo "  cd $ROOT_DIR/target/site-preview && python3 -m http.server 8000"
+echo "  open http://127.0.0.1:8000/forager-cli/"
 echo ""
 echo "To deploy to GitHub Pages, Cloudflare Pages, or Netlify:"
 echo "  Point your deployment to the dist/ directory"
