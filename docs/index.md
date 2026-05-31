@@ -10,6 +10,12 @@ approval, run long workloads under tmux, preserve evidence, and build a return
 package for the next Ondesk session. The recommended lifecycle is described in
 the [Operation Cycle Guide](guides/operation-cycle.md).
 
+The broader product direction is defined in
+[Project Direction](project-direction.md): Forager should turn fragile live chat
+and terminal sessions into governed local operations with explicit intent,
+bounded approvals, durable evidence, reviewable handoffs, and promoted project
+knowledge.
+
 ![Forager TUI preview](assets/tui.png)
 
 ## Why Forager?

@@ -2,6 +2,8 @@
 
 [Introduction](index.md)
 
+[Project Direction](project-direction.md)
+
 # Getting Started
 
 - [Installation](installation.md)

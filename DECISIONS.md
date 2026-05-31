@@ -8,6 +8,7 @@ surfaces.
 
 | Decision | Status | Source | Operational effect |
 | --- | --- | --- | --- |
+| Forager's product direction is a local autonomy harness with explicit intent, approvals, durable evidence, reviewable handoffs, and reviewed knowledge promotion. | active | `docs/project-direction.md` | New features should strengthen the staged autonomy loop instead of bypassing approval, evidence, or review boundaries. |
 | Forager owns offdesk queue state, approvals, recovery, and audit artifacts. | active | `docs/forager-orchestrator-boundary.md`, `docs/hermes-pattern-review.md` | External harnesses can run work, but durable control state stays in Forager-owned stores. |
 | Raw chat history is not the source of truth for offdesk transitions. | active | `docs/guides/operation-cycle.md` | Each handoff stage should produce a bounded artifact. |
 | Adaptive wiki canonical state remains JSON, with markdown as a human projection. | active | `docs/adaptive-wiki.md`, `docs/adaptive-wiki-execution-plan.md` | Runtime receives compact scoped projections, not raw human wiki pages. |
