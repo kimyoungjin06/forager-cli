@@ -1922,7 +1922,7 @@ Build a markdown prompt package from recent notes and optional capture
 * `--capture-id <CAPTURE_ID>` — Existing capture ID to render
 * `--mode <MODE>` — Work mode label used to filter notes
 * `--project-key <PROJECT_KEY>` — Stable project key used to filter notes
-* `--include-doc-audit` — Include a fresh documentation governance audit from the resolved project path
+* `--include-doc-audit` — Include a fresh documentation governance audit from the latest closeout workdir or resolved project path
 * `--output <OUTPUT>` — Write markdown package to a file instead of stdout
 * `--json` — Output metadata as JSON
 

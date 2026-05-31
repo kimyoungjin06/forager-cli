@@ -111,7 +111,7 @@ pub struct PromptPackageArgs {
     #[arg(long)]
     project_key: Option<String>,
 
-    /// Include a fresh documentation governance audit from the resolved project path
+    /// Include a fresh documentation governance audit from the latest closeout workdir or resolved project path
     #[arg(long)]
     include_doc_audit: bool,
 
@@ -259,6 +259,7 @@ struct OndeskCloseoutSummary {
 struct OndeskCloseoutPackage {
     summary: OndeskCloseoutSummary,
     return_package: String,
+    audit_project_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -508,7 +509,9 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
         let closeout = latest_closeout_package(&profile_dir, &capture.project_key)?;
         let project_initialization =
             latest_project_initialization(&profile_dir, &capture.project_key)?;
-        let audit_path = prompt_audit_path_for_capture(&capture)?;
+        let capture_audit_path = prompt_audit_path_for_capture(&capture)?;
+        let audit_path =
+            prompt_documentation_governance_project_path(closeout.as_ref(), &capture_audit_path);
         let documentation_governance = prompt_documentation_governance(
             args.include_doc_audit,
             Some(audit_path.as_path()),
@@ -543,9 +546,11 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
         let closeout = latest_closeout_package(&context.profile_dir, &context.project_key)?;
         let project_initialization =
             latest_project_initialization(&context.profile_dir, &context.project_key)?;
+        let audit_path =
+            prompt_documentation_governance_project_path(closeout.as_ref(), &context.project_path);
         let documentation_governance = prompt_documentation_governance(
             args.include_doc_audit,
-            Some(context.project_path.as_path()),
+            Some(audit_path.as_path()),
             &context.project_key,
             closeout.as_ref(),
         );
@@ -901,6 +906,7 @@ fn latest_closeout_package(
         .and_then(Value::as_str)
         .map(safe)
         .unwrap_or_else(|| "unknown".to_string());
+    let audit_project_path = closeout_plan_audit_project_path(&plan, project_key);
 
     Ok(Some(OndeskCloseoutPackage {
         summary: OndeskCloseoutSummary {
@@ -913,6 +919,7 @@ fn latest_closeout_package(
             review_record_path: review.map(|review| review.record_path),
         },
         return_package,
+        audit_project_path,
     }))
 }
 
@@ -1041,6 +1048,15 @@ fn prompt_audit_path_for_capture(capture: &OndeskCaptureRecord) -> Result<PathBu
         return Ok(PathBuf::from(&session.path));
     }
     Ok(std::env::current_dir()?)
+}
+
+fn prompt_documentation_governance_project_path(
+    closeout: Option<&OndeskCloseoutPackage>,
+    fallback: &Path,
+) -> PathBuf {
+    closeout
+        .and_then(|package| package.audit_project_path.clone())
+        .unwrap_or_else(|| fallback.to_path_buf())
 }
 
 fn prompt_documentation_governance(
@@ -1251,6 +1267,35 @@ fn closeout_plan_matches_project(plan: &Value, project_key: &str) -> bool {
                     .is_some_and(|value| value == project_key)
             })
         })
+}
+
+fn closeout_plan_audit_project_path(plan: &Value, project_key: &str) -> Option<PathBuf> {
+    plan.pointer("/documentation_governance/workdir")
+        .and_then(Value::as_str)
+        .and_then(non_empty_path)
+        .or_else(|| {
+            plan.get("tasks")
+                .and_then(Value::as_array)
+                .and_then(|tasks| {
+                    tasks.iter().find_map(|task| {
+                        if task.get("project_key").and_then(Value::as_str) != Some(project_key) {
+                            return None;
+                        }
+                        task.get("workdir")
+                            .and_then(Value::as_str)
+                            .and_then(non_empty_path)
+                    })
+                })
+        })
+}
+
+fn non_empty_path(value: &str) -> Option<PathBuf> {
+    let value = value.trim();
+    if value.is_empty() || value == "-" {
+        None
+    } else {
+        Some(PathBuf::from(value))
+    }
 }
 
 fn closeout_plan_generated_at(plan: &Value) -> DateTime<Utc> {

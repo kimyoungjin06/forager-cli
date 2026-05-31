@@ -123,7 +123,8 @@ The short TwinPaper smoke observed:
 - `forager offdesk closeout` carries focused documentation-governance
   recommendations into the Ondesk return package.
 - `forager ondesk prompt-package` now states the documentation governance source
-  and can run a fresh `project audit-docs` pass with `--include-doc-audit`.
+  and can run a fresh `project audit-docs` pass with `--include-doc-audit`,
+  using the latest closeout workdir when one is available.
 
 ### Adaptive Wiki Human Projection
 

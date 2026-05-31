@@ -145,7 +145,9 @@ For a current project-level governance view, add `--include-doc-audit` to
 `forager ondesk prompt-package`. The prompt package will then identify the
 governance source as `fresh_project_audit`, `latest_closeout_return_package`, or
 `fresh_project_audit_unavailable` instead of leaving the next harness to infer
-freshness from artifact paths.
+freshness from artifact paths. When a matching closeout is present, the fresh
+audit uses the closeout workdir recorded in `closeout_plan.json` before falling
+back to the current session or shell directory.
 
 ## Wiki Boundary
 

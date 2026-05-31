@@ -52,8 +52,8 @@ preferred bridge from `forager project init` into a fresh Ondesk harness.
 Every prompt package includes a `Documentation Governance Source` section. By
 default it states whether governance guidance came from the latest matching
 closeout return package, or whether no fresh audit was requested. Add
-`--include-doc-audit` when the next harness should audit the resolved project
-path immediately:
+`--include-doc-audit` when the next harness should audit the active project
+immediately:
 
 ```bash
 forager ondesk prompt-package --project-key twinpaper --include-doc-audit
@@ -61,8 +61,11 @@ forager ondesk prompt-package --project-key twinpaper --include-doc-audit
 
 The fresh audit path reports `source: fresh_project_audit`, keeps the full
 machine audit out of the prompt package, and embeds only the capped
-recommendations a human can evaluate next. If the audit cannot run, the package
-uses `fresh_project_audit_unavailable` and keeps the prompt render non-fatal.
+recommendations a human can evaluate next. When a matching closeout exists, the
+fresh audit uses the closeout plan's documentation-governance workdir before
+falling back to the captured session path or current directory. If the audit
+cannot run, the package uses `fresh_project_audit_unavailable` and keeps the
+prompt render non-fatal.
 
 When a matching Offdesk closeout exists, `prompt-package` also includes the
 latest `RETURN_PACKAGE.md` and closeout-review verdict for the same

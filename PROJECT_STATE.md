@@ -52,6 +52,9 @@ decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
 - `forager ondesk prompt-package --include-doc-audit` now runs a fresh
   project-level documentation governance audit and labels the governance source
   as fresh audit, closeout return package, unavailable audit, or not requested.
+  When a matching closeout exists, the fresh audit uses the closeout plan's
+  documentation-governance workdir before falling back to the current session or
+  shell directory.
 - Offdesk operation status remains the running status and candidate work queue
   for operator surfaces and safety rails.
 
