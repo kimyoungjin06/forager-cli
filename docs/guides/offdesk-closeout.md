@@ -171,3 +171,15 @@ validated short-run procedure.
 `next_safe_actions` surfaces and the human output points to closeout, approval,
 or recovery review, rather than claiming that terminal dispatch status means no
 operator action is needed.
+
+`forager status --json` keeps the legacy `closeout_required_offdesk_tasks`
+count, and also includes `closeout_state` so operators can distinguish:
+
+- `missing_closeout`: completed tasks with no current closeout package;
+- `pending_review`: a closeout package exists but no fresh review verdict was
+  recorded;
+- `revision_required`: the latest fresh verdict was `revise` or `blocked`;
+- `stale_closeout` / `stale_review`: the task changed after the package or
+  verdict;
+- `approved`: a fresh `approved` verdict exists and the task is no longer
+  counted as closeout-required.

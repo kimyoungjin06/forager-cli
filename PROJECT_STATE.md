@@ -60,6 +60,9 @@ decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
   package is reviewable for morning handoff, and closeout now infers the target
   project repo from nearby `prepared_task.json` or `manifest.json` when runtime
   workdir is the harness checkout.
+- `forager status` now separates closeout-required completed tasks by review
+  state: missing package, pending review, revise/blocked verdict, stale package,
+  stale review, and approved.
 - Offdesk operation status remains the running status and candidate work queue
   for operator surfaces and safety rails.
 
@@ -67,8 +70,9 @@ decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
 
 - Closeout return package freshness is explicit by source, but stale closeout
   age policy still needs to be validated against real long-run artifacts.
-- The latest task-scoped TwinPaper return package still needs a recorded
-  `closeout-review` verdict after reviewing `COMMERCIAL_REVIEW_PACKET.md`.
+- The latest task-scoped TwinPaper return package now appears as
+  `closeout_state.pending_review` until a `closeout-review` verdict is recorded
+  after reviewing `COMMERCIAL_REVIEW_PACKET.md`.
 
 ## Next Work Candidates
 
