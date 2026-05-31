@@ -108,9 +108,10 @@ pub use task_queue::{
     count_tasks, ensure_resume_review_next_safe_action, next_safe_action_for_background_poll,
     next_safe_action_for_pending_approval, pending_approval_operator_view,
     pending_approval_operator_views, status_next_safe_actions_from_summary,
-    tick_next_safe_actions_from_report, OffdeskNextSafeAction, OffdeskPendingApprovalView,
-    OffdeskStatusNextSafeActionInput, OffdeskTask, OffdeskTaskCounts, OffdeskTaskInput,
-    OffdeskTaskLifecycleAction, OffdeskTaskLifecycleReport, OffdeskTaskNextSafeAction,
-    OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView, OffdeskTickReportInput,
+    tick_next_safe_actions_from_report, OffdeskCloseoutStateSummary, OffdeskNextSafeAction,
+    OffdeskPendingApprovalView, OffdeskStatusNextSafeActionInput, OffdeskTask, OffdeskTaskCounts,
+    OffdeskTaskInput, OffdeskTaskLifecycleAction, OffdeskTaskLifecycleReport,
+    OffdeskTaskNextSafeAction, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
+    OffdeskTickReportInput,
 };
 pub use tick_lock::{OffdeskTickLockGuard, OffdeskTickLockMetadata};

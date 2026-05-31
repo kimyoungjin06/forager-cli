@@ -3,6 +3,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,8 +27,8 @@ use super::scheduler::{
 };
 use super::task_queue::{
     count_tasks, status_next_safe_actions_from_summary, tick_next_safe_actions_from_report,
-    OffdeskNextSafeAction, OffdeskStatusNextSafeActionInput, OffdeskTask, OffdeskTaskCounts,
-    OffdeskTaskStatus, OffdeskTaskStore, OffdeskTickReportInput,
+    OffdeskCloseoutStateSummary, OffdeskNextSafeAction, OffdeskStatusNextSafeActionInput,
+    OffdeskTask, OffdeskTaskCounts, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTickReportInput,
 };
 use super::tick_lock::OffdeskTickLockGuard;
 use super::{
@@ -83,6 +84,7 @@ pub struct OffdeskStatusSummary {
     pub background_stale: usize,
     pub background_failed: usize,
     pub closeout_required: usize,
+    pub closeout_state: OffdeskCloseoutStateSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
@@ -233,10 +235,12 @@ pub fn load_offdesk_status_summary(
         .iter()
         .filter(|approval| approval.status == ApprovalStatus::Pending && approval.expires_at >= now)
         .count();
+    let closeout_state = summarize_closeout_state(profile_dir, &tasks);
     let mut summary = OffdeskStatusSummary {
         pending_approvals,
         tasks: count_tasks(&tasks),
-        closeout_required: count_closeout_required_tasks(profile_dir, &tasks),
+        closeout_required: closeout_state.required_count(),
+        closeout_state,
         ..OffdeskStatusSummary::default()
     };
 
@@ -260,34 +264,109 @@ pub fn load_offdesk_status_summary(
             background_stale: summary.background_stale,
             background_failed: summary.background_failed,
             closeout_required: summary.closeout_required,
+            closeout_state: summary.closeout_state.clone(),
         });
 
     Ok(summary)
 }
 
-fn count_closeout_required_tasks(profile_dir: &Path, tasks: &[OffdeskTask]) -> usize {
-    let approved_closeouts = approved_closeout_reviewed_at_by_task(profile_dir);
-    tasks
+fn summarize_closeout_state(
+    profile_dir: &Path,
+    tasks: &[OffdeskTask],
+) -> OffdeskCloseoutStateSummary {
+    let closeouts = latest_closeout_generated_at_by_task(profile_dir);
+    let reviews = latest_closeout_review_by_task(profile_dir);
+    let mut summary = OffdeskCloseoutStateSummary::default();
+
+    for task in tasks
         .iter()
         .filter(|task| task.status == OffdeskTaskStatus::Completed)
-        .filter(|task| {
-            match approved_closeouts.get(&(task.project_key.clone(), task.task_id.clone())) {
-                Some(reviewed_at) => task.updated_at > *reviewed_at,
-                None => true,
+    {
+        let key = (task.project_key.clone(), task.task_id.clone());
+        let closeout_generated_at = closeouts.get(&key).copied();
+        let review = reviews.get(&key);
+        if let Some(review) = review.filter(|review| review.reviewed_at > task.updated_at) {
+            if review.verdict == "approved" {
+                summary.approved += 1;
+            } else {
+                summary.revision_required += 1;
             }
-        })
-        .count()
+        } else if closeout_generated_at.is_some_and(|generated_at| generated_at > task.updated_at) {
+            summary.pending_review += 1;
+        } else if review.is_some() {
+            summary.stale_review += 1;
+        } else if closeout_generated_at.is_some() {
+            summary.stale_closeout += 1;
+        } else {
+            summary.missing_closeout += 1;
+        }
+    }
+
+    summary
 }
 
-fn approved_closeout_reviewed_at_by_task(
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CloseoutReviewSnapshot {
+    reviewed_at: DateTime<Utc>,
+    verdict: String,
+}
+
+fn latest_closeout_generated_at_by_task(
     profile_dir: &Path,
 ) -> HashMap<(String, String), DateTime<Utc>> {
     let closeouts_dir = profile_dir.join("offdesk_closeouts");
     let Ok(entries) = fs::read_dir(closeouts_dir) else {
         return HashMap::new();
     };
-    let mut approved = HashMap::new();
-    for (project_key, task_id, reviewed_at) in entries
+    let mut closeouts = HashMap::new();
+    for (project_key, task_id, generated_at) in entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path().join("closeout_plan.json");
+            let content = fs::read_to_string(path).ok()?;
+            let value: Value = serde_json::from_str(&content).ok()?;
+            let generated_at = value
+                .get("generated_at")
+                .and_then(Value::as_str)
+                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc))?;
+            let tasks = value.get("tasks")?.as_array()?;
+            Some(
+                tasks
+                    .iter()
+                    .filter_map(move |task| {
+                        Some((
+                            task.get("project_key")?.as_str()?.to_string(),
+                            task.get("task_id")?.as_str()?.to_string(),
+                            generated_at,
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+    {
+        closeouts
+            .entry((project_key, task_id))
+            .and_modify(|existing| {
+                if generated_at > *existing {
+                    *existing = generated_at;
+                }
+            })
+            .or_insert(generated_at);
+    }
+    closeouts
+}
+
+fn latest_closeout_review_by_task(
+    profile_dir: &Path,
+) -> HashMap<(String, String), CloseoutReviewSnapshot> {
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    let Ok(entries) = fs::read_dir(closeouts_dir) else {
+        return HashMap::new();
+    };
+    let mut reviews = HashMap::new();
+    for (project_key, task_id, snapshot) in entries
         .filter_map(Result::ok)
         .flat_map(|entry| {
             fs::read_dir(entry.path())
@@ -302,15 +381,13 @@ fn approved_closeout_reviewed_at_by_task(
                 return None;
             }
             let content = fs::read_to_string(path).ok()?;
-            let value: serde_json::Value = serde_json::from_str(&content).ok()?;
-            if value.get("verdict")?.as_str()? != "approved" {
-                return None;
-            }
+            let value: Value = serde_json::from_str(&content).ok()?;
             let reviewed_at = value
                 .get("reviewed_at")
-                .and_then(serde_json::Value::as_str)
+                .and_then(Value::as_str)
                 .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
                 .map(|value| value.with_timezone(&Utc))?;
+            let verdict = value.get("verdict")?.as_str()?.to_string();
             let tasks = value.get("applies_to_tasks")?.as_array()?;
             Some(
                 tasks
@@ -319,7 +396,10 @@ fn approved_closeout_reviewed_at_by_task(
                         Some((
                             task.get("project_key")?.as_str()?.to_string(),
                             task.get("task_id")?.as_str()?.to_string(),
-                            reviewed_at,
+                            CloseoutReviewSnapshot {
+                                reviewed_at,
+                                verdict: verdict.clone(),
+                            },
                         ))
                     })
                     .collect::<Vec<_>>(),
@@ -327,16 +407,16 @@ fn approved_closeout_reviewed_at_by_task(
         })
         .flatten()
     {
-        approved
+        reviews
             .entry((project_key, task_id))
-            .and_modify(|existing| {
-                if reviewed_at > *existing {
-                    *existing = reviewed_at;
+            .and_modify(|existing: &mut CloseoutReviewSnapshot| {
+                if snapshot.reviewed_at > existing.reviewed_at {
+                    *existing = snapshot.clone();
                 }
             })
-            .or_insert(reviewed_at);
+            .or_insert(snapshot);
     }
-    approved
+    reviews
 }
 
 fn apply_background_outcome(
@@ -809,6 +889,68 @@ mod tests {
         }
     }
 
+    fn completed_task(task_id: &str, updated_at: DateTime<Utc>) -> OffdeskTask {
+        let mut input = task_input(updated_at, "true");
+        input.task_id = Some(task_id.to_string());
+        let mut task = OffdeskTask::new(input, updated_at);
+        task.status = OffdeskTaskStatus::Completed;
+        task
+    }
+
+    fn write_closeout_plan(
+        profile_dir: &Path,
+        dir_name: &str,
+        task_id: &str,
+        generated_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let dir = profile_dir.join("offdesk_closeouts").join(dir_name);
+        fs::create_dir_all(&dir)?;
+        fs::write(
+            dir.join("closeout_plan.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "generated_at": generated_at,
+                "closeout_id": format!("closeout_{task_id}"),
+                "tasks": [
+                    {
+                        "project_key": "project",
+                        "request_id": "request",
+                        "task_id": task_id
+                    }
+                ]
+            }))?,
+        )?;
+        Ok(())
+    }
+
+    fn write_closeout_review(
+        profile_dir: &Path,
+        dir_name: &str,
+        task_id: &str,
+        reviewed_at: DateTime<Utc>,
+        verdict: &str,
+    ) -> Result<()> {
+        let dir = profile_dir.join("offdesk_closeouts").join(dir_name);
+        fs::create_dir_all(&dir)?;
+        fs::write(
+            dir.join(format!(
+                "closeout_review_{}.json",
+                reviewed_at.format("%Y%m%dT%H%M%SZ")
+            )),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "reviewed_at": reviewed_at,
+                "verdict": verdict,
+                "applies_to_tasks": [
+                    {
+                        "project_key": "project",
+                        "request_id": "request",
+                        "task_id": task_id
+                    }
+                ]
+            }))?,
+        )?;
+        Ok(())
+    }
+
     fn fallback_candidate() -> ProviderFallbackCandidate {
         ProviderFallbackCandidate {
             provider_id: "openai".to_string(),
@@ -853,6 +995,45 @@ mod tests {
                 },
             )),
         }
+    }
+
+    #[test]
+    fn closeout_state_distinguishes_missing_pending_revision_stale_and_approved() -> Result<()> {
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let older = now - Duration::minutes(10);
+        let newer = now + Duration::minutes(10);
+        let tasks = vec![
+            completed_task("missing", now),
+            completed_task("pending", now),
+            completed_task("revision", now),
+            completed_task("approved", now),
+            completed_task("stale-package", now),
+            completed_task("stale-review", now),
+        ];
+
+        write_closeout_plan(temp.path(), "pending", "pending", newer)?;
+        write_closeout_review(temp.path(), "revision", "revision", newer, "revise")?;
+        write_closeout_review(temp.path(), "approved", "approved", newer, "approved")?;
+        write_closeout_plan(temp.path(), "stale-package", "stale-package", older)?;
+        write_closeout_review(
+            temp.path(),
+            "stale-review",
+            "stale-review",
+            older,
+            "approved",
+        )?;
+
+        let summary = summarize_closeout_state(temp.path(), &tasks);
+
+        assert_eq!(summary.missing_closeout, 1);
+        assert_eq!(summary.pending_review, 1);
+        assert_eq!(summary.revision_required, 1);
+        assert_eq!(summary.approved, 1);
+        assert_eq!(summary.stale_closeout, 1);
+        assert_eq!(summary.stale_review, 1);
+        assert_eq!(summary.required_count(), 5);
+        Ok(())
     }
 
     #[test]

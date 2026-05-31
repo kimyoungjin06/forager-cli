@@ -7971,6 +7971,9 @@ fn status_json_includes_closeout_required_count() -> Result<()> {
     assert!(status_output.status.success());
     let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
     assert_eq!(status["closeout_required_offdesk_tasks"], 1);
+    assert_eq!(status["closeout_state"]["missing_closeout"], 1);
+    assert_eq!(status["closeout_state"]["pending_review"], 0);
+    assert_eq!(status["closeout_state"]["revision_required"], 0);
     assert!(status["offdesk_next_safe_actions"]
         .as_array()
         .expect("offdesk next safe actions")
@@ -7981,9 +7984,8 @@ fn status_json_includes_closeout_required_count() -> Result<()> {
     assert!(status_output.status.success());
     let stdout = String::from_utf8_lossy(&status_output.stdout);
     assert!(stdout.contains("1 closeout required"));
-    assert!(stdout.contains(
-        "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
-    ));
+    assert!(stdout.contains("Closeout state: 1 missing, 0 pending review, 0 revise/blocked"));
+    assert!(stdout.contains("Closeout: run `forager offdesk closeout`"));
     assert!(stdout.contains("Next safe actions:"));
     assert!(stdout.contains("forager ondesk prompt-package"));
 
@@ -8010,6 +8012,7 @@ fn status_json_includes_closeout_required_count() -> Result<()> {
     assert!(status_output.status.success());
     let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
     assert_eq!(status["closeout_required_offdesk_tasks"], 0);
+    assert_eq!(status["closeout_state"]["approved"], 1);
     Ok(())
 }
 

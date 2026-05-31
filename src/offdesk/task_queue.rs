@@ -674,15 +674,40 @@ pub fn status_next_safe_actions_from_summary(
         ));
     }
     if summary.closeout_required > 0 {
-        actions.push(OffdeskNextSafeAction::new(
-            "review_required",
-            "Completed Offdesk output needs closeout and Ondesk review before it is treated as accepted.",
-            vec![
-                "forager offdesk closeout".to_string(),
-                "forager ondesk prompt-package".to_string(),
-            ],
-            true,
-        ));
+        let closeout_without_fresh_package = summary.closeout_state.missing_closeout
+            + summary.closeout_state.stale_closeout
+            + summary.closeout_state.stale_review;
+        if closeout_without_fresh_package > 0 {
+            actions.push(OffdeskNextSafeAction::new(
+                "review_required",
+                "Completed Offdesk output needs a fresh closeout package before Ondesk review.",
+                vec![
+                    "forager offdesk closeout".to_string(),
+                    "forager ondesk prompt-package".to_string(),
+                ],
+                true,
+            ));
+        } else if summary.closeout_state.pending_review > 0 {
+            actions.push(OffdeskNextSafeAction::new(
+                "review_required",
+                "Closeout package exists; review COMMERCIAL_REVIEW_PACKET.md and record a closeout-review verdict.",
+                vec![
+                    "forager offdesk closeout-review --verdict approved|revise|blocked".to_string(),
+                    "forager ondesk prompt-package".to_string(),
+                ],
+                true,
+            ));
+        } else {
+            actions.push(OffdeskNextSafeAction::new(
+                "review_required",
+                "Closeout review returned revise/blocked; address the review notes before treating output as accepted.",
+                vec![
+                    "forager ondesk prompt-package".to_string(),
+                    "forager offdesk closeout".to_string(),
+                ],
+                true,
+            ));
+        }
     }
     if summary.background_active > 0 || summary.tasks.active > 0 {
         actions.push(OffdeskNextSafeAction::new(
@@ -745,6 +770,27 @@ pub struct OffdeskStatusNextSafeActionInput {
     pub background_stale: usize,
     pub background_failed: usize,
     pub closeout_required: usize,
+    pub closeout_state: OffdeskCloseoutStateSummary,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct OffdeskCloseoutStateSummary {
+    pub missing_closeout: usize,
+    pub pending_review: usize,
+    pub revision_required: usize,
+    pub stale_closeout: usize,
+    pub stale_review: usize,
+    pub approved: usize,
+}
+
+impl OffdeskCloseoutStateSummary {
+    pub fn required_count(&self) -> usize {
+        self.missing_closeout
+            + self.pending_review
+            + self.revision_required
+            + self.stale_closeout
+            + self.stale_review
+    }
 }
 
 fn closeout_and_ondesk_commands(project_key: Option<&str>, task_id: Option<&str>) -> Vec<String> {
@@ -1289,6 +1335,10 @@ mod tests {
             background_stale: 1,
             background_failed: 1,
             closeout_required: 1,
+            closeout_state: OffdeskCloseoutStateSummary {
+                missing_closeout: 1,
+                ..OffdeskCloseoutStateSummary::default()
+            },
         });
 
         assert_eq!(
@@ -1300,6 +1350,29 @@ mod tests {
                 "runtime_monitoring",
                 "dispatch_pending",
             ]
+        );
+    }
+
+    #[test]
+    fn status_next_safe_actions_point_pending_closeouts_to_review_verdict() {
+        let actions = status_next_safe_actions_from_summary(&OffdeskStatusNextSafeActionInput {
+            pending_approvals: 0,
+            tasks: OffdeskTaskCounts::default(),
+            background_active: 0,
+            background_stale: 0,
+            background_failed: 0,
+            closeout_required: 1,
+            closeout_state: OffdeskCloseoutStateSummary {
+                pending_review: 1,
+                ..OffdeskCloseoutStateSummary::default()
+            },
+        });
+
+        assert_eq!(action_kinds(&actions), vec!["review_required"]);
+        assert!(actions[0].detail.contains("COMMERCIAL_REVIEW_PACKET.md"));
+        assert_eq!(
+            actions[0].commands[0],
+            "forager offdesk closeout-review --verdict approved|revise|blocked"
         );
     }
 

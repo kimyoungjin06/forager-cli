@@ -193,7 +193,10 @@ Acceptance checks:
 - the verdict applies to the task-scoped closeout artifact;
 - unsafe operations and missing evidence are recorded explicitly;
 - the record does not move, delete, archive, or promote files;
-- `ondesk prompt-package` includes the closeout-review verdict.
+- `ondesk prompt-package` includes the closeout-review verdict;
+- `forager status --json` moves the reviewed task from
+  `closeout_state.pending_review` to `closeout_state.approved` when the verdict
+  is `approved`.
 
 ### 3. Ondesk Return Package Validation
 

@@ -5,8 +5,9 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::offdesk::{
-    ensure_resume_review_next_safe_action, load_offdesk_status_summary, OffdeskNextSafeAction,
-    OffdeskStatusSummary, ResumeStatus, TaskResumeStore,
+    ensure_resume_review_next_safe_action, load_offdesk_status_summary,
+    OffdeskCloseoutStateSummary, OffdeskNextSafeAction, OffdeskStatusSummary, ResumeStatus,
+    TaskResumeStore,
 };
 use crate::session::{app_dir_resolution, get_profile_dir, Status, Storage};
 
@@ -60,6 +61,7 @@ struct StatusJson {
     stale_background_runs: usize,
     failed_background_runs: usize,
     closeout_required_offdesk_tasks: usize,
+    closeout_state: OffdeskCloseoutStateSummary,
     offdesk_next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
@@ -103,6 +105,7 @@ fn build_status_json(
         stale_background_runs: offdesk_summary.background_stale,
         failed_background_runs: offdesk_summary.background_failed,
         closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
+        closeout_state: offdesk_summary.closeout_state,
         offdesk_next_safe_actions,
     }
 }
@@ -307,8 +310,31 @@ fn print_offdesk_summary(
     }
     if summary.closeout_required > 0 {
         println!(
-            "Closeout: run `forager offdesk closeout`, then record review with `forager offdesk closeout-review`."
+            "Closeout state: {} missing, {} pending review, {} revise/blocked, {} stale package, {} stale review, {} approved.",
+            summary.closeout_state.missing_closeout,
+            summary.closeout_state.pending_review,
+            summary.closeout_state.revision_required,
+            summary.closeout_state.stale_closeout,
+            summary.closeout_state.stale_review,
+            summary.closeout_state.approved
         );
+        if summary.closeout_state.missing_closeout
+            + summary.closeout_state.stale_closeout
+            + summary.closeout_state.stale_review
+            > 0
+        {
+            println!("Closeout: run `forager offdesk closeout` for tasks without a fresh closeout package.");
+        }
+        if summary.closeout_state.pending_review > 0 {
+            println!(
+                "Closeout review: read `COMMERCIAL_REVIEW_PACKET.md`, then record `forager offdesk closeout-review --verdict approved|revise|blocked`."
+            );
+        }
+        if summary.closeout_state.revision_required > 0 {
+            println!(
+                "Closeout revision: address revise/blocked review notes before accepting output."
+            );
+        }
     }
     print_offdesk_next_safe_actions(next_safe_actions);
 }
