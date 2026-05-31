@@ -6,7 +6,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -2099,6 +2099,11 @@ struct CloseoutArtifactPaths {
     commercial_review_packet: String,
     return_package_markdown: String,
 }
+
+const CLOSEOUT_RETURN_DECISION_LIMIT: usize = 5;
+const CLOSEOUT_RETURN_FIRST_READ_LIMIT: usize = 5;
+const CLOSEOUT_RETURN_EVIDENCE_LIMIT: usize = 5;
+const CLOSEOUT_RETURN_GOVERNANCE_PATH_LIMIT: usize = 3;
 
 #[derive(Serialize)]
 struct CloseoutReviewRecord {
@@ -6784,26 +6789,38 @@ fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
     let mut output = String::new();
     output.push_str("# Ondesk Return Package\n\n");
     output.push_str("Use this package to rehydrate a fresh Ondesk harness after Offdesk work.\n\n");
+    render_return_status(&mut output, report);
+    render_return_decisions(&mut output, report);
     output.push_str("## Required First Reads\n");
-    if report.required_first_reads.is_empty() {
+    let first_reads = prioritized_closeout_first_reads(&report.required_first_reads);
+    if first_reads.is_empty() {
         output.push_str(
             "- No present result artifacts were found. Start with `closeout_plan.json`.\n",
         );
     } else {
-        for read in &report.required_first_reads {
-            output.push_str(&format!("- `{}`: {}\n", read.path, read.reason));
+        for read in first_reads.iter().take(CLOSEOUT_RETURN_FIRST_READ_LIMIT) {
+            output.push_str(&format!(
+                "- {}: `{}`\n  - why: {}\n",
+                closeout_read_label(read),
+                read.path,
+                read.reason
+            ));
+        }
+        if first_reads.len() > CLOSEOUT_RETURN_FIRST_READ_LIMIT {
+            output.push_str(&format!(
+                "- ... {} more first-read candidate(s) are listed in `closeout_plan.json`.\n",
+                first_reads.len() - CLOSEOUT_RETURN_FIRST_READ_LIMIT
+            ));
         }
     }
-    output.push_str("\n## Open Decisions\n");
-    if report.open_decisions.is_empty() {
-        output.push_str("- None recorded.\n");
-    } else {
-        for decision in &report.open_decisions {
-            output.push_str(&format!("- {}: {}\n", decision.kind, decision.detail));
-        }
-    }
+    render_return_change_summary(&mut output, report);
+    render_return_evidence(&mut output, report);
     output.push_str("\n## Documentation Governance Recommendations\n");
-    render_documentation_governance_markdown(&mut output, report.documentation_governance.as_ref());
+    render_documentation_governance_return_markdown(
+        &mut output,
+        report.documentation_governance.as_ref(),
+    );
+    render_return_next_safe_action(&mut output, report);
     output.push_str("\n## Verification Commands\n");
     for command in &report.verification_commands {
         output.push_str(&format!("- `{command}`\n"));
@@ -6813,6 +6830,262 @@ fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
     output.push_str("- Re-read listed artifacts before continuing work.\n");
     output.push_str("- Do not delete or move files until commercial review and human approval are both recorded.\n");
     output
+}
+
+fn render_return_status(output: &mut String, report: &OffdeskCloseoutReport) {
+    output.push_str("## Status\n");
+    let state =
+        if report.summary.active_or_blocked_tasks > 0 || report.summary.missing_artifacts > 0 {
+            "blocked"
+        } else if report.open_decisions.is_empty() {
+            "evidence_ready"
+        } else {
+            "review_required"
+        };
+    output.push_str(&format!("- state: `{state}`\n"));
+    output.push_str(&format!(
+        "- tasks: {} completed / {} scanned; {} active_or_blocked\n",
+        report.summary.completed_tasks,
+        report.summary.tasks_scanned,
+        report.summary.active_or_blocked_tasks
+    ));
+    output.push_str(&format!(
+        "- file review: {} keep, {} archive candidates, {} delete candidates, {} missing artifacts\n",
+        report.summary.keep_operations,
+        report.summary.archive_candidates,
+        report.summary.delete_candidates,
+        report.summary.missing_artifacts
+    ));
+    if let Some(governance) = &report.documentation_governance {
+        if governance.error.is_some() {
+            output.push_str("- documentation governance: audit unavailable\n");
+        } else {
+            output.push_str(&format!(
+                "- documentation governance: {} recommendation(s)\n",
+                governance.recommendation_count
+            ));
+        }
+    }
+    output.push('\n');
+}
+
+fn render_return_decisions(output: &mut String, report: &OffdeskCloseoutReport) {
+    output.push_str("## Decision Needed\n");
+    if report.open_decisions.is_empty() {
+        output.push_str("- No open decision recorded. Start with the first reads and verification commands.\n\n");
+        return;
+    }
+    for decision in report
+        .open_decisions
+        .iter()
+        .take(CLOSEOUT_RETURN_DECISION_LIMIT)
+    {
+        output.push_str(&format!(
+            "- {}: {}\n  - next: `{}`\n",
+            decision.kind, decision.detail, decision.suggested_command
+        ));
+    }
+    if report.open_decisions.len() > CLOSEOUT_RETURN_DECISION_LIMIT {
+        output.push_str(&format!(
+            "- ... {} more decision(s) are listed in `closeout_plan.json`.\n",
+            report.open_decisions.len() - CLOSEOUT_RETURN_DECISION_LIMIT
+        ));
+    }
+    output.push('\n');
+}
+
+fn render_return_change_summary(output: &mut String, report: &OffdeskCloseoutReport) {
+    output.push_str("\n## What Changed\n");
+    output.push_str("- Closeout generated review artifacts only; project files were not moved, deleted, or archived.\n");
+    output.push_str(&format!(
+        "- Review packet: `{}`\n",
+        report.artifacts.commercial_review_packet
+    ));
+    output.push_str(&format!(
+        "- Full machine plan: `{}`\n",
+        report.artifacts.closeout_plan_json
+    ));
+    output.push_str(&format!(
+        "- Cleanup manifest: `{}`\n",
+        report.artifacts.cleanup_manifest_json
+    ));
+}
+
+fn render_return_evidence(output: &mut String, report: &OffdeskCloseoutReport) {
+    output.push_str("\n## Evidence\n");
+    render_return_evidence_group(output, report, "keep", "Kept review evidence");
+    render_return_evidence_group(
+        output,
+        report,
+        "archive_candidate",
+        "Archive review candidates",
+    );
+    render_return_evidence_group(
+        output,
+        report,
+        "delete_candidate",
+        "Delete review candidates",
+    );
+}
+
+fn render_return_evidence_group(
+    output: &mut String,
+    report: &OffdeskCloseoutReport,
+    operation: &str,
+    title: &str,
+) {
+    let mut seen_paths = BTreeSet::new();
+    let operations = report
+        .file_operations
+        .iter()
+        .filter(|item| item.operation == operation)
+        .filter(|item| seen_paths.insert(item.path.clone()))
+        .collect::<Vec<_>>();
+    output.push_str(&format!("\n### {title}\n"));
+    if operations.is_empty() {
+        output.push_str("- None.\n");
+        return;
+    }
+    for item in operations.iter().take(CLOSEOUT_RETURN_EVIDENCE_LIMIT) {
+        output.push_str(&format!(
+            "- {}: `{}`\n  - purpose: {}\n  - present: {} / risk: {} / review_required: {}\n",
+            closeout_operation_label(item),
+            item.path,
+            item.reason,
+            item.present,
+            item.risk,
+            item.requires_commercial_review || item.requires_human_approval
+        ));
+    }
+    if operations.len() > CLOSEOUT_RETURN_EVIDENCE_LIMIT {
+        output.push_str(&format!(
+            "- ... {} more `{operation}` item(s) are listed in `cleanup_manifest.json`.\n",
+            operations.len() - CLOSEOUT_RETURN_EVIDENCE_LIMIT
+        ));
+    }
+}
+
+fn render_documentation_governance_return_markdown(
+    output: &mut String,
+    governance: Option<&CloseoutDocumentationGovernance>,
+) {
+    let Some(governance) = governance else {
+        output.push_str("- No project workdir was available for documentation governance audit.\n");
+        return;
+    };
+    output.push_str(&format!(
+        "- audit source: `{}` profile for `{}`\n",
+        governance.audit_profile, governance.workdir
+    ));
+    output.push_str(&format!("- full audit command: `{}`\n", governance.command));
+    if let Some(error) = &governance.error {
+        output.push_str(&format!("- audit unavailable: {}\n", error));
+        return;
+    }
+    if governance.recommendations.is_empty() {
+        output.push_str("- No documentation governance recommendations.\n");
+        return;
+    }
+    for recommendation in &governance.recommendations {
+        output.push_str(&format!(
+            "- {}: {} (`{}`)\n  - action: {}\n",
+            recommendation.priority,
+            recommendation.title,
+            recommendation.kind,
+            recommendation.suggested_action
+        ));
+        if !recommendation.paths.is_empty() {
+            output.push_str("  - focus:");
+            for path in recommendation
+                .paths
+                .iter()
+                .take(CLOSEOUT_RETURN_GOVERNANCE_PATH_LIMIT)
+            {
+                output.push_str(&format!(" `{path}`"));
+            }
+            if recommendation.paths.len() > CLOSEOUT_RETURN_GOVERNANCE_PATH_LIMIT {
+                output.push_str(&format!(
+                    " (+{} more)",
+                    recommendation.paths.len() - CLOSEOUT_RETURN_GOVERNANCE_PATH_LIMIT
+                ));
+            }
+            output.push('\n');
+        }
+    }
+}
+
+fn render_return_next_safe_action(output: &mut String, report: &OffdeskCloseoutReport) {
+    output.push_str("\n## Next Safe Action\n");
+    if let Some(decision) = report.open_decisions.first() {
+        output.push_str(&format!(
+            "- Resolve `{}` first: {}\n",
+            decision.kind, decision.detail
+        ));
+        output.push_str(&format!(
+            "- Suggested command/review: `{}`\n",
+            decision.suggested_command
+        ));
+        return;
+    }
+    if let Some(command) = report
+        .verification_commands
+        .iter()
+        .find(|command| command.contains("forager ondesk prompt-package"))
+    {
+        output.push_str(&format!("- Rehydrate Ondesk with `{command}`.\n"));
+        return;
+    }
+    output.push_str("- Run the verification commands below before continuing work.\n");
+}
+
+fn prioritized_closeout_first_reads(reads: &[CloseoutReadRef]) -> Vec<&CloseoutReadRef> {
+    let mut seen = BTreeSet::new();
+    let mut prioritized = reads
+        .iter()
+        .filter(|read| read.present)
+        .filter(|read| seen.insert(read.path.clone()))
+        .collect::<Vec<_>>();
+    prioritized.sort_by(|left, right| {
+        (closeout_read_priority(left), left.path.as_str())
+            .cmp(&(closeout_read_priority(right), right.path.as_str()))
+    });
+    prioritized
+}
+
+fn closeout_read_priority(read: &CloseoutReadRef) -> u8 {
+    if read.reason.contains("Result artifacts")
+        || read.reason.contains("Background result artifacts")
+    {
+        0
+    } else if read.reason.contains("Declared task artifacts") {
+        1
+    } else {
+        2
+    }
+}
+
+fn closeout_read_label(read: &CloseoutReadRef) -> &'static str {
+    if read.reason.contains("Result artifacts")
+        || read.reason.contains("Background result artifacts")
+    {
+        "Result evidence"
+    } else if read.reason.contains("Declared task artifacts") {
+        "Declared artifact"
+    } else {
+        "Review evidence"
+    }
+}
+
+fn closeout_operation_label(operation: &CloseoutFileOperation) -> &'static str {
+    if operation.source.contains("result_artifact") {
+        "result artifact"
+    } else if operation.source.contains("log_artifact") {
+        "runtime log"
+    } else if operation.source.contains("artifact_ref") {
+        "declared artifact"
+    } else {
+        "artifact"
+    }
 }
 
 fn render_documentation_governance_markdown(

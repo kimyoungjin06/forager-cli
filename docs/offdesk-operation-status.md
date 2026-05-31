@@ -143,25 +143,26 @@ The short TwinPaper smoke observed:
 
 ## Remaining Work
 
-### 1. Return Package And Prompt Package Polish
+### 1. Prompt Package Audit Freshness
 
-Goal: make the handoff artifact concise enough to read first, while retaining
-links to inspectable evidence.
+Goal: make Ondesk prompt packages explicit about whether their documentation
+governance view comes from the latest closeout package, a fresh audit, or an
+unavailable audit.
 
 Expected slice:
 
-- reduce raw artifact-path noise in `RETURN_PACKAGE.md`;
-- deduplicate and prioritize required first reads;
 - decide whether `ondesk prompt-package` should optionally run a fresh
   `project audit-docs` pass when no closeout package exists;
-- keep closeout recommendations focused on actions a human can evaluate.
+- decide how stale closeout return packages should be identified;
+- keep prompt-package documentation governance output focused on actions a
+  human can evaluate.
 
 Acceptance checks:
 
-- the first-read section is short and ordered;
-- raw paths are grouped behind human labels;
-- documentation-governance recommendations are visible without dumping the full
-  audit report;
+- the prompt package states the documentation governance source;
+- stale or missing closeout packages do not silently suppress audit guidance;
+- documentation-governance recommendations remain visible without dumping the
+  full audit report;
 - prompt-package output does not imply that Offdesk output is trusted without
   review.
 
@@ -298,8 +299,8 @@ rather than inventing separate wording.
 
 The next practical step is:
 
-1. split the current local changes into reviewable commits;
-2. improve return package summarization and prompt-package audit freshness;
+1. implement or reject prompt-package fresh audit support;
+2. validate the compact return package on a real completed TwinPaper run;
 3. prepare a longer TwinPaper run with Council enabled;
 4. launch it through the existing `dispatch.runtime` approval path;
 5. monitor with `offdesk poll`, tmux, heartbeat, progress, and logs;

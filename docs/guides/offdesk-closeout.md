@@ -114,6 +114,12 @@ Use `RETURN_PACKAGE.md` to start a fresh or resumed Ondesk harness. The harness
 should read the listed result artifacts first, then inspect open decisions and
 run the verification commands before continuing work.
 
+The return package is intentionally shorter than `closeout_plan.json` and
+`cleanup_manifest.json`. It starts with status, decisions needed, capped first
+reads, a short change summary, grouped evidence, documentation governance
+recommendations, and the next safe action. Large evidence inventories stay in
+the machine-readable closeout artifacts.
+
 `forager ondesk prompt-package --project-key <project>` now includes the latest
 matching closeout return package and the latest recorded closeout-review
 verdict, when those artifacts exist. This makes the normal morning return path

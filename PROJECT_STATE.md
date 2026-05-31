@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-05-30
+Updated: 2026-05-31
 
 This is the small current surface for Forager development work. It is separate
 from the public product README and from the mdBook user guides.
@@ -45,22 +45,26 @@ decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
 - `forager doctor` and `forager status --json` now expose active profile/app
   directory source, making legacy AoE storage fallback visible before
   migration.
+- `RETURN_PACKAGE.md` now uses a compact Ondesk-facing template with status,
+  decisions needed, capped first reads, grouped evidence, documentation
+  governance recommendations, and a next safe action. Full inventories stay in
+  `closeout_plan.json` and `cleanup_manifest.json`.
 - Offdesk operation status remains the running status and candidate work queue
   for operator surfaces and safety rails.
 
 ## Current Gaps
 
-- Offdesk return packages can still list too many raw artifact paths when a
-  smaller human-facing summary would be better.
 - Closeout consumes audit recommendations, but prompt packages still rely on
   the closeout return package rather than running a fresh audit themselves.
+- The compact return package template is covered by fixture tests, but still
+  needs validation on a real completed TwinPaper run.
 
 ## Next Work Candidates
 
-1. Improve Offdesk return package summarization so required first reads are
-   deduplicated and prioritized.
-2. Consider whether `ondesk prompt-package` should optionally run a fresh
+1. Consider whether `ondesk prompt-package` should optionally run a fresh
    `project audit-docs` pass when no closeout package exists.
+2. Run closeout on a real completed TwinPaper workload and inspect whether the
+   compact return package is readable enough for morning handoff.
 
 ## Refresh Rule
 
