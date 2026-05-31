@@ -179,6 +179,7 @@ Run closeout before returning to live work:
 ```bash
 target/debug/forager -p twinpaper-adaptive-debug offdesk closeout \
   --project-key twinpaper \
+  --task-id <task_id> \
   --dry-run
 ```
 
@@ -192,12 +193,13 @@ Start the next harness from the return package:
 
 ```bash
 target/debug/forager -p twinpaper-adaptive-debug ondesk prompt-package \
-  --project-key twinpaper
+  --project-key twinpaper \
+  --include-doc-audit
 ```
 
 The package should include the latest project initialization summary, latest
-closeout return package, review verdict when present, and first-read
-instructions for the fresh harness.
+closeout return package, review verdict when present, documentation governance
+source, and first-read instructions for the fresh harness.
 
 ## Wiki Review
 

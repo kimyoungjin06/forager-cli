@@ -6635,7 +6635,57 @@ fn closeout_documentation_governance(
 fn closeout_project_workdir(args: &CloseoutArgs, tasks: &[OffdeskTask]) -> Option<PathBuf> {
     args.workdir
         .clone()
+        .or_else(|| closeout_project_workdir_from_task_artifacts(tasks))
         .or_else(|| tasks.first().map(|task| PathBuf::from(&task.workdir)))
+}
+
+fn closeout_project_workdir_from_task_artifacts(tasks: &[OffdeskTask]) -> Option<PathBuf> {
+    tasks.iter().find_map(|task| {
+        task.result_artifact_path
+            .as_deref()
+            .and_then(closeout_project_workdir_from_artifact_path)
+            .or_else(|| {
+                task.log_artifact_path
+                    .as_deref()
+                    .and_then(closeout_project_workdir_from_artifact_path)
+            })
+            .or_else(|| {
+                task.artifact_refs.iter().find_map(|artifact| {
+                    artifact
+                        .path
+                        .as_deref()
+                        .and_then(closeout_project_workdir_from_artifact_path)
+                })
+            })
+    })
+}
+
+fn closeout_project_workdir_from_artifact_path(path: &str) -> Option<PathBuf> {
+    let path = Path::new(path);
+    let artifact_dir = if path.is_dir() { path } else { path.parent()? };
+    for ancestor in artifact_dir.ancestors() {
+        for manifest_name in ["prepared_task.json", "manifest.json"] {
+            let manifest_path = ancestor.join(manifest_name);
+            let repo = closeout_project_workdir_from_manifest(&manifest_path);
+            if repo.is_some() {
+                return repo;
+            }
+        }
+    }
+    None
+}
+
+fn closeout_project_workdir_from_manifest(path: &Path) -> Option<PathBuf> {
+    let content = fs::read_to_string(path).ok()?;
+    let manifest = serde_json::from_str::<Value>(&content).ok()?;
+    manifest
+        .get("repo")
+        .or_else(|| manifest.get("project_path"))
+        .or_else(|| manifest.get("target_repo"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "-")
+        .map(PathBuf::from)
 }
 
 fn closeout_documentation_recommendation(

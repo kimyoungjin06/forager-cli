@@ -145,6 +145,13 @@ recommendations, such as deliverables to promote or outputs to record in
 `RETENTION_REVIEW.md`; the full machine summary stays in
 `forager project audit-docs --json`.
 
+For workloads launched from a harness checkout against a separate target repo,
+closeout first looks beside result and log artifacts for `prepared_task.json` or
+`manifest.json` and uses their `repo` field as the documentation-governance
+workdir. An explicit `--workdir` still wins. This keeps a TwinPaper runtime
+command launched from Forager from accidentally auditing the Forager checkout as
+the research project.
+
 ## Runtime Smoke Interpretation
 
 A clean runtime smoke does not skip closeout. For example, the TwinPaper
