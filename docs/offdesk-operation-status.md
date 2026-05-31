@@ -122,6 +122,13 @@ The short TwinPaper smoke observed:
   overwrites existing project documents.
 - `forager offdesk closeout` carries focused documentation-governance
   recommendations into the Ondesk return package.
+- Task-scoped closeout has been validated on the real
+  `twinpaper-autonomy-20260527T125541Z` long-run artifact. It produced a compact
+  one-task return package with no missing artifacts and no delete candidates.
+- Closeout documentation governance now prefers the target repo recorded beside
+  runtime artifacts in `prepared_task.json` or `manifest.json` before falling
+  back to the runtime workdir. This matters when the runtime command runs from
+  the harness checkout while the research target is a separate repository.
 - `forager ondesk prompt-package` now states the documentation governance source
   and can run a fresh `project audit-docs` pass with `--include-doc-audit`,
   using the latest closeout workdir when one is available.
@@ -167,30 +174,26 @@ Acceptance checks:
 - no system-critical mutation occurs;
 - the final report separates pass/fail from operator judgement.
 
-### 2. Offdesk Closeout On A Real Completed Run
+### 2. Closeout Review Verdict For Real TwinPaper Return
 
-Goal: make the "finished process -> reviewable work" transition practical.
+Goal: record the human/commercial review result without applying file
+operations.
 
 Expected slice:
 
 ```bash
-forager offdesk closeout --project-key twinpaper --dry-run
+forager offdesk closeout-review \
+  --closeout-id closeout_f2573215 \
+  --verdict approved|revise|blocked \
+  --reviewer <reviewer>
 ```
-
-Then inspect:
-
-- `closeout_plan.json`;
-- `CLOSEOUT_PLAN.md`;
-- `cleanup_manifest.json`;
-- `COMMERCIAL_REVIEW_PACKET.md`;
-- `RETURN_PACKAGE.md`.
 
 Acceptance checks:
 
-- closeout does not move, delete, or archive files;
-- keep/archive/delete candidates are explainable;
-- required first reads for Ondesk return are complete;
-- any proposed cleanup requires separate review and approval.
+- the verdict applies to the task-scoped closeout artifact;
+- unsafe operations and missing evidence are recorded explicitly;
+- the record does not move, delete, archive, or promote files;
+- `ondesk prompt-package` includes the closeout-review verdict.
 
 ### 3. Ondesk Return Package Validation
 
@@ -281,13 +284,12 @@ rather than inventing separate wording.
 
 The next practical step is:
 
-1. validate the compact return package on a real completed TwinPaper run;
-2. prepare a longer TwinPaper run with Council enabled;
-3. launch it through the existing `dispatch.runtime` approval path;
-4. monitor with `offdesk poll`, tmux, heartbeat, progress, and logs;
-5. run closeout after completion;
-6. validate the Ondesk return prompt package with `--include-doc-audit`;
-7. review wiki candidates before promotion.
+1. review the latest task-scoped TwinPaper `COMMERCIAL_REVIEW_PACKET.md`;
+2. record a `closeout-review` verdict for `closeout_f2573215`;
+3. validate the Ondesk return prompt package includes that verdict;
+4. review wiki candidates before promotion;
+5. prepare the next longer TwinPaper run only after the return/review path is
+   closed.
 
 Use the generated `LONG_RUN_VALIDATION.md` packet from
 `scripts/prepare_twinpaper_offdesk_task.py` as the checklist for this sequence.

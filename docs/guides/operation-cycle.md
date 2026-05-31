@@ -123,7 +123,7 @@ evidence, runner log, heartbeat/progress, and result-review evidence together.
 When runtime finishes, run closeout before resuming live work:
 
 ```bash
-forager offdesk closeout --project-key <project> --dry-run
+forager offdesk closeout --project-key <project> --task-id <task-id> --dry-run
 ```
 
 Closeout is a review packet, not a cleanup executor. The expected morning path
@@ -140,6 +140,13 @@ is:
 from `project audit-docs` when the closeout workdir can be audited. This keeps
 the Ondesk return surface action-oriented while leaving full audit inventories
 in machine JSON.
+
+Prefer task-scoped closeout for morning handoff when a specific Offdesk run is
+being returned. Project-wide closeout is useful for backlog review, but it can
+mix older debug, cancelled, and completed tasks into the same return package.
+When runtime artifacts include `prepared_task.json` or `manifest.json`, closeout
+uses their target repo field for documentation governance before falling back to
+the runtime workdir.
 
 For a current project-level governance view, add `--include-doc-audit` to
 `forager ondesk prompt-package`. The prompt package will then identify the

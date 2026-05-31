@@ -287,3 +287,137 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     assert!(review_record_path.exists());
     Ok(())
 }
+
+#[test]
+#[serial]
+fn offdesk_closeout_prefers_prepared_repo_for_documentation_governance() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+
+    let harness_dir = temp.path().join("harness");
+    let run_dir = harness_dir.join("target").join("offdesk-run");
+    fs::create_dir_all(&run_dir)?;
+    fs::write(harness_dir.join("README.md"), "# Harness\n")?;
+    fs::write(
+        harness_dir.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(harness_dir.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        harness_dir.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: harness overview.\n",
+    )?;
+
+    let target_repo = temp.path().join("target-repo");
+    fs::create_dir_all(target_repo.join("outputs"))?;
+    fs::write(target_repo.join("README.md"), "# Target Repo\n")?;
+    fs::write(
+        target_repo.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(target_repo.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        target_repo.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: target overview.\n",
+    )?;
+    fs::write(
+        target_repo.join("outputs").join("target-report.html"),
+        "<h1>target</h1>",
+    )?;
+
+    let result_path = run_dir.join("result.json");
+    let log_path = run_dir.join("runner.log");
+    fs::write(&result_path, "{\"status\":\"ok\"}")?;
+    fs::write(&log_path, "runner log")?;
+    fs::write(
+        run_dir.join("prepared_task.json"),
+        serde_json::to_string_pretty(&json!({
+            "project_key": "target",
+            "repo": target_repo.to_str().expect("utf-8 target repo"),
+            "out_dir": run_dir.to_str().expect("utf-8 run dir")
+        }))?,
+    )?;
+
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-target",
+                "request_id": "request-target",
+                "project_key": "target",
+                "status": "completed",
+                "capability_id": "dispatch.runtime",
+                "runner_kind": "local_tmux",
+                "command": "bash run_workload.sh",
+                "workdir": harness_dir.to_str().expect("utf-8 harness path"),
+                "background_ticket_id": "ticket-target",
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "log_artifact_path": log_path.to_str().expect("utf-8 log path"),
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path")
+            }
+        ]))?,
+    )?;
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "ticket_id": "ticket-target",
+                "project_key": "target",
+                "request_id": "request-target",
+                "task_id": "task-target",
+                "runner_kind": "local_tmux",
+                "phase": "completed",
+                "working_dir": harness_dir.to_str().expect("utf-8 harness path"),
+                "log_artifact_path": log_path.to_str().expect("utf-8 log path"),
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path"),
+                "runtime_handle_alive": false,
+                "log_artifact_present": true,
+                "result_artifact_present": true
+            }
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .current_dir(&harness_dir)
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "target",
+            "--task-id",
+            "task-target",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        report["documentation_governance"]["workdir"],
+        target_repo.to_string_lossy().as_ref()
+    );
+    assert!(report["documentation_governance"]["recommendations"]
+        .as_array()
+        .expect("documentation governance recommendations")
+        .iter()
+        .any(|recommendation| recommendation["kind"] == "review_human_output_candidates"));
+
+    let return_package_path = PathBuf::from(
+        report["artifacts"]["return_package_markdown"]
+            .as_str()
+            .expect("return package path"),
+    );
+    let return_package = fs::read_to_string(return_package_path)?;
+    assert!(return_package.contains("target-report.html"));
+    assert!(return_package.contains(target_repo.to_str().expect("utf-8 target repo")));
+    assert!(!return_package.contains("harness overview"));
+    Ok(())
+}
