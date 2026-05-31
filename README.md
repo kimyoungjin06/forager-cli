@@ -80,6 +80,7 @@ In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal v
 
 ## Documentation
 
+- **[Project Direction](https://kimyoungjin06.github.io/forager-cli/docs/project-direction.html)** -- product direction and operating principles
 - **[Installation](https://kimyoungjin06.github.io/forager-cli/docs/installation.html)** -- prerequisites and install methods
 - **[Quick Start](https://kimyoungjin06.github.io/forager-cli/docs/quick-start.html)** -- first steps and basic usage
 - **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/docs/guides/workflow.html)** -- recommended setup with bare repos and worktrees

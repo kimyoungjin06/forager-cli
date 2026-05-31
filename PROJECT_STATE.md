@@ -10,10 +10,12 @@ from the public product README and from the mdBook user guides.
 Forager is an approval-gated offdesk runtime harness around tmux-backed agent
 work. The current development focus is long-running offdesk safety, operator
 decision surfaces, adaptive wiki governance, and documentation/artifact hygiene.
+The product direction is defined in `docs/project-direction.md`.
 
 ## First Reads For Development
 
 - repository rules: `AGENTS.md`
+- project direction: `docs/project-direction.md`
 - product overview: `README.md`
 - documentation governance guide:
   `docs/guides/documentation-artifact-governance.md`
