@@ -1829,6 +1829,57 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     )?;
     let prompt_package = temp.path().join("ondesk_prompt_package.md");
     write_file(&prompt_package, "# prompt package\n")?;
+    let review_surface_path = temp.path().join("review_surface.json");
+    write_file(
+        &review_surface_path,
+        &serde_json::to_string_pretty(&json!({
+            "schema": "review_surface.v1",
+            "status": {
+                "label": "needs_review",
+                "severity": "attention",
+                "summary": "Closeout follow-ups need operator review before accepted truth."
+            },
+            "accepted_truth": {
+                "status": "pending",
+                "source": "closeout_receipt.v1",
+                "reason": "Review remaining follow-ups before treating the result as accepted.",
+                "receipt_acceptance_status": "approved_with_followups"
+            },
+            "closeout": {
+                "execution_status": "completed_needs_review",
+                "review_status": "approved_with_followups",
+                "unresolved_risks": [
+                    "2 open decision(s) remain in the closeout receipt.",
+                    "1 missing evidence item(s) must be resolved."
+                ]
+            },
+            "runtime": {
+                "progress_summary": "0 queued, 0 active, 0 failed, 0 closeout-required offdesk task(s)."
+            },
+            "decisions": {
+                "open_count": 2
+            },
+            "adaptive_wiki": {
+                "candidate_count": 1,
+                "review_due_count": 0
+            },
+            "artifacts": {
+                "summary": [
+                    {
+                        "label": "Closeout receipt",
+                        "why_it_matters": "Records whether execution is accepted truth or still needs follow-up.",
+                        "retention_class": "acceptance"
+                    },
+                    {
+                        "label": "Ondesk return package",
+                        "why_it_matters": "Rehydrates a fresh harness with reviewed context and next steps.",
+                        "retention_class": "handoff"
+                    }
+                ],
+                "refs": []
+            }
+        }))?,
+    )?;
     let request_path = temp.path().join("ondesk_request.json");
     let builder_output = Command::new("python3")
         .arg(script_path("build_ondesk_handoff_request.py"))
@@ -1840,6 +1891,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
         .arg(&closeout_dir)
         .arg("--prompt-package")
         .arg(&prompt_package)
+        .arg("--review-surface")
+        .arg(&review_surface_path)
         .arg("--webui-url")
         .arg("http://127.0.0.1:3000/ondesk/twinpaper")
         .arg("--handoff-local-time")
@@ -1882,6 +1935,10 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     assert_eq!(
         request["approval_brief"]["next_safe_actions"][0]["kind"],
         "ondesk_review_entry"
+    );
+    assert_eq!(
+        request["approval_brief"]["review_surface"]["schema"],
+        "review_surface.v1"
     );
     assert_eq!(request["summary"]["open_decisions"], 3);
     assert_eq!(
@@ -1930,6 +1987,7 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
         "closeout_test",
         "closeout_plan.json",
         "ondesk_prompt_package.md",
+        "review_surface.json",
         temp_path_string.as_str(),
     ];
     assert_telegram_card_quality(
@@ -1949,9 +2007,11 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
             required_detail: &[
                 "Ondesk 전환 상세",
                 "왜 이 추천인가",
+                "Morning Review Surface",
                 "핵심 근거",
                 "권장 다음 행동",
                 "Closeout receipt: approved with follow-ups",
+                "Closeout follow-ups need operator review",
                 "Receipt follow-ups",
                 "accepted truth",
                 "ondesk review entry",
@@ -1988,6 +2048,7 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     let detail_preview = result["detail_preview"].as_str().expect("detail preview");
     assert!(detail_preview.contains("Ondesk 전환 상세"));
     assert!(detail_preview.contains("왜 이 추천인가"));
+    assert!(detail_preview.contains("Morning Review Surface"));
     assert!(detail_preview.contains("핵심 근거"));
     assert!(detail_preview.contains("선택별 의미"));
     assert!(!result_text.contains("fake-token-for-test"));

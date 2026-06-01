@@ -1,4 +1,4 @@
-//! JSON-only review surface contract for Ondesk and future rich UIs.
+//! Shared review surface contract for Ondesk and future rich UIs.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -24,7 +24,7 @@ pub struct ReviewSurfaceArgs {
     #[arg(long)]
     pub project_key: Option<String>,
 
-    /// Emit compact JSON. Without this flag, pretty JSON is printed.
+    /// Emit compact JSON. Without this flag, a human summary is printed.
     #[arg(long)]
     pub json: bool,
 }
@@ -176,9 +176,97 @@ pub async fn run(profile: &str, args: ReviewSurfaceArgs) -> Result<()> {
     if args.json {
         println!("{}", serde_json::to_string(&surface)?);
     } else {
-        println!("{}", serde_json::to_string_pretty(&surface)?);
+        let value = serde_json::to_value(&surface)?;
+        print!("{}", human_summary_from_value(&value));
     }
     Ok(())
+}
+
+pub(crate) fn build_review_surface_value(
+    profile: &str,
+    project_key: Option<&str>,
+) -> Result<Value> {
+    let args = ReviewSurfaceArgs {
+        project_key: project_key.map(ToOwned::to_owned),
+        json: true,
+    };
+    serde_json::to_value(build_review_surface(profile, &args)?).context("serialize review surface")
+}
+
+pub(crate) fn human_summary_from_value(surface: &Value) -> String {
+    let mut output = String::new();
+    output.push_str("Morning Review Surface\n");
+    push_summary_line(&mut output, "profile", text_at(surface, "/profile"));
+    push_summary_line(&mut output, "project", text_at(surface, "/project_key"));
+    let status_label = text_at(surface, "/status/label").unwrap_or("unknown");
+    let status_severity = text_at(surface, "/status/severity").unwrap_or("unknown");
+    output.push_str(&format!("  status: {status_label} ({status_severity})\n"));
+    if let Some(summary) = text_at(surface, "/status/summary") {
+        output.push_str(&format!("  summary: {summary}\n"));
+    }
+    let truth_status = text_at(surface, "/accepted_truth/status").unwrap_or("unknown");
+    let truth_source = text_at(surface, "/accepted_truth/source").unwrap_or("unknown");
+    output.push_str(&format!(
+        "  accepted truth: {truth_status} via {truth_source}\n"
+    ));
+    if let Some(reason) = text_at(surface, "/accepted_truth/reason") {
+        output.push_str(&format!("  reason: {reason}\n"));
+    }
+    let execution = text_at(surface, "/closeout/execution_status").unwrap_or("unknown");
+    let review = text_at(surface, "/closeout/review_status").unwrap_or("unknown");
+    output.push_str(&format!(
+        "  closeout: execution={execution}, review={review}\n"
+    ));
+    if let Some(runtime) = text_at(surface, "/runtime/progress_summary") {
+        output.push_str(&format!("  runtime: {runtime}\n"));
+    }
+    output.push_str(&format!(
+        "  open decisions: {}\n",
+        number_at(surface, "/decisions/open_count").unwrap_or_default()
+    ));
+    output.push_str(&format!(
+        "  adaptive wiki: {} candidate(s), {} review-due entry(s)\n",
+        number_at(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
+        number_at(surface, "/adaptive_wiki/review_due_count").unwrap_or_default()
+    ));
+
+    if let Some(actions) = surface
+        .get("next_safe_actions")
+        .and_then(Value::as_array)
+        .filter(|actions| !actions.is_empty())
+    {
+        output.push_str("  next safe actions:\n");
+        for action in actions.iter().take(3) {
+            output.push_str(&format!("    - {}\n", format_next_safe_action(action)));
+        }
+    }
+
+    if let Some(risks) = surface
+        .pointer("/closeout/unresolved_risks")
+        .and_then(Value::as_array)
+        .filter(|risks| !risks.is_empty())
+    {
+        output.push_str("  unresolved risks:\n");
+        for risk in risks.iter().take(4).filter_map(Value::as_str) {
+            output.push_str(&format!("    - {}\n", operator_safe_text(risk)));
+        }
+    }
+
+    if let Some(summaries) = surface
+        .pointer("/artifacts/summary")
+        .and_then(Value::as_array)
+        .filter(|summaries| !summaries.is_empty())
+    {
+        output.push_str("  artifact summaries:\n");
+        for summary in summaries.iter().take(5) {
+            let label = text_at(summary, "/label").unwrap_or("Artifact");
+            let why = text_at(summary, "/why_it_matters").unwrap_or("Review before use.");
+            let retention = text_at(summary, "/retention_class").unwrap_or("review");
+            output.push_str(&format!("    - {label}: {why} [{retention}]\n"));
+        }
+    }
+    output.push_str("  refs: use --json for audit paths and source ids\n");
+    output
 }
 
 fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<ReviewSurface> {
@@ -854,4 +942,56 @@ fn option_matches(filter: Option<&str>, value: Option<&str>) -> bool {
 
 fn value_usize(value: &Value, key: &str) -> usize {
     value.get(key).and_then(Value::as_u64).unwrap_or_default() as usize
+}
+
+fn push_summary_line(output: &mut String, label: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        output.push_str(&format!("  {label}: {value}\n"));
+    }
+}
+
+fn text_at<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
+    value.pointer(pointer).and_then(Value::as_str)
+}
+
+fn number_at(value: &Value, pointer: &str) -> Option<u64> {
+    value.pointer(pointer).and_then(Value::as_u64)
+}
+
+fn format_next_safe_action(action: &Value) -> String {
+    if !action.is_object() {
+        return action
+            .as_str()
+            .map(operator_safe_text)
+            .unwrap_or_else(|| action.to_string());
+    }
+    let kind = action
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(operator_safe_text)
+        .unwrap_or_else(|| "next".to_string());
+    let detail = action
+        .get("detail")
+        .and_then(Value::as_str)
+        .map(operator_safe_text)
+        .unwrap_or_default();
+    let review = action
+        .get("requires_operator_review")
+        .and_then(Value::as_bool)
+        .map(|value| {
+            if value {
+                "operator review required"
+            } else {
+                "monitoring step"
+            }
+        });
+    let mut text = if detail.is_empty() {
+        kind
+    } else {
+        format!("{kind}: {detail}")
+    };
+    if let Some(review) = review {
+        text.push_str(&format!(" ({review})"));
+    }
+    text
 }
