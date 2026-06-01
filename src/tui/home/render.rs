@@ -594,7 +594,7 @@ impl HomeView {
             Line::from(vec![
                 Span::styled("Close: ", label_style),
                 Span::styled(
-                    format!("{} tasks require closeout", summary.closeout_required),
+                    summary.closeout_label(),
                     if summary.closeout_required > 0 {
                         accent_style
                     } else {

@@ -1437,6 +1437,18 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
     }
 }
 
+fn closeout_receipt_acceptance_note(status: &str) -> &'static str {
+    match status {
+        "accepted" => "accepted truth recorded; still inspect the evidence before acting.",
+        "approved_with_followups" => {
+            "not accepted truth; review receipt follow-ups before treating output as final."
+        }
+        "revision_required" => "not accepted truth; revise before continuing.",
+        "blocked" => "not accepted truth; blocker review is required before continuing.",
+        _ => "not accepted truth; inspect the closeout receipt before continuing.",
+    }
+}
+
 struct PromptPackageParts<'a> {
     profile: &'a str,
     project_key: &'a str,
@@ -1628,6 +1640,10 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
         }
         if let Some(status) = &closeout.summary.receipt_status {
             output.push_str(&format!("- closeout_receipt_status: {status}\n"));
+            output.push_str(&format!(
+                "- closeout_acceptance: {}\n",
+                closeout_receipt_acceptance_note(status)
+            ));
         }
         if let Some(path) = &closeout.summary.receipt_path {
             output.push_str(&format!("- closeout_receipt: {path}\n"));

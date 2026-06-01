@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use tui_input::Input;
 
-use crate::offdesk::OffdeskNextSafeAction;
+use crate::offdesk::{OffdeskCloseoutStateSummary, OffdeskNextSafeAction};
 use crate::session::{
     config::{load_config, save_config},
     flatten_tree, get_profile_dir, resolve_config, Group, GroupTree, Instance, Item, Storage,
@@ -95,6 +95,7 @@ pub(super) struct OffdeskResumeSummary {
     pub(super) stale_background: usize,
     pub(super) failed_background: usize,
     pub(super) closeout_required: usize,
+    pub(super) closeout_state: OffdeskCloseoutStateSummary,
     pub(super) next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
 
@@ -137,7 +138,7 @@ impl OffdeskResumeSummary {
         } else if self.stale_background > 0 {
             "stale background run"
         } else if self.closeout_required > 0 {
-            "closeout required"
+            self.closeout_focus_label()
         } else if self.active_tasks > 0 {
             "active offdesk work"
         } else if self.queued_tasks > 0 {
@@ -180,6 +181,82 @@ impl OffdeskResumeSummary {
             "Review: forager offdesk tasks"
         } else {
             "Plan: forager offdesk maintenance-report"
+        }
+    }
+
+    pub(super) fn closeout_label(&self) -> String {
+        if self.closeout_required == 0 {
+            return "0 tasks require closeout".to_string();
+        }
+
+        let missing_or_stale = self.closeout_state.missing_closeout
+            + self.closeout_state.stale_closeout
+            + self.closeout_state.stale_review;
+        let categories = [
+            missing_or_stale,
+            self.closeout_state.pending_review,
+            self.closeout_state.revision_required,
+            self.closeout_state.approved_with_followups,
+        ]
+        .into_iter()
+        .filter(|count| *count > 0)
+        .count();
+
+        if categories == 1 {
+            if self.closeout_state.approved_with_followups > 0 {
+                return format!(
+                    "{} follow-up receipt pending",
+                    self.closeout_state.approved_with_followups
+                );
+            }
+            if self.closeout_state.pending_review > 0 {
+                return format!("{} review pending", self.closeout_state.pending_review);
+            }
+            if self.closeout_state.revision_required > 0 {
+                return format!("{} revision/blocked", self.closeout_state.revision_required);
+            }
+            if missing_or_stale > 0 {
+                return format!("{missing_or_stale} package missing/stale");
+            }
+        }
+
+        if categories == 0 {
+            return format!("{} tasks require closeout", self.closeout_required);
+        }
+
+        format!(
+            "{} require closeout, see next action",
+            self.closeout_required
+        )
+    }
+
+    fn closeout_focus_label(&self) -> &'static str {
+        let missing_or_stale = self.closeout_state.missing_closeout
+            + self.closeout_state.stale_closeout
+            + self.closeout_state.stale_review;
+        let categories = [
+            missing_or_stale,
+            self.closeout_state.pending_review,
+            self.closeout_state.revision_required,
+            self.closeout_state.approved_with_followups,
+        ]
+        .into_iter()
+        .filter(|count| *count > 0)
+        .count();
+
+        if categories != 1 {
+            return "closeout required";
+        }
+        if self.closeout_state.approved_with_followups > 0 {
+            "closeout follow-ups pending"
+        } else if self.closeout_state.pending_review > 0 {
+            "closeout review pending"
+        } else if self.closeout_state.revision_required > 0 {
+            "closeout revision pending"
+        } else if missing_or_stale > 0 {
+            "closeout package missing/stale"
+        } else {
+            "closeout required"
         }
     }
 }
@@ -784,6 +861,7 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
         summary.stale_background = offdesk.background_stale;
         summary.failed_background = offdesk.background_failed;
         summary.closeout_required = offdesk.closeout_required;
+        summary.closeout_state = offdesk.closeout_state;
         summary.next_safe_actions = offdesk.next_safe_actions;
     }
     if summary.fresh_pending > 0 || summary.stale_pending > 0 {
