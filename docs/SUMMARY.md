@@ -4,6 +4,8 @@
 
 [Project Direction](project-direction.md)
 
+[Functional Definition Set](functional-definitions.md)
+
 [Gajae-Code Benchmarking](gajae-benchmarking.md)
 
 [Decision Pipeline](decision-pipeline.md)
