@@ -1804,7 +1804,27 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     write_file(
         &closeout_dir.join("closeout_review_20260528T011100Z.json"),
         &serde_json::to_string_pretty(&json!({
-            "verdict": "approved_with_followups"
+            "verdict": "approved",
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": "approved_with_followups",
+                "evidence_status": "partial",
+                "verification_status": "pending",
+                "open_decisions": [
+                    {
+                        "kind": "missing_artifact",
+                        "detail": "4 referenced artifacts still need review."
+                    },
+                    {
+                        "kind": "archive_review",
+                        "detail": "Archive candidates need commercial review."
+                    }
+                ],
+                "missing_evidence": [
+                    "commercial review packet was not accepted yet"
+                ],
+                "next_safe_action": "Review remaining follow-ups before treating the result as accepted."
+            }
         }))?,
     )?;
     let prompt_package = temp.path().join("ondesk_prompt_package.md");
@@ -1864,6 +1884,24 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
         "ondesk_review_entry"
     );
     assert_eq!(request["summary"]["open_decisions"], 3);
+    assert_eq!(
+        request["summary"]["closeout_receipt_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(
+        request["summary"]["closeout_receipt_verification_status"],
+        "pending"
+    );
+    assert_eq!(request["summary"]["closeout_receipt_open_decisions"], 2);
+    assert_eq!(request["summary"]["closeout_receipt_missing_evidence"], 1);
+    assert!(request["approval_brief"]["summary_lines"][2]
+        .as_str()
+        .expect("receipt summary line")
+        .contains("accepted truth 아님"));
+    assert!(request["approval_brief"]["next_safe_actions"][0]["detail"]
+        .as_str()
+        .expect("next action detail")
+        .contains("receipt follow-ups"));
 
     let out = temp.path().join("ondesk_relay_result.json");
     let relay_output = Command::new("python3")
@@ -1903,6 +1941,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
                 "08:30 Asia/Seoul",
                 "Closeout 요약",
                 "남은 사용자 결정 3건",
+                "approved with follow-ups",
+                "accepted truth 아님",
                 "WebUI에서 ondesk 검토를 시작할까요",
                 "Telegram은 ondesk 검토 진입/대기만 기록",
             ],
@@ -1911,6 +1951,9 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
                 "왜 이 추천인가",
                 "핵심 근거",
                 "권장 다음 행동",
+                "Closeout receipt: approved with follow-ups",
+                "Receipt follow-ups",
+                "accepted truth",
                 "ondesk review entry",
                 "선택별 의미",
             ],
@@ -1935,6 +1978,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     assert!(message_preview.contains("08:30 Asia/Seoul"));
     assert!(message_preview.contains("Closeout 요약"));
     assert!(message_preview.contains("남은 사용자 결정 3건"));
+    assert!(message_preview.contains("approved with follow-ups"));
+    assert!(message_preview.contains("accepted truth 아님"));
     assert!(message_preview.contains("WebUI에서 ondesk 검토를 시작할까요"));
     assert!(message_preview.contains("Telegram은 ondesk 검토 진입/대기만 기록"));
     assert!(!message_preview.contains("closeout_test"));
@@ -1947,6 +1992,73 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     assert!(detail_preview.contains("선택별 의미"));
     assert!(!result_text.contains("fake-token-for-test"));
     assert!(!result_text.contains("123456789"));
+    Ok(())
+}
+
+#[test]
+fn ondesk_handoff_request_summarizes_accepted_receipt() -> Result<()> {
+    let temp = tempdir()?;
+    let closeout_dir = temp.path().join("closeout");
+    write_file(
+        &closeout_dir.join("closeout_plan.json"),
+        &serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_accepted",
+            "summary": {
+                "tasks_scanned": 4,
+                "completed_tasks": 4,
+                "missing_artifacts": 0,
+                "archive_candidates": 0
+            },
+            "open_decisions": []
+        }))?,
+    )?;
+    write_file(
+        &closeout_dir.join("closeout_review_20260528T011100Z.json"),
+        &serde_json::to_string_pretty(&json!({
+            "verdict": "approved",
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": "accepted",
+                "evidence_status": "complete",
+                "verification_status": "recorded",
+                "open_decisions": [],
+                "missing_evidence": [],
+                "next_safe_action": "Start Ondesk review from the return package."
+            }
+        }))?,
+    )?;
+    let request_path = temp.path().join("ondesk_request.json");
+    let builder_output = Command::new("python3")
+        .arg(script_path("build_ondesk_handoff_request.py"))
+        .arg("--project-key")
+        .arg("twinpaper")
+        .arg("--subject")
+        .arg("TwinPaper")
+        .arg("--closeout-artifact-dir")
+        .arg(&closeout_dir)
+        .arg("--now")
+        .arg("2026-05-28T08:30:00+09:00")
+        .arg("--out")
+        .arg(&request_path)
+        .output()?;
+
+    assert!(
+        builder_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&builder_output.stdout),
+        String::from_utf8_lossy(&builder_output.stderr)
+    );
+    let request: Value = serde_json::from_slice(&fs::read(&request_path)?)?;
+    assert_eq!(request["summary"]["closeout_receipt_status"], "accepted");
+    assert_eq!(
+        request["summary"]["closeout_receipt_verification_status"],
+        "recorded"
+    );
+    let receipt_line = request["approval_brief"]["summary_lines"][2]
+        .as_str()
+        .expect("receipt summary line");
+    assert!(receipt_line.contains("Closeout receipt: accepted"));
+    assert!(!receipt_line.contains("accepted truth 아님"));
     Ok(())
 }
 

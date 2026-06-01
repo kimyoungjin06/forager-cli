@@ -83,16 +83,101 @@ def latest_closeout_dir(profile: str, project_key: str) -> pathlib.Path | None:
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def latest_review_verdict(closeout_dir: pathlib.Path | None) -> tuple[str | None, str | None]:
+def latest_closeout_review_projection(closeout_dir: pathlib.Path | None) -> dict[str, Any]:
     if closeout_dir is None or not closeout_dir.exists():
-        return None, None
+        return {}
     candidates = sorted(closeout_dir.glob("closeout_review_*.json"), key=lambda path: path.stat().st_mtime)
     if not candidates:
-        return None, None
+        return {}
     review_path = candidates[-1]
     review = load_json_object(review_path)
-    verdict = review.get("verdict")
-    return str(verdict) if verdict else None, str(review_path)
+    verdict = str(review.get("verdict") or "").strip()
+    receipt = review.get("closeout_receipt") if isinstance(review.get("closeout_receipt"), dict) else {}
+    receipt_status = str(receipt.get("acceptance_status") or "").strip()
+    if not receipt_status and verdict == "approved_with_followups":
+        receipt_status = "approved_with_followups"
+    elif not receipt_status and verdict == "approved":
+        receipt_status = "legacy_approved"
+    elif not receipt_status and verdict in {"revise", "revision_required"}:
+        receipt_status = "revision_required"
+    elif not receipt_status and verdict == "blocked":
+        receipt_status = "blocked"
+    return {
+        "verdict": verdict or None,
+        "path": str(review_path),
+        "receipt_status": receipt_status or None,
+        "evidence_status": str(receipt.get("evidence_status") or "").strip() or None,
+        "verification_status": str(receipt.get("verification_status") or "").strip() or None,
+        "open_decisions": receipt.get("open_decisions") if isinstance(receipt.get("open_decisions"), list) else [],
+        "missing_evidence": receipt.get("missing_evidence") if isinstance(receipt.get("missing_evidence"), list) else [],
+        "next_safe_action": str(receipt.get("next_safe_action") or "").strip() or None,
+    }
+
+
+def human_closeout_receipt_status(status: str | None) -> str:
+    labels = {
+        "accepted": "accepted",
+        "approved_with_followups": "approved with follow-ups",
+        "revision_required": "revision required",
+        "blocked": "blocked",
+        "legacy_approved": "legacy approved without receipt",
+    }
+    return labels.get(str(status or "").strip(), str(status or "not reviewed").replace("_", " "))
+
+
+def closeout_receipt_summary_line(review: dict[str, Any], open_count: int) -> str:
+    status = str(review.get("receipt_status") or "").strip()
+    if status == "accepted":
+        return "Closeout receipt: accepted; WebUI에서 최종 근거만 확인하면 됩니다."
+    if status == "approved_with_followups":
+        return (
+            "Closeout receipt: approved with follow-ups; accepted truth 아님. "
+            f"남은 사용자 결정 {open_count}건은 WebUI에서 검토해야 합니다."
+        )
+    if status in {"revision_required", "blocked"}:
+        label = human_closeout_receipt_status(status)
+        return f"Closeout receipt: {label}; 다음 실행 전 수정/차단 사유를 검토해야 합니다."
+    if status == "legacy_approved":
+        return (
+            "Closeout review: legacy approved without receipt; WebUI에서 근거를 재확인해야 합니다. "
+            f"남은 사용자 결정 {open_count}건."
+        )
+    if review.get("verdict"):
+        return f"Closeout review verdict: {review['verdict']}; WebUI에서 receipt 상태를 확인해야 합니다."
+    return (
+        f"남은 사용자 결정 {open_count}건은 WebUI에서 검토해야 합니다."
+        if open_count
+        else "현재 handoff 기준으로 열린 closeout 결정은 없습니다."
+    )
+
+
+def closeout_receipt_evidence_lines(review: dict[str, Any]) -> list[str]:
+    status = str(review.get("receipt_status") or "").strip()
+    if not status:
+        return ["Closeout receipt가 아직 없어 accepted truth로 볼 수 없습니다."]
+    status_line = f"Closeout receipt: {human_closeout_receipt_status(status)}."
+    if status == "approved_with_followups":
+        status_line = "Closeout receipt: approved with follow-ups; not accepted truth."
+    lines = [status_line]
+    evidence_status = review.get("evidence_status")
+    verification_status = review.get("verification_status")
+    status_parts = []
+    if evidence_status:
+        status_parts.append(f"evidence {evidence_status}")
+    if verification_status:
+        status_parts.append(f"verification {verification_status}")
+    if status_parts:
+        lines.append("Receipt status: " + ", ".join(status_parts) + ".")
+    open_decisions = review.get("open_decisions") if isinstance(review.get("open_decisions"), list) else []
+    missing_evidence = review.get("missing_evidence") if isinstance(review.get("missing_evidence"), list) else []
+    if open_decisions or missing_evidence:
+        lines.append(
+            f"Receipt follow-ups: open decisions {len(open_decisions)}건, missing evidence {len(missing_evidence)}건."
+        )
+    next_safe_action = review.get("next_safe_action")
+    if next_safe_action:
+        lines.append(f"Receipt next safe action: {next_safe_action}")
+    return lines
 
 
 def human_decision_kind(kind: Any) -> str:
@@ -143,7 +228,10 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
     closeout_dir = args.closeout_artifact_dir or latest_closeout_dir(args.profile, args.project_key)
     plan_path = closeout_dir / "closeout_plan.json" if closeout_dir else None
     plan = load_json_object(plan_path)
-    review_verdict, review_record_path = latest_review_verdict(closeout_dir)
+    closeout_review = latest_closeout_review_projection(closeout_dir)
+    review_verdict = closeout_review.get("verdict")
+    review_record_path = closeout_review.get("path")
+    receipt_status = str(closeout_review.get("receipt_status") or "").strip()
     open_decisions = plan.get("open_decisions") if isinstance(plan, dict) else []
     open_count = len(open_decisions) if isinstance(open_decisions, list) else 0
     closeout_id = str(plan.get("closeout_id") or (closeout_dir.name if closeout_dir else "none")).strip()
@@ -152,31 +240,31 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
     summary_lines = [
         f"{scheduled_label} 기준 Ondesk 전환 브리핑입니다.",
         summary_line_for_closeout(plan),
-        (
-            f"남은 사용자 결정 {open_count}건은 WebUI에서 검토해야 합니다."
-            if open_count
-            else "현재 handoff 기준으로 열린 closeout 결정은 없습니다."
-        ),
+        closeout_receipt_summary_line(closeout_review, open_count),
     ]
-    if review_verdict:
-        summary_lines[-1] = f"{summary_lines[-1]} Closeout review verdict: {review_verdict}."
 
     evidence = [
         *open_decision_lines(open_decisions),
+        *closeout_receipt_evidence_lines(closeout_review),
         "prompt package가 있으면 다음 harness는 이 패키지에서 시작합니다."
         if args.prompt_package
         else "prompt package 경로가 지정되지 않았습니다.",
         "Telegram 응답은 아침 검토 진입 여부만 기록합니다.",
     ]
     next_action = [
-        "WebUI에서 RETURN_PACKAGE와 closeout 결정을 먼저 확인합니다.",
+        "WebUI에서 RETURN_PACKAGE와 closeout receipt를 먼저 확인합니다.",
         "wiki projection/review 상태를 확인한 뒤 필요한 mutation만 별도 승인합니다.",
         "검토하지 못하면 pending ondesk review 상태로 유지합니다.",
     ]
+    review_entry_detail = (
+        "WebUI에서 closeout receipt follow-ups, RETURN_PACKAGE, wiki 상태를 함께 열어 아침 검토를 시작합니다."
+        if receipt_status == "approved_with_followups"
+        else "WebUI에서 closeout, RETURN_PACKAGE, wiki 상태를 함께 열어 아침 검토를 시작합니다."
+    )
     next_safe_actions = [
         {
             "kind": "ondesk_review_entry",
-            "detail": "WebUI에서 closeout, RETURN_PACKAGE, wiki 상태를 함께 열어 아침 검토를 시작합니다.",
+            "detail": review_entry_detail,
             "scope": "operator_next_step",
             "commands": ["Open the WebUI handoff link"],
             "requires_operator_review": True,
@@ -301,6 +389,11 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
             "handoff_local_time": args.handoff_local_time,
             "timezone": args.timezone,
             "closeout_review_verdict": review_verdict,
+            "closeout_receipt_status": receipt_status or None,
+            "closeout_receipt_evidence_status": closeout_review.get("evidence_status"),
+            "closeout_receipt_verification_status": closeout_review.get("verification_status"),
+            "closeout_receipt_open_decisions": len(closeout_review.get("open_decisions") or []),
+            "closeout_receipt_missing_evidence": len(closeout_review.get("missing_evidence") or []),
         },
         "next_safe_actions": next_safe_actions,
     }

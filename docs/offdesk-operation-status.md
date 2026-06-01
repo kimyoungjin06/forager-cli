@@ -282,6 +282,9 @@ Current implementation note: `offdesk tasks`, `offdesk poll`, `offdesk tick`,
 expose a shared `next_safe_action` / `next_safe_actions` contract for
 operator-facing next steps. Remaining surfaces should reuse the same contract
 rather than inventing separate wording.
+Morning Ondesk Telegram handoff also uses the closeout receipt status when it
+summarizes whether output is accepted, still needs follow-up review, or remains
+blocked/revision-required.
 
 ## Near-Term Recommendation
 
