@@ -1,6 +1,7 @@
 //! CLI command implementations
 
 pub mod add;
+pub mod artifact_index;
 pub mod definition;
 pub mod doctor;
 pub mod group;

@@ -138,6 +138,19 @@ the artifact directory manually or inheriting raw command strings.
 `OFFDESK_READY_CHECK.json` marks Ondesk startup as ready but keeps Offdesk
 runtime blocked until operator review selects a scoped operation.
 
+After initialization or after a long run creates visible outputs, build the
+artifact index to see which deliverables are linked, missing, or still only
+present in output roots:
+
+```bash
+forager project artifact-index /path/to/project \
+  --project-key <project> \
+  --json
+```
+
+This emits `artifact_index.v1`. It is a read-only discovery and retention
+surface, not approval to clean, archive, publish, or accept output as truth.
+
 ## Recommended Flow
 
 1. Run `forager project init`.
@@ -148,17 +161,19 @@ runtime blocked until operator review selects a scoped operation.
 4. Manually refresh existing or stale governance surfaces when needed.
 5. Run `forager project audit-docs /path/to/project --audit-profile standard`
    or `--audit-profile research-longrun` for long-running research projects.
-6. Review module candidates and decide which ones need a module operation
+6. Run `forager project artifact-index /path/to/project --project-key <project>`
+   when the project has generated outputs or handoff artifacts to review.
+7. Review module candidates and decide which ones need a module operation
    profile.
-7. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
+8. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
    module-profile and evidence preflight commands where available.
-8. Turn the evidence collector plan into a project-specific deterministic
+9. Turn the evidence collector plan into a project-specific deterministic
    bundle builder.
-9. Promote only reviewed wiki seeds.
-10. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-11. Prepare Offdesk with a matching module operation preflight artifact, for
+10. Promote only reviewed wiki seeds.
+11. Start Ondesk from `ONDESK_START_PACKAGE.md`.
+12. Prepare Offdesk with a matching module operation preflight artifact, for
    example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
-12. Enqueue Offdesk only after runtime capability, evidence, and closeout
+13. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.
 
 ## Operator Interpretation

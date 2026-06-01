@@ -173,6 +173,40 @@ Minimal fields:
 The manifest should point to large data instead of copying it when the source
 data already has stable provenance.
 
+## Artifact Index
+
+`forager project artifact-index` is the current read-only index surface for
+human-facing outputs and Forager profile handoff artifacts:
+
+```bash
+forager project artifact-index /path/to/project \
+  --project-key my-project \
+  --json
+```
+
+The command scans `DELIVERABLES.md` references, common output roots such as
+`outputs/`, `web/`, `deliverables/`, `previews/`, and `gallery/`, plus matching
+profile-local closeout, project-initialization, and Ondesk-capture artifacts.
+It emits `artifact_index.v1` with:
+
+- counts for present, missing, review-required, disposal/archive candidate, and
+  human-facing entries;
+- per-entry role fields: source, kind, retention class, review status, and why
+  the artifact matters;
+- audit paths in JSON, while human text stays summary-first;
+- an explicit read-only authority boundary.
+
+The index can recommend review, archive, or disposal candidates. It does not
+delete, move, archive, publish, or accept output as truth. Those actions still
+need their own reviewed workflow.
+
+`forager ondesk review-surface --project-key <project> --json` embeds a compact
+projection of the matching profile-local artifact index, and
+`forager ondesk prompt-package --project-key <project>` renders its counts in
+the morning review section. Use the project-level command when you need the
+target repository's deliverables and output roots; use the review surface when
+you need the current handoff state for a fresh harness or WebUI.
+
 ## Logs
 
 Append-only logs remain useful, but they should be optimized for audit rather

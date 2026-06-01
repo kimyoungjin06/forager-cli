@@ -35,6 +35,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project init`↴](#forager-project-init)
 * [`forager project apply-governance-hints`↴](#forager-project-apply-governance-hints)
 * [`forager project audit-docs`↴](#forager-project-audit-docs)
+* [`forager project artifact-index`↴](#forager-project-artifact-index)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -537,6 +538,7 @@ Initialize and inspect project operation packets
 * `init` — Create a read-only project operation initialization packet
 * `apply-governance-hints` — Apply reviewed governance surface templates to a project
 * `audit-docs` — Audit documentation and human-facing artifact governance surfaces
+* `artifact-index` — Build a read-only project/profile artifact index
 
 
 
@@ -611,6 +613,23 @@ Audit documentation and human-facing artifact governance surfaces
 * `--json` — Output machine-readable JSON to stdout
 * `--json-out <JSON_OUT>` — Write JSON report to this path
 * `--md-out <MD_OUT>` — Write Markdown report to this path
+
+
+
+## `forager project artifact-index`
+
+Build a read-only project/profile artifact index
+
+**Usage:** `forager project artifact-index [OPTIONS] [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory to scan. Defaults to the current directory
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key used to filter profile-local Forager artifacts
+* `--json` — Output machine-readable JSON
 
 
 

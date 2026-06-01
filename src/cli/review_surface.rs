@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::artifact_index;
 use super::status::current_status_json_value;
 use crate::offdesk::{
     load_offdesk_status_summary, operator_safe_text, AdaptiveWikiStore, BackgroundProbe,
@@ -120,6 +121,7 @@ struct ReviewSurfaceAdaptiveWiki {
 
 #[derive(Debug, Serialize)]
 struct ReviewSurfaceArtifacts {
+    index: Value,
     summary: Vec<ReviewSurfaceArtifactSummary>,
     refs: Vec<ReviewSurfaceArtifactRef>,
 }
@@ -229,6 +231,19 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
         number_at(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
         number_at(surface, "/adaptive_wiki/review_due_count").unwrap_or_default()
     ));
+    if surface.pointer("/artifacts/index/schema").is_some() {
+        output.push_str(&format!(
+            "  artifact index: {} total, {} review-required, {} disposal/archive candidate(s)\n",
+            number_at(surface, "/artifacts/index/summary/total_entries").unwrap_or_default(),
+            number_at(surface, "/artifacts/index/summary/review_required_entries")
+                .unwrap_or_default(),
+            number_at(
+                surface,
+                "/artifacts/index/summary/disposal_candidate_entries"
+            )
+            .unwrap_or_default()
+        ));
+    }
 
     if let Some(actions) = surface
         .get("next_safe_actions")
@@ -286,7 +301,10 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         .map(operator_safe_text)
         .unwrap_or_else(|| "all".to_string());
     let latest_closeout = latest_closeout(&profile_dir, args.project_key.as_deref())?;
-    let artifacts = build_artifacts(latest_closeout.as_ref());
+    let artifact_index =
+        artifact_index::build_profile_artifact_index_value(profile, args.project_key.as_deref())?;
+    let artifact_index = artifact_index::review_surface_projection(&artifact_index);
+    let artifacts = build_artifacts(latest_closeout.as_ref(), artifact_index);
 
     Ok(ReviewSurface {
         schema: REVIEW_SURFACE_SCHEMA,
@@ -309,7 +327,7 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
             status_json: "forager status --json",
             offdesk_status_summary: "load_offdesk_status_summary",
             closeout_receipt: "closeout_receipt.v1",
-            artifact_index: "transitional_closeout_artifact_refs",
+            artifact_index: "artifact_index.v1",
         },
     })
 }
@@ -601,7 +619,7 @@ fn build_adaptive_wiki(
     }
 }
 
-fn build_artifacts(latest: Option<&LatestCloseout>) -> ReviewSurfaceArtifacts {
+fn build_artifacts(latest: Option<&LatestCloseout>, index: Value) -> ReviewSurfaceArtifacts {
     let mut summary = Vec::new();
     let mut refs = Vec::new();
     if let Some(closeout) = latest {
@@ -665,7 +683,11 @@ fn build_artifacts(latest: Option<&LatestCloseout>) -> ReviewSurfaceArtifacts {
             }
         }
     }
-    ReviewSurfaceArtifacts { summary, refs }
+    ReviewSurfaceArtifacts {
+        index,
+        summary,
+        refs,
+    }
 }
 
 fn push_artifact_ref(

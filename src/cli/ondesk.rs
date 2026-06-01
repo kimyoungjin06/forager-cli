@@ -1736,6 +1736,19 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         value_u64(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
         value_u64(surface, "/adaptive_wiki/review_due_count").unwrap_or_default()
     ));
+    if surface.pointer("/artifacts/index/schema").is_some() {
+        output.push_str(&format!(
+            "- artifact_index: {} total, {} review-required, {} disposal/archive candidate(s)\n",
+            value_u64(surface, "/artifacts/index/summary/total_entries").unwrap_or_default(),
+            value_u64(surface, "/artifacts/index/summary/review_required_entries")
+                .unwrap_or_default(),
+            value_u64(
+                surface,
+                "/artifacts/index/summary/disposal_candidate_entries"
+            )
+            .unwrap_or_default()
+        ));
+    }
     if let Some(actions) = surface
         .get("next_safe_actions")
         .and_then(Value::as_array)
