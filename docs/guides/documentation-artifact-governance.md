@@ -200,9 +200,23 @@ The index can recommend review, archive, or disposal candidates. It does not
 delete, move, archive, publish, or accept output as truth. Those actions still
 need their own reviewed workflow.
 
+`forager project retention-review` derives a shorter read-only action queue
+from the same index:
+
+```bash
+forager project retention-review /path/to/project \
+  --project-key my-project \
+  --json
+```
+
+It emits `artifact_retention_review.v1` with summary counts, recommendation
+rows, action-required artifacts, and a keep sample. Missing artifacts,
+unreferenced human-facing outputs, archive candidates, and disposal candidates
+are surfaced as review work, not executed cleanup.
+
 `forager ondesk review-surface --project-key <project> --json` embeds a compact
-projection of the matching profile-local artifact index, and
-`forager ondesk prompt-package --project-key <project>` renders its counts in
+projection of the matching profile-local artifact index and retention review.
+`forager ondesk prompt-package --project-key <project>` renders their counts in
 the morning review section. Use the project-level command when you need the
 target repository's deliverables and output roots; use the review surface when
 you need the current handoff state for a fresh harness or WebUI.

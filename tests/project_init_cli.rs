@@ -895,5 +895,51 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
             && entry["present"] == false
             && entry["review_status"] == "missing"
     }));
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-review",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&review_output.stdout),
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: Value = serde_json::from_slice(&review_output.stdout)?;
+    assert_eq!(review["schema"], "artifact_retention_review.v1");
+    assert!(review["authority"]["read_only"].as_bool().unwrap_or(false));
+    assert_eq!(review["summary"]["missing_entries"], 1);
+    assert!(
+        review["summary"]["action_required_entries"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 2
+    );
+    assert!(review["recommendations"]
+        .as_array()
+        .expect("retention recommendations")
+        .iter()
+        .any(
+            |recommendation| recommendation["kind"] == "restore_or_update_missing_artifacts"
+                && recommendation["priority"] == "high"
+        ));
+    let action_items = review["queues"]["action_required"]
+        .as_array()
+        .expect("action required items");
+    assert!(action_items.iter().any(|item| {
+        item["relative_path"] == "outputs/missing.pdf"
+            && item["recommended_action"] == "restore_or_update_reference"
+    }));
+    assert!(action_items.iter().any(|item| {
+        item["relative_path"] == "outputs/plot.png"
+            && item["recommended_action"] == "promote_to_deliverables_or_mark_disposable"
+    }));
     Ok(())
 }

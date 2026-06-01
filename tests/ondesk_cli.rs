@@ -187,7 +187,15 @@ fn ondesk_review_surface_json_agrees_with_status_next_safe_action() -> Result<()
     );
     assert_eq!(surface["sources"]["status_json"], "forager status --json");
     assert_eq!(surface["sources"]["artifact_index"], "artifact_index.v1");
+    assert_eq!(
+        surface["sources"]["artifact_retention_review"],
+        "artifact_retention_review.v1"
+    );
     assert_eq!(surface["artifacts"]["index"]["schema"], "artifact_index.v1");
+    assert_eq!(
+        surface["artifacts"]["retention_review"]["schema"],
+        "artifact_retention_review.v1"
+    );
     Ok(())
 }
 
@@ -385,6 +393,14 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
         .any(|entry| entry["kind"] == "closeout_receipt"
             && entry["label"] == "Closeout receipt"
             && entry["present"] == true));
+    let retention_review = &surface["artifacts"]["retention_review"];
+    assert_eq!(retention_review["schema"], "artifact_retention_review.v1");
+    assert!(
+        retention_review["summary"]["total_entries"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 3
+    );
     Ok(())
 }
 
@@ -473,6 +489,7 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
     assert!(content.contains("artifact_index:"));
+    assert!(content.contains("retention_review:"));
     assert!(content.contains("artifact_summaries"));
     assert!(content.contains("Documentation Governance Source"));
     assert!(content.contains("source: `latest_closeout_return_package`"));

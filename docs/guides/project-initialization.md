@@ -151,6 +151,19 @@ forager project artifact-index /path/to/project \
 This emits `artifact_index.v1`. It is a read-only discovery and retention
 surface, not approval to clean, archive, publish, or accept output as truth.
 
+Use the retention review packet when the operator needs a shorter action queue
+instead of the full index:
+
+```bash
+forager project retention-review /path/to/project \
+  --project-key <project> \
+  --json
+```
+
+This emits `artifact_retention_review.v1`, grouping missing references,
+unreviewed human-facing outputs, archive candidates, and disposal candidates
+without moving or deleting anything.
+
 ## Recommended Flow
 
 1. Run `forager project init`.
@@ -162,7 +175,9 @@ surface, not approval to clean, archive, publish, or accept output as truth.
 5. Run `forager project audit-docs /path/to/project --audit-profile standard`
    or `--audit-profile research-longrun` for long-running research projects.
 6. Run `forager project artifact-index /path/to/project --project-key <project>`
-   when the project has generated outputs or handoff artifacts to review.
+   when the project has generated outputs or handoff artifacts to review, then
+   `forager project retention-review /path/to/project --project-key <project>`
+   when you need the shorter retention action queue.
 7. Review module candidates and decide which ones need a module operation
    profile.
 8. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed

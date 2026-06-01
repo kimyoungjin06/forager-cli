@@ -74,15 +74,17 @@ into a fresh Ondesk session. If closeout found documentation governance
 recommendations, the return package carries the focused action list rather than
 the full audit summary.
 
-`prompt-package` also renders the compact `artifact_index.v1` projection from
-the shared review surface. The prompt shows artifact counts and meaning first;
-paths remain in `review_surface` JSON for audit. Use the project artifact-index
-command when the next reviewer must inspect project outputs from
-`DELIVERABLES.md` and common output roots, not only profile-local handoff
+`prompt-package` also renders the compact `artifact_index.v1` and
+`artifact_retention_review.v1` projections from the shared review surface. The
+prompt shows artifact counts, retention action counts, and meaning first; paths
+remain in `review_surface` JSON for audit. Use the project artifact-index and
+retention-review commands when the next reviewer must inspect project outputs
+from `DELIVERABLES.md` and common output roots, not only profile-local handoff
 artifacts:
 
 ```bash
 forager project artifact-index /path/to/project --project-key <project> --json
+forager project retention-review /path/to/project --project-key <project> --json
 ```
 
 ## Knowledge Policy

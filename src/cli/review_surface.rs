@@ -122,6 +122,7 @@ struct ReviewSurfaceAdaptiveWiki {
 #[derive(Debug, Serialize)]
 struct ReviewSurfaceArtifacts {
     index: Value,
+    retention_review: Value,
     summary: Vec<ReviewSurfaceArtifactSummary>,
     refs: Vec<ReviewSurfaceArtifactRef>,
 }
@@ -154,6 +155,7 @@ struct ReviewSurfaceSources {
     offdesk_status_summary: &'static str,
     closeout_receipt: &'static str,
     artifact_index: &'static str,
+    artifact_retention_review: &'static str,
 }
 
 struct LatestCloseout {
@@ -244,6 +246,29 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
             .unwrap_or_default()
         ));
     }
+    if surface
+        .pointer("/artifacts/retention_review/schema")
+        .is_some()
+    {
+        output.push_str(&format!(
+            "  retention review: {} action-required, {} missing, {} unreferenced human-facing\n",
+            number_at(
+                surface,
+                "/artifacts/retention_review/summary/action_required_entries"
+            )
+            .unwrap_or_default(),
+            number_at(
+                surface,
+                "/artifacts/retention_review/summary/missing_entries"
+            )
+            .unwrap_or_default(),
+            number_at(
+                surface,
+                "/artifacts/retention_review/summary/unreferenced_human_facing_entries"
+            )
+            .unwrap_or_default()
+        ));
+    }
 
     if let Some(actions) = surface
         .get("next_safe_actions")
@@ -303,8 +328,11 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
     let latest_closeout = latest_closeout(&profile_dir, args.project_key.as_deref())?;
     let artifact_index =
         artifact_index::build_profile_artifact_index_value(profile, args.project_key.as_deref())?;
+    let retention_review =
+        artifact_index::build_profile_retention_review_value(profile, args.project_key.as_deref())?;
     let artifact_index = artifact_index::review_surface_projection(&artifact_index);
-    let artifacts = build_artifacts(latest_closeout.as_ref(), artifact_index);
+    let retention_review = artifact_index::retention_review_projection(&retention_review);
+    let artifacts = build_artifacts(latest_closeout.as_ref(), artifact_index, retention_review);
 
     Ok(ReviewSurface {
         schema: REVIEW_SURFACE_SCHEMA,
@@ -328,6 +356,7 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
             offdesk_status_summary: "load_offdesk_status_summary",
             closeout_receipt: "closeout_receipt.v1",
             artifact_index: "artifact_index.v1",
+            artifact_retention_review: "artifact_retention_review.v1",
         },
     })
 }
@@ -619,7 +648,11 @@ fn build_adaptive_wiki(
     }
 }
 
-fn build_artifacts(latest: Option<&LatestCloseout>, index: Value) -> ReviewSurfaceArtifacts {
+fn build_artifacts(
+    latest: Option<&LatestCloseout>,
+    index: Value,
+    retention_review: Value,
+) -> ReviewSurfaceArtifacts {
     let mut summary = Vec::new();
     let mut refs = Vec::new();
     if let Some(closeout) = latest {
@@ -685,6 +718,7 @@ fn build_artifacts(latest: Option<&LatestCloseout>, index: Value) -> ReviewSurfa
     }
     ReviewSurfaceArtifacts {
         index,
+        retention_review,
         summary,
         refs,
     }
