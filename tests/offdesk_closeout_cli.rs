@@ -79,6 +79,52 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
 
     let now = Utc::now();
     fs::write(
+        artifact_dir.join("offdesk_decisions.jsonl"),
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "schema": "decision_record.v1",
+                "decision_id": "decision-closeout",
+                "project_key": "project",
+                "request_id": "request-closeout",
+                "task_id": "task-closeout",
+                "raised_by": "council",
+                "source_surface": "offdesk.council",
+                "materiality": "high",
+                "status": "user_pending",
+                "created_at": now,
+                "updated_at": now,
+                "decision_request": {
+                    "kind": "episode_council_continuation",
+                    "summary": "Council recommends revising before accepting the run.",
+                    "decision_needed": "Choose whether to revise or close out.",
+                    "current_scope": "Next episode continuation only.",
+                    "non_authorized_scope": [
+                        "runtime dispatch",
+                        "cleanup",
+                        "provider retargeting",
+                        "wiki promotion"
+                    ]
+                },
+                "route": {
+                    "materiality": "high",
+                    "target": "user",
+                    "reason": "Council returned a non-continue decision.",
+                    "default_if_no_reply": "defer"
+                },
+                "approval_brief": {
+                    "schema": "approval_brief.v1",
+                    "source": "offdesk_twinpaper_autonomy_workload",
+                    "recommendation": "revise",
+                    "subject": "Council continuation decision",
+                    "summary_lines": ["Council recommends revising before accepting the run."],
+                    "scope": "Next episode continuation only; does not approve cleanup or provider retargeting.",
+                    "question": "How should closeout treat this decision?"
+                }
+            }))?
+        ),
+    )?;
+    fs::write(
         profile_dir.join("offdesk_tasks.json"),
         serde_json::to_string_pretty(&json!([
             {
@@ -167,6 +213,26 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
         .unwrap()
         .iter()
         .any(|decision| decision["kind"] == "documentation_governance_review"));
+    assert_eq!(report["summary"]["decision_records_scanned"], 1);
+    assert_eq!(report["summary"]["open_decision_records"], 1);
+    assert!(report["decision_records"]
+        .as_array()
+        .expect("decision records")
+        .iter()
+        .any(|decision| decision["record"]["decision_id"] == "decision-closeout"));
+    assert!(report["open_decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|decision| decision["kind"] == "decision_record_review"));
+    assert!(report["required_first_reads"]
+        .as_array()
+        .expect("first reads")
+        .iter()
+        .any(|read| read["path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("offdesk_decisions.jsonl")));
 
     let plan_path = PathBuf::from(
         report["artifacts"]["closeout_plan_json"]
@@ -218,8 +284,9 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     assert!(return_package.contains("## Decision Needed"));
     assert!(return_package.contains("Required First Reads"));
     assert!(return_package.contains("Result evidence"));
-    assert!(return_package
-        .contains("... 5 more first-read candidate(s) are listed in `closeout_plan.json`."));
+    assert!(
+        return_package.contains("more first-read candidate(s) are listed in `closeout_plan.json`.")
+    );
     assert!(return_package.contains("## What Changed"));
     assert!(return_package.contains("## Evidence"));
     assert!(return_package.contains("Kept review evidence"));

@@ -27,6 +27,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import offdesk_decision_records as decision_records
+
 DEFAULT_REPO = pathlib.Path("/home/kimyoungjin06/Desktop/Workspace/1.2.8.TwinPaper")
 DEFAULT_BASE_URL = os.environ.get("OFFDESK_LLM_BASE_URL", "http://172.16.0.37:11434")
 DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder-next:latest")
@@ -36,7 +42,6 @@ DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
         "/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control/.aoe-team/telegram.env",
     )
 )
-
 SYSTEM_CRITICAL_SAFETY: dict[str, Any] = {
     "repo_read_only": True,
     "writes_only_under_out_dir": True,
@@ -264,6 +269,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=os.environ.get("OFFDESK_TELEGRAM_DECISION_DRY_RUN", "0") in {"1", "true", "yes", "on"},
         help="Write relay artifacts without sending Telegram messages.",
+    )
+    parser.add_argument(
+        "--decision-ledger-profile-dir",
+        type=pathlib.Path,
+        help="Profile directory whose offdesk_decisions.jsonl should ingest Telegram relay results.",
+    )
+    parser.add_argument(
+        "--forager-bin",
+        default=os.environ.get("FORAGER_BIN"),
+        help="Forager binary used for decision ledger ingestion. Defaults to target/debug/forager or cargo run.",
     )
     parser.add_argument(
         "--wiki-candidate-mode",
@@ -1081,6 +1096,15 @@ def append_jsonl(path: pathlib.Path, row: dict[str, Any]) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def forager_command(forager_bin: str | None) -> list[str]:
+    if forager_bin:
+        return [forager_bin]
+    local = REPO_ROOT / "target" / "debug" / "forager"
+    if local.exists():
+        return [str(local)]
+    return ["cargo", "run", "--quiet", "--bin", "forager", "--"]
+
+
 def write_markdown_report(path: pathlib.Path, summary: dict[str, Any], records: list[dict[str, Any]]) -> None:
     assessment = summary.get("assessment", {})
     policy = assessment.get("domain_policy_followed", {})
@@ -1472,6 +1496,219 @@ def build_operator_approval_brief(council_record: dict[str, Any]) -> dict[str, A
     }
 
 
+def operator_decision_request_id(
+    *,
+    args: argparse.Namespace,
+    out_dir: pathlib.Path,
+    council_record: dict[str, Any],
+) -> str:
+    return (
+        f"{args.task_id or out_dir.name}:episode-"
+        f"{int(council_record.get('iteration') or 0):03d}:council"
+    )
+
+
+def council_decision_options() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "continue",
+            "label": "Continue",
+            "description": "Continue the next episode in the current direction.",
+        },
+        {
+            "id": "revise",
+            "label": "Revise",
+            "description": "Provide a natural-language correction and continue under that direction.",
+            "natural_input_prompt": "Describe the revision direction for the next episode.",
+        },
+        {
+            "id": "block",
+            "label": "Block",
+            "description": "Hold the workload until restart conditions are clarified.",
+            "natural_input_prompt": "Describe the blocker and restart condition.",
+        },
+        {
+            "id": "stop",
+            "label": "Stop",
+            "description": "Stop this run and move to closeout or separate review.",
+        },
+    ]
+
+
+def build_council_decision_record(
+    *,
+    args: argparse.Namespace,
+    out_dir: pathlib.Path,
+    council_record: dict[str, Any],
+    approval_brief: dict[str, Any],
+    decision_request_id: str,
+) -> dict[str, Any]:
+    episode = load_json_object(council_record.get("episode_record_path"))
+    council = load_json_object(council_record.get("council_path"))
+    consensus = council.get("consensus", {}) if isinstance(council.get("consensus"), dict) else {}
+    recommendation = str(consensus.get("decision") or council_record.get("decision") or "").strip()
+    is_user_pending = recommendation != "continue" or bool(consensus.get("requires_operator_review", True))
+    task_id = str(args.task_id or out_dir.name)
+    request_id = str(args.request_id or task_id)
+    now = utc_now()
+    episode_iteration = council_record.get("iteration") or episode.get("iteration")
+    case_name = council_record.get("case") or episode.get("case")
+    materiality = "high" if is_user_pending else "low"
+    target = "user" if is_user_pending else "agent"
+    reviewer_decisions = consensus.get("reviewer_decisions")
+    if not isinstance(reviewer_decisions, dict):
+        reviewer_decisions = council_record.get("reviewer_decisions", {})
+    if not isinstance(reviewer_decisions, dict):
+        reviewer_decisions = {}
+    trace_refs = [
+        ref
+        for ref in (
+            decision_records.trace_ref("request", "operator_decision_request", decision_request_id),
+            decision_records.trace_ref("artifact", "episode_record", council_record.get("episode_record_path")),
+            decision_records.trace_ref("artifact", "council", council_record.get("council_path")),
+            decision_records.trace_ref("artifact", "council_progress", out_dir / "council_progress.jsonl"),
+            decision_records.trace_ref("artifact", "heartbeat", out_dir / "heartbeat.json"),
+            decision_records.trace_ref("artifact", "result", out_dir / "result.json"),
+        )
+        if ref is not None
+    ]
+    summary_lines = clean_list(approval_brief.get("summary_lines"))
+    decision_summary = " ".join(summary_lines) or "Council requested a continuation decision."
+    return decision_records.build_decision_record(
+        decision_id=decision_records.stable_decision_id(
+            request_id,
+            task_id,
+            episode_iteration,
+            case_name,
+            council_record.get("council_path"),
+        ),
+        project_key="twinpaper",
+        request_id=request_id,
+        task_id=task_id,
+        raised_by="council",
+        source_surface="offdesk.council",
+        materiality=materiality,
+        status="user_pending" if is_user_pending else "auto_resolved",
+        created_at=now,
+        updated_at=now,
+        decision_kind="episode_council_continuation",
+        summary=decision_summary,
+        decision_needed="Choose whether the next episode should continue, revise, block, or stop.",
+        why_now=summary_lines[:3],
+        current_scope="Next episode continuation in this TwinPaper Offdesk workload.",
+        non_authorized_scope=[
+            "runtime dispatch",
+            "file changes",
+            "cleanup",
+            "provider retargeting",
+            "wiki promotion",
+        ],
+        options=council_decision_options(),
+        evidence_refs=trace_refs[:2],
+        council_review={
+            "recommendation": recommendation or "needs_review",
+            "agreement": consensus.get("agreement", council_record.get("agreement")),
+            "reviewer_decisions": reviewer_decisions,
+            "evidence_gaps": clean_list(consensus.get("evidence_gaps")),
+            "risk_notes": clean_list(consensus.get("risk_notes")),
+            "option_assessment": clean_list(consensus.get("option_assessment")),
+        },
+        route_target=target,
+        route_reason=(
+            "Council returned a non-continue or operator-review decision."
+            if is_user_pending
+            else "Council returned continue within the existing task scope."
+        ),
+        route_policy_basis=[
+            "Council is read-only.",
+            "Telegram controls continuation only.",
+            "Mutation approval remains separate.",
+        ],
+        default_if_no_reply="defer" if is_user_pending else None,
+        approval_brief=approval_brief if is_user_pending else None,
+        trace_refs=trace_refs,
+    )
+
+
+def write_decision_record_artifacts(
+    *,
+    out_dir: pathlib.Path,
+    relay_dir: pathlib.Path,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    return decision_records.write_decision_record_artifacts(
+        out_dir=out_dir,
+        relay_dir=relay_dir,
+        request=request,
+    )
+
+
+def run_decision_ledger_ingest(
+    *,
+    args: argparse.Namespace,
+    request_path: pathlib.Path,
+    result_path: pathlib.Path,
+    relay_dir: pathlib.Path,
+) -> dict[str, Any]:
+    ingest_path = relay_dir / "decision_ledger_ingest.json"
+    invocation_path = relay_dir / "decision_ledger_ingest_invocation.json"
+    profile_dir = args.decision_ledger_profile_dir.resolve() if args.decision_ledger_profile_dir else None
+    if profile_dir is None:
+        result = {
+            "enabled": False,
+            "reason": "decision_ledger_profile_dir_not_configured",
+            "path": str(ingest_path),
+        }
+        write_json(ingest_path, result)
+        return result
+
+    command = [
+        *forager_command(args.forager_bin),
+        "offdesk",
+        "decision",
+        "ingest-telegram",
+        "--profile-dir",
+        str(profile_dir),
+        "--request",
+        str(request_path),
+        "--result",
+        str(result_path),
+        "--receipt-result-status",
+        "applied",
+        "--receipt-evidence",
+        "Telegram reply was consumed by the TwinPaper workload control loop.",
+        "--json",
+    ]
+    completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
+    invocation = {
+        "enabled": True,
+        "profile_dir": str(profile_dir),
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "path": str(ingest_path),
+    }
+    write_json(invocation_path, invocation)
+    if completed.returncode == 0:
+        try:
+            result = json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            result = {
+                **invocation,
+                "status": "error",
+                "error": f"ingest_stdout_not_json: {error!r}",
+            }
+    else:
+        result = {
+            **invocation,
+            "status": "error",
+            "error": "decision_ledger_ingest_failed",
+        }
+    write_json(ingest_path, result)
+    return result
+
+
 def apply_wiki_trial_decisions(
     *,
     args: argparse.Namespace,
@@ -1687,9 +1924,18 @@ def build_operator_decision_request(
     out_dir: pathlib.Path,
     council_record: dict[str, Any],
 ) -> dict[str, Any]:
-    decision_request_id = (
-        f"{args.task_id or out_dir.name}:episode-"
-        f"{int(council_record.get('iteration') or 0):03d}:council"
+    decision_request_id = operator_decision_request_id(
+        args=args,
+        out_dir=out_dir,
+        council_record=council_record,
+    )
+    approval_brief = build_operator_approval_brief(council_record)
+    decision_record = build_council_decision_record(
+        args=args,
+        out_dir=out_dir,
+        council_record=council_record,
+        approval_brief=approval_brief,
+        decision_request_id=decision_request_id,
     )
     return {
         "decision_request_id": decision_request_id,
@@ -1712,7 +1958,8 @@ def build_operator_decision_request(
                 "cleanup, provider retargeting, wiki promotion, or file changes."
             ),
         },
-        "approval_brief": build_operator_approval_brief(council_record),
+        "decision_record": decision_record,
+        "approval_brief": approval_brief,
         "artifacts": {
             "episode_record": council_record.get("episode_record_path"),
             "council": council_record.get("council_path"),
@@ -1741,6 +1988,11 @@ def run_operator_decision_relay(
     invocation_path = relay_dir / "invocation.json"
     request = build_operator_decision_request(args=args, out_dir=out_dir, council_record=council_record)
     write_json(request_path, request)
+    decision_record_artifacts = write_decision_record_artifacts(
+        out_dir=out_dir,
+        relay_dir=relay_dir,
+        request=request,
+    )
 
     command = [
         sys.executable,
@@ -1776,12 +2028,20 @@ def run_operator_decision_relay(
         write_json(result_path, result)
     if not isinstance(result, dict):
         result = {"status": "error", "decision": None, "error": "telegram_decision_artifact_not_object"}
+    decision_ledger_ingest = run_decision_ledger_ingest(
+        args=args,
+        request_path=request_path,
+        result_path=result_path,
+        relay_dir=relay_dir,
+    )
     return {
         "enabled": True,
         "mode": "telegram",
         "request_path": str(request_path),
         "result_path": str(result_path),
         "invocation_path": str(invocation_path),
+        "decision_record": decision_record_artifacts,
+        "decision_ledger_ingest": decision_ledger_ingest,
         "returncode": completed.returncode,
         "status": result.get("status"),
         "decision": result.get("decision"),

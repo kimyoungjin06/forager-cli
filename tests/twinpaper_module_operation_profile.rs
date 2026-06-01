@@ -1,4 +1,5 @@
 use anyhow::Result;
+use forager::offdesk::DecisionRecord;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -593,6 +594,11 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
         .expect("workload command")
         .iter()
         .any(|arg| arg.as_str() == Some("--council-operator-decision-relay")));
+    assert!(relay_manifest["workload_command"]
+        .as_array()
+        .expect("workload command")
+        .iter()
+        .any(|arg| arg.as_str() == Some("--decision-ledger-profile-dir")));
     assert!(!relay_manifest_text.contains("fake-token-for-test"));
     assert!(!relay_manifest_text.contains("123456789"));
     Ok(())
@@ -999,7 +1005,12 @@ request = workload.build_operator_decision_request(
     out_dir=pathlib.Path(out_dir),
     council_record=council_record,
 )
-print(json.dumps(request, ensure_ascii=False))
+artifacts = workload.write_decision_record_artifacts(
+    out_dir=pathlib.Path(out_dir),
+    relay_dir=pathlib.Path(out_dir) / "operator_decision",
+    request=request,
+)
+print(json.dumps({"request": request, "artifacts": artifacts}, ensure_ascii=False))
 "#,
     )?;
     let producer_output = Command::new("python3")
@@ -1016,7 +1027,8 @@ print(json.dumps(request, ensure_ascii=False))
         String::from_utf8_lossy(&producer_output.stdout),
         String::from_utf8_lossy(&producer_output.stderr)
     );
-    let producer_request: Value = serde_json::from_slice(&producer_output.stdout)?;
+    let producer: Value = serde_json::from_slice(&producer_output.stdout)?;
+    let producer_request = &producer["request"];
     assert_eq!(
         producer_request["approval_brief"]["schema"],
         "approval_brief.v1"
@@ -1045,6 +1057,61 @@ print(json.dumps(request, ensure_ascii=False))
             .as_str()
             .unwrap_or_default()
             .contains("primary objective gate failed")));
+    assert_eq!(
+        producer_request["decision_record"]["schema"],
+        "decision_record.v1"
+    );
+    assert_eq!(
+        producer_request["decision_record"]["status"],
+        "user_pending"
+    );
+    assert_eq!(
+        producer_request["decision_record"]["source_surface"],
+        "offdesk.council"
+    );
+    assert_eq!(
+        producer_request["decision_record"]["route"]["target"],
+        "user"
+    );
+    assert_eq!(
+        producer_request["decision_record"]["approval_brief"]["schema"],
+        "approval_brief.v1"
+    );
+    assert_eq!(
+        producer_request["decision_record"]["decision_request"]["kind"],
+        "episode_council_continuation"
+    );
+    assert!(
+        producer_request["decision_record"]["decision_request"]["non_authorized_scope"]
+            .as_array()
+            .expect("non-authorized scope")
+            .iter()
+            .any(|scope| scope.as_str() == Some("provider retargeting"))
+    );
+    let _: DecisionRecord = serde_json::from_value(producer_request["decision_record"].clone())?;
+    assert_eq!(producer["artifacts"]["written"], true);
+    let decision_record_path = PathBuf::from(
+        producer["artifacts"]["record_path"]
+            .as_str()
+            .expect("decision record path"),
+    );
+    let decision_ledger_path = PathBuf::from(
+        producer["artifacts"]["ledger_path"]
+            .as_str()
+            .expect("decision ledger path"),
+    );
+    let mirrored_record: Value = serde_json::from_slice(&fs::read(decision_record_path)?)?;
+    assert_eq!(
+        mirrored_record["decision_id"],
+        producer_request["decision_record"]["decision_id"]
+    );
+    let ledger_text = fs::read_to_string(decision_ledger_path)?;
+    let ledger_record: Value =
+        serde_json::from_str(ledger_text.lines().next().expect("ledger line"))?;
+    assert_eq!(
+        ledger_record["decision_id"],
+        producer_request["decision_record"]["decision_id"]
+    );
 
     let natural_out = temp.path().join("relay_result_natural.json");
     let natural_output = Command::new("python3")
@@ -1624,6 +1691,81 @@ print(json.dumps({"registry": registry_json, "state_files": state_files}, ensure
 }
 
 #[test]
+fn decision_record_helper_builds_generic_producer_record() -> Result<()> {
+    let temp = tempdir()?;
+    let probe = temp.path().join("decision_record_helper_probe.py");
+    write_file(
+        &probe,
+        r#"
+import importlib.util
+import json
+import sys
+
+helper_path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("decision_records", helper_path)
+helper = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = helper
+spec.loader.exec_module(helper)
+
+record = helper.build_decision_record(
+    decision_id=helper.stable_decision_id("generic", "request", "task"),
+    project_key="generic-project",
+    request_id="generic-request",
+    task_id="generic-task",
+    raised_by="agent",
+    source_surface="generic.producer",
+    materiality="medium",
+    status="user_pending",
+    decision_kind="generic_direction_choice",
+    summary="A generic producer needs an operator direction.",
+    decision_needed="Choose continue, revise, or defer.",
+    current_scope="Next generic producer step only.",
+    non_authorized_scope=["cleanup", "provider retargeting"],
+    approval_brief={
+        "schema": "approval_brief.v1",
+        "source": "generic.producer",
+        "recommendation": "revise",
+        "subject": "generic direction",
+        "summary_lines": ["Generic producer asks for direction."],
+        "scope": "Only approves the next generic step.",
+        "question": "How should this continue?",
+        "options": [
+            {"id": "continue", "label": "Continue", "description": "Proceed."},
+            {
+                "id": "revise",
+                "label": "Revise",
+                "description": "Provide a revised direction.",
+                "natural_input_prompt": "Describe the revision.",
+            },
+        ],
+    },
+    route_target="user",
+    route_reason="Generic producer requested operator direction.",
+    default_if_no_reply="defer",
+)
+print(json.dumps(record, ensure_ascii=False))
+"#,
+    )?;
+    let output = Command::new("python3")
+        .arg(&probe)
+        .arg(script_path("offdesk_decision_records.py"))
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let record: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(record["schema"], "decision_record.v1");
+    assert_eq!(record["source_surface"], "generic.producer");
+    assert_eq!(record["route"]["target"], "user");
+    assert_eq!(record["approval_brief"]["options"][1]["id"], "revise");
+    let _: DecisionRecord = serde_json::from_value(record)?;
+    Ok(())
+}
+
+#[test]
 fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -1698,6 +1840,17 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     );
     let request: Value = serde_json::from_slice(&fs::read(&request_path)?)?;
     assert_eq!(request["message_type"], "ondesk_handoff");
+    assert_eq!(request["decision_record"]["schema"], "decision_record.v1");
+    assert_eq!(
+        request["decision_record"]["decision_request"]["kind"],
+        "ondesk_handoff_entry"
+    );
+    assert_eq!(request["decision_record"]["route"]["target"], "user");
+    assert_eq!(
+        request["decision_record"]["approval_brief"]["schema"],
+        "ondesk_handoff_brief.v1"
+    );
+    let _: DecisionRecord = serde_json::from_value(request["decision_record"].clone())?;
     assert_eq!(
         request["approval_brief"]["schema"],
         "ondesk_handoff_brief.v1"

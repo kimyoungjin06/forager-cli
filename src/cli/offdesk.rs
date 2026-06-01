@@ -39,8 +39,10 @@ use crate::offdesk::{
     AdaptiveWikiUsageContext, ApprovalLedger, ApprovalStatus, BackgroundLaunchOutcome,
     BackgroundLaunchRequest, BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore,
     BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
-    ExecutionBrief, LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan,
-    MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
+    DecisionLedger, DecisionReceipt, DecisionRecord, DecisionRecordView, DecisionStatus,
+    DecisionTraceRef, DecisionValidationIssue, ExecutionBrief, ExecutionHandoff,
+    LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan, MutationSnapshot,
+    MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
     OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskTask,
     OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
     OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
@@ -74,6 +76,12 @@ pub enum OffdeskCommands {
 
     /// Show durable offdesk tasks
     Tasks(TasksArgs),
+
+    /// List canonical Offdesk decision records
+    Decisions(DecisionsArgs),
+
+    /// Inspect one canonical Offdesk decision record
+    Decision(DecisionArgs),
 
     /// Show provider capacity cooldown state
     ProviderCapacity(JsonArgs),
@@ -1136,6 +1144,147 @@ pub struct TaskLifecycleArgs {
 }
 
 #[derive(Args)]
+pub struct DecisionsArgs {
+    /// Filter by project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Filter by task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Filter by decision status, such as user_pending or auto_resolved
+    #[arg(long)]
+    status: Vec<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct DecisionArgs {
+    #[command(subcommand)]
+    command: DecisionCommands,
+}
+
+#[derive(Subcommand)]
+pub enum DecisionCommands {
+    /// Show one canonical Offdesk decision record
+    Show(DecisionShowArgs),
+
+    /// Resolve a decision into an append-only execution handoff
+    Resolve(DecisionResolveArgs),
+
+    /// Close a handoff-ready decision with an append-only receipt
+    Receipt(DecisionReceiptArgs),
+
+    /// Ingest a Telegram relay result into the canonical decision ledger
+    IngestTelegram(DecisionIngestTelegramArgs),
+}
+
+#[derive(Args)]
+pub struct DecisionShowArgs {
+    /// Decision ID to inspect
+    decision_id: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct DecisionResolveArgs {
+    /// Decision ID to resolve
+    decision_id: String,
+
+    /// Operator or policy choice, such as continue, revise, block, stop, deny, or defer
+    #[arg(long)]
+    decision: String,
+
+    /// Required rationale or natural-language direction for revise/block/custom choices
+    #[arg(long, default_value = "")]
+    note: String,
+
+    /// Actor recording the resolution
+    #[arg(long, default_value = "operator")]
+    by: String,
+
+    /// Override execution handoff target
+    #[arg(long)]
+    target: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct DecisionReceiptArgs {
+    /// Decision ID to close
+    decision_id: String,
+
+    /// Actor recording the receipt
+    #[arg(long, default_value = "operator")]
+    by: String,
+
+    /// Result status for the consumed handoff
+    #[arg(long, default_value = "closed")]
+    result_status: String,
+
+    /// Evidence summary line. Repeat for multiple lines.
+    #[arg(long = "evidence")]
+    evidence_summary: Vec<String>,
+
+    /// Remaining review item. Repeat for multiple lines.
+    #[arg(long = "remaining-review")]
+    remaining_review: Vec<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct DecisionIngestTelegramArgs {
+    /// Operator-safe decision request JSON containing decision_record
+    #[arg(long)]
+    request: PathBuf,
+
+    /// Telegram relay result JSON
+    #[arg(long)]
+    result: PathBuf,
+
+    /// Override canonical profile directory for producer integrations
+    #[arg(long = "profile-dir")]
+    profile_dir: Option<PathBuf>,
+
+    /// Actor recording the relay ingestion
+    #[arg(long, default_value = "telegram")]
+    by: String,
+
+    /// Override execution handoff target
+    #[arg(long)]
+    target: Option<String>,
+
+    /// Also append a receipt with this result status after resolving
+    #[arg(long = "receipt-result-status")]
+    receipt_result_status: Option<String>,
+
+    /// Receipt evidence summary line. Repeat for multiple lines.
+    #[arg(long = "receipt-evidence")]
+    receipt_evidence_summary: Vec<String>,
+
+    /// Remaining review item. Repeat for multiple lines.
+    #[arg(long = "remaining-review")]
+    remaining_review: Vec<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct RetryTaskArgs {
     /// Offdesk task ID to retry
     task_id: String,
@@ -2150,6 +2299,23 @@ struct MaintenanceRecommendedAction {
     command: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+struct DecisionIngestTelegramReport {
+    request_path: String,
+    result_path: String,
+    ledger_path: String,
+    decision_id: String,
+    telegram_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    telegram_decision: Option<String>,
+    appended_records: Vec<String>,
+    receipt_recorded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skipped_reason: Option<String>,
+    record: DecisionRecord,
+    validation_issues: Vec<DecisionValidationIssue>,
+}
+
 #[derive(Serialize)]
 struct OffdeskCloseoutReport {
     generated_at: DateTime<Utc>,
@@ -2166,6 +2332,7 @@ struct OffdeskCloseoutReport {
     background_runs: Vec<CloseoutBackgroundRun>,
     file_operations: Vec<CloseoutFileOperation>,
     required_first_reads: Vec<CloseoutReadRef>,
+    decision_records: Vec<CloseoutDecisionRecord>,
     open_decisions: Vec<CloseoutDecision>,
     verification_commands: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2198,6 +2365,9 @@ struct CloseoutSummary {
     delete_candidates: usize,
     operations_requiring_commercial_review: usize,
     operations_requiring_human_approval: usize,
+    decision_records_scanned: usize,
+    open_decision_records: usize,
+    invalid_decision_records: usize,
     missing_artifacts: usize,
     return_package_required: bool,
 }
@@ -2266,6 +2436,13 @@ struct CloseoutReadRef {
     path: String,
     reason: String,
     present: bool,
+}
+
+#[derive(Serialize)]
+struct CloseoutDecisionRecord {
+    source_path: String,
+    record: DecisionRecord,
+    validation_issues: Vec<DecisionValidationIssue>,
 }
 
 #[derive(Serialize)]
@@ -2381,6 +2558,8 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Enqueue(args) => enqueue(profile, args).await,
         OffdeskCommands::Tick(args) => tick(profile, args).await,
         OffdeskCommands::Tasks(args) => tasks(profile, args).await,
+        OffdeskCommands::Decisions(args) => decisions(profile, args).await,
+        OffdeskCommands::Decision(args) => decision(profile, args).await,
         OffdeskCommands::ProviderCapacity(args) => provider_capacity(profile, args).await,
         OffdeskCommands::ProviderFallback(args) => provider_fallback(profile, args).await,
         OffdeskCommands::CancelTask(args) => cancel_task(profile, args).await,
@@ -2532,6 +2711,440 @@ fn task_matches_tasks_filter(task: &OffdeskTask, args: &TasksArgs) -> bool {
         return false;
     }
     true
+}
+
+async fn decisions(profile: &str, args: DecisionsArgs) -> Result<()> {
+    let mut records = DecisionLedger::new(read_only_profile_dir(profile)?).load()?;
+    records.retain(|record| decision_matches_filter(record, &args));
+    records.sort_by_key(|record| record.updated_at);
+
+    if args.json {
+        let views: Vec<DecisionRecordView> =
+            records.into_iter().map(DecisionRecordView::from).collect();
+        println!("{}", serde_json::to_string_pretty(&views)?);
+        return Ok(());
+    }
+
+    if records.is_empty() {
+        println!("No offdesk decisions found.");
+        return Ok(());
+    }
+
+    print_decisions(&records);
+    Ok(())
+}
+
+fn decision_matches_filter(record: &DecisionRecord, args: &DecisionsArgs) -> bool {
+    if let Some(project_key) = args.project_key.as_deref() {
+        if record.project_key != project_key {
+            return false;
+        }
+    }
+    if let Some(task_id) = args.task_id.as_deref() {
+        if record.task_id != task_id {
+            return false;
+        }
+    }
+    if !args.status.is_empty()
+        && !args
+            .status
+            .iter()
+            .any(|status| status == record.status.as_str())
+    {
+        return false;
+    }
+    true
+}
+
+async fn decision(profile: &str, args: DecisionArgs) -> Result<()> {
+    match args.command {
+        DecisionCommands::Show(args) => decision_show(profile, args).await,
+        DecisionCommands::Resolve(args) => decision_resolve(profile, args).await,
+        DecisionCommands::Receipt(args) => decision_receipt(profile, args).await,
+        DecisionCommands::IngestTelegram(args) => decision_ingest_telegram(profile, args).await,
+    }
+}
+
+async fn decision_show(profile: &str, args: DecisionShowArgs) -> Result<()> {
+    let Some(record) =
+        DecisionLedger::new(read_only_profile_dir(profile)?).find(&args.decision_id)?
+    else {
+        bail!("decision not found: {}", args.decision_id);
+    };
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DecisionRecordView::from(record))?
+        );
+        return Ok(());
+    }
+
+    print_decision(&record);
+    Ok(())
+}
+
+async fn decision_resolve(profile: &str, args: DecisionResolveArgs) -> Result<()> {
+    let ledger = DecisionLedger::new(get_profile_dir(profile)?);
+    let Some(record) = ledger.find(&args.decision_id)? else {
+        bail!("decision not found: {}", args.decision_id);
+    };
+    let updated = resolve_decision_record(record, &args)?;
+    ledger.append(&updated)?;
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DecisionRecordView::from(updated))?
+        );
+        return Ok(());
+    }
+
+    print_decision(&updated);
+    Ok(())
+}
+
+async fn decision_receipt(profile: &str, args: DecisionReceiptArgs) -> Result<()> {
+    let ledger = DecisionLedger::new(get_profile_dir(profile)?);
+    let Some(record) = ledger.find(&args.decision_id)? else {
+        bail!("decision not found: {}", args.decision_id);
+    };
+    let updated = receipt_decision_record(record, &args)?;
+    ledger.append(&updated)?;
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DecisionRecordView::from(updated))?
+        );
+        return Ok(());
+    }
+
+    print_decision(&updated);
+    Ok(())
+}
+
+async fn decision_ingest_telegram(profile: &str, args: DecisionIngestTelegramArgs) -> Result<()> {
+    let profile_dir = match args.profile_dir.as_ref() {
+        Some(path) => path.to_path_buf(),
+        None => get_profile_dir(profile)?,
+    };
+    let ledger = DecisionLedger::new(&profile_dir);
+    let request = read_json_file(&args.request)?;
+    let result = read_json_file(&args.result)?;
+    let seed_record = decision_record_from_request(&request, &args.request)?;
+    let decision_id = seed_record.decision_id.clone();
+    let mut appended_records = Vec::new();
+    let mut record = if let Some(existing) = ledger.find(&decision_id)? {
+        existing
+    } else {
+        ledger.append(&seed_record)?;
+        appended_records.push(seed_record.status.as_str().to_string());
+        seed_record
+    };
+
+    let telegram_status = json_string_field(&result, "status").unwrap_or_default();
+    let telegram_decision = json_string_field(&result, "decision");
+    let mut receipt_recorded = false;
+    let mut skipped_reason = None;
+
+    if telegram_status == "accepted" {
+        let Some(decision) = telegram_decision
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            bail!("accepted Telegram result is missing decision");
+        };
+        if record.status == DecisionStatus::Receipted {
+            skipped_reason = Some("decision_already_receipted".to_string());
+        } else if !decision_record_has_matching_handoff(&record, &decision) {
+            let resolve_args = DecisionResolveArgs {
+                decision_id: decision_id.clone(),
+                decision,
+                note: json_string_field(&result, "reason").unwrap_or_default(),
+                by: args.by.clone(),
+                target: args.target.clone(),
+                json: false,
+            };
+            record = resolve_decision_record(record, &resolve_args)?;
+            ledger.append(&record)?;
+            appended_records.push(record.status.as_str().to_string());
+        }
+
+        if let Some(result_status) = args
+            .receipt_result_status
+            .as_deref()
+            .map(str::trim)
+            .filter(|status| !status.is_empty())
+        {
+            if record.status == DecisionStatus::Receipted {
+                receipt_recorded = true;
+            } else {
+                let receipt_args = DecisionReceiptArgs {
+                    decision_id: decision_id.clone(),
+                    by: args.by.clone(),
+                    result_status: result_status.to_string(),
+                    evidence_summary: args.receipt_evidence_summary.clone(),
+                    remaining_review: args.remaining_review.clone(),
+                    json: false,
+                };
+                record = receipt_decision_record(record, &receipt_args)?;
+                ledger.append(&record)?;
+                appended_records.push(record.status.as_str().to_string());
+                receipt_recorded = true;
+            }
+        }
+    } else {
+        skipped_reason = Some(format!(
+            "telegram_result_status_{}",
+            if telegram_status.is_empty() {
+                "missing"
+            } else {
+                telegram_status.as_str()
+            }
+        ));
+    }
+
+    let report = DecisionIngestTelegramReport {
+        request_path: args.request.display().to_string(),
+        result_path: args.result.display().to_string(),
+        ledger_path: ledger.path().display().to_string(),
+        decision_id,
+        telegram_status,
+        telegram_decision,
+        appended_records,
+        receipt_recorded,
+        skipped_reason,
+        validation_issues: record.validation_issues(),
+        record,
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_decision_ingest_telegram_report(&report);
+    Ok(())
+}
+
+fn resolve_decision_record(
+    mut record: DecisionRecord,
+    args: &DecisionResolveArgs,
+) -> Result<DecisionRecord> {
+    let decision = normalize_decision_choice(&args.decision);
+    let note = crate::offdesk::operator_safe_text(args.note.trim());
+    if decision_requires_note(&decision) && note.trim().is_empty() {
+        bail!("decision `{decision}` requires --note with the bounded direction or blocker");
+    }
+    let by = crate::offdesk::operator_safe_text(args.by.trim());
+    record.updated_at = Utc::now();
+    record.trace_refs.push(DecisionTraceRef {
+        kind: "decision_resolution".to_string(),
+        label: by.clone(),
+        reference: format!("choice={decision}"),
+    });
+
+    match decision.as_str() {
+        "deny" => {
+            record.status = DecisionStatus::Denied;
+            record.execution_handoff = None;
+        }
+        "defer" => {
+            record.status = DecisionStatus::Deferred;
+            record.execution_handoff = None;
+        }
+        _ => {
+            record.status = DecisionStatus::HandoffReady;
+            record.execution_handoff =
+                Some(build_execution_handoff(&record, &decision, &note, args));
+        }
+    }
+    Ok(record)
+}
+
+fn receipt_decision_record(
+    mut record: DecisionRecord,
+    args: &DecisionReceiptArgs,
+) -> Result<DecisionRecord> {
+    let Some(handoff) = record.execution_handoff.as_ref() else {
+        bail!(
+            "decision {} has no execution_handoff to receipt",
+            record.decision_id
+        );
+    };
+    let resolved_at = Utc::now();
+    let by = crate::offdesk::operator_safe_text(args.by.trim());
+    let result_status = crate::offdesk::operator_safe_text(args.result_status.trim());
+    let evidence_summary = args
+        .evidence_summary
+        .iter()
+        .map(|line| crate::offdesk::operator_safe_text(line.trim()))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let remaining_review = args
+        .remaining_review
+        .iter()
+        .map(|line| crate::offdesk::operator_safe_text(line.trim()))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let applied_handoff_id = handoff.handoff_id.clone();
+    let final_decision = handoff.approved_direction.clone();
+
+    record.updated_at = resolved_at;
+    record.status = DecisionStatus::Receipted;
+    record.decision_receipt = Some(DecisionReceipt {
+        receipt_id: format!("receipt-{}", short_uuid()),
+        decision_id: record.decision_id.clone(),
+        resolved_by: by.clone(),
+        resolved_at,
+        final_decision,
+        applied_handoff_id: Some(applied_handoff_id),
+        authorization_summary: "Receipt closes the decision handoff; it does not authorize runtime mutation, cleanup, provider retargeting, or wiki promotion.".to_string(),
+        evidence_summary,
+        result_status: if result_status.is_empty() {
+            "closed".to_string()
+        } else {
+            result_status
+        },
+        remaining_review,
+    });
+    record.trace_refs.push(DecisionTraceRef {
+        kind: "decision_receipt".to_string(),
+        label: by,
+        reference: record
+            .decision_receipt
+            .as_ref()
+            .map(|receipt| receipt.receipt_id.clone())
+            .unwrap_or_default(),
+    });
+    Ok(record)
+}
+
+fn normalize_decision_choice(value: &str) -> String {
+    let normalized = value.trim().to_lowercase().replace([' ', '-'], "_");
+    match normalized.as_str() {
+        "go" | "ok" | "okay" | "yes" | "proceed" => "continue".to_string(),
+        "retry" | "redo" => "revise".to_string(),
+        "hold" => "block".to_string(),
+        "cancel" | "abort" => "stop".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn decision_requires_note(decision: &str) -> bool {
+    matches!(
+        decision,
+        "revise" | "block" | "custom" | "custom_direction" | "other"
+    )
+}
+
+fn build_execution_handoff(
+    record: &DecisionRecord,
+    decision: &str,
+    note: &str,
+    args: &DecisionResolveArgs,
+) -> ExecutionHandoff {
+    let mut instructions = vec![format!("Operator selected `{decision}` for this decision.")];
+    if !note.trim().is_empty() {
+        instructions.push(format!("Operator note: {note}"));
+    }
+    instructions.push("Before execution, read the decision request, Council review, and approval brief projection.".to_string());
+
+    let non_authorized_actions = record.decision_request.non_authorized_scope.clone();
+    let constraints = non_authorized_actions
+        .iter()
+        .map(|scope| format!("This handoff does not authorize {scope}."))
+        .collect::<Vec<_>>();
+
+    ExecutionHandoff {
+        handoff_id: format!("handoff-{}", short_uuid()),
+        decision_id: record.decision_id.clone(),
+        target: args
+            .target
+            .as_deref()
+            .map(crate::offdesk::operator_safe_text)
+            .filter(|target| !target.trim().is_empty())
+            .unwrap_or_else(|| default_decision_handoff_target(decision).to_string()),
+        approved_direction: decision.to_string(),
+        approved_scope: record.decision_request.current_scope.clone(),
+        instructions,
+        constraints,
+        verification_required: vec![
+            "Record a decision receipt before treating this handoff as accepted.".to_string(),
+            "Use separate approvals for runtime mutation, cleanup, provider retargeting, or wiki promotion.".to_string(),
+        ],
+        non_authorized_actions,
+    }
+}
+
+fn default_decision_handoff_target(decision: &str) -> &'static str {
+    match decision {
+        "stop" => "closeout",
+        _ => "agent",
+    }
+}
+
+fn read_json_file(path: &Path) -> Result<Value> {
+    serde_json::from_str(
+        &fs::read_to_string(path).with_context(|| format!("read JSON {}", path.display()))?,
+    )
+    .with_context(|| format!("parse JSON {}", path.display()))
+}
+
+fn decision_record_from_request(request: &Value, request_path: &Path) -> Result<DecisionRecord> {
+    let Some(record) = request.get("decision_record").cloned() else {
+        bail!(
+            "Telegram request {} does not contain decision_record",
+            request_path.display()
+        );
+    };
+    serde_json::from_value(record).with_context(|| {
+        format!(
+            "parse decision_record from Telegram request {}",
+            request_path.display()
+        )
+    })
+}
+
+fn json_string_field(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn decision_record_has_matching_handoff(record: &DecisionRecord, decision: &str) -> bool {
+    record
+        .execution_handoff
+        .as_ref()
+        .map(|handoff| handoff.approved_direction == normalize_decision_choice(decision))
+        .unwrap_or(false)
+}
+
+fn print_decision_ingest_telegram_report(report: &DecisionIngestTelegramReport) {
+    println!("Decision: {}", report.decision_id);
+    println!("Telegram status: {}", report.telegram_status);
+    if let Some(decision) = report.telegram_decision.as_deref() {
+        println!("Telegram decision: {}", decision);
+    }
+    println!("Ledger: {}", report.ledger_path);
+    if report.appended_records.is_empty() {
+        println!("Appended: none");
+    } else {
+        println!("Appended: {}", report.appended_records.join(", "));
+    }
+    if report.receipt_recorded {
+        println!("Receipt: recorded");
+    }
+    if let Some(reason) = report.skipped_reason.as_deref() {
+        println!("Skipped: {}", reason);
+    }
+    if !report.validation_issues.is_empty() {
+        println!("Validation issues: {}", report.validation_issues.len());
+    }
 }
 
 async fn provider_capacity(profile: &str, args: JsonArgs) -> Result<()> {
@@ -6336,6 +6949,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         .iter()
         .map(closeout_background_summary)
         .collect::<Vec<_>>();
+    let decision_records = closeout_decision_records(&profile_dir, &tasks, &background_runs, args)?;
 
     let mut file_operations = closeout_file_operations(&tasks, &background_runs);
     file_operations.sort_by(|left, right| {
@@ -6354,6 +6968,16 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
             present: operation.present,
         })
         .collect::<Vec<_>>();
+    let mut decision_sources = BTreeSet::new();
+    for decision in &decision_records {
+        if decision_sources.insert(decision.source_path.clone()) {
+            required_first_reads.push(CloseoutReadRef {
+                path: decision.source_path.clone(),
+                reason: "Decision ledger used by closeout; review unresolved decisions before accepting the run.".to_string(),
+                present: Path::new(&decision.source_path).exists(),
+            });
+        }
+    }
     required_first_reads.truncate(20);
 
     let git_snapshot = if args.include_git {
@@ -6365,6 +6989,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
     let open_decisions = closeout_open_decisions(
         &tasks,
         &file_operations,
+        &decision_records,
         git_snapshot.as_ref(),
         args,
         documentation_governance.as_ref(),
@@ -6410,7 +7035,12 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         packet_path: artifacts.commercial_review_packet.clone(),
     };
 
-    let summary = summarize_closeout(&closeout_tasks, &closeout_background_runs, &file_operations);
+    let summary = summarize_closeout(
+        &closeout_tasks,
+        &closeout_background_runs,
+        &file_operations,
+        &decision_records,
+    );
 
     let report = OffdeskCloseoutReport {
         generated_at,
@@ -6427,6 +7057,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         background_runs: closeout_background_runs,
         file_operations,
         required_first_reads,
+        decision_records,
         open_decisions,
         verification_commands,
         documentation_governance,
@@ -6962,9 +7593,142 @@ fn closeout_git_output(workdir: &Path, args: &[&str]) -> Result<Option<String>> 
     }
 }
 
+fn closeout_decision_records(
+    profile_dir: &Path,
+    tasks: &[OffdeskTask],
+    background_runs: &[BackgroundProbe],
+    args: &CloseoutArgs,
+) -> Result<Vec<CloseoutDecisionRecord>> {
+    let mut roots = BTreeSet::new();
+    roots.insert(profile_dir.to_path_buf());
+    for task in tasks {
+        closeout_add_decision_root(&mut roots, Some(task.workdir.as_str()));
+        closeout_add_decision_root(&mut roots, task.log_artifact_path.as_deref());
+        closeout_add_decision_root(&mut roots, task.result_artifact_path.as_deref());
+        for artifact in &task.artifact_refs {
+            closeout_add_decision_root(&mut roots, artifact.path.as_deref());
+        }
+    }
+    for probe in background_runs {
+        closeout_add_decision_root(&mut roots, probe.working_dir.as_deref());
+        closeout_add_decision_root(&mut roots, probe.log_artifact_path.as_deref());
+        closeout_add_decision_root(&mut roots, probe.result_artifact_path.as_deref());
+    }
+
+    let mut by_decision_id = BTreeMap::<String, CloseoutDecisionRecord>::new();
+    for root in roots {
+        let ledger = DecisionLedger::new(&root);
+        let source_path = ledger.path();
+        if !source_path.exists() {
+            continue;
+        }
+        for record in ledger
+            .load()
+            .with_context(|| format!("read closeout decision ledger {}", source_path.display()))?
+        {
+            if !closeout_decision_record_matches(&record, args) {
+                continue;
+            }
+            let candidate =
+                closeout_decision_record_from_source(source_path.display().to_string(), record);
+            let decision_id = candidate.record.decision_id.clone();
+            let replace = by_decision_id
+                .get(&decision_id)
+                .map(|existing| existing.record.updated_at < candidate.record.updated_at)
+                .unwrap_or(true);
+            if replace {
+                by_decision_id.insert(decision_id, candidate);
+            }
+        }
+    }
+
+    let mut records = by_decision_id.into_values().collect::<Vec<_>>();
+    records.sort_by(|left, right| {
+        left.record
+            .updated_at
+            .cmp(&right.record.updated_at)
+            .then_with(|| left.record.decision_id.cmp(&right.record.decision_id))
+    });
+    Ok(records)
+}
+
+fn closeout_add_decision_root(roots: &mut BTreeSet<PathBuf>, value: Option<&str>) {
+    let Some(raw) = value else {
+        return;
+    };
+    let text = raw.trim();
+    if text.is_empty() {
+        return;
+    }
+    let path = PathBuf::from(text);
+    if path.is_dir() {
+        roots.insert(path);
+    } else if let Some(parent) = path.parent() {
+        roots.insert(parent.to_path_buf());
+    }
+}
+
+fn closeout_decision_record_matches(record: &DecisionRecord, args: &CloseoutArgs) -> bool {
+    if let Some(project_key) = args.project_key.as_deref() {
+        if record.project_key != project_key {
+            return false;
+        }
+    }
+    if let Some(request_id) = args.request_id.as_deref() {
+        if record.request_id != request_id {
+            return false;
+        }
+    }
+    if let Some(task_id) = args.task_id.as_deref() {
+        if record.task_id != task_id {
+            return false;
+        }
+    }
+    true
+}
+
+fn closeout_decision_record_from_source(
+    source_path: String,
+    record: DecisionRecord,
+) -> CloseoutDecisionRecord {
+    let validation_issues = record.validation_issues();
+    CloseoutDecisionRecord {
+        source_path,
+        record,
+        validation_issues,
+    }
+}
+
+fn closeout_decision_record_is_open(decision: &CloseoutDecisionRecord) -> bool {
+    if !decision.validation_issues.is_empty() {
+        return true;
+    }
+    match decision.record.status {
+        DecisionStatus::AutoResolved | DecisionStatus::Denied | DecisionStatus::Receipted => false,
+        DecisionStatus::Applied => decision.record.decision_receipt.is_none(),
+        DecisionStatus::Draft
+        | DecisionStatus::CouncilReview
+        | DecisionStatus::UserPending
+        | DecisionStatus::Approved
+        | DecisionStatus::Revised
+        | DecisionStatus::Deferred
+        | DecisionStatus::HandoffReady => true,
+    }
+}
+
+fn closeout_decision_record_subject(record: &DecisionRecord) -> &str {
+    record
+        .approval_brief
+        .as_ref()
+        .map(|brief| brief.subject.as_str())
+        .filter(|subject| !subject.trim().is_empty())
+        .unwrap_or(record.decision_request.summary.as_str())
+}
+
 fn closeout_open_decisions(
     tasks: &[OffdeskTask],
     operations: &[CloseoutFileOperation],
+    decision_records: &[CloseoutDecisionRecord],
     git_snapshot: Option<&CloseoutGitSnapshot>,
     args: &CloseoutArgs,
     documentation_governance: Option<&CloseoutDocumentationGovernance>,
@@ -7015,6 +7779,38 @@ fn closeout_open_decisions(
                     .unwrap_or_else(|| "COMMERCIAL_REVIEW_PACKET.md".to_string())
             ),
         });
+    }
+    for decision in decision_records
+        .iter()
+        .filter(|decision| closeout_decision_record_is_open(decision))
+    {
+        let subject = closeout_decision_record_subject(&decision.record);
+        let detail = format!(
+            "Decision {} is {}: {}",
+            decision.record.decision_id,
+            decision.record.status.as_str(),
+            subject
+        );
+        decisions.push(CloseoutDecision {
+            kind: "decision_record_review",
+            detail: truncate_closeout_text(&crate::offdesk::operator_safe_text(&detail), 500),
+            suggested_command:
+                "Review `decision_records` in closeout_plan.json before accepting this run."
+                    .to_string(),
+        });
+        if !decision.validation_issues.is_empty() {
+            decisions.push(CloseoutDecision {
+                kind: "decision_record_validation",
+                detail: format!(
+                    "Decision {} has {} validation issue(s).",
+                    crate::offdesk::operator_safe_text(&decision.record.decision_id),
+                    decision.validation_issues.len()
+                ),
+                suggested_command:
+                    "Review `decision_records[].validation_issues` in closeout_plan.json."
+                        .to_string(),
+            });
+        }
     }
     if let Some(snapshot) = git_snapshot {
         if snapshot.status_short.is_some()
@@ -7193,6 +7989,7 @@ fn summarize_closeout(
     tasks: &[CloseoutTask],
     background_runs: &[CloseoutBackgroundRun],
     operations: &[CloseoutFileOperation],
+    decision_records: &[CloseoutDecisionRecord],
 ) -> CloseoutSummary {
     let mut summary = CloseoutSummary {
         tasks_scanned: tasks.len(),
@@ -7211,6 +8008,15 @@ fn summarize_closeout(
             })
             .count(),
         file_operations: operations.len(),
+        decision_records_scanned: decision_records.len(),
+        open_decision_records: decision_records
+            .iter()
+            .filter(|decision| closeout_decision_record_is_open(decision))
+            .count(),
+        invalid_decision_records: decision_records
+            .iter()
+            .filter(|decision| !decision.validation_issues.is_empty())
+            .count(),
         return_package_required: true,
         ..CloseoutSummary::default()
     };
@@ -7288,8 +8094,14 @@ fn render_closeout_plan_markdown(report: &OffdeskCloseoutReport) -> String {
         report.summary.delete_candidates
     ));
     output.push_str(&format!(
-        "- commercial review required: {}\n\n",
+        "- commercial review required: {}\n",
         report.summary.operations_requiring_commercial_review
+    ));
+    output.push_str(&format!(
+        "- decision records: {} scanned, {} open, {} invalid\n\n",
+        report.summary.decision_records_scanned,
+        report.summary.open_decision_records,
+        report.summary.invalid_decision_records
     ));
     output.push_str("## File Operations\n");
     if report.file_operations.is_empty() {
@@ -10028,6 +10840,129 @@ fn print_tasks(tasks: &[OffdeskTaskView]) {
         }
         println!("Terminal tasks:");
         print_task_rows(&terminal);
+    }
+}
+
+fn print_decisions(records: &[DecisionRecord]) {
+    println!(
+        "{:<28} {:<16} {:<10} {:<10} {:<18} SUBJECT",
+        "DECISION", "STATUS", "MATERIAL", "TARGET", "TASK"
+    );
+    for record in records {
+        let target = record
+            .route
+            .as_ref()
+            .map(|route| route.target.as_str())
+            .unwrap_or("-");
+        let subject = record
+            .approval_brief
+            .as_ref()
+            .map(|brief| brief.subject.as_str())
+            .unwrap_or(record.decision_request.kind.as_str());
+        println!(
+            "{:<28} {:<16} {:<10} {:<10} {:<18} {}",
+            record.decision_id,
+            record.status.as_str(),
+            record.materiality.as_str(),
+            target,
+            record.task_id,
+            subject
+        );
+        if !record.decision_request.summary.trim().is_empty() {
+            println!("  summary: {}", record.decision_request.summary);
+        }
+        if let Some(route) = record.route.as_ref() {
+            println!("  route:   {} ({})", route.target.as_str(), route.reason);
+        }
+        let issue_count = record.validation_issues().len();
+        if issue_count > 0 {
+            println!("  validation_issues: {}", issue_count);
+        }
+    }
+}
+
+fn print_decision(record: &DecisionRecord) {
+    println!("decision: {}", record.decision_id);
+    println!("status:   {}", record.status.as_str());
+    println!("material: {}", record.materiality.as_str());
+    println!("project:  {}", record.project_key);
+    println!("request:  {}", record.request_id);
+    println!("task:     {}", record.task_id);
+    println!("raised:   {}", record.raised_by.as_str());
+    println!("source:   {}", record.source_surface);
+    println!("updated:  {}", record.updated_at);
+    println!();
+    println!("Decision request:");
+    println!("  kind:     {}", record.decision_request.kind);
+    println!("  summary:  {}", record.decision_request.summary);
+    println!("  needed:   {}", record.decision_request.decision_needed);
+    println!("  scope:    {}", record.decision_request.current_scope);
+    if !record.decision_request.non_authorized_scope.is_empty() {
+        println!(
+            "  not authorized: {}",
+            record.decision_request.non_authorized_scope.join(", ")
+        );
+    }
+    if let Some(council) = record.council_review.as_ref() {
+        println!();
+        println!("Council:");
+        println!("  recommendation: {}", council.recommendation);
+        if let Some(agreement) = council.agreement {
+            println!("  agreement:      {}", agreement);
+        }
+        if !council.reviewer_decisions.is_empty() {
+            println!("  reviewers:");
+            for (reviewer, decision) in &council.reviewer_decisions {
+                println!("    - {}: {}", reviewer, decision);
+            }
+        }
+    }
+    if let Some(route) = record.route.as_ref() {
+        println!();
+        println!("Route:");
+        println!("  target:  {}", route.target.as_str());
+        println!("  reason:  {}", route.reason);
+        if let Some(default) = route.default_if_no_reply.as_deref() {
+            println!("  default: {}", default);
+        }
+    }
+    if let Some(brief) = record.approval_brief.as_ref() {
+        println!();
+        println!("Approval brief:");
+        println!("  recommendation: {}", brief.recommendation);
+        println!("  subject:        {}", brief.subject);
+        println!("  question:       {}", brief.question);
+        println!("  scope:          {}", brief.scope);
+    }
+    if let Some(handoff) = record.execution_handoff.as_ref() {
+        println!();
+        println!("Execution handoff:");
+        println!("  handoff_id: {}", handoff.handoff_id);
+        println!("  target:     {}", handoff.target);
+        println!("  direction:  {}", handoff.approved_direction);
+        println!("  scope:      {}", handoff.approved_scope);
+    }
+    if let Some(receipt) = record.decision_receipt.as_ref() {
+        println!();
+        println!("Decision receipt:");
+        println!("  receipt_id: {}", receipt.receipt_id);
+        println!("  decision:   {}", receipt.final_decision);
+        println!(
+            "  resolved:   {} by {}",
+            receipt.resolved_at, receipt.resolved_by
+        );
+        println!("  result:     {}", receipt.result_status);
+    }
+    let validation_issues = record.validation_issues();
+    if !validation_issues.is_empty() {
+        println!();
+        println!("Validation issues:");
+        for issue in validation_issues {
+            println!(
+                "  - {:?}: {} ({})",
+                issue.severity, issue.code, issue.detail
+            );
+        }
     }
 }
 

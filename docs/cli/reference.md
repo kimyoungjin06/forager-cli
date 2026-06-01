@@ -48,6 +48,12 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk enqueue`↴](#forager-offdesk-enqueue)
 * [`forager offdesk tick`↴](#forager-offdesk-tick)
 * [`forager offdesk tasks`↴](#forager-offdesk-tasks)
+* [`forager offdesk decisions`↴](#forager-offdesk-decisions)
+* [`forager offdesk decision`↴](#forager-offdesk-decision)
+* [`forager offdesk decision show`↴](#forager-offdesk-decision-show)
+* [`forager offdesk decision resolve`↴](#forager-offdesk-decision-resolve)
+* [`forager offdesk decision receipt`↴](#forager-offdesk-decision-receipt)
+* [`forager offdesk decision ingest-telegram`↴](#forager-offdesk-decision-ingest-telegram)
 * [`forager offdesk provider-capacity`↴](#forager-offdesk-provider-capacity)
 * [`forager offdesk provider-fallback`↴](#forager-offdesk-provider-fallback)
 * [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
@@ -669,6 +675,8 @@ Manage offdesk approvals and recovery artifacts
 * `enqueue` — Enqueue a durable offdesk task
 * `tick` — Run one offdesk control-loop pass
 * `tasks` — Show durable offdesk tasks
+* `decisions` — List canonical Offdesk decision records
+* `decision` — Inspect one canonical Offdesk decision record
 * `provider-capacity` — Show provider capacity cooldown state
 * `provider-fallback` — Recommend provider/model fallbacks without retargeting tasks
 * `cancel-task` — Mark a durable task cancelled without stopping its background runner
@@ -900,6 +908,122 @@ Show durable offdesk tasks
 * `--task-id <TASK_ID>` — Filter tasks by exact task ID
 * `--status <STATUS>` — Filter tasks by status. Repeat for multiple statuses
 * `--latest` — Return only the newest matching task by updated_at
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk decisions`
+
+List canonical Offdesk decision records
+
+**Usage:** `forager offdesk decisions [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Filter by project key
+* `--task-id <TASK_ID>` — Filter by task ID
+* `--status <STATUS>` — Filter by decision status, such as user_pending or auto_resolved
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk decision`
+
+Inspect one canonical Offdesk decision record
+
+**Usage:** `forager offdesk decision <COMMAND>`
+
+###### **Subcommands:**
+
+* `show` — Show one canonical Offdesk decision record
+* `resolve` — Resolve a decision into an append-only execution handoff
+* `receipt` — Close a handoff-ready decision with an append-only receipt
+* `ingest-telegram` — Ingest a Telegram relay result into the canonical decision ledger
+
+
+
+## `forager offdesk decision show`
+
+Show one canonical Offdesk decision record
+
+**Usage:** `forager offdesk decision show [OPTIONS] <DECISION_ID>`
+
+###### **Arguments:**
+
+* `<DECISION_ID>` — Decision ID to inspect
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk decision resolve`
+
+Resolve a decision into an append-only execution handoff
+
+**Usage:** `forager offdesk decision resolve [OPTIONS] --decision <DECISION> <DECISION_ID>`
+
+###### **Arguments:**
+
+* `<DECISION_ID>` — Decision ID to resolve
+
+###### **Options:**
+
+* `--decision <DECISION>` — Operator or policy choice, such as continue, revise, block, stop, deny, or defer
+* `--note <NOTE>` — Required rationale or natural-language direction for revise/block/custom choices
+
+  Default value: ``
+* `--by <BY>` — Actor recording the resolution
+
+  Default value: `operator`
+* `--target <TARGET>` — Override execution handoff target
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk decision receipt`
+
+Close a handoff-ready decision with an append-only receipt
+
+**Usage:** `forager offdesk decision receipt [OPTIONS] <DECISION_ID>`
+
+###### **Arguments:**
+
+* `<DECISION_ID>` — Decision ID to close
+
+###### **Options:**
+
+* `--by <BY>` — Actor recording the receipt
+
+  Default value: `operator`
+* `--result-status <RESULT_STATUS>` — Result status for the consumed handoff
+
+  Default value: `closed`
+* `--evidence <EVIDENCE_SUMMARY>` — Evidence summary line. Repeat for multiple lines
+* `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk decision ingest-telegram`
+
+Ingest a Telegram relay result into the canonical decision ledger
+
+**Usage:** `forager offdesk decision ingest-telegram [OPTIONS] --request <REQUEST> --result <RESULT>`
+
+###### **Options:**
+
+* `--request <REQUEST>` — Operator-safe decision request JSON containing decision_record
+* `--result <RESULT>` — Telegram relay result JSON
+* `--profile-dir <PROFILE_DIR>` — Override canonical profile directory for producer integrations
+* `--by <BY>` — Actor recording the relay ingestion
+
+  Default value: `telegram`
+* `--target <TARGET>` — Override execution handoff target
+* `--receipt-result-status <RECEIPT_RESULT_STATUS>` — Also append a receipt with this result status after resolving
+* `--receipt-evidence <RECEIPT_EVIDENCE_SUMMARY>` — Receipt evidence summary line. Repeat for multiple lines
+* `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines
 * `--json` — Output as JSON
 
 

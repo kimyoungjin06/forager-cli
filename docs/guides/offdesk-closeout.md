@@ -114,6 +114,13 @@ Use `RETURN_PACKAGE.md` to start a fresh or resumed Ondesk harness. The harness
 should read the listed result artifacts first, then inspect open decisions and
 run the verification commands before continuing work.
 
+Closeout now also reads `offdesk_decisions.jsonl` from the active profile and
+from matched run artifact directories, such as the directory containing
+`result.json`. Any unresolved `decision_record.v1` entry is surfaced in
+`open_decisions`, and the raw records are preserved under `decision_records` in
+`closeout_plan.json`. Receipted records remain in `decision_records` as history
+and are not treated as open unless their schema validation fails.
+
 The return package is intentionally shorter than `closeout_plan.json` and
 `cleanup_manifest.json`. It starts with status, decisions needed, capped first
 reads, a short change summary, grouped evidence, documentation governance

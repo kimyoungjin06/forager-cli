@@ -8,7 +8,14 @@ import datetime as dt
 import json
 import os
 import pathlib
+import sys
 from typing import Any
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import offdesk_decision_records as decision_records
 
 
 DEFAULT_PROFILE = os.environ.get("OFFDESK_PROFILE", "twinpaper-adaptive-debug")
@@ -189,41 +196,98 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
         },
     ]
 
+    decision_request_id = f"ondesk-handoff-{args.project_key}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}"
+    approval_brief = {
+        "schema": "ondesk_handoff_brief.v1",
+        "source": "build_ondesk_handoff_request",
+        "recommendation": "start_ondesk_review",
+        "subject": args.subject,
+        "summary_lines": summary_lines,
+        "why_recommendation": [
+            "Telegram은 push 알림에 적합하지만 전체 검수 화면으로는 좁습니다.",
+            "Ondesk 전환은 closeout, wiki, git 상태, prompt package를 함께 봐야 합니다.",
+            "무응답이면 자동 전환하지 않고 pending 상태를 유지하는 편이 안전합니다.",
+        ],
+        "evidence": evidence,
+        "next_action": next_action,
+        "next_safe_actions": next_safe_actions,
+        "decision_impacts": {
+            "start_ondesk_review": "WebUI에서 상세 검토를 시작합니다. 이 선택만으로 mutation은 승인되지 않습니다.",
+            "keep_pending": "자동 전환하지 않고 pending ondesk review로 남깁니다.",
+            "defer_ondesk": "자연어로 남긴 시간이나 조건까지 검토를 미룹니다.",
+        },
+        "options": [dict(option) for option in DEFAULT_OPTIONS],
+        "reply_examples": {
+            "defer_ondesk": "30분 뒤 다시 알려줘.",
+        },
+        "scope": (
+            "Telegram은 ondesk 검토 진입/대기만 기록합니다. wiki promotion, delete, cleanup, "
+            "provider 변경, 파일 이동은 WebUI/CLI에서 별도 승인합니다."
+        ),
+        "question": "WebUI에서 ondesk 검토를 시작할까요?",
+    }
+    trace_refs = [
+        ref
+        for ref in (
+            decision_records.trace_ref("artifact", "closeout_plan", plan_path),
+            decision_records.trace_ref("artifact", "closeout_dir", closeout_dir),
+            decision_records.trace_ref("artifact", "closeout_review_record", review_record_path),
+            decision_records.trace_ref("artifact", "prompt_package", args.prompt_package),
+        )
+        if ref is not None
+    ]
+    decision_record = decision_records.build_decision_record(
+        decision_id=decision_records.stable_decision_id(
+            decision_request_id,
+            args.project_key,
+            closeout_id,
+            generated_at.isoformat(),
+            prefix="decision",
+        ),
+        project_key=args.project_key,
+        request_id=decision_request_id,
+        task_id=closeout_id or "ondesk-handoff",
+        raised_by="closeout",
+        source_surface="ondesk.handoff",
+        materiality="high" if open_count else "medium",
+        status="user_pending",
+        decision_kind="ondesk_handoff_entry",
+        summary=" ".join(summary_lines),
+        decision_needed="Choose whether to start WebUI review, keep the handoff pending, or defer.",
+        why_now=summary_lines[:3],
+        current_scope="Ondesk review entry only.",
+        non_authorized_scope=[
+            "cleanup",
+            "delete",
+            "file movement",
+            "wiki promotion",
+            "provider retargeting",
+            "accepting Offdesk output without separate review",
+        ],
+        options=[dict(option) for option in DEFAULT_OPTIONS],
+        evidence_refs=trace_refs,
+        route_target="user",
+        route_reason="Morning handoff requires operator choice before returning to Ondesk review.",
+        route_policy_basis=[
+            "Telegram records only review entry intent.",
+            "WebUI remains the detailed review surface.",
+            "Mutation approval remains separate.",
+        ],
+        default_if_no_reply="defer_ondesk",
+        approval_brief=approval_brief,
+        trace_refs=trace_refs,
+        created_at=generated_at.isoformat(),
+        updated_at=generated_at.isoformat(),
+    )
+
     request: dict[str, Any] = {
-        "decision_request_id": f"ondesk-handoff-{args.project_key}-{generated_at.strftime('%Y%m%dT%H%M%SZ')}",
+        "decision_request_id": decision_request_id,
         "message_type": "ondesk_handoff",
         "title": f"{args.subject} ondesk handoff",
         "project_key": args.project_key,
         "created_at": generated_at.isoformat(),
-        "approval_brief": {
-            "schema": "ondesk_handoff_brief.v1",
-            "source": "build_ondesk_handoff_request",
-            "recommendation": "start_ondesk_review",
-            "subject": args.subject,
-            "summary_lines": summary_lines,
-            "why_recommendation": [
-                "Telegram은 push 알림에 적합하지만 전체 검수 화면으로는 좁습니다.",
-                "Ondesk 전환은 closeout, wiki, git 상태, prompt package를 함께 봐야 합니다.",
-                "무응답이면 자동 전환하지 않고 pending 상태를 유지하는 편이 안전합니다.",
-            ],
-            "evidence": evidence,
-            "next_action": next_action,
-            "next_safe_actions": next_safe_actions,
-            "decision_impacts": {
-                "start_ondesk_review": "WebUI에서 상세 검토를 시작합니다. 이 선택만으로 mutation은 승인되지 않습니다.",
-                "keep_pending": "자동 전환하지 않고 pending ondesk review로 남깁니다.",
-                "defer_ondesk": "자연어로 남긴 시간이나 조건까지 검토를 미룹니다.",
-            },
-            "options": [dict(option) for option in DEFAULT_OPTIONS],
-            "reply_examples": {
-                "defer_ondesk": "30분 뒤 다시 알려줘.",
-            },
-            "scope": (
-                "Telegram은 ondesk 검토 진입/대기만 기록합니다. wiki promotion, delete, cleanup, "
-                "provider 변경, 파일 이동은 WebUI/CLI에서 별도 승인합니다."
-            ),
-            "question": "WebUI에서 ondesk 검토를 시작할까요?",
-        },
+        "decision_record": decision_record,
+        "approval_brief": approval_brief,
         "artifacts": {
             "closeout_id": closeout_id,
             "closeout_plan": str(plan_path) if plan_path else None,

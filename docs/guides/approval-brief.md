@@ -194,6 +194,11 @@ human decision. The relay still supports older requests by deriving an approval
 brief from `operator_brief`, artifacts, or summary fields, but new producers
 should not depend on that inference.
 
+When the decision should participate in closeout or later profile-ledger review,
+the producer should also include a `decision_record.v1` parent record. Python
+producers should use `scripts/offdesk_decision_records.py` instead of hand
+assembling ad hoc dictionaries.
+
 Before emitting an approval brief, check:
 
 - The primary card tells the operator what decision is requested.
@@ -204,6 +209,11 @@ Before emitting an approval brief, check:
 - Raw paths, request ids, secrets, and raw JSON keys are absent from rendered
   user messages.
 - Internal trace fields remain available in state/result artifacts.
+- Accepted Telegram relay artifacts are ingested into the canonical decision
+  ledger with `forager offdesk decision ingest-telegram --request <request.json>
+  --result <telegram_decision.json> --json`; pass `--receipt-result-status` only
+  after the workload has consumed the handoff. Producer scripts may use
+  `--profile-dir <profile-dir>` when they already know the target profile root.
 
 ## Examples
 
