@@ -186,6 +186,8 @@ fn ondesk_review_surface_json_agrees_with_status_next_safe_action() -> Result<()
         status_json["offdesk_next_safe_actions"][0]
     );
     assert_eq!(surface["sources"]["status_json"], "forager status --json");
+    assert_eq!(surface["sources"]["artifact_index"], "artifact_index.v1");
+    assert_eq!(surface["artifacts"]["index"]["schema"], "artifact_index.v1");
     Ok(())
 }
 
@@ -368,6 +370,21 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
         .expect("artifact refs")
         .iter()
         .any(|reference| reference["id"] == "closeout_receipt" && reference["present"] == true));
+    let artifact_index = &surface["artifacts"]["index"];
+    assert_eq!(artifact_index["schema"], "artifact_index.v1");
+    assert!(
+        artifact_index["summary"]["total_entries"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 3
+    );
+    assert!(artifact_index["entries"]
+        .as_array()
+        .expect("artifact index entries")
+        .iter()
+        .any(|entry| entry["kind"] == "closeout_receipt"
+            && entry["label"] == "Closeout receipt"
+            && entry["present"] == true));
     Ok(())
 }
 
@@ -455,6 +472,7 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Morning Review Surface"));
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
+    assert!(content.contains("artifact_index:"));
     assert!(content.contains("artifact_summaries"));
     assert!(content.contains("Documentation Governance Source"));
     assert!(content.contains("source: `latest_closeout_return_package`"));

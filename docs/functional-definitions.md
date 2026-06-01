@@ -493,6 +493,7 @@ Inputs:
 - Open decisions.
 - Runtime evidence summary.
 - Wiki review summary.
+- Artifact index summary.
 
 Outputs:
 - `review_surface.v1` JSON.
@@ -514,6 +515,7 @@ Acceptance Criteria:
 
 Primary Surfaces:
 - `forager ondesk review-surface --json`.
+- `forager project artifact-index`.
 - Future WebUI.
 - Telegram "details" link target.
 - Prompt-package summary.
@@ -743,7 +745,7 @@ Inputs:
 - Promotion or disposal decision.
 
 Outputs:
-- Artifact index.
+- `artifact_index.v1`.
 - Retention recommendation.
 - Review packet.
 - Disposal-safe manifest.
@@ -759,9 +761,11 @@ Acceptance Criteria:
 - Disposal candidates are inspectable before mutation.
 
 Primary Surfaces:
+- `forager project artifact-index`.
+- `forager ondesk review-surface`.
 - Closeout artifacts.
 - Documentation governance reports.
-- Future review surface packet.
+- Prompt-package summary.
 
 Open Design Questions:
 - What retention classes should be standard across projects?
@@ -975,10 +979,13 @@ Completed P0 slice:
 Completed P1 operator workflow slice:
 1. Project `review_surface.v1` into Ondesk prompt packages.
 2. Make Telegram detail replies use the same review packet summaries.
+3. Add `artifact_index.v1` for project outputs and profile-local handoff
+   artifacts.
+4. Project artifact-index summaries into `review_surface.v1` and Ondesk prompt
+   packages.
 
 Remaining P1 operator workflow slice:
-1. Add an artifact index for long-running project outputs.
-2. Strengthen adaptive wiki promotion receipts and review summaries.
+1. Strengthen adaptive wiki promotion receipts and review summaries.
 
 P2 expansion slice:
 1. Normalize hosted harness capability contracts for Claude Code, Codex,

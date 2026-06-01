@@ -833,3 +833,67 @@ fn project_audit_docs_recommends_adaptive_wiki_projection_export() -> Result<()>
     );
     Ok(())
 }
+
+#[test]
+#[serial]
+fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_file(
+        repo.join("DELIVERABLES.md").as_path(),
+        "# Deliverables\n\n- Main report: `outputs/report.html`\n- Missing export: `outputs/missing.pdf`\n",
+    )?;
+    write_file(
+        repo.join("outputs/report.html").as_path(),
+        "<html><body>report</body></html>\n",
+    )?;
+    write_file(repo.join("outputs/plot.png").as_path(), "png-bytes\n")?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "artifact-index",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["schema"], "artifact_index.v1");
+    assert_eq!(json["project_key"], "demo-project");
+    assert!(json["authority"]["read_only"].as_bool().unwrap_or(false));
+    assert!(
+        json["summary"]["human_facing_entries"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 3
+    );
+    assert_eq!(json["summary"]["missing_entries"], 1);
+
+    let entries = json["entries"].as_array().expect("artifact entries");
+    assert!(entries.iter().any(|entry| {
+        entry["relative_path"] == "outputs/report.html"
+            && entry["source"] == "project_deliverables"
+            && entry["retention_class"] == "handoff"
+            && entry["present"] == true
+    }));
+    assert!(entries.iter().any(|entry| {
+        entry["relative_path"] == "outputs/plot.png"
+            && entry["source"] == "project_output_scan"
+            && entry["review_status"] == "needs_triage"
+    }));
+    assert!(entries.iter().any(|entry| {
+        entry["relative_path"] == "outputs/missing.pdf"
+            && entry["source"] == "project_deliverables"
+            && entry["present"] == false
+            && entry["review_status"] == "missing"
+    }));
+    Ok(())
+}

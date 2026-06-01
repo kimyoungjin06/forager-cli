@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
+use super::artifact_index::{self, ProjectArtifactIndexArgs};
 use super::project_audit::{run_audit_docs, ProjectAuditDocsArgs};
 use crate::offdesk::operator_safe_text;
 use crate::session::get_profile_dir;
@@ -35,6 +36,10 @@ pub enum ProjectCommands {
 
     /// Audit documentation and human-facing artifact governance surfaces
     AuditDocs(ProjectAuditDocsArgs),
+
+    /// Build a read-only project/profile artifact index
+    #[command(name = "artifact-index")]
+    ArtifactIndex(ProjectArtifactIndexArgs),
 }
 
 #[derive(Args)]
@@ -425,6 +430,7 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
         ProjectCommands::Init(args) => run_init(profile, args).await,
         ProjectCommands::ApplyGovernanceHints(args) => run_apply_governance_hints(args),
         ProjectCommands::AuditDocs(args) => run_audit_docs(args),
+        ProjectCommands::ArtifactIndex(args) => artifact_index::run(profile, args).await,
     }
 }
 

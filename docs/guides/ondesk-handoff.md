@@ -74,6 +74,17 @@ into a fresh Ondesk session. If closeout found documentation governance
 recommendations, the return package carries the focused action list rather than
 the full audit summary.
 
+`prompt-package` also renders the compact `artifact_index.v1` projection from
+the shared review surface. The prompt shows artifact counts and meaning first;
+paths remain in `review_surface` JSON for audit. Use the project artifact-index
+command when the next reviewer must inspect project outputs from
+`DELIVERABLES.md` and common output roots, not only profile-local handoff
+artifacts:
+
+```bash
+forager project artifact-index /path/to/project --project-key <project> --json
+```
+
 ## Knowledge Policy
 
 - `ondesk note` stores redacted, operator-safe JSONL in `ondesk_notes.jsonl`.
@@ -163,9 +174,10 @@ review receipt exists. `accepted` means the output can move into Ondesk review;
 review-required states rather than accepted truth. When a `review_surface.v1`
 packet is provided, Telegram detail replies render the same review summary used
 by `forager ondesk prompt-package`, including accepted-truth state, closeout
-risks, review queue counts, and artifact meanings before any paths. The rendered
-message hides raw paths and ids. Those remain in the request, state, and result
-JSON for audit/debugging. The relay writes the state beside the result as
+risks, review queue counts, artifact-index counts, and artifact meanings before
+any paths. The rendered message hides raw paths and ids. Those remain in the
+request, state, and result JSON for audit/debugging. The relay writes the state
+beside the result as
 `<result-stem>.telegram_decision_state.json`, so simultaneous handoff and
 council prompts in the same directory do not overwrite each other's state
 artifacts.
