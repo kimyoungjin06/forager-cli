@@ -77,6 +77,70 @@ Open Design Questions:
 | FD-014 | Harness Comparison And Evaluation | Compare agents by task evidence | P2 |
 | FD-015 | External Orchestration Boundary | Coordinate without surrendering local truth | P2 |
 
+## Priority And Readiness
+
+Priority describes product importance. Readiness describes how safely a
+capability can be used as a dependency.
+
+Priority:
+- P0: Required for Forager to be trusted as an autonomous harness supervisor.
+- P1: Required for a good operator workflow once the P0 spine is stable.
+- P2: Important expansion area, but not allowed to weaken P0/P1 contracts.
+
+Readiness states:
+- Defined: the user problem, actors, and authorization boundary are written.
+- Contracted: durable state and JSON projection fields are named.
+- Implemented: at least one CLI or runtime path produces the contract.
+- Validated: tests or smoke runs prove the contract against realistic state.
+- Operational: the capability is wired into the normal operator workflow.
+
+Rule:
+- P0 capabilities should reach `contracted` before any new WebUI-first design
+  work depends on them.
+- A capability should not be treated as operational until its summary surface
+  and its machine-readable evidence agree on the same next safe action.
+- A surface may be experimental, but the local contract behind it must state
+  whether it is stable, transitional, or legacy.
+
+## Capability Dependencies
+
+| Capability | Depends On | Why It Matters |
+| --- | --- | --- |
+| FD-002 Harness Session Runtime | FD-001 | Runtime state must attach to a profile-local truth source. |
+| FD-003 Hosted Harness Agent Workloads | FD-001, FD-002 | External agents need a supervised session and state boundary. |
+| FD-004 Approval And Decision Pipeline | FD-001 | Decisions must become durable local records. |
+| FD-005 Offdesk Runtime Supervision | FD-001, FD-003, FD-004 | Unattended work needs state, hosted workers, and approval gates. |
+| FD-006 Recovery And Resume | FD-001, FD-005 | Recovery must replay evidence from supervised runtime state. |
+| FD-007 Closeout And Accepted Truth | FD-001, FD-005, FD-006 | Closeout only matters if runtime and recovery evidence can be checked. |
+| FD-008 Review Surface Packet | FD-001, FD-004, FD-007, FD-012 | Rich review needs state, decisions, acceptance, and artifact indexes. |
+| FD-009 Operator Notification Relay | FD-004, FD-008 | Notifications should carry decisions and link to review details. |
+| FD-010 Ondesk Handoff | FD-006, FD-007, FD-008 | A fresh harness needs accepted truth, recovery state, and review context. |
+| FD-011 Adaptive Knowledge Governance | FD-004, FD-007 | Promotion should depend on reviewed decisions and accepted outcomes. |
+| FD-012 Artifact Governance And Retention | FD-001, FD-005, FD-007 | Retention should preserve evidence while allowing old work to be disposed. |
+| FD-013 Provider And Model Routing | FD-003, FD-004 | Routing changes are worker changes and may require approval. |
+| FD-014 Harness Comparison And Evaluation | FD-003, FD-007, FD-012 | Comparisons need comparable runs, accepted closeouts, and artifacts. |
+| FD-015 External Orchestration Boundary | FD-001, FD-004, FD-008 | External systems should call contracts, not become the truth source. |
+
+## Shared Data Contracts
+
+These contracts are the preferred integration points between capabilities. A
+new UI should project these contracts instead of inventing a separate model.
+
+| Contract | Owner | Purpose | Projection Rule |
+| --- | --- | --- | --- |
+| `profile_state` | FD-001 | Canonical project/profile state root. | May expose paths in CLI JSON; human surfaces summarize ownership and freshness. |
+| `session_record` | FD-002 | Interactive or hosted harness session identity, cwd, provider, and lifecycle. | TUI can show compact status; detailed paths stay in JSON/details. |
+| `hosted_workload` | FD-003 | External agent command, model/provider, runtime handle, and safety envelope. | Operator summaries show who is working and why, not raw command dumps first. |
+| `decision_record.v1` | FD-004 | Durable decision, options, rationale, response, and effect. | Telegram shows the choice problem; JSON preserves ids, files, and receipts. |
+| `approval_brief.v1` | FD-004 | Human-readable decision card generated from Council or agent evidence. | Must include context, options, recommendation, tradeoff, and default timeout behavior. |
+| `decision_receipt` | FD-004 | Proof that an approval, rejection, or natural-language response was handled. | Surfaces show final status and consequence before implementation continues. |
+| `offdesk_task` | FD-005 | Unattended workload scope, guardrails, heartbeat, and stop conditions. | Summaries show progress, ETA, blockers, and interruption safety. |
+| `runtime_evidence` | FD-005 | Heartbeat, progress events, logs, and process handle evidence. | Human surfaces summarize; machine surfaces retain artifact refs. |
+| `next_safe_action` | FD-006 | The single safest continuation action after interruption or closeout. | Every operator-facing surface must agree on the first action. |
+| `closeout_receipt.v1` | FD-007 | Completion status, accepted-truth state, evidence, and unresolved risk. | Never collapse `execution_complete` into `accepted`. |
+| `review_surface.v1` | FD-008 | Rich review packet shared by WebUI, Ondesk handoff, and detail views. | Rich surfaces consume this packet as their read model. |
+| `artifact_index` | FD-012 | Findable inventory of outputs, retention class, and disposal status. | User surfaces explain why an artifact matters before exposing its path. |
+
 ## FD-001 Local Profile State
 
 Purpose:
@@ -454,9 +518,78 @@ Primary Surfaces:
 - Telegram "details" link target.
 - Prompt-package summary.
 
+Minimum `review_surface.v1` Shape:
+
+```json
+{
+  "schema": "review_surface.v1",
+  "generated_at": "2026-06-01T00:00:00Z",
+  "profile": "default",
+  "project_key": "forager-cli",
+  "status": {
+    "label": "needs_review",
+    "summary": "One offdesk task completed execution and awaits acceptance.",
+    "severity": "attention"
+  },
+  "next_safe_actions": [
+    {
+      "id": "review-closeout",
+      "label": "Review closeout evidence",
+      "reason": "Execution completed, but accepted truth is not set.",
+      "command": "forager offdesk closeout-review --latest"
+    }
+  ],
+  "accepted_truth": {
+    "status": "pending",
+    "source": "closeout_receipt.v1",
+    "reason": "No reviewed receipt has accepted the result yet."
+  },
+  "closeout": {
+    "latest_receipt_id": "receipt-id",
+    "execution_status": "completed",
+    "review_status": "pending",
+    "unresolved_risks": []
+  },
+  "runtime": {
+    "active": false,
+    "last_heartbeat_at": "2026-06-01T00:00:00Z",
+    "progress_summary": "Completed 4 of 4 planned steps."
+  },
+  "decisions": {
+    "open_count": 0,
+    "recent": []
+  },
+  "adaptive_wiki": {
+    "candidate_count": 0,
+    "promotion_required": false
+  },
+  "artifacts": {
+    "summary": [
+      {
+        "label": "Closeout summary",
+        "why_it_matters": "Contains the evidence needed for acceptance.",
+        "retention_class": "review"
+      }
+    ],
+    "refs": []
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  }
+}
+```
+
+Implementation Rule:
+- The first implementation may be JSON-only.
+- WebUI, TUI detail panels, Telegram detail replies, and Ondesk packets should
+  project from this packet rather than each querying unrelated state.
+- Raw paths are allowed in `artifacts.refs`, but user-facing summaries should
+  explain the artifact's meaning before exposing its location.
+
 Open Design Questions:
-- Should the first implementation be JSON-only, markdown, or both?
 - Should packet generation be stored as an artifact or generated live?
+- How much artifact detail belongs in the packet versus a linked artifact index?
 
 ## FD-009 Operator Notification Relay
 
@@ -775,15 +908,81 @@ Open Design Questions:
 - Fresh harnesses start from artifacts, not from inherited chat.
 - Legacy compatibility is explicit and should fade over time.
 
+## Surface Projection Rules
+
+Each surface should answer a different operator problem from the same contracts.
+Surfaces should differ in density and interaction model, not in truth.
+
+| Surface | Primary Job | Should Show | Should Avoid |
+| --- | --- | --- | --- |
+| CLI text | Fast local operation and scripting hints. | Current status, first next safe action, concise reason. | Long raw logs by default. |
+| CLI JSON | Durable automation and audit integration. | Full ids, paths, schema versions, receipts, and refs. | Human-only prose as the only evidence. |
+| TUI | Live operator focus while at desk. | Active task, progress, open decisions, accepted-truth state. | Deep file inventories in the main view. |
+| Telegram | Offdesk decision and interruption prompts. | Decision context, recommendation, options, consequence, detail trigger. | Raw ids, raw paths, or log-style payloads in the primary card. |
+| Ondesk Prompt Package | Fresh harness continuation. | Accepted truth, unresolved risks, next commands, artifact references. | Claims that depend only on old chat history. |
+| WebUI or HTML Review | Dense visual review and browsing. | `review_surface.v1`, artifact summaries, drill-down panels. | Direct mutation before approval contracts exist. |
+| Project Docs and GH Pages | Public explanation and onboarding. | Direction, concepts, examples, supported surfaces. | Runtime state, secrets, or operational decisions. |
+
+Projection rules:
+- A compact surface may omit detail only if it links to or names a richer
+  contract that contains the omitted evidence.
+- A rich surface may add layout, grouping, and filtering, but should not invent
+  a different accepted-truth or next-safe-action calculation.
+- Raw artifact locations are machine-friendly data. User-facing cards should
+  first explain what the artifact proves and why the user might open it.
+
+## Functional Definition Done
+
+A capability definition is ready to become an implementation spec when it has:
+
+- A named owner source of truth.
+- A durable state or JSON contract, even if the first version is small.
+- An authorization boundary that says what the capability permits.
+- A projection plan for CLI JSON and at least one human surface.
+- A `next_safe_action` behavior when the capability can affect operator flow.
+- An accepted-truth rule when the capability can complete or close work.
+- A redaction rule for operator-facing summaries.
+- A validation plan with tests, smoke commands, or inspectable artifacts.
+- A compatibility note for transitional or legacy state.
+
+If one of these is unknown, the implementation spec should name the unknown
+explicitly instead of hiding it inside UI behavior.
+
+## Implementation Slicing Rules
+
+Forager features should move from contracts to surfaces in this order:
+
+1. Define the profile-local state or JSON contract.
+2. Add the smallest CLI JSON projection that proves the contract.
+3. Add focused tests or smoke checks against realistic state.
+4. Add a compact human projection for CLI text, TUI, Telegram, or Ondesk.
+5. Add rich review surfaces after the compact and machine surfaces agree.
+6. Promote learnings to adaptive wiki only after review and receipt handling.
+
+The preferred first slice for WebUI work is not a screen. It is
+`review_surface.v1` plus a static or CLI-generated projection that proves the
+data is complete enough for review.
+
 ## Near-Term Functional Backlog
 
-1. Define and implement `review_surface.v1` as the shared rich-review packet.
-2. Make WebUI consume `review_surface.v1` rather than inventing its own state.
-3. Add artifact governance indexes for long-running project outputs.
+Immediate P0 slice:
+1. Implement `review_surface.v1` JSON generation from local profile state.
+2. Add a closeout and accepted-truth section to that packet.
+3. Add an artifact summary section that explains meaning before paths.
+4. Add tests that compare `forager status`, closeout review, and
+   `review_surface.v1` first next-safe-action.
+
+P1 operator workflow slice:
+1. Project `review_surface.v1` into Ondesk prompt packages.
+2. Make Telegram detail replies use the same review packet summaries.
+3. Add an artifact index for long-running project outputs.
 4. Strengthen adaptive wiki promotion receipts and review summaries.
-5. Normalize hosted harness capability contracts for Claude Code, Codex,
+
+P2 expansion slice:
+1. Normalize hosted harness capability contracts for Claude Code, Codex,
    OpenCode, OpenHands, Gemini CLI, and local scripts.
-6. Add harness comparison records after enough evidence exists.
+2. Add harness comparison records after enough accepted evidence exists.
+3. Decide whether a local HTTP API is needed after CLI JSON proves stable.
 
 ## How To Use This Document
 
