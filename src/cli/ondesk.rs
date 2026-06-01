@@ -253,6 +253,10 @@ struct OndeskCloseoutSummary {
     review_verdict: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     review_record_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -916,7 +920,11 @@ fn latest_closeout_package(
             return_package_path: safe(return_package_path.to_string_lossy().as_ref()),
             return_package_truncated,
             review_verdict: review.as_ref().map(|review| review.verdict.clone()),
-            review_record_path: review.map(|review| review.record_path),
+            review_record_path: review.as_ref().map(|review| review.record_path.clone()),
+            receipt_status: review
+                .as_ref()
+                .and_then(|review| review.receipt_status.clone()),
+            receipt_path: review.and_then(|review| review.receipt_path),
         },
         return_package,
         audit_project_path,
@@ -1310,6 +1318,8 @@ struct OndeskCloseoutReview {
     reviewed_at: DateTime<Utc>,
     verdict: String,
     record_path: String,
+    receipt_status: Option<String>,
+    receipt_path: Option<String>,
 }
 
 fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<OndeskCloseoutReview>> {
@@ -1342,10 +1352,20 @@ fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<OndeskCloseoutRe
             .and_then(Value::as_str)
             .map(safe)
             .unwrap_or_else(|| "unknown".to_string());
+        let receipt_status = value
+            .pointer("/closeout_receipt/acceptance_status")
+            .and_then(Value::as_str)
+            .map(safe);
+        let receipt_path = value
+            .pointer("/artifacts/closeout_receipt_json")
+            .and_then(Value::as_str)
+            .map(safe);
         reviews.push(OndeskCloseoutReview {
             reviewed_at,
             verdict,
             record_path: safe(path.to_string_lossy().as_ref()),
+            receipt_status,
+            receipt_path,
         });
     }
 
@@ -1605,6 +1625,12 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
             output.push_str(&format!("- review_verdict: {verdict}\n"));
         } else {
             output.push_str("- review_verdict: none recorded\n");
+        }
+        if let Some(status) = &closeout.summary.receipt_status {
+            output.push_str(&format!("- closeout_receipt_status: {status}\n"));
+        }
+        if let Some(path) = &closeout.summary.receipt_path {
+            output.push_str(&format!("- closeout_receipt: {path}\n"));
         }
         output.push('\n');
         output.push_str(&fenced("markdown", &closeout.return_package));

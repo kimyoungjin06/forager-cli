@@ -2532,6 +2532,7 @@ struct CloseoutReviewRecord {
     applies_to_tasks: Vec<CloseoutReviewTaskRef>,
     read_only_project_state: bool,
     applies_file_operations: bool,
+    closeout_receipt: CloseoutReceipt,
     artifacts: CloseoutReviewArtifactPaths,
 }
 
@@ -2546,6 +2547,51 @@ struct CloseoutReviewTaskRef {
 struct CloseoutReviewArtifactPaths {
     closeout_plan_json: String,
     review_record_json: String,
+    closeout_receipt_json: String,
+    return_package_markdown: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutReceipt {
+    schema: &'static str,
+    receipt_id: String,
+    closeout_id: String,
+    review_id: String,
+    generated_at: DateTime<Utc>,
+    reviewed_at: DateTime<Utc>,
+    verdict: CloseoutReviewVerdict,
+    acceptance_status: &'static str,
+    accepted_scope: Vec<String>,
+    executed_scope: Vec<String>,
+    evidence_status: &'static str,
+    verification_status: &'static str,
+    open_decisions: Vec<CloseoutReceiptDecision>,
+    missing_evidence: Vec<String>,
+    required_first_reads: Vec<String>,
+    unsafe_operations: Vec<String>,
+    retention_review: &'static str,
+    wiki_promotion_state: &'static str,
+    stale_task_count: usize,
+    next_safe_action: String,
+    source_artifacts: CloseoutReceiptArtifacts,
+}
+
+#[derive(Serialize)]
+struct CloseoutReceiptDecision {
+    kind: String,
+    detail: String,
+    suggested_command: String,
+}
+
+#[derive(Serialize)]
+struct CloseoutReceiptArtifacts {
+    closeout_plan_json: String,
+    closeout_plan_markdown: Option<String>,
+    cleanup_manifest_json: Option<String>,
+    commercial_review_packet: Option<String>,
+    return_package_markdown: String,
+    review_record_json: String,
+    review_file: Option<String>,
 }
 
 pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
@@ -7146,10 +7192,27 @@ fn build_closeout_review_record(
     let reviewed_at = Utc::now();
     let review_id = format!("closeout_review_{}", short_uuid());
     let review_record_path = allocate_closeout_review_record_path(&artifact_dir, reviewed_at)?;
+    let receipt_path = allocate_closeout_receipt_path(&artifact_dir, reviewed_at)?;
+    let return_package_path = closeout_return_package_path(&artifact_dir, &plan);
     let artifacts = CloseoutReviewArtifactPaths {
         closeout_plan_json: plan_path.display().to_string(),
         review_record_json: review_record_path.display().to_string(),
+        closeout_receipt_json: receipt_path.display().to_string(),
+        return_package_markdown: return_package_path.display().to_string(),
     };
+    let stale_task_count =
+        closeout_review_stale_task_count(&profile_dir, &applies_to_tasks, closeout_generated_at);
+    let closeout_receipt = build_closeout_receipt(CloseoutReceiptInput {
+        plan: &plan,
+        args,
+        artifacts: &artifacts,
+        closeout_id: &closeout_id,
+        review_id: &review_id,
+        closeout_generated_at,
+        reviewed_at,
+        applies_to_tasks: &applies_to_tasks,
+        stale_task_count,
+    });
     let record = CloseoutReviewRecord {
         reviewed_at,
         review_id,
@@ -7178,11 +7241,19 @@ fn build_closeout_review_record(
         applies_to_tasks,
         read_only_project_state: true,
         applies_file_operations: false,
+        closeout_receipt,
         artifacts,
     };
 
     write_closeout_review_record(&record)?;
     Ok(record)
+}
+
+fn closeout_return_package_path(artifact_dir: &Path, plan: &Value) -> PathBuf {
+    plan.pointer("/artifacts/return_package_markdown")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact_dir.join("RETURN_PACKAGE.md"))
 }
 
 fn resolve_closeout_artifact_dir(profile_dir: &Path, args: &CloseoutReviewArgs) -> Result<PathBuf> {
@@ -7260,11 +7331,396 @@ fn allocate_closeout_review_record_path(
     )
 }
 
+fn allocate_closeout_receipt_path(
+    artifact_dir: &Path,
+    reviewed_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    fs::create_dir_all(artifact_dir)
+        .with_context(|| format!("create closeout artifact dir {}", artifact_dir.display()))?;
+    let timestamp = reviewed_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("closeout_receipt_{timestamp}.json")
+        } else {
+            format!("closeout_receipt_{timestamp}_{attempt:03}.json")
+        };
+        let path = artifact_dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+
+    bail!(
+        "could not allocate closeout receipt path in {}",
+        artifact_dir.display()
+    )
+}
+
 fn write_closeout_review_record(record: &CloseoutReviewRecord) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(record)?;
     write_new_file(Path::new(&record.artifacts.review_record_json), &bytes)
         .with_context(|| format!("write {}", record.artifacts.review_record_json))?;
+    let receipt_bytes = serde_json::to_vec_pretty(&record.closeout_receipt)?;
+    write_new_file(
+        Path::new(&record.artifacts.closeout_receipt_json),
+        &receipt_bytes,
+    )
+    .with_context(|| format!("write {}", record.artifacts.closeout_receipt_json))?;
+    update_return_package_with_closeout_receipt(record)?;
     Ok(())
+}
+
+struct CloseoutReceiptInput<'a> {
+    plan: &'a Value,
+    args: &'a CloseoutReviewArgs,
+    artifacts: &'a CloseoutReviewArtifactPaths,
+    closeout_id: &'a str,
+    review_id: &'a str,
+    closeout_generated_at: Option<DateTime<Utc>>,
+    reviewed_at: DateTime<Utc>,
+    applies_to_tasks: &'a [CloseoutReviewTaskRef],
+    stale_task_count: usize,
+}
+
+fn build_closeout_receipt(input: CloseoutReceiptInput<'_>) -> CloseoutReceipt {
+    let CloseoutReceiptInput {
+        plan,
+        args,
+        artifacts,
+        closeout_id,
+        review_id,
+        closeout_generated_at,
+        reviewed_at,
+        applies_to_tasks,
+        stale_task_count,
+    } = input;
+    let open_decisions = closeout_receipt_open_decisions(plan);
+    let unsafe_operations = material_review_items(&args.unsafe_operation);
+    let missing_evidence = material_review_items(&args.missing_evidence);
+    let required_first_reads = material_review_items(&args.required_first_read);
+    let plan_missing_artifacts = closeout_plan_usize(plan, "/summary/missing_artifacts");
+    let retention_review = closeout_receipt_retention_review(plan, &unsafe_operations);
+    let wiki_promotion_state = closeout_receipt_wiki_promotion_state(plan);
+    let evidence_status = if plan_missing_artifacts > 0 || !missing_evidence.is_empty() {
+        "missing"
+    } else {
+        "review_ready"
+    };
+    let has_followups = stale_task_count > 0
+        || !open_decisions.is_empty()
+        || !unsafe_operations.is_empty()
+        || !missing_evidence.is_empty()
+        || !required_first_reads.is_empty()
+        || plan_missing_artifacts > 0
+        || retention_review == "required"
+        || wiki_promotion_state == "review_required"
+        || wiki_promotion_state == "audit_unavailable";
+    let verification_status = if has_followups { "pending" } else { "recorded" };
+    let acceptance_status = match args.verdict {
+        CloseoutReviewVerdict::Approved if has_followups => "approved_with_followups",
+        CloseoutReviewVerdict::Approved => "accepted",
+        CloseoutReviewVerdict::Revise => "revision_required",
+        CloseoutReviewVerdict::Blocked => "blocked",
+    };
+    let executed_scope = applies_to_tasks
+        .iter()
+        .map(|task| {
+            format!(
+                "{}:{} request={}",
+                task.project_key, task.task_id, task.request_id
+            )
+        })
+        .collect::<Vec<_>>();
+    let accepted_scope = if acceptance_status == "accepted" {
+        executed_scope.clone()
+    } else {
+        vec![
+            "No final accepted scope; receipt requires follow-up review before accepted truth."
+                .to_string(),
+        ]
+    };
+    let next_safe_action = closeout_receipt_next_safe_action(
+        acceptance_status,
+        stale_task_count,
+        &open_decisions,
+        &missing_evidence,
+        &required_first_reads,
+    );
+
+    CloseoutReceipt {
+        schema: "closeout_receipt.v1",
+        receipt_id: format!("closeout_receipt_{}", short_uuid()),
+        closeout_id: closeout_id.to_string(),
+        review_id: review_id.to_string(),
+        generated_at: closeout_generated_at.unwrap_or(reviewed_at),
+        reviewed_at,
+        verdict: args.verdict,
+        acceptance_status,
+        accepted_scope,
+        executed_scope,
+        evidence_status,
+        verification_status,
+        open_decisions,
+        missing_evidence,
+        required_first_reads,
+        unsafe_operations,
+        retention_review,
+        wiki_promotion_state,
+        stale_task_count,
+        next_safe_action,
+        source_artifacts: CloseoutReceiptArtifacts {
+            closeout_plan_json: crate::offdesk::operator_safe_text(&artifacts.closeout_plan_json),
+            closeout_plan_markdown: closeout_plan_artifact(
+                plan,
+                "/artifacts/closeout_plan_markdown",
+            ),
+            cleanup_manifest_json: closeout_plan_artifact(plan, "/artifacts/cleanup_manifest_json"),
+            commercial_review_packet: closeout_plan_artifact(
+                plan,
+                "/artifacts/commercial_review_packet",
+            ),
+            return_package_markdown: crate::offdesk::operator_safe_text(
+                &artifacts.return_package_markdown,
+            ),
+            review_record_json: crate::offdesk::operator_safe_text(&artifacts.review_record_json),
+            review_file: args
+                .review_file
+                .as_ref()
+                .map(|path| crate::offdesk::operator_safe_text(path.to_string_lossy().as_ref())),
+        },
+    }
+}
+
+fn closeout_review_stale_task_count(
+    profile_dir: &Path,
+    applies_to_tasks: &[CloseoutReviewTaskRef],
+    closeout_generated_at: Option<DateTime<Utc>>,
+) -> usize {
+    let Some(generated_at) = closeout_generated_at else {
+        return 0;
+    };
+    let targets = applies_to_tasks
+        .iter()
+        .map(|task| (task.project_key.clone(), task.task_id.clone()))
+        .collect::<BTreeSet<_>>();
+    if targets.is_empty() {
+        return 0;
+    }
+    let Ok(tasks) = OffdeskTaskStore::new(profile_dir).load() else {
+        return 0;
+    };
+    tasks
+        .iter()
+        .filter(|task| targets.contains(&(task.project_key.clone(), task.task_id.clone())))
+        .filter(|task| task.updated_at > generated_at)
+        .count()
+}
+
+fn closeout_receipt_open_decisions(plan: &Value) -> Vec<CloseoutReceiptDecision> {
+    plan.get("open_decisions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(20)
+        .map(|decision| CloseoutReceiptDecision {
+            kind: closeout_plan_string(decision, "kind", "unknown"),
+            detail: truncate_closeout_text(&closeout_plan_string(decision, "detail", "-"), 500),
+            suggested_command: truncate_closeout_text(
+                &closeout_plan_string(decision, "suggested_command", "-"),
+                500,
+            ),
+        })
+        .collect()
+}
+
+fn closeout_receipt_retention_review(plan: &Value, unsafe_operations: &[String]) -> &'static str {
+    if !unsafe_operations.is_empty()
+        || closeout_plan_usize(plan, "/summary/operations_requiring_commercial_review") > 0
+        || closeout_plan_usize(plan, "/summary/operations_requiring_human_approval") > 0
+        || closeout_plan_usize(plan, "/summary/archive_candidates") > 0
+        || closeout_plan_usize(plan, "/summary/delete_candidates") > 0
+    {
+        "required"
+    } else {
+        "not_required"
+    }
+}
+
+fn closeout_receipt_wiki_promotion_state(plan: &Value) -> &'static str {
+    let Some(governance) = plan.get("documentation_governance") else {
+        return "not_requested";
+    };
+    if governance
+        .get("error")
+        .is_some_and(|value| !value.is_null())
+    {
+        "audit_unavailable"
+    } else if closeout_plan_usize(plan, "/documentation_governance/recommendation_count") > 0 {
+        "review_required"
+    } else {
+        "no_candidate"
+    }
+}
+
+fn closeout_receipt_next_safe_action(
+    acceptance_status: &str,
+    stale_task_count: usize,
+    open_decisions: &[CloseoutReceiptDecision],
+    missing_evidence: &[String],
+    required_first_reads: &[String],
+) -> String {
+    if stale_task_count > 0 {
+        return "Regenerate closeout because one or more tasks changed after the closeout plan."
+            .to_string();
+    }
+    if acceptance_status == "accepted" {
+        return "Rehydrate Ondesk from the return package and continue under reviewed evidence."
+            .to_string();
+    }
+    if acceptance_status == "blocked" {
+        return "Resolve the closeout blocker, then rerun closeout-review.".to_string();
+    }
+    if acceptance_status == "revision_required" {
+        return "Revise the closeout package or evidence and rerun closeout-review.".to_string();
+    }
+    if !missing_evidence.is_empty() {
+        return "Supply the missing evidence and rerun closeout-review.".to_string();
+    }
+    if !required_first_reads.is_empty() {
+        return "Read the required artifacts before treating the result as accepted.".to_string();
+    }
+    if let Some(decision) = open_decisions.first() {
+        return format!(
+            "Resolve `{}` before treating the result as accepted.",
+            decision.kind
+        );
+    }
+    "Review remaining follow-ups before treating the result as accepted.".to_string()
+}
+
+fn closeout_plan_usize(plan: &Value, pointer: &str) -> usize {
+    plan.pointer(pointer)
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or_default()
+}
+
+fn closeout_plan_artifact(plan: &Value, pointer: &str) -> Option<String> {
+    plan.pointer(pointer)
+        .and_then(Value::as_str)
+        .map(crate::offdesk::operator_safe_text)
+}
+
+fn closeout_plan_string(value: &Value, field: &str, fallback: &str) -> String {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(crate::offdesk::operator_safe_text)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn material_review_items(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| crate::offdesk::operator_safe_text(value.trim()))
+        .filter(|value| {
+            let normalized = value.trim().to_lowercase();
+            !normalized.is_empty()
+                && normalized != "none"
+                && normalized != "n/a"
+                && normalized != "na"
+                && normalized != "-"
+        })
+        .collect()
+}
+
+fn update_return_package_with_closeout_receipt(record: &CloseoutReviewRecord) -> Result<()> {
+    let path = Path::new(&record.artifacts.return_package_markdown);
+    let existing =
+        fs::read_to_string(path).unwrap_or_else(|_| "# Ondesk Return Package\n\n".to_string());
+    let section =
+        render_closeout_receipt_return_section(&record.closeout_receipt, &record.artifacts);
+    let updated = replace_marked_section(
+        &existing,
+        CLOSEOUT_RECEIPT_SECTION_START,
+        CLOSEOUT_RECEIPT_SECTION_END,
+        &section,
+    );
+    fs::write(path, updated).with_context(|| format!("update {}", path.display()))?;
+    Ok(())
+}
+
+const CLOSEOUT_RECEIPT_SECTION_START: &str = "<!-- forager:closeout-receipt:start -->";
+const CLOSEOUT_RECEIPT_SECTION_END: &str = "<!-- forager:closeout-receipt:end -->";
+
+fn render_closeout_receipt_return_section(
+    receipt: &CloseoutReceipt,
+    artifacts: &CloseoutReviewArtifactPaths,
+) -> String {
+    let mut output = String::new();
+    output.push_str(CLOSEOUT_RECEIPT_SECTION_START);
+    output.push_str("\n## Closeout Receipt\n");
+    output.push_str(&format!(
+        "- acceptance_status: `{}`\n",
+        receipt.acceptance_status
+    ));
+    output.push_str(&format!("- verdict: `{}`\n", receipt.verdict.as_str()));
+    output.push_str(&format!(
+        "- evidence_status: `{}` / verification_status: `{}`\n",
+        receipt.evidence_status, receipt.verification_status
+    ));
+    output.push_str(&format!(
+        "- open_decisions: {} / missing_evidence: {} / required_first_reads: {} / stale_tasks: {}\n",
+        receipt.open_decisions.len(),
+        receipt.missing_evidence.len(),
+        receipt.required_first_reads.len(),
+        receipt.stale_task_count
+    ));
+    output.push_str(&format!(
+        "- retention_review: `{}` / wiki_promotion_state: `{}`\n",
+        receipt.retention_review, receipt.wiki_promotion_state
+    ));
+    output.push_str(&format!(
+        "- next_safe_action: {}\n",
+        receipt.next_safe_action
+    ));
+    output.push_str(&format!(
+        "- receipt_artifact: `{}`\n",
+        artifacts.closeout_receipt_json
+    ));
+    output.push_str(CLOSEOUT_RECEIPT_SECTION_END);
+    output.push_str("\n\n");
+    output
+}
+
+fn replace_marked_section(existing: &str, start: &str, end: &str, section: &str) -> String {
+    if let Some(start_index) = existing.find(start) {
+        if let Some(end_offset) = existing[start_index..].find(end) {
+            let end_index = start_index + end_offset + end.len();
+            let mut output = String::new();
+            output.push_str(existing[..start_index].trim_end());
+            output.push_str("\n\n");
+            output.push_str(section);
+            output.push_str(existing[end_index..].trim_start());
+            return output;
+        }
+    }
+
+    if let Some(insert_at) = existing.find("\n## Status\n") {
+        let mut output = String::new();
+        output.push_str(&existing[..insert_at]);
+        output.push_str(section);
+        output.push_str(&existing[insert_at + 1..]);
+        output
+    } else {
+        let mut output = String::new();
+        output.push_str(existing.trim_end());
+        output.push_str("\n\n");
+        output.push_str(section);
+        output
+    }
 }
 
 fn safe_text_list(values: &[String]) -> Vec<String> {
@@ -8565,6 +9021,10 @@ fn print_closeout_review_record(record: &CloseoutReviewRecord) {
     println!("  review_id:    {}", record.review_id);
     println!("  closeout_id:  {}", record.closeout_id);
     println!("  verdict:      {}", record.verdict.as_str());
+    println!(
+        "  acceptance:   {}",
+        record.closeout_receipt.acceptance_status
+    );
     println!("  reviewer:     {}", record.reviewer);
     if let Some(provider) = record.review_provider.as_deref() {
         println!("  provider:     {provider}");
@@ -8573,6 +9033,11 @@ fn print_closeout_review_record(record: &CloseoutReviewRecord) {
     println!("Artifacts:");
     println!("  plan:         {}", record.artifacts.closeout_plan_json);
     println!("  review:       {}", record.artifacts.review_record_json);
+    println!("  receipt:      {}", record.artifacts.closeout_receipt_json);
+    println!(
+        "  return:       {}",
+        record.artifacts.return_package_markdown
+    );
     if !record.unsafe_operations.is_empty() {
         println!("Unsafe operations:");
         for operation in &record.unsafe_operations {

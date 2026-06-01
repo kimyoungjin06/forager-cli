@@ -278,7 +278,7 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     assert!(review_packet.contains("Commercial Model Closeout Review Packet"));
     assert!(review_packet.contains("\"verdict\": \"approved|revise|blocked\""));
 
-    let return_package = fs::read_to_string(return_package_path)?;
+    let return_package = fs::read_to_string(&return_package_path)?;
     assert!(return_package.contains("Ondesk Return Package"));
     assert!(return_package.contains("## Status"));
     assert!(return_package.contains("## Decision Needed"));
@@ -335,6 +335,21 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     );
     let review: Value = serde_json::from_slice(&review_output.stdout)?;
     assert_eq!(review["verdict"], "approved");
+    assert_eq!(review["closeout_receipt"]["schema"], "closeout_receipt.v1");
+    assert_eq!(
+        review["closeout_receipt"]["acceptance_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(
+        review["closeout_receipt"]["evidence_status"],
+        "review_ready"
+    );
+    assert_eq!(review["closeout_receipt"]["verification_status"], "pending");
+    assert!(review["closeout_receipt"]["open_decisions"]
+        .as_array()
+        .expect("receipt open decisions")
+        .iter()
+        .any(|decision| decision["kind"] == "decision_record_review"));
     assert_eq!(review["read_only_project_state"], true);
     assert_eq!(review["applies_file_operations"], false);
     assert_eq!(review["closeout_id"], report["closeout_id"]);
@@ -351,7 +366,153 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
             .as_str()
             .expect("review record path"),
     );
+    let receipt_path = PathBuf::from(
+        review["artifacts"]["closeout_receipt_json"]
+            .as_str()
+            .expect("receipt path"),
+    );
     assert!(review_record_path.exists());
+    assert!(receipt_path.exists());
+    let receipt: Value = serde_json::from_str(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt, review["closeout_receipt"]);
+    let updated_return_package = fs::read_to_string(&return_package_path)?;
+    assert!(updated_return_package.contains("## Closeout Receipt"));
+    assert!(updated_return_package.contains("acceptance_status: `approved_with_followups`"));
+    assert!(updated_return_package.contains("next_safe_action"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_closeout_review_receipt_distinguishes_acceptance_from_revision() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project)?;
+    fs::write(project.join("README.md"), "# Project\n")?;
+    fs::write(
+        project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    let result_path = project.join("result.json");
+    fs::write(&result_path, "{\"status\":\"ok\"}")?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-accepted",
+                "request_id": "request-accepted",
+                "project_key": "accepted",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": project.to_str().expect("utf-8 project path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "accepted closeout",
+                "reason": "closeout receipt test",
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path")
+            }
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "accepted",
+            "--task-id",
+            "task-accepted",
+            "--workdir",
+            project.to_str().expect("utf-8 project path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout)?;
+    assert!(report["open_decisions"]
+        .as_array()
+        .expect("open decisions")
+        .is_empty());
+
+    let revise_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            report["closeout_id"].as_str().expect("closeout id"),
+            "--verdict",
+            "revise",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "revise before acceptance",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        revise_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&revise_output.stderr)
+    );
+    let revise: Value = serde_json::from_slice(&revise_output.stdout)?;
+    assert_eq!(
+        revise["closeout_receipt"]["acceptance_status"],
+        "revision_required"
+    );
+
+    let approved_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            report["closeout_id"].as_str().expect("closeout id"),
+            "--verdict",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "accepted after clean review",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        approved_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approved_output.stderr)
+    );
+    let approved: Value = serde_json::from_slice(&approved_output.stdout)?;
+    assert_eq!(
+        approved["closeout_receipt"]["acceptance_status"],
+        "accepted"
+    );
+    assert_eq!(
+        approved["closeout_receipt"]["verification_status"],
+        "recorded"
+    );
+    let return_package_path = PathBuf::from(
+        report["artifacts"]["return_package_markdown"]
+            .as_str()
+            .expect("return package path"),
+    );
+    let return_package = fs::read_to_string(return_package_path)?;
+    assert!(return_package.contains("acceptance_status: `accepted`"));
+    assert!(!return_package.contains("acceptance_status: `revision_required`"));
     Ok(())
 }
 
