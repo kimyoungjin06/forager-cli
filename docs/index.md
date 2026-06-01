@@ -22,6 +22,10 @@ deliberate knowledge promotion.
 
 - [Project Direction](project-direction.md) defines the north star, product
   boundary, and practical completion criteria.
+- [Gajae-Code Benchmarking](gajae-benchmarking.md) records how external harness
+  patterns are translated through Forager's invariants before implementation.
+- [Decision Pipeline](decision-pipeline.md) defines the canonical state model
+  for Agent to Council to User decisions before execution handoff.
 - [Operation Cycle](guides/operation-cycle.md) explains the Ondesk to Offdesk to
   Ondesk loop.
 - [Hosted Harness Agents](hosted-harness-agents.md) defines how external

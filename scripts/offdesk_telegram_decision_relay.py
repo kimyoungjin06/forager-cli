@@ -1105,6 +1105,11 @@ def brief_for(request: dict[str, Any]) -> dict[str, Any]:
     return brief if isinstance(brief, dict) else {}
 
 
+def decision_record_for(request: dict[str, Any]) -> dict[str, Any]:
+    record = request.get("decision_record")
+    return record if isinstance(record, dict) else {}
+
+
 def message_type_for(request: dict[str, Any]) -> str:
     raw = str(request.get("message_type") or request.get("type") or DEFAULT_MESSAGE_TYPE).strip()
     return raw if raw in TEMPLATE_SPECS else DEFAULT_MESSAGE_TYPE
@@ -2600,6 +2605,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "state_path": state["state_path"],
         "approval_brief_schema": brief_for(request).get("schema"),
         "approval_brief_validation": approval_brief_validation,
+        "decision_record_schema": decision_record_for(request).get("schema"),
+        "decision_record_id": decision_record_for(request).get("decision_id"),
+        "decision_record_status": decision_record_for(request).get("status"),
         "keyboard": {
             "inline": True,
             "actions": [action["decision"] for action in action_specs] + ["more_details"],

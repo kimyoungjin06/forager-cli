@@ -899,6 +899,10 @@ def build_workload_command(
                     str(max(0, args.telegram_decision_timeout_sec)),
                     "--telegram-decision-poll-interval-sec",
                     str(max(0.2, args.telegram_decision_poll_interval_sec)),
+                    "--decision-ledger-profile-dir",
+                    str(profile_dir(args.profile)),
+                    "--forager-bin",
+                    str(args.forager_bin),
                 ]
             )
             if args.telegram_decision_dry_run:

@@ -265,6 +265,425 @@ fn offdesk_pending_and_ok_resolve_approval() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_decisions_lists_and_shows_decision_records() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let pending = json!({
+        "schema": "decision_record.v1",
+        "decision_id": "decision-user",
+        "project_key": "project",
+        "request_id": "request",
+        "task_id": "task",
+        "raised_by": "agent",
+        "source_surface": "offdesk.council",
+        "materiality": "high",
+        "status": "user_pending",
+        "created_at": now,
+        "updated_at": now,
+        "decision_request": {
+            "kind": "council_escalation",
+            "summary": "Council recommends revising the next episode.",
+            "decision_needed": "Choose whether to continue, revise, block, or stop.",
+            "why_now": ["Council did not return continue."],
+            "current_scope": "Next episode only.",
+            "non_authorized_scope": [
+                "provider retargeting",
+                "cleanup",
+                "wiki promotion"
+            ]
+        },
+        "council_review": {
+            "recommendation": "revise",
+            "agreement": true,
+            "reviewer_decisions": {
+                "claude": "revise",
+                "gpt": "revise"
+            }
+        },
+        "route": {
+            "materiality": "high",
+            "target": "user",
+            "reason": "The next episode direction changes.",
+            "default_if_no_reply": "defer"
+        },
+        "approval_brief": {
+            "schema": "approval_brief.v1",
+            "recommendation": "revise",
+            "subject": "council continuation decision",
+            "summary_lines": ["Council recommends revising before continuing."],
+            "scope": "Only approves the next episode direction.",
+            "question": "How should the run proceed?"
+        }
+    });
+    let internal = json!({
+        "schema": "decision_record.v1",
+        "decision_id": "decision-auto",
+        "project_key": "project",
+        "request_id": "request",
+        "task_id": "other-task",
+        "raised_by": "council",
+        "source_surface": "offdesk.council",
+        "materiality": "low",
+        "status": "auto_resolved",
+        "created_at": now,
+        "updated_at": now,
+        "decision_request": {
+            "kind": "verification_order",
+            "summary": "Council selected the approved verification command.",
+            "decision_needed": "Select verification order.",
+            "current_scope": "Approved task contract.",
+            "non_authorized_scope": []
+        },
+        "route": {
+            "materiality": "low",
+            "target": "agent",
+            "reason": "Covered by existing task policy."
+        }
+    });
+    fs::write(
+        profile_dir.join("offdesk_decisions.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::to_string(&pending)?,
+            serde_json::to_string(&internal)?
+        ),
+    )?;
+
+    let list_output = forager_command(temp.path())
+        .args(["offdesk", "decisions", "--status", "user_pending", "--json"])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let list: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    assert_eq!(list.as_array().expect("array").len(), 1);
+    assert_eq!(list[0]["record"]["decision_id"], "decision-user");
+    assert_eq!(
+        list[0]["record"]["approval_brief"]["schema"],
+        "approval_brief.v1"
+    );
+    assert_eq!(list[0]["validation_issues"], json!([]));
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "decision", "show", "decision-user", "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["record"]["status"], "user_pending");
+    assert_eq!(shown["record"]["route"]["target"], "user");
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_decision_resolve_and_receipt_append_handoff_records() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let pending = json!({
+        "schema": "decision_record.v1",
+        "decision_id": "decision-handoff",
+        "project_key": "project",
+        "request_id": "request",
+        "task_id": "task",
+        "raised_by": "council",
+        "source_surface": "offdesk.council",
+        "materiality": "high",
+        "status": "user_pending",
+        "created_at": now,
+        "updated_at": now,
+        "decision_request": {
+            "kind": "episode_council_continuation",
+            "summary": "Council recommends revising before continuing.",
+            "decision_needed": "Choose whether to continue, revise, block, or stop.",
+            "why_now": ["Council did not return continue."],
+            "current_scope": "Next episode only.",
+            "non_authorized_scope": [
+                "provider retargeting",
+                "cleanup",
+                "wiki promotion"
+            ]
+        },
+        "council_review": {
+            "recommendation": "revise",
+            "agreement": true,
+            "reviewer_decisions": {
+                "claude": "revise",
+                "gpt": "revise"
+            }
+        },
+        "route": {
+            "materiality": "high",
+            "target": "user",
+            "reason": "The next episode direction changes.",
+            "default_if_no_reply": "defer"
+        },
+        "approval_brief": {
+            "schema": "approval_brief.v1",
+            "recommendation": "revise",
+            "subject": "council continuation decision",
+            "summary_lines": ["Council recommends revising before continuing."],
+            "scope": "Only approves the next episode direction.",
+            "question": "How should the run proceed?"
+        }
+    });
+    fs::write(
+        profile_dir.join("offdesk_decisions.jsonl"),
+        format!("{}\n", serde_json::to_string(&pending)?),
+    )?;
+
+    let resolve_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "resolve",
+            "decision-handoff",
+            "--decision",
+            "revise",
+            "--note",
+            "Diagnose primary gate failure before continuing.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        resolve_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolve_output.stderr)
+    );
+    let resolved: serde_json::Value = serde_json::from_slice(&resolve_output.stdout)?;
+    assert_eq!(resolved["record"]["status"], "handoff_ready");
+    assert_eq!(
+        resolved["record"]["execution_handoff"]["approved_direction"],
+        "revise"
+    );
+    assert_eq!(resolved["record"]["execution_handoff"]["target"], "agent");
+    assert!(resolved["record"]["execution_handoff"]["instructions"]
+        .as_array()
+        .expect("handoff instructions")
+        .iter()
+        .any(|line| line
+            .as_str()
+            .unwrap_or_default()
+            .contains("Diagnose primary gate failure")));
+    assert_eq!(resolved["validation_issues"], json!([]));
+
+    let receipt_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "receipt",
+            "decision-handoff",
+            "--result-status",
+            "applied",
+            "--evidence",
+            "Handoff was reviewed by the next harness.",
+            "--remaining-review",
+            "Closeout still needs final acceptance.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        receipt_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&receipt_output.stderr)
+    );
+    let receipted: serde_json::Value = serde_json::from_slice(&receipt_output.stdout)?;
+    assert_eq!(receipted["record"]["status"], "receipted");
+    assert_eq!(
+        receipted["record"]["decision_receipt"]["final_decision"],
+        "revise"
+    );
+    assert_eq!(
+        receipted["record"]["decision_receipt"]["result_status"],
+        "applied"
+    );
+    assert_eq!(receipted["validation_issues"], json!([]));
+
+    let ledger = fs::read_to_string(profile_dir.join("offdesk_decisions.jsonl"))?;
+    assert_eq!(ledger.lines().count(), 3);
+    assert!(ledger.contains("\"status\":\"handoff_ready\""));
+    assert!(ledger.contains("\"status\":\"receipted\""));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_decision_ingest_telegram_appends_profile_handoff_and_receipt() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let artifact_dir = temp.path().join("relay");
+    fs::create_dir_all(&artifact_dir)?;
+    let now = Utc::now();
+    let decision_record = json!({
+        "schema": "decision_record.v1",
+        "decision_id": "decision-telegram",
+        "project_key": "project",
+        "request_id": "request",
+        "task_id": "task",
+        "raised_by": "council",
+        "source_surface": "offdesk.council",
+        "materiality": "high",
+        "status": "user_pending",
+        "created_at": now,
+        "updated_at": now,
+        "decision_request": {
+            "kind": "episode_council_continuation",
+            "summary": "Council needs a revised direction.",
+            "decision_needed": "Choose the next direction.",
+            "why_now": ["Council returned revise."],
+            "current_scope": "Next episode only.",
+            "non_authorized_scope": ["cleanup", "provider retargeting"]
+        },
+        "route": {
+            "materiality": "high",
+            "target": "user",
+            "reason": "The next direction changes.",
+            "default_if_no_reply": "defer"
+        },
+        "approval_brief": {
+            "schema": "approval_brief.v1",
+            "recommendation": "revise",
+            "subject": "council continuation decision",
+            "summary_lines": ["Council needs a revised direction."],
+            "scope": "Only approves the next episode direction.",
+            "question": "How should the run proceed?"
+        }
+    });
+    let request_path = artifact_dir.join("request.json");
+    fs::write(
+        &request_path,
+        serde_json::to_string_pretty(&json!({
+            "decision_request_id": "request:episode-001:council",
+            "decision_record": decision_record,
+            "approval_brief": {
+                "schema": "approval_brief.v1",
+                "recommendation": "revise",
+                "subject": "council continuation decision",
+                "summary_lines": ["Council needs a revised direction."],
+                "scope": "Only approves the next episode direction.",
+                "question": "How should the run proceed?"
+            }
+        }))?,
+    )?;
+    let result_path = artifact_dir.join("telegram_decision.json");
+    fs::write(
+        &result_path,
+        serde_json::to_string_pretty(&json!({
+            "status": "accepted",
+            "decision": "revise",
+            "reason": "Focus on the failed primary gate before continuing.",
+            "input_mode": "callback_then_message"
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram",
+            "--request",
+            request_path.to_str().expect("utf8 request path"),
+            "--result",
+            result_path.to_str().expect("utf8 result path"),
+            "--receipt-result-status",
+            "applied",
+            "--receipt-evidence",
+            "Telegram reply was consumed by the workload control loop.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["decision_id"], "decision-telegram");
+    assert_eq!(report["telegram_status"], "accepted");
+    assert_eq!(report["telegram_decision"], "revise");
+    assert_eq!(
+        report["appended_records"],
+        json!(["user_pending", "handoff_ready", "receipted"])
+    );
+    assert_eq!(report["record"]["status"], "receipted");
+    assert_eq!(
+        report["record"]["execution_handoff"]["approved_direction"],
+        "revise"
+    );
+    assert_eq!(
+        report["record"]["decision_receipt"]["result_status"],
+        "applied"
+    );
+    assert_eq!(report["validation_issues"], json!([]));
+
+    let ledger = fs::read_to_string(profile_dir.join("offdesk_decisions.jsonl"))?;
+    assert_eq!(ledger.lines().count(), 3);
+    assert!(ledger.contains("Focus on the failed primary gate"));
+    assert!(ledger.contains("\"status\":\"receipted\""));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_decisions_report_validation_issues() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let invalid = json!({
+        "schema": "decision_record.v1",
+        "decision_id": "decision-invalid",
+        "project_key": "project",
+        "request_id": "request",
+        "task_id": "task",
+        "raised_by": "agent",
+        "source_surface": "offdesk.council",
+        "materiality": "high",
+        "status": "user_pending",
+        "created_at": now,
+        "updated_at": now,
+        "decision_request": {
+            "kind": "council_escalation",
+            "summary": "Council needs operator input.",
+            "decision_needed": "Choose next direction.",
+            "current_scope": "Next episode only.",
+            "non_authorized_scope": []
+        }
+    });
+    fs::write(
+        profile_dir.join("offdesk_decisions.jsonl"),
+        format!("{}\n", serde_json::to_string(&invalid)?),
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "decision", "show", "decision-invalid", "--json"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert!(shown["validation_issues"]
+        .as_array()
+        .expect("validation issues")
+        .iter()
+        .any(|issue| issue["code"] == "user_pending_without_approval_brief"));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_resume_json_reports_artifacts() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());

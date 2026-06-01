@@ -1,6 +1,6 @@
 //! Offdesk orchestration safety rails and durable artifacts.
 //!
-//! This module keeps the canonical state in AOE-owned JSON artifacts. The
+//! This module keeps the canonical state in Forager-owned JSON artifacts. The
 //! helpers are intentionally side-effect-light so the scheduler, dashboard,
 //! Telegram bridge, and future worker backends can share the same policy logic.
 
@@ -9,6 +9,7 @@ pub mod approval;
 pub mod background;
 pub mod capability;
 pub mod control_loop;
+pub mod decision;
 pub mod mode_contract;
 pub mod mutation;
 pub mod provider;
@@ -71,6 +72,12 @@ pub use capability::{
 pub use control_loop::{
     load_offdesk_status_summary, reconcile_tasks_with_background_outcomes, run_offdesk_tick,
     OffdeskStatusSummary, OffdeskTickOptions, OffdeskTickReport,
+};
+pub use decision::{
+    CouncilReview, DecisionLedger, DecisionMateriality, DecisionOption, DecisionRaisedBy,
+    DecisionReceipt, DecisionRecord, DecisionRecordView, DecisionRequest, DecisionRoute,
+    DecisionRouteTarget, DecisionStatus, DecisionTraceRef, DecisionValidationIssue,
+    DecisionValidationSeverity, ExecutionHandoff, DECISION_RECORD_SCHEMA,
 };
 pub use mode_contract::{
     assess_offdesk_mode, mode_requires_separate_review, OffdeskModeAssessment,

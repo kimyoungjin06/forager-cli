@@ -1,6 +1,6 @@
 # Deliverables
 
-Updated: 2026-05-30
+Updated: 2026-06-01
 
 This is the compact development deliverables surface for Forager. It is for
 humans who need to inspect outputs without browsing build or documentation
@@ -11,6 +11,10 @@ folders.
 - `README.md`: public product overview.
 - `docs/index.md`: mdBook introduction.
 - `docs/SUMMARY.md`: mdBook navigation.
+- `docs/gajae-benchmarking.md`: Forager-native benchmark translation of
+  Gajae-Code operating patterns.
+- `docs/decision-pipeline.md`: canonical decision state design for
+  Agent/Council/User escalation and execution handoff.
 - `docs/guides/operation-cycle.md`: offdesk lifecycle guide.
 - `docs/guides/documentation-artifact-governance.md`: documentation and
   artifact governance guide.

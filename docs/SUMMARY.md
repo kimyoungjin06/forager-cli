@@ -4,6 +4,10 @@
 
 [Project Direction](project-direction.md)
 
+[Gajae-Code Benchmarking](gajae-benchmarking.md)
+
+[Decision Pipeline](decision-pipeline.md)
+
 [Hosted Harness Agents](hosted-harness-agents.md)
 
 # Getting Started

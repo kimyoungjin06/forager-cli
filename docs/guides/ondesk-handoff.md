@@ -149,9 +149,12 @@ scripts/offdesk_telegram_decision_relay.py \
 
 The request includes `next_safe_actions` for the WebUI entry and pending path,
 using the same operator-next-step contract as `forager status`, `offdesk pending`,
-`tasks`, `poll`, `tick`, and `maintenance-report`. The rendered message hides
-raw paths and ids. Those remain in the request, state, and result JSON for
-audit/debugging. The relay writes the state beside the result as
+`tasks`, `poll`, `tick`, and `maintenance-report`. It also includes a
+`decision_record.v1` parent record, built through the shared producer helper, so
+the handoff can be ingested into the profile decision ledger with
+`forager offdesk decision ingest-telegram` when the operator replies. The
+rendered message hides raw paths and ids. Those remain in the request, state,
+and result JSON for audit/debugging. The relay writes the state beside the result as
 `<result-stem>.telegram_decision_state.json`, so simultaneous handoff and
 council prompts in the same directory do not overwrite each other's state
 artifacts.

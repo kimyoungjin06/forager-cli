@@ -64,7 +64,10 @@ scripts/prepare_twinpaper_offdesk_task.py \
 
 The Telegram decision controls only whether the workload continues to the next
 episode. It does not approve file changes, cleanup, provider retargeting, wiki
-promotion, or any system mutation.
+promotion, or any system mutation. When a Telegram reply is accepted, the
+workload ingests the request/result pair into the configured profile
+`offdesk_decisions.jsonl` as an append-only decision record, handoff, and
+receipt.
 
 For the shared approval-card contract used by the relay and producers, see
 [`Approval Briefs`](approval-brief.md).
