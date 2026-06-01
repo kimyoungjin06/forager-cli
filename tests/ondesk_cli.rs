@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde_json::{json, Value};
 use serial_test::serial;
 use std::fs;
@@ -31,6 +31,25 @@ fn profile_dir(home: &Path) -> PathBuf {
     {
         home.join(".forager").join("profiles").join("default")
     }
+}
+
+fn offdesk_task_fixture(
+    task_id: &str,
+    status: &str,
+    now: chrono::DateTime<Utc>,
+) -> serde_json::Value {
+    json!({
+        "task_id": task_id,
+        "request_id": format!("request-{task_id}"),
+        "project_key": "project",
+        "status": status,
+        "capability_id": "dispatch.runtime",
+        "runner_kind": "local_background",
+        "command": "true",
+        "workdir": "/tmp",
+        "created_at": now,
+        "updated_at": now
+    })
 }
 
 #[test]
@@ -114,6 +133,207 @@ fn ondesk_prompt_package_uses_recent_redacted_notes() -> Result<()> {
     assert!(content.contains("Instructions For The Next Harness"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_review_surface_json_agrees_with_status_next_safe_action() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            offdesk_task_fixture("approval-task", "pending_approval", now),
+            offdesk_task_fixture("completed-task", "completed", now),
+            offdesk_task_fixture("running-task", "running", now)
+        ]))?,
+    )?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(
+        status_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_json: Value = serde_json::from_slice(&status_output.stdout)?;
+
+    let surface_output = forager_command(temp.path())
+        .args([
+            "ondesk",
+            "review-surface",
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        surface_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&surface_output.stderr)
+    );
+    let surface: Value = serde_json::from_slice(&surface_output.stdout)?;
+
+    assert_eq!(surface["schema"], "review_surface.v1");
+    assert_eq!(surface["project_key"], "project");
+    assert_eq!(surface["status"]["label"], "needs_review");
+    assert_eq!(
+        surface["next_safe_actions"][0],
+        status_json["offdesk_next_safe_actions"][0]
+    );
+    assert_eq!(surface["sources"]["status_json"], "forager status --json");
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let task_updated = now - Duration::minutes(10);
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([offdesk_task_fixture(
+            "completed-task",
+            "completed",
+            task_updated
+        )]))?,
+    )?;
+
+    let closeout_dir = profile_dir
+        .join("offdesk_closeouts")
+        .join("20260601T000000Z_closeout_project");
+    fs::create_dir_all(&closeout_dir)?;
+    let return_package_path = closeout_dir.join("RETURN_PACKAGE.md");
+    let receipt_path = closeout_dir.join("closeout_receipt_20260601T000000Z.json");
+    fs::write(&return_package_path, "# Ondesk Return Package\n")?;
+    fs::write(
+        closeout_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_project",
+            "generated_at": now,
+            "filters": {
+                "project_key": "project"
+            },
+            "tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request-completed-task",
+                    "task_id": "completed-task"
+                }
+            ],
+            "artifacts": {
+                "return_package_markdown": return_package_path
+            }
+        }))?,
+    )?;
+    let receipt = json!({
+        "schema": "closeout_receipt.v1",
+        "receipt_id": "receipt-followup",
+        "closeout_id": "closeout_project",
+        "review_id": "review-followup",
+        "acceptance_status": "approved_with_followups",
+        "verification_status": "pending",
+        "open_decisions": [
+            {
+                "kind": "operator_followup",
+                "detail": "Confirm whether to promote the wiki lesson.",
+                "suggested_command": "forager offdesk wiki review"
+            }
+        ],
+        "missing_evidence": ["verification screenshot"],
+        "required_first_reads": [],
+        "unsafe_operations": [],
+        "retention_review": "not_required",
+        "wiki_promotion_state": "not_required",
+        "stale_task_count": 0,
+        "next_safe_action": "Review missing evidence before acceptance."
+    });
+    fs::write(&receipt_path, serde_json::to_string_pretty(&receipt)?)?;
+    fs::write(
+        closeout_dir.join("closeout_review_20260601T000000Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now,
+            "verdict": "approved",
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request-completed-task",
+                    "task_id": "completed-task"
+                }
+            ],
+            "closeout_receipt": receipt,
+            "artifacts": {
+                "closeout_receipt_json": receipt_path
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "ondesk",
+            "review-surface",
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let surface: Value = serde_json::from_slice(&output.stdout)?;
+
+    assert_eq!(surface["accepted_truth"]["status"], "pending");
+    assert_eq!(
+        surface["accepted_truth"]["receipt_acceptance_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(
+        surface["accepted_truth"]["reason"],
+        "Review missing evidence before acceptance."
+    );
+    assert_eq!(surface["closeout"]["latest_receipt_id"], "receipt-followup");
+    assert_eq!(
+        surface["closeout"]["review_status"],
+        "approved_with_followups"
+    );
+    assert!(surface["closeout"]["unresolved_risks"]
+        .as_array()
+        .expect("unresolved risks")
+        .iter()
+        .any(|risk| risk
+            .as_str()
+            .expect("risk string")
+            .contains("missing evidence")));
+
+    let summaries = surface["artifacts"]["summary"]
+        .as_array()
+        .expect("artifact summaries");
+    assert!(summaries
+        .iter()
+        .any(|summary| summary["label"] == "Closeout receipt"
+            && summary["retention_class"] == "acceptance"));
+    for summary in summaries {
+        assert!(
+            !summary
+                .to_string()
+                .contains(closeout_dir.to_string_lossy().as_ref()),
+            "artifact summary should explain meaning before exposing paths: {summary}"
+        );
+    }
+    assert!(surface["artifacts"]["refs"]
+        .as_array()
+        .expect("artifact refs")
+        .iter()
+        .any(|reference| reference["id"] == "closeout_receipt" && reference["present"] == true));
     Ok(())
 }
 

@@ -110,6 +110,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager ondesk note`↴](#forager-ondesk-note)
 * [`forager ondesk capture`↴](#forager-ondesk-capture)
 * [`forager ondesk prompt-package`↴](#forager-ondesk-prompt-package)
+* [`forager ondesk review-surface`↴](#forager-ondesk-review-surface)
 * [`forager tmux`↴](#forager-tmux)
 * [`forager tmux status`↴](#forager-tmux-status)
 * [`forager sounds`↴](#forager-sounds)
@@ -2026,6 +2027,7 @@ Capture ondesk notes and prompt context from external harness work
 * `note` — Append a safe operator note for an ondesk session or project
 * `capture` — Capture live harness scrollback into an inspectable prompt package
 * `prompt-package` — Build a markdown prompt package from recent notes and optional capture
+* `review-surface` — Emit the shared JSON review surface for Ondesk and future rich UIs
 
 
 
@@ -2088,6 +2090,19 @@ Build a markdown prompt package from recent notes and optional capture
 * `--include-doc-audit` — Include a fresh documentation governance audit from the latest closeout workdir or resolved project path
 * `--output <OUTPUT>` — Write markdown package to a file instead of stdout
 * `--json` — Output metadata as JSON
+
+
+
+## `forager ondesk review-surface`
+
+Emit the shared JSON review surface for Ondesk and future rich UIs
+
+**Usage:** `forager ondesk review-surface [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key to focus the review packet. Defaults to all projects
+* `--json` — Emit compact JSON. Without this flag, pretty JSON is printed
 
 
 

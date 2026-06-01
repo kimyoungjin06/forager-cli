@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::offdesk::{
     ensure_resume_review_next_safe_action, load_offdesk_status_summary,
@@ -170,6 +171,26 @@ pub(crate) fn status_json_value_for_test(profile: &str) -> serde_json::Value {
         offdesk_summary,
     ))
     .expect("status json should serialize")
+}
+
+pub(crate) fn current_status_json_value(profile: &str) -> Result<Value> {
+    let storage = Storage::new(profile)?;
+    let (mut instances, _) = storage.load_with_groups()?;
+    if !instances.is_empty() {
+        crate::tmux::refresh_session_cache();
+        for inst in &mut instances {
+            inst.update_status();
+        }
+    }
+    let counts = count_by_status(&instances);
+    let resume_counts = count_resume_state(storage.profile());
+    let offdesk_summary = count_offdesk_state(storage.profile());
+    Ok(serde_json::to_value(build_status_json(
+        storage.profile(),
+        counts,
+        resume_counts,
+        offdesk_summary,
+    ))?)
 }
 
 pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
