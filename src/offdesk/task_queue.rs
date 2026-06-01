@@ -697,6 +697,16 @@ pub fn status_next_safe_actions_from_summary(
                 ],
                 true,
             ));
+        } else if summary.closeout_state.approved_with_followups > 0 {
+            actions.push(OffdeskNextSafeAction::new(
+                "review_required",
+                "Closeout review is approved, but receipt follow-ups remain before the output is accepted truth.",
+                vec![
+                    "forager ondesk prompt-package".to_string(),
+                    "Review the latest closeout receipt and RETURN_PACKAGE.md".to_string(),
+                ],
+                true,
+            ));
         } else {
             actions.push(OffdeskNextSafeAction::new(
                 "review_required",
@@ -778,8 +788,10 @@ pub struct OffdeskCloseoutStateSummary {
     pub missing_closeout: usize,
     pub pending_review: usize,
     pub revision_required: usize,
+    pub approved_with_followups: usize,
     pub stale_closeout: usize,
     pub stale_review: usize,
+    pub accepted: usize,
     pub approved: usize,
 }
 
@@ -788,6 +800,7 @@ impl OffdeskCloseoutStateSummary {
         self.missing_closeout
             + self.pending_review
             + self.revision_required
+            + self.approved_with_followups
             + self.stale_closeout
             + self.stale_review
     }
@@ -1374,6 +1387,26 @@ mod tests {
             actions[0].commands[0],
             "forager offdesk closeout-review --verdict approved|revise|blocked"
         );
+    }
+
+    #[test]
+    fn status_next_safe_actions_keep_receipt_followups_visible() {
+        let actions = status_next_safe_actions_from_summary(&OffdeskStatusNextSafeActionInput {
+            pending_approvals: 0,
+            tasks: OffdeskTaskCounts::default(),
+            background_active: 0,
+            background_stale: 0,
+            background_failed: 0,
+            closeout_required: 1,
+            closeout_state: OffdeskCloseoutStateSummary {
+                approved_with_followups: 1,
+                ..OffdeskCloseoutStateSummary::default()
+            },
+        });
+
+        assert_eq!(action_kinds(&actions), vec!["review_required"]);
+        assert!(actions[0].detail.contains("receipt follow-ups"));
+        assert_eq!(actions[0].commands[0], "forager ondesk prompt-package");
     }
 
     #[test]

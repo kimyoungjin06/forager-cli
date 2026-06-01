@@ -331,12 +331,14 @@ fn print_offdesk_summary(
     }
     if summary.closeout_required > 0 {
         println!(
-            "Closeout state: {} missing, {} pending review, {} revise/blocked, {} stale package, {} stale review, {} approved.",
+            "Closeout state: {} missing, {} pending review, {} revise/blocked, {} approved with follow-ups, {} stale package, {} stale review, {} accepted, {} approved.",
             summary.closeout_state.missing_closeout,
             summary.closeout_state.pending_review,
             summary.closeout_state.revision_required,
+            summary.closeout_state.approved_with_followups,
             summary.closeout_state.stale_closeout,
             summary.closeout_state.stale_review,
+            summary.closeout_state.accepted,
             summary.closeout_state.approved
         );
         if summary.closeout_state.missing_closeout
@@ -354,6 +356,11 @@ fn print_offdesk_summary(
         if summary.closeout_state.revision_required > 0 {
             println!(
                 "Closeout revision: address revise/blocked review notes before accepting output."
+            );
+        }
+        if summary.closeout_state.approved_with_followups > 0 {
+            println!(
+                "Closeout receipt: approved review still has follow-ups; read `RETURN_PACKAGE.md` or `forager ondesk prompt-package` before treating output as accepted."
             );
         }
     }

@@ -8592,6 +8592,76 @@ fn status_json_includes_closeout_required_count() -> Result<()> {
     let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
     assert_eq!(status["closeout_required_offdesk_tasks"], 0);
     assert_eq!(status["closeout_state"]["approved"], 1);
+
+    fs::write(
+        closeout_dir.join("closeout_review_20260521T000100Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now + Duration::minutes(2),
+            "verdict": "approved",
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": "approved_with_followups"
+            },
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "completed-task"
+                }
+            ]
+        }))?,
+    )?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["closeout_required_offdesk_tasks"], 1);
+    assert_eq!(status["closeout_state"]["approved_with_followups"], 1);
+    assert_eq!(status["closeout_state"]["accepted"], 0);
+    assert!(status["offdesk_next_safe_actions"]
+        .as_array()
+        .expect("offdesk next safe actions")
+        .iter()
+        .any(|action| action["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("receipt follow-ups")));
+
+    let status_output = forager_command(temp.path()).args(["status"]).output()?;
+    assert!(status_output.status.success());
+    let stdout = String::from_utf8_lossy(&status_output.stdout);
+    assert!(stdout.contains("1 approved with follow-ups"));
+    assert!(stdout.contains("Closeout receipt: approved review still has follow-ups"));
+
+    fs::write(
+        closeout_dir.join("closeout_review_20260521T000200Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now + Duration::minutes(3),
+            "verdict": "approved",
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": "accepted"
+            },
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "completed-task"
+                }
+            ]
+        }))?,
+    )?;
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["closeout_required_offdesk_tasks"], 0);
+    assert_eq!(status["closeout_state"]["accepted"], 1);
+    assert_eq!(status["closeout_state"]["approved"], 1);
     Ok(())
 }
 
