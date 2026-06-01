@@ -15,13 +15,31 @@ use crate::offdesk::operator_safe_text;
 use crate::session::get_profile_dir;
 
 const ARTIFACT_INDEX_SCHEMA: &str = "artifact_index.v1";
+const ARTIFACT_RETENTION_REVIEW_SCHEMA: &str = "artifact_retention_review.v1";
 const DELIVERABLE_EXTENSIONS: &[&str] = &[".html", ".png", ".jpg", ".jpeg", ".pdf"];
 const OUTPUT_ROOTS: &[&str] = &["outputs", "web", "deliverables", "previews", "gallery"];
 const MAX_INDEX_ENTRIES: usize = 240;
 const MAX_HUMAN_ROWS: usize = 12;
+const MAX_RETENTION_REVIEW_ITEMS: usize = 40;
+const MAX_RETENTION_REVIEW_KEEP_SAMPLE: usize = 12;
+const MAX_RETENTION_REVIEW_PROJECTION_ITEMS: usize = 10;
 
 #[derive(Debug, Clone, Args)]
 pub struct ProjectArtifactIndexArgs {
+    /// Project repository/root directory to scan. Defaults to the current directory.
+    path: Option<PathBuf>,
+
+    /// Stable project key used to filter profile-local Forager artifacts
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProjectRetentionReviewArgs {
     /// Project repository/root directory to scan. Defaults to the current directory.
     path: Option<PathBuf>,
 
@@ -93,6 +111,76 @@ struct ArtifactIndexAuthority {
     does_not_authorize: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionReview {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    profile: String,
+    project_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_root: Option<String>,
+    summary: ArtifactRetentionReviewSummary,
+    queues: ArtifactRetentionReviewQueues,
+    recommendations: Vec<ArtifactRetentionRecommendation>,
+    redaction: ArtifactIndexRedaction,
+    authority: ArtifactRetentionReviewAuthority,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct ArtifactRetentionReviewSummary {
+    total_entries: usize,
+    action_required_entries: usize,
+    keep_entries: usize,
+    missing_entries: usize,
+    review_required_entries: usize,
+    disposal_candidate_entries: usize,
+    archive_candidate_entries: usize,
+    unreferenced_human_facing_entries: usize,
+    queue_items: usize,
+    truncated_queue_items: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionReviewQueues {
+    action_required: Vec<ArtifactRetentionReviewItem>,
+    keep_sample: Vec<ArtifactRetentionReviewItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionReviewItem {
+    id: String,
+    label: String,
+    source: String,
+    kind: String,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relative_path: Option<String>,
+    present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<u64>,
+    retention_class: String,
+    review_status: String,
+    recommended_action: String,
+    reason: String,
+    why_it_matters: String,
+    refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionRecommendation {
+    kind: String,
+    priority: String,
+    count: usize,
+    summary: String,
+    next_action: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionReviewAuthority {
+    read_only: bool,
+    does_not_authorize: Vec<&'static str>,
+}
+
 struct EntryInput {
     label: String,
     source: String,
@@ -135,12 +223,43 @@ pub async fn run(profile: &str, args: ProjectArtifactIndexArgs) -> Result<()> {
     Ok(())
 }
 
+pub async fn run_retention_review(profile: &str, args: ProjectRetentionReviewArgs) -> Result<()> {
+    let project_root = resolve_project_root(args.path.as_deref())?;
+    let project_key = args
+        .project_key
+        .as_deref()
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_project_key(project_root.as_deref()));
+    let index = build_artifact_index(profile, Some(&project_key), project_root.as_deref())?;
+    let review = build_retention_review(&index);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&review)?);
+    } else {
+        print!(
+            "{}",
+            retention_review_human_summary(&serde_json::to_value(&review)?)
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn build_profile_artifact_index_value(
     profile: &str,
     project_key: Option<&str>,
 ) -> Result<Value> {
     serde_json::to_value(build_artifact_index(profile, project_key, None)?)
         .context("serialize artifact index")
+}
+
+pub(crate) fn build_profile_retention_review_value(
+    profile: &str,
+    project_key: Option<&str>,
+) -> Result<Value> {
+    let index = build_artifact_index(profile, project_key, None)?;
+    serde_json::to_value(build_retention_review(&index))
+        .context("serialize artifact retention review")
 }
 
 pub(crate) fn review_surface_projection(index: &Value) -> Value {
@@ -173,6 +292,46 @@ pub(crate) fn review_surface_projection(index: &Value) -> Value {
         "summary": index.get("summary").cloned().unwrap_or(Value::Object(Default::default())),
         "entries": entries,
         "projection_policy": "first_20_entries_summary_first"
+    })
+}
+
+pub(crate) fn retention_review_projection(review: &Value) -> Value {
+    let action_required = review
+        .pointer("/queues/action_required")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .take(MAX_RETENTION_REVIEW_PROJECTION_ITEMS)
+                .map(|item| {
+                    json!({
+                        "id": item.get("id").cloned().unwrap_or(Value::Null),
+                        "label": item.get("label").cloned().unwrap_or(Value::Null),
+                        "source": item.get("source").cloned().unwrap_or(Value::Null),
+                        "kind": item.get("kind").cloned().unwrap_or(Value::Null),
+                        "present": item.get("present").cloned().unwrap_or(Value::Null),
+                        "retention_class": item.get("retention_class").cloned().unwrap_or(Value::Null),
+                        "review_status": item.get("review_status").cloned().unwrap_or(Value::Null),
+                        "recommended_action": item.get("recommended_action").cloned().unwrap_or(Value::Null),
+                        "reason": item.get("reason").cloned().unwrap_or(Value::Null),
+                        "why_it_matters": item.get("why_it_matters").cloned().unwrap_or(Value::Null)
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let recommendations = review
+        .get("recommendations")
+        .and_then(Value::as_array)
+        .map(|recommendations| recommendations.iter().take(5).cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    json!({
+        "schema": review.get("schema").cloned().unwrap_or(Value::String(ARTIFACT_RETENTION_REVIEW_SCHEMA.to_string())),
+        "summary": review.get("summary").cloned().unwrap_or(Value::Object(Default::default())),
+        "recommendations": recommendations,
+        "action_required": action_required,
+        "projection_policy": "summary_plus_first_10_action_required_items"
     })
 }
 
@@ -232,6 +391,202 @@ fn build_artifact_index(
             ],
         },
     })
+}
+
+fn build_retention_review(index: &ArtifactIndex) -> ArtifactRetentionReview {
+    let mut action_required = Vec::new();
+    let mut keep_sample = Vec::new();
+    let mut summary = ArtifactRetentionReviewSummary {
+        total_entries: index.summary.total_entries,
+        missing_entries: index.summary.missing_entries,
+        review_required_entries: index.summary.review_required_entries,
+        disposal_candidate_entries: index.summary.disposal_candidate_entries,
+        archive_candidate_entries: index
+            .entries
+            .iter()
+            .filter(|entry| entry.retention_class == "archive_candidate")
+            .count(),
+        unreferenced_human_facing_entries: index
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.review_status == "needs_triage" && is_human_facing_artifact(entry)
+            })
+            .count(),
+        ..ArtifactRetentionReviewSummary::default()
+    };
+
+    for entry in &index.entries {
+        let item = retention_review_item(entry);
+        if item.recommended_action == "preserve" {
+            summary.keep_entries += 1;
+            if keep_sample.len() < MAX_RETENTION_REVIEW_KEEP_SAMPLE {
+                keep_sample.push(item);
+            }
+        } else {
+            summary.action_required_entries += 1;
+            action_required.push(item);
+        }
+    }
+
+    let queue_items = action_required.len();
+    let truncated_queue_items = queue_items.saturating_sub(MAX_RETENTION_REVIEW_ITEMS);
+    action_required.truncate(MAX_RETENTION_REVIEW_ITEMS);
+    summary.queue_items = action_required.len();
+    summary.truncated_queue_items = truncated_queue_items;
+
+    ArtifactRetentionReview {
+        schema: ARTIFACT_RETENTION_REVIEW_SCHEMA,
+        generated_at: Utc::now(),
+        profile: index.profile.clone(),
+        project_key: index.project_key.clone(),
+        project_root: index.project_root.clone(),
+        recommendations: retention_recommendations(&summary),
+        summary,
+        queues: ArtifactRetentionReviewQueues {
+            action_required,
+            keep_sample,
+        },
+        redaction: ArtifactIndexRedaction {
+            operator_safe: true,
+            path_policy: "summary_first_paths_in_json",
+        },
+        authority: ArtifactRetentionReviewAuthority {
+            read_only: true,
+            does_not_authorize: vec![
+                "delete",
+                "move",
+                "archive",
+                "publish",
+                "accepting an artifact as disposable without operator approval",
+            ],
+        },
+    }
+}
+
+fn retention_review_item(entry: &ArtifactIndexEntry) -> ArtifactRetentionReviewItem {
+    let (recommended_action, reason) = retention_action_and_reason(entry);
+    ArtifactRetentionReviewItem {
+        id: entry.id.clone(),
+        label: entry.label.clone(),
+        source: entry.source.clone(),
+        kind: entry.kind.clone(),
+        path: entry.path.clone(),
+        relative_path: entry.relative_path.clone(),
+        present: entry.present,
+        bytes: entry.bytes,
+        retention_class: entry.retention_class.clone(),
+        review_status: entry.review_status.clone(),
+        recommended_action: recommended_action.to_string(),
+        reason: reason.to_string(),
+        why_it_matters: entry.why_it_matters.clone(),
+        refs: entry.refs.clone(),
+    }
+}
+
+fn retention_action_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'static str) {
+    if !entry.present {
+        return (
+            "restore_or_update_reference",
+            "The index points to an artifact that is not present.",
+        );
+    }
+    match entry.retention_class.as_str() {
+        "disposal_candidate" => {
+            return (
+                "review_disposal_candidate",
+                "The artifact is marked as a disposal candidate, but mutation needs separate approval.",
+            );
+        }
+        "archive_candidate" => {
+            return (
+                "review_archive_candidate",
+                "The artifact is marked as an archive candidate, but movement needs separate approval.",
+            );
+        }
+        _ => {}
+    }
+    if entry.review_status == "needs_triage" && is_human_facing_artifact(entry) {
+        return (
+            "promote_to_deliverables_or_mark_disposable",
+            "A human-facing output exists outside the deliverables surface.",
+        );
+    }
+    if entry.review_status.contains("review") || entry.review_status == "needs_triage" {
+        return (
+            "review_before_relying",
+            "The artifact is useful but still needs operator review before relying on it.",
+        );
+    }
+    (
+        "preserve",
+        "The artifact is referenced and currently has no retention action.",
+    )
+}
+
+fn retention_recommendations(
+    summary: &ArtifactRetentionReviewSummary,
+) -> Vec<ArtifactRetentionRecommendation> {
+    let mut recommendations = Vec::new();
+    if summary.missing_entries > 0 {
+        recommendations.push(ArtifactRetentionRecommendation {
+            kind: "restore_or_update_missing_artifacts".to_string(),
+            priority: "high".to_string(),
+            count: summary.missing_entries,
+            summary: "Some indexed artifacts are missing from disk.".to_string(),
+            next_action: "Restore the artifact or update the referring surface before relying on the package."
+                .to_string(),
+        });
+    }
+    if summary.unreferenced_human_facing_entries > 0 {
+        recommendations.push(ArtifactRetentionRecommendation {
+            kind: "triage_unreferenced_human_outputs".to_string(),
+            priority: "normal".to_string(),
+            count: summary.unreferenced_human_facing_entries,
+            summary: "Human-facing outputs exist outside the deliverables surface.".to_string(),
+            next_action:
+                "Promote useful outputs to DELIVERABLES.md or mark them for later disposal review."
+                    .to_string(),
+        });
+    }
+    if summary.disposal_candidate_entries > 0 {
+        recommendations.push(ArtifactRetentionRecommendation {
+            kind: "review_disposal_or_archive_candidates".to_string(),
+            priority: "normal".to_string(),
+            count: summary.disposal_candidate_entries,
+            summary: "Some artifacts are archive or disposal candidates.".to_string(),
+            next_action:
+                "Inspect the candidate list and request an explicit cleanup/archive action if appropriate."
+                    .to_string(),
+        });
+    }
+    if summary.review_required_entries > 0 {
+        recommendations.push(ArtifactRetentionRecommendation {
+            kind: "review_required_artifacts".to_string(),
+            priority: "normal".to_string(),
+            count: summary.review_required_entries,
+            summary: "Some artifacts need review before they can support handoff or acceptance."
+                .to_string(),
+            next_action:
+                "Review the artifact meaning and evidence status before treating it as reusable."
+                    .to_string(),
+        });
+    }
+    if recommendations.is_empty() {
+        recommendations.push(ArtifactRetentionRecommendation {
+            kind: "no_retention_action_required".to_string(),
+            priority: "info".to_string(),
+            count: 0,
+            summary: "No retention action is required by the current index.".to_string(),
+            next_action: "Continue using the artifact index as the read-only inventory."
+                .to_string(),
+        });
+    }
+    recommendations
+}
+
+fn is_human_facing_artifact(entry: &ArtifactIndexEntry) -> bool {
+    matches!(entry.kind.as_str(), "html" | "png" | "jpg" | "jpeg" | "pdf")
 }
 
 fn resolve_project_root(path: Option<&Path>) -> Result<Option<PathBuf>> {
@@ -988,6 +1343,92 @@ fn human_summary(index: &Value) -> String {
         }
     }
     output.push_str("  authority: read-only index; deletion, movement, archive, and publication need separate approval\n");
+    output
+}
+
+fn retention_review_human_summary(review: &Value) -> String {
+    let mut output = String::new();
+    output.push_str("Artifact Retention Review\n");
+    if let Some(project_key) = review.get("project_key").and_then(Value::as_str) {
+        output.push_str(&format!("  project: {project_key}\n"));
+    }
+    if let Some(root) = review.get("project_root").and_then(Value::as_str) {
+        output.push_str(&format!("  root: {root}\n"));
+    }
+    let summary = review.get("summary").unwrap_or(&Value::Null);
+    output.push_str(&format!(
+        "  entries: {} total, {} action-required, {} keep\n",
+        json_u64(summary, "total_entries"),
+        json_u64(summary, "action_required_entries"),
+        json_u64(summary, "keep_entries")
+    ));
+    output.push_str(&format!(
+        "  review: {} missing, {} review-required, {} disposal/archive candidates, {} unreferenced human-facing\n",
+        json_u64(summary, "missing_entries"),
+        json_u64(summary, "review_required_entries"),
+        json_u64(summary, "disposal_candidate_entries"),
+        json_u64(summary, "unreferenced_human_facing_entries")
+    ));
+    if let Some(recommendations) = review.get("recommendations").and_then(Value::as_array) {
+        output.push_str("  recommendations:\n");
+        for recommendation in recommendations.iter().take(5) {
+            let kind = recommendation
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("review");
+            let priority = recommendation
+                .get("priority")
+                .and_then(Value::as_str)
+                .unwrap_or("normal");
+            let count = recommendation
+                .get("count")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let next = recommendation
+                .get("next_action")
+                .and_then(Value::as_str)
+                .unwrap_or("Review before mutation.");
+            output.push_str(&format!("    - {kind} ({priority}, {count}): {next}\n"));
+        }
+    }
+    if let Some(items) = review
+        .pointer("/queues/action_required")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+    {
+        output.push_str("  action-required artifacts:\n");
+        for item in items.iter().take(MAX_HUMAN_ROWS) {
+            let label = item
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or("Artifact");
+            let action = item
+                .get("recommended_action")
+                .and_then(Value::as_str)
+                .unwrap_or("review_before_relying");
+            let retention = item
+                .get("retention_class")
+                .and_then(Value::as_str)
+                .unwrap_or("review");
+            let status = item
+                .get("review_status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let path = item
+                .get("relative_path")
+                .or_else(|| item.get("path"))
+                .and_then(Value::as_str)
+                .unwrap_or("-");
+            output.push_str(&format!(
+                "    - {label}: {action} [{retention}/{status}] `{path}`\n"
+            ));
+        }
+    } else {
+        output.push_str("  action-required artifacts: none\n");
+    }
+    output.push_str(
+        "  authority: read-only review; cleanup, archive, movement, and deletion need separate approval\n",
+    );
     output
 }
 

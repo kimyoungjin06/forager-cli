@@ -1749,6 +1749,44 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
             .unwrap_or_default()
         ));
     }
+    if surface
+        .pointer("/artifacts/retention_review/schema")
+        .is_some()
+    {
+        output.push_str(&format!(
+            "- retention_review: {} action-required, {} missing, {} unreferenced human-facing\n",
+            value_u64(
+                surface,
+                "/artifacts/retention_review/summary/action_required_entries"
+            )
+            .unwrap_or_default(),
+            value_u64(
+                surface,
+                "/artifacts/retention_review/summary/missing_entries"
+            )
+            .unwrap_or_default(),
+            value_u64(
+                surface,
+                "/artifacts/retention_review/summary/unreferenced_human_facing_entries"
+            )
+            .unwrap_or_default()
+        ));
+        if let Some(items) = surface
+            .pointer("/artifacts/retention_review/action_required")
+            .and_then(Value::as_array)
+            .filter(|items| !items.is_empty())
+        {
+            output.push_str("- retention_actions:\n");
+            for item in items.iter().take(3) {
+                output.push_str(&format!(
+                    "  - {}: {} ({})\n",
+                    value_text(item, "/label").unwrap_or("Artifact"),
+                    value_text(item, "/recommended_action").unwrap_or("review_before_relying"),
+                    value_text(item, "/reason").unwrap_or("Review before mutation.")
+                ));
+            }
+        }
+    }
     if let Some(actions) = surface
         .get("next_safe_actions")
         .and_then(Value::as_array)

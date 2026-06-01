@@ -751,6 +751,7 @@ Inputs:
 
 Outputs:
 - `artifact_index.v1`.
+- `artifact_retention_review.v1`.
 - Retention recommendation.
 - Review packet.
 - Disposal-safe manifest.
@@ -761,12 +762,15 @@ Authorization Boundary:
 
 Acceptance Criteria:
 - Humans can find deliverables without opening every generated file.
+- Retention review separates keep, review, missing, archive, and disposal
+  candidates without mutating files.
 - Runs do not create endless flat directories without review paths.
 - Logs and raw evidence remain available but are not the primary review surface.
 - Disposal candidates are inspectable before mutation.
 
 Primary Surfaces:
 - `forager project artifact-index`.
+- `forager project retention-review`.
 - `forager ondesk review-surface`.
 - Closeout artifacts.
 - Documentation governance reports.
@@ -988,9 +992,13 @@ Completed P1 operator workflow slice:
    artifacts.
 4. Project artifact-index summaries into `review_surface.v1` and Ondesk prompt
    packages.
+5. Strengthen adaptive wiki promotion receipts and review summaries.
+6. Add `artifact_retention_review.v1` and project it into review/Ondesk
+   surfaces.
 
 Remaining P1 operator workflow slice:
-1. Strengthen adaptive wiki promotion receipts and review summaries.
+1. Standardize retention-class names and cleanup approval workflows across
+   project templates before adding any mutation path.
 
 P2 expansion slice:
 1. Normalize hosted harness capability contracts for Claude Code, Codex,
