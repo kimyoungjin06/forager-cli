@@ -1,6 +1,6 @@
 # Decisions
 
-Updated: 2026-05-31
+Updated: 2026-06-01
 
 This is the compact development decision index for Forager. It points to the
 decisions that currently shape implementation, documentation, and operator
@@ -9,6 +9,8 @@ surfaces.
 | Decision | Status | Source | Operational effect |
 | --- | --- | --- | --- |
 | Forager's product direction is a local autonomy meta-harness for harness-backed agents, with explicit intent, approvals, durable evidence, reviewable handoffs, and reviewed knowledge promotion. | active | `docs/project-direction.md` | New features should strengthen Forager as the supervising layer around agents built by Claude Code, Codex, OpenHands, OpenCode, local scripts, or future harnesses. |
+| External harnesses are benchmarked as operating-pattern sources, not copied product boundaries. | active | `docs/gajae-benchmarking.md` | Gajae-Code patterns must pass Forager invariant fit before becoming module contracts; Forager should translate scope gates, council decisions, execution lanes, and closeout receipts without importing another harness's agent loop. |
+| Offdesk Council decisions should flow through a canonical decision record before becoming user-facing briefs or execution handoffs. | proposed | `docs/decision-pipeline.md` | `approval_brief.v1` remains the compact projection and `PendingActionApproval` remains the mutation authority; the new decision layer records Agent -> Council -> Router -> User/Agent state. |
 | Forager owns offdesk queue state, approvals, recovery, and audit artifacts. | active | `docs/forager-orchestrator-boundary.md`, `docs/hermes-pattern-review.md` | External harnesses can run agent loops, but durable control state stays in Forager-owned stores. |
 | Raw chat history is not the source of truth for offdesk transitions. | active | `docs/guides/operation-cycle.md` | Each handoff stage should produce a bounded artifact. |
 | Adaptive wiki canonical state remains JSON, with markdown as a human projection. | active | `docs/adaptive-wiki.md`, `docs/adaptive-wiki-execution-plan.md` | Runtime receives compact scoped projections, not raw human wiki pages. |
