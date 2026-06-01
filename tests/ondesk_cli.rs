@@ -199,6 +199,8 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Night result summary"));
     assert!(content.contains("review_verdict: approved"));
     assert!(content.contains("closeout_receipt_status: approved_with_followups"));
+    assert!(content.contains("closeout_acceptance: not accepted truth"));
+    assert!(content.contains("review receipt follow-ups"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
     Ok(())

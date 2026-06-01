@@ -194,9 +194,11 @@ Acceptance checks:
 - unsafe operations and missing evidence are recorded explicitly;
 - the record does not move, delete, archive, or promote files;
 - `ondesk prompt-package` includes the closeout-review verdict;
-- `forager status --json` moves the reviewed task from
-  `closeout_state.pending_review` to `closeout_state.approved` when the verdict
-  is `approved`.
+- `forager status --json` moves the reviewed task out of
+  `closeout_required_offdesk_tasks` only when the latest fresh closeout receipt
+  is `accepted`; legacy receipt-less `approved` reviews remain compatible, while
+  `approved_with_followups`, `revision_required`, and `blocked` remain
+  review-required.
 
 ### 3. Ondesk Return Package Validation
 
@@ -285,6 +287,8 @@ rather than inventing separate wording.
 Morning Ondesk Telegram handoff also uses the closeout receipt status when it
 summarizes whether output is accepted, still needs follow-up review, or remains
 blocked/revision-required.
+The TUI home summary should show the same distinction instead of collapsing all
+closeout-required work into a generic count.
 
 ## Near-Term Recommendation
 

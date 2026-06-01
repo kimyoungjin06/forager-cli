@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use tui_input::Input;
 
 use super::{HomeView, OffdeskResumeSummary, ViewMode};
-use crate::offdesk::OffdeskNextSafeAction;
+use crate::offdesk::{OffdeskCloseoutStateSummary, OffdeskNextSafeAction};
 use crate::session::{Instance, Item, Storage};
 use crate::tmux::AvailableTools;
 use crate::tui::app::Action;
@@ -223,8 +223,10 @@ fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
 
     let summary = super::load_offdesk_summary("test");
     assert_eq!(summary.closeout_required, 1);
+    assert_eq!(summary.closeout_state.missing_closeout, 1);
     assert!(summary.needs_operator_attention());
-    assert_eq!(summary.focus_label(), "closeout required");
+    assert_eq!(summary.focus_label(), "closeout package missing/stale");
+    assert_eq!(summary.closeout_label(), "1 package missing/stale");
     assert_eq!(
         summary.next_action_label(),
         "Review: forager offdesk closeout"
@@ -236,7 +238,14 @@ fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
     fs::write(
         closeout_dir.join("closeout_plan.json"),
         serde_json::to_string_pretty(&json!({
-            "generated_at": now + Duration::minutes(1)
+            "generated_at": now + Duration::minutes(1),
+            "tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "completed-task"
+                }
+            ]
         }))
         .unwrap(),
     )
@@ -244,12 +253,47 @@ fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
 
     let summary = super::load_offdesk_summary("test");
     assert_eq!(summary.closeout_required, 1);
+    assert_eq!(summary.closeout_state.pending_review, 1);
     assert!(summary.needs_operator_attention());
+    assert_eq!(summary.focus_label(), "closeout review pending");
+    assert_eq!(summary.closeout_label(), "1 review pending");
 
     fs::write(
         closeout_dir.join("closeout_review_20260521T000000Z.json"),
         serde_json::to_string_pretty(&json!({
             "reviewed_at": now + Duration::minutes(2),
+            "verdict": "approved",
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": "approved_with_followups"
+            },
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": "completed-task"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let summary = super::load_offdesk_summary("test");
+    assert_eq!(summary.closeout_required, 1);
+    assert_eq!(summary.closeout_state.approved_with_followups, 1);
+    assert!(summary.needs_operator_attention());
+    assert_eq!(summary.focus_label(), "closeout follow-ups pending");
+    assert_eq!(summary.closeout_label(), "1 follow-up receipt pending");
+    assert_eq!(
+        summary.next_action_label(),
+        "Review: forager ondesk prompt-package"
+    );
+
+    fs::write(
+        closeout_dir.join("closeout_review_20260521T000100Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now + Duration::minutes(3),
             "verdict": "approved",
             "applies_to_tasks": [
                 {
@@ -511,6 +555,7 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
         name: &'static str,
         summary: OffdeskResumeSummary,
         expected_focus: &'static str,
+        expected_close: &'static str,
         expected_next: &'static str,
         expected_action: &'static str,
     }
@@ -530,6 +575,7 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "approvals waiting",
+            expected_close: "Close: 0 tasks require closeout",
             expected_next: "Next:  Review: forager offdesk pending",
             expected_action: "Action forager offdesk pending",
         },
@@ -546,6 +592,7 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "failed work needs review",
+            expected_close: "Close: 0 tasks require closeout",
             expected_next: "Next:  Recover: forager offdesk resume",
             expected_action: "Action forager offdesk resume",
         },
@@ -553,6 +600,10 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
             name: "closeout",
             summary: OffdeskResumeSummary {
                 closeout_required: 1,
+                closeout_state: OffdeskCloseoutStateSummary {
+                    pending_review: 1,
+                    ..OffdeskCloseoutStateSummary::default()
+                },
                 next_safe_actions: vec![OffdeskNextSafeAction::new(
                     "review_required",
                     "Close out completed work before accepting output.",
@@ -561,9 +612,31 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 )],
                 ..OffdeskResumeSummary::default()
             },
-            expected_focus: "closeout required",
+            expected_focus: "closeout review pending",
+            expected_close: "Close: 1 review pending",
             expected_next: "Next:  Review: forager offdesk closeout",
             expected_action: "Action forager offdesk closeout",
+        },
+        Case {
+            name: "closeout-followups",
+            summary: OffdeskResumeSummary {
+                closeout_required: 1,
+                closeout_state: OffdeskCloseoutStateSummary {
+                    approved_with_followups: 1,
+                    ..OffdeskCloseoutStateSummary::default()
+                },
+                next_safe_actions: vec![OffdeskNextSafeAction::new(
+                    "review_required",
+                    "Closeout review is approved, but receipt follow-ups remain before accepted truth.",
+                    vec!["forager ondesk prompt-package".to_string()],
+                    true,
+                )],
+                ..OffdeskResumeSummary::default()
+            },
+            expected_focus: "closeout follow-ups pending",
+            expected_close: "Close: 1 follow-up receipt pending",
+            expected_next: "Next:  Review: forager ondesk prompt-package",
+            expected_action: "Action forager ondesk prompt-package",
         },
         Case {
             name: "runtime",
@@ -578,6 +651,7 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "active offdesk work",
+            expected_close: "Close: 0 tasks require closeout",
             expected_next: "Next:  Monitor: forager offdesk poll",
             expected_action: "Action forager offdesk poll",
         },
@@ -600,6 +674,13 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
             "{} should render focus `{}`:\n{}",
             case.name,
             case.expected_focus,
+            rendered
+        );
+        assert!(
+            rendered.contains(case.expected_close),
+            "{} should render closeout `{}`:\n{}",
+            case.name,
+            case.expected_close,
             rendered
         );
         assert!(
@@ -678,7 +759,7 @@ fn home_view_loads_offdesk_summary_fixture_and_renders_next_safe_action() {
         rendered
     );
     assert!(
-        rendered.contains("closeout required"),
+        rendered.contains("closeout package missing/stale"),
         "fixture-backed home view should render closeout focus:\n{}",
         rendered
     );
@@ -688,7 +769,7 @@ fn home_view_loads_offdesk_summary_fixture_and_renders_next_safe_action() {
         rendered
     );
     assert!(
-        rendered.contains("1 tasks require closeout"),
+        rendered.contains("1 package missing/stale"),
         "fixture-backed home view should render closeout count:\n{}",
         rendered
     );
