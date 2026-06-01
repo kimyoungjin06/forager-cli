@@ -22,6 +22,8 @@ deliberate knowledge promotion.
 
 - [Project Direction](project-direction.md) defines the north star, product
   boundary, and practical completion criteria.
+- [Functional Definition Set](functional-definitions.md) defines the required
+  capabilities independently from the current UI or implementation shape.
 - [Gajae-Code Benchmarking](gajae-benchmarking.md) records how external harness
   patterns are translated through Forager's invariants before implementation.
 - [Decision Pipeline](decision-pipeline.md) defines the canonical state model
