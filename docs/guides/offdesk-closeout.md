@@ -62,9 +62,11 @@ forager offdesk closeout-review \
   --review-file <path-to-review-output>
 ```
 
-Only an `approved` review record clears the TUI's closeout-required signal.
-`revise` and `blocked` verdicts are preserved as evidence but keep the return
-path reviewable.
+Only an `accepted` closeout receipt clears the TUI's closeout-required signal.
+Legacy `approved` review records without a receipt are still treated as cleared
+for older profiles. `approved_with_followups`, `revision_required`, and
+`blocked` receipts remain reviewable and keep the closeout-required signal
+visible.
 
 `forager offdesk closeout-review` also writes a `closeout_receipt.v1` artifact:
 
@@ -211,7 +213,11 @@ count, and also includes `closeout_state` so operators can distinguish:
 - `pending_review`: a closeout package exists but no fresh review verdict was
   recorded;
 - `revision_required`: the latest fresh verdict was `revise` or `blocked`;
+- `approved_with_followups`: the review verdict was approved, but the receipt
+  still lists follow-up review before accepted truth;
 - `stale_closeout` / `stale_review`: the task changed after the package or
   verdict;
-- `approved`: a fresh `approved` verdict exists and the task is no longer
-  counted as closeout-required.
+- `accepted`: a fresh receipt says the closeout is accepted and the task is no
+  longer counted as closeout-required;
+- `approved`: compatibility count for closeouts that clear the old approved
+  signal, including legacy approved reviews without a receipt.

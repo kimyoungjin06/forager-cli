@@ -286,11 +286,7 @@ fn summarize_closeout_state(
         let closeout_generated_at = closeouts.get(&key).copied();
         let review = reviews.get(&key);
         if let Some(review) = review.filter(|review| review.reviewed_at > task.updated_at) {
-            if review.verdict == "approved" {
-                summary.approved += 1;
-            } else {
-                summary.revision_required += 1;
-            }
+            apply_closeout_review_snapshot(&mut summary, review);
         } else if closeout_generated_at.is_some_and(|generated_at| generated_at > task.updated_at) {
             summary.pending_review += 1;
         } else if review.is_some() {
@@ -305,10 +301,38 @@ fn summarize_closeout_state(
     summary
 }
 
+fn apply_closeout_review_snapshot(
+    summary: &mut OffdeskCloseoutStateSummary,
+    review: &CloseoutReviewSnapshot,
+) {
+    match review.receipt_acceptance_status.as_deref() {
+        Some("accepted") => {
+            summary.accepted += 1;
+            summary.approved += 1;
+        }
+        Some("approved_with_followups") => {
+            summary.approved_with_followups += 1;
+        }
+        Some("revision_required" | "blocked") => {
+            summary.revision_required += 1;
+        }
+        Some(_) => {
+            summary.revision_required += 1;
+        }
+        None if review.verdict == "approved" => {
+            summary.approved += 1;
+        }
+        None => {
+            summary.revision_required += 1;
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CloseoutReviewSnapshot {
     reviewed_at: DateTime<Utc>,
     verdict: String,
+    receipt_acceptance_status: Option<String>,
 }
 
 fn latest_closeout_generated_at_by_task(
@@ -388,6 +412,10 @@ fn latest_closeout_review_by_task(
                 .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
                 .map(|value| value.with_timezone(&Utc))?;
             let verdict = value.get("verdict")?.as_str()?.to_string();
+            let receipt_acceptance_status = value
+                .pointer("/closeout_receipt/acceptance_status")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
             let tasks = value.get("applies_to_tasks")?.as_array()?;
             Some(
                 tasks
@@ -399,6 +427,7 @@ fn latest_closeout_review_by_task(
                             CloseoutReviewSnapshot {
                                 reviewed_at,
                                 verdict: verdict.clone(),
+                                receipt_acceptance_status: receipt_acceptance_status.clone(),
                             },
                         ))
                     })
@@ -928,25 +957,33 @@ mod tests {
         task_id: &str,
         reviewed_at: DateTime<Utc>,
         verdict: &str,
+        receipt_status: Option<&str>,
     ) -> Result<()> {
         let dir = profile_dir.join("offdesk_closeouts").join(dir_name);
         fs::create_dir_all(&dir)?;
+        let mut review = serde_json::json!({
+            "reviewed_at": reviewed_at,
+            "verdict": verdict,
+            "applies_to_tasks": [
+                {
+                    "project_key": "project",
+                    "request_id": "request",
+                    "task_id": task_id
+                }
+            ]
+        });
+        if let Some(status) = receipt_status {
+            review["closeout_receipt"] = serde_json::json!({
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": status
+            });
+        }
         fs::write(
             dir.join(format!(
                 "closeout_review_{}.json",
                 reviewed_at.format("%Y%m%dT%H%M%SZ")
             )),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "reviewed_at": reviewed_at,
-                "verdict": verdict,
-                "applies_to_tasks": [
-                    {
-                        "project_key": "project",
-                        "request_id": "request",
-                        "task_id": task_id
-                    }
-                ]
-            }))?,
+            serde_json::to_string_pretty(&review)?,
         )?;
         Ok(())
     }
@@ -1007,14 +1044,39 @@ mod tests {
             completed_task("missing", now),
             completed_task("pending", now),
             completed_task("revision", now),
-            completed_task("approved", now),
+            completed_task("legacy-approved", now),
+            completed_task("accepted", now),
+            completed_task("followup", now),
             completed_task("stale-package", now),
             completed_task("stale-review", now),
         ];
 
         write_closeout_plan(temp.path(), "pending", "pending", newer)?;
-        write_closeout_review(temp.path(), "revision", "revision", newer, "revise")?;
-        write_closeout_review(temp.path(), "approved", "approved", newer, "approved")?;
+        write_closeout_review(temp.path(), "revision", "revision", newer, "revise", None)?;
+        write_closeout_review(
+            temp.path(),
+            "legacy-approved",
+            "legacy-approved",
+            newer,
+            "approved",
+            None,
+        )?;
+        write_closeout_review(
+            temp.path(),
+            "accepted",
+            "accepted",
+            newer,
+            "approved",
+            Some("accepted"),
+        )?;
+        write_closeout_review(
+            temp.path(),
+            "followup",
+            "followup",
+            newer,
+            "approved",
+            Some("approved_with_followups"),
+        )?;
         write_closeout_plan(temp.path(), "stale-package", "stale-package", older)?;
         write_closeout_review(
             temp.path(),
@@ -1022,6 +1084,7 @@ mod tests {
             "stale-review",
             older,
             "approved",
+            Some("accepted"),
         )?;
 
         let summary = summarize_closeout_state(temp.path(), &tasks);
@@ -1029,10 +1092,12 @@ mod tests {
         assert_eq!(summary.missing_closeout, 1);
         assert_eq!(summary.pending_review, 1);
         assert_eq!(summary.revision_required, 1);
-        assert_eq!(summary.approved, 1);
+        assert_eq!(summary.approved_with_followups, 1);
+        assert_eq!(summary.accepted, 1);
+        assert_eq!(summary.approved, 2);
         assert_eq!(summary.stale_closeout, 1);
         assert_eq!(summary.stale_review, 1);
-        assert_eq!(summary.required_count(), 5);
+        assert_eq!(summary.required_count(), 6);
         Ok(())
     }
 
