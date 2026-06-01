@@ -572,6 +572,14 @@ These flags still only preview the governed command. The operator must run the
 returned mutation command separately and record any lifecycle decision
 separately.
 
+`forager offdesk wiki promote <candidate-id>` writes an
+`adaptive_wiki_promotion_receipt.v1` artifact under
+`adaptive_wiki_promotion_receipts/` while it performs the canonical promotion.
+The receipt records the candidate id, entry id, audit id, reviewed snapshots,
+activation mode, scope transition, and authority boundary. It proves one
+promotion was recorded; it does not authorize future runtime projection,
+cleanup, provider retargeting, or accepted truth for task outputs.
+
 `forager offdesk wiki proposal-receipt <proposal-id> --audit-id <id>
 --event-id <id> --command <cmd> --json` links those separated steps after the
 fact. The default output is transient. `--export` writes a sanitized receipt
@@ -596,7 +604,8 @@ mutation, and verification separate:
 3. Record the operator decision with `accept-proposal`, `reject-proposal`, or
    `supersede-proposal`.
 4. Run the returned governed mutation command when the decision requires a
-   wiki state change.
+   wiki state change. Promotion mutations write a durable promotion receipt
+   automatically.
 5. Link the preview, lifecycle event, and mutation audit with
    `proposal-receipt`. Use `--export` or `--output` when the operator needs a
    durable receipt artifact for later audit.
@@ -714,6 +723,19 @@ launch, alter approvals, rewrite commands, change workdirs, or retarget
 provider/model choices. Older promotion audits that predate snapshots are
 reported with explicit missing-snapshot failures instead of being silently
 backfilled from current state.
+
+`forager offdesk wiki review --json` also reports promotion receipt coverage in
+its summary:
+
+- `promotion_receipts_checked`;
+- `promotion_receipt_files_invalid`;
+- `promoted_entries_with_promotion_receipt`;
+- `promoted_entries_missing_promotion_receipt`.
+
+These fields are review signals, not automatic blockers. Older promoted entries
+may lack receipts even when they have promotion audit records, so treat missing
+receipts or invalid receipt files as cues to inspect `promotion-chain` before
+relying on the entry in a new high-stakes context.
 
 ## Procedure Runbooks
 

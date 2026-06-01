@@ -35,6 +35,8 @@ const ADAPTIVE_WIKI_EPISODE_REPORTS_DIR: &str = "adaptive_wiki_episode_reports";
 const ADAPTIVE_WIKI_EPISODE_TRACES_DIR: &str = "adaptive_wiki_episode_traces";
 const ADAPTIVE_WIKI_RECURRENCE_REPORTS_DIR: &str = "adaptive_wiki_recurrence_reports";
 const ADAPTIVE_WIKI_PROMOTION_CHAINS_DIR: &str = "adaptive_wiki_promotion_chains";
+const ADAPTIVE_WIKI_PROMOTION_RECEIPTS_DIR: &str = "adaptive_wiki_promotion_receipts";
+const ADAPTIVE_WIKI_PROMOTION_RECEIPT_SCHEMA: &str = "adaptive_wiki_promotion_receipt.v1";
 const STALE_CANDIDATE_DAYS: i64 = 30;
 const DEFAULT_PROJECTION_MAX_ENTRIES: usize = 8;
 const DEFAULT_PROJECTION_MAX_CONTEXT_CHARS: usize = 4_000;
@@ -201,6 +203,39 @@ pub struct AdaptiveWikiAuditRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_snapshot: Option<AdaptiveWikiHumanEntry>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiPromotionReceipt {
+    pub schema: String,
+    pub receipt_id: String,
+    pub generated_at: DateTime<Utc>,
+    pub status: String,
+    pub read_only_review_artifact: bool,
+    pub candidate_id: String,
+    pub entry_id: String,
+    pub audit_id: String,
+    pub actor: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    pub activation_mode: AdaptiveWikiActivationMode,
+    pub before_scope: AdaptiveWikiScopeSuggestion,
+    pub after_scope: AdaptiveWikiScopeSuggestion,
+    pub candidate_snapshot: AdaptiveWikiHumanCandidate,
+    pub entry_snapshot: AdaptiveWikiHumanEntry,
+    pub authority: AdaptiveWikiPromotionReceiptAuthority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdaptiveWikiPromotionReceiptAuthority {
+    pub canonical_mutation_recorded: bool,
+    pub does_not_authorize: Vec<String>,
+}
+
+impl AdaptiveWikiPromotionReceipt {
+    pub fn schema_name() -> &'static str {
+        ADAPTIVE_WIKI_PROMOTION_RECEIPT_SCHEMA
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1005,6 +1040,14 @@ pub struct AdaptiveWikiReviewReportSummary {
     pub usage_records_checked: usize,
     pub audit_records_checked: usize,
     pub correction_records_checked: usize,
+    #[serde(default)]
+    pub promotion_receipts_checked: usize,
+    #[serde(default)]
+    pub promotion_receipt_files_invalid: usize,
+    #[serde(default)]
+    pub promoted_entries_with_promotion_receipt: usize,
+    #[serde(default)]
+    pub promoted_entries_missing_promotion_receipt: usize,
     pub review_events_checked: usize,
     #[serde(default)]
     pub proposals_with_events: usize,
@@ -1276,6 +1319,10 @@ impl AdaptiveWikiStore {
 
     pub fn runtime_policy_acknowledgements_path(&self) -> PathBuf {
         self.root.join(ADAPTIVE_WIKI_RUNTIME_POLICY_ACKS_FILE)
+    }
+
+    pub fn promotion_receipts_dir(&self) -> PathBuf {
+        self.root.join(ADAPTIVE_WIKI_PROMOTION_RECEIPTS_DIR)
     }
 
     pub fn default_markdown_vault_dir(&self) -> PathBuf {
@@ -1577,6 +1624,61 @@ impl AdaptiveWikiStore {
 
     pub fn load_audit_records(&self) -> Result<Vec<AdaptiveWikiAuditRecord>> {
         read_jsonl(&self.audit_path())
+    }
+
+    pub fn write_promotion_receipt(
+        &self,
+        receipt: &AdaptiveWikiPromotionReceipt,
+    ) -> Result<PathBuf> {
+        let output_dir = self.promotion_receipts_dir();
+        fs::create_dir_all(&output_dir)?;
+        let path = output_dir.join(promotion_receipt_filename(receipt));
+        fs::write(&path, serde_json::to_string_pretty(receipt)?)?;
+        Ok(path)
+    }
+
+    fn load_promotion_receipt_report(&self) -> Result<AdaptiveWikiPromotionReceiptLoadReport> {
+        let dir = self.promotion_receipts_dir();
+        if !dir.exists() {
+            return Ok(AdaptiveWikiPromotionReceiptLoadReport::default());
+        }
+        let mut receipts = Vec::new();
+        let mut invalid_files = 0;
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file()
+                || path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(|extension| extension != "json")
+                    .unwrap_or(true)
+            {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else {
+                invalid_files += 1;
+                continue;
+            };
+            let Ok(receipt) = serde_json::from_str::<AdaptiveWikiPromotionReceipt>(&content) else {
+                invalid_files += 1;
+                continue;
+            };
+            receipts.push(receipt);
+        }
+        receipts.sort_by_key(|receipt| receipt.generated_at);
+        Ok(AdaptiveWikiPromotionReceiptLoadReport {
+            receipts,
+            invalid_files,
+        })
+    }
+
+    pub fn load_promotion_receipts(&self) -> Result<Vec<AdaptiveWikiPromotionReceipt>> {
+        Ok(self.load_promotion_receipt_report()?.receipts)
+    }
+
+    pub fn invalid_promotion_receipt_files(&self) -> Result<usize> {
+        Ok(self.load_promotion_receipt_report()?.invalid_files)
     }
 
     pub fn append_usage_records(&self, records: &[AdaptiveWikiUsageRecord]) -> Result<()> {
@@ -1960,8 +2062,11 @@ impl AdaptiveWikiStore {
         let usage_records = self.load_usage_records()?;
         let audit_records = self.load_audit_records()?;
         let correction_records = self.load_correction_records()?;
+        let promotion_receipt_report = self.load_promotion_receipt_report()?;
+        let promotion_receipts = promotion_receipt_report.receipts;
         let review_events = self.load_review_proposal_events()?;
         let lint = build_lint_report(&entries, &candidates, now);
+        let promotion_receipt_coverage = promotion_receipt_coverage(&entries, &promotion_receipts);
         let report_dir = self.review_report_dir(now);
         let mut proposals = build_review_proposals(
             &entries,
@@ -1993,6 +2098,11 @@ impl AdaptiveWikiStore {
                 usage_records_checked: usage_records.len(),
                 audit_records_checked: audit_records.len(),
                 correction_records_checked: correction_records.len(),
+                promotion_receipts_checked: promotion_receipts.len(),
+                promotion_receipt_files_invalid: promotion_receipt_report.invalid_files,
+                promoted_entries_with_promotion_receipt: promotion_receipt_coverage.with_receipt,
+                promoted_entries_missing_promotion_receipt: promotion_receipt_coverage
+                    .missing_receipt,
                 review_events_checked: review_events.len(),
                 proposals_with_events: proposal_lifecycle_summary.proposals_with_events,
                 open_proposals: proposal_lifecycle_summary.open_proposals,
@@ -4272,12 +4382,16 @@ fn markdown_review_report(report: &AdaptiveWikiReviewReport) -> String {
     ));
     content.push_str("## Summary\n\n");
     content.push_str(&format!(
-        "- Entries checked: `{}`\n- Candidates checked: `{}`\n- Usage records checked: `{}`\n- Audit records checked: `{}`\n- Correction records checked: `{}`\n- Review events checked: `{}`\n- Proposals: `{}`\n- Filtered out proposals: `{}`\n- Open proposals: `{}`\n- Proposals with events: `{}`\n- Accepted proposals: `{}`\n- Rejected proposals: `{}`\n- Superseded proposals: `{}`\n- Stale decision proposals: `{}`\n- Lint errors: `{}`\n- Lint warnings: `{}`\n- Lint info: `{}`\n\n",
+        "- Entries checked: `{}`\n- Candidates checked: `{}`\n- Usage records checked: `{}`\n- Audit records checked: `{}`\n- Correction records checked: `{}`\n- Promotion receipts checked: `{}`\n- Invalid promotion receipt files: `{}`\n- Promoted entries with promotion receipt: `{}`\n- Promoted entries missing promotion receipt: `{}`\n- Review events checked: `{}`\n- Proposals: `{}`\n- Filtered out proposals: `{}`\n- Open proposals: `{}`\n- Proposals with events: `{}`\n- Accepted proposals: `{}`\n- Rejected proposals: `{}`\n- Superseded proposals: `{}`\n- Stale decision proposals: `{}`\n- Lint errors: `{}`\n- Lint warnings: `{}`\n- Lint info: `{}`\n\n",
         report.summary.entries_checked,
         report.summary.candidates_checked,
         report.summary.usage_records_checked,
         report.summary.audit_records_checked,
         report.summary.correction_records_checked,
+        report.summary.promotion_receipts_checked,
+        report.summary.promotion_receipt_files_invalid,
+        report.summary.promoted_entries_with_promotion_receipt,
+        report.summary.promoted_entries_missing_promotion_receipt,
         report.summary.review_events_checked,
         report.summary.proposals,
         report.summary.filtered_out_proposals,
@@ -5903,6 +6017,51 @@ struct AdaptiveWikiReviewProposalLifecycleSummary {
     rejected_proposals: usize,
     superseded_proposals: usize,
     stale_decision_proposals: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AdaptiveWikiPromotionReceiptLoadReport {
+    receipts: Vec<AdaptiveWikiPromotionReceipt>,
+    invalid_files: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct AdaptiveWikiPromotionReceiptCoverage {
+    with_receipt: usize,
+    missing_receipt: usize,
+}
+
+fn promotion_receipt_coverage(
+    entries: &[AdaptiveWikiEntry],
+    receipts: &[AdaptiveWikiPromotionReceipt],
+) -> AdaptiveWikiPromotionReceiptCoverage {
+    let receipted_entry_ids = receipts
+        .iter()
+        .filter(|receipt| receipt.status == "promoted")
+        .map(|receipt| receipt.entry_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut coverage = AdaptiveWikiPromotionReceiptCoverage::default();
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.status == AdaptiveWikiStatus::Promoted)
+    {
+        if receipted_entry_ids.contains(entry.id.as_str()) {
+            coverage.with_receipt += 1;
+        } else {
+            coverage.missing_receipt += 1;
+        }
+    }
+    coverage
+}
+
+fn promotion_receipt_filename(receipt: &AdaptiveWikiPromotionReceipt) -> String {
+    let timestamp = receipt.generated_at.format("%Y%m%dT%H%M%SZ");
+    format!(
+        "adaptive_wiki_promotion_receipt_{}_{}_{}.json",
+        timestamp,
+        markdown_slug(&receipt.entry_id, "entry"),
+        markdown_slug(&receipt.receipt_id, "receipt")
+    )
 }
 
 struct AdaptiveWikiReviewProposalLifecycleContext<'a> {
