@@ -13,6 +13,7 @@ pub mod profile;
 pub mod project;
 pub mod project_audit;
 pub mod remove;
+pub mod review_surface;
 pub mod session;
 pub mod sounds;
 pub mod status;

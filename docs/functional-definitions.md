@@ -513,7 +513,7 @@ Acceptance Criteria:
   dumps.
 
 Primary Surfaces:
-- Proposed `forager ondesk review-surface --json`.
+- `forager ondesk review-surface --json`.
 - Future WebUI.
 - Telegram "details" link target.
 - Prompt-package summary.

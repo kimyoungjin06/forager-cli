@@ -14,6 +14,7 @@ use uuid::Uuid;
 use super::project_audit::{
     audit_recommendations_for_project, AuditRecommendation, DocumentationAuditProfile,
 };
+use super::review_surface::{self, ReviewSurfaceArgs};
 use crate::offdesk::operator_safe_text;
 use crate::session::{get_profile_dir, Instance, Storage};
 
@@ -44,6 +45,10 @@ pub enum OndeskCommands {
     /// Build a markdown prompt package from recent notes and optional capture
     #[command(name = "prompt-package")]
     PromptPackage(PromptPackageArgs),
+
+    /// Emit the shared JSON review surface for Ondesk and future rich UIs
+    #[command(name = "review-surface")]
+    ReviewSurface(ReviewSurfaceArgs),
 }
 
 #[derive(Args)]
@@ -353,6 +358,7 @@ pub async fn run(profile: &str, command: OndeskCommands) -> Result<()> {
         OndeskCommands::Note(args) => note(profile, args).await,
         OndeskCommands::Capture(args) => capture(profile, args).await,
         OndeskCommands::PromptPackage(args) => prompt_package(profile, args).await,
+        OndeskCommands::ReviewSurface(args) => review_surface::run(profile, args).await,
     }
 }
 
