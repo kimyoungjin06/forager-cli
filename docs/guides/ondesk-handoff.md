@@ -153,8 +153,12 @@ using the same operator-next-step contract as `forager status`, `offdesk pending
 `decision_record.v1` parent record, built through the shared producer helper, so
 the handoff can be ingested into the profile decision ledger with
 `forager offdesk decision ingest-telegram` when the operator replies. The
-rendered message hides raw paths and ids. Those remain in the request, state,
-and result JSON for audit/debugging. The relay writes the state beside the result as
+handoff summary reads `closeout_receipt.acceptance_status` when a closeout
+review receipt exists. `accepted` means the output can move into Ondesk review;
+`approved_with_followups`, `revision_required`, and `blocked` remain visible as
+review-required states rather than accepted truth. The rendered message hides
+raw paths and ids. Those remain in the request, state, and result JSON for
+audit/debugging. The relay writes the state beside the result as
 `<result-stem>.telegram_decision_state.json`, so simultaneous handoff and
 council prompts in the same directory do not overwrite each other's state
 artifacts.
