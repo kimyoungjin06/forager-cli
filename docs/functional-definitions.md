@@ -705,6 +705,7 @@ Outputs:
 - Promotion/deprecation events.
 - Markdown projections.
 - Proposal receipts.
+- Promotion receipts.
 
 Authorization Boundary:
 - Candidate creation is provisional.
@@ -714,6 +715,10 @@ Authorization Boundary:
 Acceptance Criteria:
 - Candidates remain findable without polluting canonical instructions.
 - Promotions carry evidence and review receipts.
+- Promotion mutations write a durable receipt that links candidate, entry, and
+  audit state.
+- Review reports summarize promotion receipt coverage and invalid receipt files
+  for promoted entries.
 - Conflicts produce review actions rather than silent overwrites.
 - Long-running projects can prune or archive stale knowledge safely.
 

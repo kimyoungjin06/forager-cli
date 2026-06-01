@@ -30,7 +30,8 @@ use crate::offdesk::{
     AdaptiveWikiMarkdownExportReport, AdaptiveWikiOrigin, AdaptiveWikiProjectionBudget,
     AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionPolicy,
     AdaptiveWikiProjectionReport, AdaptiveWikiProjectionReviewExpiredPolicy,
-    AdaptiveWikiPromotionEvidenceChainReport, AdaptiveWikiQuery, AdaptiveWikiReviewProposal,
+    AdaptiveWikiPromotionEvidenceChainReport, AdaptiveWikiPromotionReceipt,
+    AdaptiveWikiPromotionReceiptAuthority, AdaptiveWikiQuery, AdaptiveWikiReviewProposal,
     AdaptiveWikiReviewProposalAction, AdaptiveWikiReviewProposalDecision,
     AdaptiveWikiReviewProposalEventRecord, AdaptiveWikiReviewQueueFilter, AdaptiveWikiReviewReport,
     AdaptiveWikiRuntimePolicyAckScopeMode, AdaptiveWikiRuntimePolicyAcknowledgement,
@@ -2054,6 +2055,8 @@ enum WikiMutationResult {
     Promote {
         entry: AdaptiveWikiHumanEntry,
         audit: AdaptiveWikiAuditRecord,
+        promotion_receipt: Box<AdaptiveWikiPromotionReceipt>,
+        promotion_receipt_path: String,
     },
     Reject {
         candidate: AdaptiveWikiHumanCandidate,
@@ -5742,14 +5745,45 @@ async fn wiki_promote(profile: &str, args: WikiPromoteArgs) -> Result<()> {
         before_scope: Some(wiki_candidate_scope(&candidate)),
         after_scope: Some(wiki_entry_scope(&entry)),
         activation_mode: Some(args.activation_mode),
-        candidate_snapshot: Some(candidate_snapshot),
+        candidate_snapshot: Some(candidate_snapshot.clone()),
         entry_snapshot: Some(entry_snapshot.clone()),
         now,
     });
     store.append_audit(&audit)?;
+    let promotion_receipt = AdaptiveWikiPromotionReceipt {
+        schema: AdaptiveWikiPromotionReceipt::schema_name().to_string(),
+        receipt_id: format!("wiki_promotion_receipt_{}", Uuid::new_v4()),
+        generated_at: now,
+        status: "promoted".to_string(),
+        read_only_review_artifact: true,
+        candidate_id: candidate.id.clone(),
+        entry_id: entry.id.clone(),
+        audit_id: audit.id.clone(),
+        actor: audit.actor.clone(),
+        reason: audit.reason.clone(),
+        activation_mode: args.activation_mode,
+        before_scope: wiki_candidate_scope(&candidate),
+        after_scope: wiki_entry_scope(&entry),
+        candidate_snapshot,
+        entry_snapshot: entry_snapshot.clone(),
+        authority: AdaptiveWikiPromotionReceiptAuthority {
+            canonical_mutation_recorded: true,
+            does_not_authorize: vec![
+                "future automatic projection without current policy checks".to_string(),
+                "cleanup, archive, file movement, or deletion".to_string(),
+                "provider/model retargeting or runtime launch".to_string(),
+                "accepted truth for task outputs".to_string(),
+            ],
+        },
+    };
+    let promotion_receipt_path = store.write_promotion_receipt(&promotion_receipt)?;
     let result = WikiMutationResult::Promote {
         entry: entry_snapshot,
         audit,
+        promotion_receipt: Box::new(promotion_receipt),
+        promotion_receipt_path: crate::offdesk::operator_safe_text(
+            promotion_receipt_path.to_string_lossy().as_ref(),
+        ),
     };
     print_wiki_mutation(&result, args.json)
 }
@@ -10353,7 +10387,12 @@ fn print_wiki_mutation(result: &WikiMutationResult, json: bool) -> Result<()> {
     }
 
     match result {
-        WikiMutationResult::Promote { entry, audit } => {
+        WikiMutationResult::Promote {
+            entry,
+            audit,
+            promotion_receipt,
+            promotion_receipt_path,
+        } => {
             println!("Promoted adaptive wiki candidate to entry {}", entry.id);
             println!(
                 "  scope: {}",
@@ -10365,6 +10404,8 @@ fn print_wiki_mutation(result: &WikiMutationResult, json: bool) -> Result<()> {
                 adaptive_wiki_agent_modes_label(&entry.agent_modes)
             );
             println!("  audit: {}", audit.id);
+            println!("  receipt: {}", promotion_receipt.receipt_id);
+            println!("  receipt_path: {promotion_receipt_path}");
         }
         WikiMutationResult::Reject { candidate, audit } => {
             println!("Rejected adaptive wiki candidate {}", candidate.id);
@@ -10897,6 +10938,13 @@ fn print_wiki_review_report(report: &AdaptiveWikiReviewReport) {
         report.summary.accepted_proposals,
         report.summary.rejected_proposals,
         report.summary.superseded_proposals
+    );
+    println!(
+        "  promotion receipts: {} checked, {} invalid files, {} promoted entries covered, {} missing receipts",
+        report.summary.promotion_receipts_checked,
+        report.summary.promotion_receipt_files_invalid,
+        report.summary.promoted_entries_with_promotion_receipt,
+        report.summary.promoted_entries_missing_promotion_receipt
     );
     if report.summary.stale_decision_proposals > 0 {
         println!(

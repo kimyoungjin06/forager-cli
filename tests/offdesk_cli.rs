@@ -3731,6 +3731,78 @@ fn offdesk_wiki_review_commands_mutate_entries_and_append_audit() -> Result<()> 
         .to_string();
     assert_eq!(promoted["audit"]["entry_snapshot"]["id"], entry_id.as_str());
     assert_eq!(promoted["audit"]["entry_snapshot"]["scope_ref"], "report");
+    assert_eq!(
+        promoted["promotion_receipt"]["schema"],
+        "adaptive_wiki_promotion_receipt.v1"
+    );
+    assert_eq!(promoted["promotion_receipt"]["status"], "promoted");
+    assert_eq!(
+        promoted["promotion_receipt"]["candidate_id"],
+        "wiki_candidate_promote"
+    );
+    assert_eq!(promoted["promotion_receipt"]["entry_id"], entry_id.as_str());
+    assert_eq!(
+        promoted["promotion_receipt"]["audit_id"],
+        promoted["audit"]["id"]
+    );
+    assert_eq!(
+        promoted["promotion_receipt"]["authority"]["canonical_mutation_recorded"],
+        true
+    );
+    let promotion_receipt_path = PathBuf::from(
+        promoted["promotion_receipt_path"]
+            .as_str()
+            .expect("promotion receipt path"),
+    );
+    assert!(promotion_receipt_path.is_file());
+    let promotion_receipt_file = fs::read_to_string(&promotion_receipt_path)?;
+    assert!(!promotion_receipt_file.contains(secret));
+
+    let review_after_promotion_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "review", "--dry-run", "--json"])
+        .output()?;
+    assert!(review_after_promotion_output.status.success());
+    let review_after_promotion: serde_json::Value =
+        serde_json::from_slice(&review_after_promotion_output.stdout)?;
+    assert_eq!(
+        review_after_promotion["summary"]["promotion_receipts_checked"],
+        1
+    );
+    assert_eq!(
+        review_after_promotion["summary"]["promotion_receipt_files_invalid"],
+        0
+    );
+    assert_eq!(
+        review_after_promotion["summary"]["promoted_entries_with_promotion_receipt"],
+        1
+    );
+    assert_eq!(
+        review_after_promotion["summary"]["promoted_entries_missing_promotion_receipt"],
+        0
+    );
+    let invalid_receipt_path = promotion_receipt_path
+        .parent()
+        .expect("promotion receipt parent")
+        .join("broken_promotion_receipt.json");
+    fs::write(&invalid_receipt_path, "{not valid json")?;
+    let review_with_invalid_receipt_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "review", "--dry-run", "--json"])
+        .output()?;
+    assert!(review_with_invalid_receipt_output.status.success());
+    let review_with_invalid_receipt: serde_json::Value =
+        serde_json::from_slice(&review_with_invalid_receipt_output.stdout)?;
+    assert_eq!(
+        review_with_invalid_receipt["summary"]["promotion_receipts_checked"],
+        1
+    );
+    assert_eq!(
+        review_with_invalid_receipt["summary"]["promotion_receipt_files_invalid"],
+        1
+    );
+    assert_eq!(
+        review_with_invalid_receipt["summary"]["promoted_entries_with_promotion_receipt"],
+        1
+    );
 
     let candidates_after_promote: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         profile_dir.join("adaptive_wiki_candidates.json"),
