@@ -66,6 +66,26 @@ Only an `approved` review record clears the TUI's closeout-required signal.
 `revise` and `blocked` verdicts are preserved as evidence but keep the return
 path reviewable.
 
+`forager offdesk closeout-review` also writes a `closeout_receipt.v1` artifact:
+
+```text
+closeout_receipt_<timestamp>.json
+```
+
+The receipt separates the review verdict from accepted truth:
+
+- `accepted`: the closeout was approved with no tracked follow-ups.
+- `approved_with_followups`: the closeout verdict is approved, but open
+  decisions, missing evidence, required first reads, retention review, stale
+  tasks, or wiki/documentation follow-ups remain.
+- `revision_required`: the reviewer returned `revise`.
+- `blocked`: the reviewer returned `blocked`.
+
+The receipt is also inserted into `RETURN_PACKAGE.md` so the next Ondesk harness
+can see whether it is resuming from accepted work or from an approved package
+with follow-ups. It still does not approve file operations, cleanup, provider
+retargeting, or wiki promotion.
+
 ## Cleanup Policy
 
 Closeout classifies files but does not apply changes:
@@ -132,6 +152,11 @@ matching closeout return package and the latest recorded closeout-review
 verdict, when those artifacts exist. This makes the normal morning return path
 start from a fresh package instead of requiring the operator to manually paste
 the closeout artifact path.
+
+When a closeout receipt exists, the prompt package also surfaces
+`closeout_receipt_status` and the receipt artifact path. The next harness should
+treat `approved_with_followups`, `revision_required`, and `blocked` as review
+states, not as accepted final truth.
 
 When no closeout exists, or when the next harness needs a current governance
 view, use:

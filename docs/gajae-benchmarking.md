@@ -202,6 +202,17 @@ Minimum receipt dimensions:
 - retention or disposal recommendation;
 - reviewer verdict.
 
+First implementation slice:
+
+- `forager offdesk closeout-review` writes a `closeout_receipt.v1` artifact next
+  to the closeout plan.
+- `accepted` is reserved for approved closeouts with no tracked follow-ups.
+- `approved_with_followups` records an approved review where open decisions,
+  missing evidence, required first reads, retention review, stale tasks, or
+  wiki/documentation follow-ups still remain.
+- `RETURN_PACKAGE.md` and `forager ondesk prompt-package` surface the receipt
+  status for the next harness.
+
 ## P2: Gajae-Code As A Hosted Harness Candidate
 
 Gajae-Code may later become one hosted harness profile among Codex, Claude Code,

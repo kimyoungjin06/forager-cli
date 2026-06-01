@@ -156,7 +156,14 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
         closeout_dir.join("closeout_review_20260521T000000Z.json"),
         serde_json::to_string_pretty(&json!({
             "reviewed_at": generated_at,
-            "verdict": "approved"
+            "verdict": "approved",
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "acceptance_status": "approved_with_followups"
+            },
+            "artifacts": {
+                "closeout_receipt_json": closeout_dir.join("closeout_receipt_20260521T000000Z.json")
+            }
         }))?,
     )?;
 
@@ -178,6 +185,10 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
     assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
     assert_eq!(
+        json["latest_closeout"]["receipt_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(
         json["documentation_governance"]["source"],
         "latest_closeout_return_package"
     );
@@ -187,6 +198,7 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Latest Offdesk Return Package"));
     assert!(content.contains("Night result summary"));
     assert!(content.contains("review_verdict: approved"));
+    assert!(content.contains("closeout_receipt_status: approved_with_followups"));
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
     Ok(())
