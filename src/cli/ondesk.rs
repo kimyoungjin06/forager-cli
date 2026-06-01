@@ -46,7 +46,7 @@ pub enum OndeskCommands {
     #[command(name = "prompt-package")]
     PromptPackage(PromptPackageArgs),
 
-    /// Emit the shared JSON review surface for Ondesk and future rich UIs
+    /// Emit the shared review surface for Ondesk and future rich UIs
     #[command(name = "review-surface")]
     ReviewSurface(ReviewSurfaceArgs),
 }
@@ -241,6 +241,7 @@ struct PromptPackageOutput {
     latest_closeout: Option<OndeskCloseoutSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     latest_project_initialization: Option<OndeskProjectInitializationSummary>,
+    review_surface: Value,
     documentation_governance: OndeskDocumentationGovernanceSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_path: Option<String>,
@@ -463,6 +464,8 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
 
     let project_initialization =
         latest_project_initialization(&context.profile_dir, &context.project_key)?;
+    let review_surface =
+        review_surface::build_review_surface_value(&context.profile, Some(&context.project_key))?;
     let documentation_governance = prompt_documentation_governance(
         false,
         Some(context.project_path.as_path()),
@@ -473,6 +476,7 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
         capture: &record,
         closeout: None,
         project_initialization: project_initialization.as_ref(),
+        review_surface: Some(&review_surface),
         documentation_governance: &documentation_governance,
     });
     fs::write(&capture_path, serde_json::to_string_pretty(&record)?)?;
@@ -513,12 +517,15 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
         capture_id,
         latest_closeout,
         latest_project_initialization,
+        review_surface,
         documentation_governance,
     ) = if let Some(capture_id) = args.capture_id {
         let capture = load_capture_by_id(&profile_dir, &capture_id)?;
         let closeout = latest_closeout_package(&profile_dir, &capture.project_key)?;
         let project_initialization =
             latest_project_initialization(&profile_dir, &capture.project_key)?;
+        let review_surface =
+            review_surface::build_review_surface_value(&profile_name, Some(&capture.project_key))?;
         let capture_audit_path = prompt_audit_path_for_capture(&capture)?;
         let audit_path =
             prompt_documentation_governance_project_path(closeout.as_ref(), &capture_audit_path);
@@ -535,6 +542,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
                 capture: &capture,
                 closeout: closeout.as_ref(),
                 project_initialization: project_initialization.as_ref(),
+                review_surface: Some(&review_surface),
                 documentation_governance: &documentation_governance,
             }),
             project_key,
@@ -542,6 +550,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             Some(capture.id),
             closeout.map(|package| package.summary),
             project_initialization.map(|package| package.summary),
+            review_surface,
             documentation_governance,
         )
     } else {
@@ -556,6 +565,10 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
         let closeout = latest_closeout_package(&context.profile_dir, &context.project_key)?;
         let project_initialization =
             latest_project_initialization(&context.profile_dir, &context.project_key)?;
+        let review_surface = review_surface::build_review_surface_value(
+            &context.profile,
+            Some(&context.project_key),
+        )?;
         let audit_path =
             prompt_documentation_governance_project_path(closeout.as_ref(), &context.project_path);
         let documentation_governance = prompt_documentation_governance(
@@ -572,6 +585,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             notes: &notes,
             closeout: closeout.as_ref(),
             project_initialization: project_initialization.as_ref(),
+            review_surface: Some(&review_surface),
             documentation_governance: &documentation_governance,
         });
         (
@@ -581,6 +595,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             None,
             closeout.map(|package| package.summary),
             project_initialization.map(|package| package.summary),
+            review_surface,
             documentation_governance,
         )
     };
@@ -607,6 +622,7 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
             note_count,
             latest_closeout,
             latest_project_initialization,
+            review_surface,
             documentation_governance,
             output_path,
             content: if truncated {
@@ -1384,6 +1400,7 @@ enum PromptPackageContext<'a> {
         capture: &'a OndeskCaptureRecord,
         closeout: Option<&'a OndeskCloseoutPackage>,
         project_initialization: Option<&'a OndeskProjectInitializationPackage>,
+        review_surface: Option<&'a Value>,
         documentation_governance: &'a OndeskDocumentationGovernanceSummary,
     },
     Live {
@@ -1394,6 +1411,7 @@ enum PromptPackageContext<'a> {
         notes: &'a [OndeskNoteRecord],
         closeout: Option<&'a OndeskCloseoutPackage>,
         project_initialization: Option<&'a OndeskProjectInitializationPackage>,
+        review_surface: Option<&'a Value>,
         documentation_governance: &'a OndeskDocumentationGovernanceSummary,
     },
 }
@@ -1404,6 +1422,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             capture,
             closeout,
             project_initialization,
+            review_surface,
             documentation_governance,
         } => render_prompt_package_parts(PromptPackageParts {
             profile: &capture.profile,
@@ -1416,6 +1435,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             capture_id: Some(&capture.id),
             closeout,
             project_initialization,
+            review_surface,
             documentation_governance,
         }),
         PromptPackageContext::Live {
@@ -1426,6 +1446,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             notes,
             closeout,
             project_initialization,
+            review_surface,
             documentation_governance,
         } => render_prompt_package_parts(PromptPackageParts {
             profile,
@@ -1438,6 +1459,7 @@ fn render_prompt_package(context: PromptPackageContext<'_>) -> String {
             capture_id: None,
             closeout,
             project_initialization,
+            review_surface,
             documentation_governance,
         }),
     }
@@ -1466,6 +1488,7 @@ struct PromptPackageParts<'a> {
     capture_id: Option<&'a str>,
     closeout: Option<&'a OndeskCloseoutPackage>,
     project_initialization: Option<&'a OndeskProjectInitializationPackage>,
+    review_surface: Option<&'a Value>,
     documentation_governance: &'a OndeskDocumentationGovernanceSummary,
 }
 
@@ -1487,6 +1510,10 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
         output.push_str(&format!("- tool: {}\n", session.tool));
     } else {
         output.push_str("- session: none\n");
+    }
+
+    if let Some(surface) = parts.review_surface {
+        render_review_surface_prompt_section(&mut output, surface);
     }
 
     output.push_str("\n## Operator Notes\n");
@@ -1667,6 +1694,86 @@ fn render_prompt_package_parts(parts: PromptPackageParts<'_>) -> String {
     output
 }
 
+fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
+    output.push_str("\n## Morning Review Surface\n");
+    output.push_str(&format!(
+        "- schema: {}\n",
+        value_text(surface, "/schema").unwrap_or("review_surface.v1")
+    ));
+    output.push_str(&format!(
+        "- status: {} ({})\n",
+        value_text(surface, "/status/label").unwrap_or("unknown"),
+        value_text(surface, "/status/severity").unwrap_or("unknown")
+    ));
+    if let Some(summary) = value_text(surface, "/status/summary") {
+        output.push_str(&format!("- status_summary: {summary}\n"));
+    }
+    output.push_str(&format!(
+        "- accepted_truth: {} via {}\n",
+        value_text(surface, "/accepted_truth/status").unwrap_or("unknown"),
+        value_text(surface, "/accepted_truth/source").unwrap_or("unknown")
+    ));
+    if let Some(status) = value_text(surface, "/accepted_truth/receipt_acceptance_status") {
+        output.push_str(&format!("- receipt_acceptance_status: {status}\n"));
+    }
+    if let Some(reason) = value_text(surface, "/accepted_truth/reason") {
+        output.push_str(&format!("- accepted_truth_reason: {reason}\n"));
+    }
+    output.push_str(&format!(
+        "- closeout: execution={}, review={}\n",
+        value_text(surface, "/closeout/execution_status").unwrap_or("unknown"),
+        value_text(surface, "/closeout/review_status").unwrap_or("unknown")
+    ));
+    if let Some(runtime) = value_text(surface, "/runtime/progress_summary") {
+        output.push_str(&format!("- runtime: {runtime}\n"));
+    }
+    output.push_str(&format!(
+        "- open_decisions: {}\n",
+        value_u64(surface, "/decisions/open_count").unwrap_or_default()
+    ));
+    output.push_str(&format!(
+        "- adaptive_wiki: {} candidate(s), {} review-due entry(s)\n",
+        value_u64(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
+        value_u64(surface, "/adaptive_wiki/review_due_count").unwrap_or_default()
+    ));
+    if let Some(actions) = surface
+        .get("next_safe_actions")
+        .and_then(Value::as_array)
+        .filter(|actions| !actions.is_empty())
+    {
+        output.push_str("- next_safe_actions:\n");
+        for action in actions.iter().take(3) {
+            output.push_str(&format!("  - {}\n", prompt_next_safe_action(action)));
+        }
+    }
+    if let Some(risks) = surface
+        .pointer("/closeout/unresolved_risks")
+        .and_then(Value::as_array)
+        .filter(|risks| !risks.is_empty())
+    {
+        output.push_str("- unresolved_risks:\n");
+        for risk in risks.iter().take(4).filter_map(Value::as_str) {
+            output.push_str(&format!("  - {}\n", safe(risk)));
+        }
+    }
+    if let Some(summaries) = surface
+        .pointer("/artifacts/summary")
+        .and_then(Value::as_array)
+        .filter(|summaries| !summaries.is_empty())
+    {
+        output.push_str("- artifact_summaries:\n");
+        for summary in summaries.iter().take(5) {
+            output.push_str(&format!(
+                "  - {}: {} [{}]\n",
+                value_text(summary, "/label").unwrap_or("Artifact"),
+                value_text(summary, "/why_it_matters").unwrap_or("Review before use."),
+                value_text(summary, "/retention_class").unwrap_or("review")
+            ));
+        }
+    }
+    output.push_str("- artifact_refs: available in `review_surface` JSON, omitted here unless needed for audit.\n");
+}
+
 fn render_documentation_governance_prompt_section(
     output: &mut String,
     governance: &OndeskDocumentationGovernanceSummary,
@@ -1739,6 +1846,52 @@ fn short_id(prefix: &str) -> String {
 
 fn safe(value: &str) -> String {
     operator_safe_text(value).trim().to_string()
+}
+
+fn value_text<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
+    value.pointer(pointer).and_then(Value::as_str)
+}
+
+fn value_u64(value: &Value, pointer: &str) -> Option<u64> {
+    value.pointer(pointer).and_then(Value::as_u64)
+}
+
+fn prompt_next_safe_action(action: &Value) -> String {
+    if !action.is_object() {
+        return action
+            .as_str()
+            .map(safe)
+            .unwrap_or_else(|| action.to_string());
+    }
+    let kind = action
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(safe)
+        .unwrap_or_else(|| "next".to_string());
+    let detail = action
+        .get("detail")
+        .and_then(Value::as_str)
+        .map(safe)
+        .unwrap_or_default();
+    let review = action
+        .get("requires_operator_review")
+        .and_then(Value::as_bool)
+        .map(|value| {
+            if value {
+                "operator review required"
+            } else {
+                "monitoring step"
+            }
+        });
+    let mut text = if detail.is_empty() {
+        kind
+    } else {
+        format!("{kind}: {detail}")
+    };
+    if let Some(review) = review {
+        text.push_str(&format!(" ({review})"));
+    }
+    text
 }
 
 fn shell_arg(value: &str) -> String {

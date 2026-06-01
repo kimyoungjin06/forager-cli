@@ -965,18 +965,20 @@ data is complete enough for review.
 
 ## Near-Term Functional Backlog
 
-Immediate P0 slice:
+Completed P0 slice:
 1. Implement `review_surface.v1` JSON generation from local profile state.
 2. Add a closeout and accepted-truth section to that packet.
 3. Add an artifact summary section that explains meaning before paths.
 4. Add tests that compare `forager status`, closeout review, and
    `review_surface.v1` first next-safe-action.
 
-P1 operator workflow slice:
+Completed P1 operator workflow slice:
 1. Project `review_surface.v1` into Ondesk prompt packages.
 2. Make Telegram detail replies use the same review packet summaries.
-3. Add an artifact index for long-running project outputs.
-4. Strengthen adaptive wiki promotion receipts and review summaries.
+
+Remaining P1 operator workflow slice:
+1. Add an artifact index for long-running project outputs.
+2. Strengthen adaptive wiki promotion receipts and review summaries.
 
 P2 expansion slice:
 1. Normalize hosted harness capability contracts for Claude Code, Codex,

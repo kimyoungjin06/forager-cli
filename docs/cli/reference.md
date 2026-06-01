@@ -2027,7 +2027,7 @@ Capture ondesk notes and prompt context from external harness work
 * `note` — Append a safe operator note for an ondesk session or project
 * `capture` — Capture live harness scrollback into an inspectable prompt package
 * `prompt-package` — Build a markdown prompt package from recent notes and optional capture
-* `review-surface` — Emit the shared JSON review surface for Ondesk and future rich UIs
+* `review-surface` — Emit the shared review surface for Ondesk and future rich UIs
 
 
 
@@ -2095,14 +2095,14 @@ Build a markdown prompt package from recent notes and optional capture
 
 ## `forager ondesk review-surface`
 
-Emit the shared JSON review surface for Ondesk and future rich UIs
+Emit the shared review surface for Ondesk and future rich UIs
 
 **Usage:** `forager ondesk review-surface [OPTIONS]`
 
 ###### **Options:**
 
 * `--project-key <PROJECT_KEY>` — Stable project key to focus the review packet. Defaults to all projects
-* `--json` — Emit compact JSON. Without this flag, pretty JSON is printed
+* `--json` — Emit compact JSON. Without this flag, a human summary is printed
 
 
 

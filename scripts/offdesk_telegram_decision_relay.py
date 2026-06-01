@@ -149,7 +149,7 @@ CARD_TEMPLATE = """<b>{headline}</b>
 {input_policy}{input_prompt_section}
 <b>범위</b>: {scope}"""
 DETAIL_TEMPLATE = """<b>{headline}</b>
-{why_recommendation_section}{failure_section}{evidence_section}{council_section}{next_action_section}{decision_impact_section}{reply_example_section}"""
+{why_recommendation_section}{review_surface_section}{failure_section}{evidence_section}{council_section}{next_action_section}{decision_impact_section}{reply_example_section}"""
 SECTION_TEMPLATE = """
 
 <b>{title}</b>
@@ -1615,6 +1615,62 @@ def render_why_recommendation_section(brief: dict[str, Any]) -> str:
     return render_lines_section("왜 이 추천인가", lines, max_items=3, max_chars=300)
 
 
+def render_review_surface_section(brief: dict[str, Any]) -> str:
+    surface = brief.get("review_surface")
+    if not isinstance(surface, dict):
+        return ""
+    lines: list[str] = []
+    status = surface.get("status") if isinstance(surface.get("status"), dict) else {}
+    accepted_truth = (
+        surface.get("accepted_truth") if isinstance(surface.get("accepted_truth"), dict) else {}
+    )
+    closeout = surface.get("closeout") if isinstance(surface.get("closeout"), dict) else {}
+    runtime = surface.get("runtime") if isinstance(surface.get("runtime"), dict) else {}
+    decisions = surface.get("decisions") if isinstance(surface.get("decisions"), dict) else {}
+    adaptive_wiki = surface.get("adaptive_wiki") if isinstance(surface.get("adaptive_wiki"), dict) else {}
+    if status.get("summary"):
+        lines.append(f"상태: {status.get('summary')}")
+    elif status.get("label"):
+        lines.append(f"상태: {status.get('label')} ({status.get('severity') or 'unknown'})")
+    if accepted_truth.get("status"):
+        reason = str(accepted_truth.get("reason") or "").strip()
+        line = f"Accepted truth: {accepted_truth.get('status')}"
+        if accepted_truth.get("receipt_acceptance_status"):
+            line += f" / receipt {accepted_truth.get('receipt_acceptance_status')}"
+        if reason:
+            line += f" - {reason}"
+        lines.append(line)
+    if closeout.get("review_status") or closeout.get("execution_status"):
+        lines.append(
+            f"Closeout: review {closeout.get('review_status') or 'unknown'}, "
+            f"execution {closeout.get('execution_status') or 'unknown'}"
+        )
+    risks = closeout.get("unresolved_risks") if isinstance(closeout.get("unresolved_risks"), list) else []
+    if risks:
+        lines.append("남은 위험: " + "; ".join(str(item) for item in risks[:3]))
+    if runtime.get("progress_summary"):
+        lines.append(f"Runtime: {runtime.get('progress_summary')}")
+    open_count = decisions.get("open_count") if isinstance(decisions.get("open_count"), int) else 0
+    wiki_candidates = (
+        adaptive_wiki.get("candidate_count") if isinstance(adaptive_wiki.get("candidate_count"), int) else 0
+    )
+    review_due = (
+        adaptive_wiki.get("review_due_count") if isinstance(adaptive_wiki.get("review_due_count"), int) else 0
+    )
+    if open_count or wiki_candidates or review_due:
+        lines.append(f"Review queue: decisions {open_count}건, wiki candidates {wiki_candidates}건, due {review_due}건")
+    artifact_summaries = surface.get("artifact_summaries")
+    if isinstance(artifact_summaries, list):
+        for item in artifact_summaries[:3]:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "Artifact").strip()
+            why = str(item.get("why_it_matters") or "").strip()
+            if why:
+                lines.append(f"{label}: {why}")
+    return render_quote_section("Morning Review Surface", lines, expandable=len(lines) > 4, max_items=8, max_chars=320)
+
+
 def render_reply_example_section(request: dict[str, Any]) -> str:
     brief = brief_for(request)
     raw_examples = brief.get("reply_examples")
@@ -1695,12 +1751,14 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
         headline = f"{display_decision(recommendation)} 권고의 근거" if recommendation else "승인 요청의 근거"
     if brief:
         why_recommendation_section = render_why_recommendation_section(brief)
+        review_surface_section = render_review_surface_section(brief)
         failure_section = render_failure_section(brief)
         evidence_section = render_evidence_section(brief, detailed=True)
         council_section = render_council_section(brief, detailed=True)
         next_action_section = render_next_action_section(brief, detailed=True)
         if not (
             why_recommendation_section
+            or review_surface_section
             or failure_section
             or evidence_section
             or council_section
@@ -1710,6 +1768,7 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
         return DETAIL_TEMPLATE.format(
             headline=html.escape(headline),
             why_recommendation_section=why_recommendation_section,
+            review_surface_section=review_surface_section,
             failure_section=failure_section,
             evidence_section=evidence_section,
             council_section=council_section,

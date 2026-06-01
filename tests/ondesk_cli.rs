@@ -191,6 +191,40 @@ fn ondesk_review_surface_json_agrees_with_status_next_safe_action() -> Result<()
 
 #[test]
 #[serial]
+fn ondesk_review_surface_default_output_is_human_summary() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([offdesk_task_fixture(
+            "approval-task",
+            "pending_approval",
+            now
+        )]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["ondesk", "review-surface", "--project-key", "project"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Morning Review Surface"));
+    assert!(stdout.contains("status: needs_review"));
+    assert!(stdout.contains("accepted truth:"));
+    assert!(stdout.contains("next safe actions:"));
+    assert!(stdout.contains("refs: use --json for audit paths"));
+    assert!(!stdout.contains(profile_dir.to_string_lossy().as_ref()));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -402,6 +436,11 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
         String::from_utf8_lossy(&output.stderr)
     );
     let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["review_surface"]["schema"], "review_surface.v1");
+    assert_eq!(
+        json["review_surface"]["accepted_truth"]["receipt_acceptance_status"],
+        "approved_with_followups"
+    );
     assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
     assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
     assert_eq!(
@@ -413,6 +452,10 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
         "latest_closeout_return_package"
     );
     let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("Morning Review Surface"));
+    assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
+    assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
+    assert!(content.contains("artifact_summaries"));
     assert!(content.contains("Documentation Governance Source"));
     assert!(content.contains("source: `latest_closeout_return_package`"));
     assert!(content.contains("Latest Offdesk Return Package"));

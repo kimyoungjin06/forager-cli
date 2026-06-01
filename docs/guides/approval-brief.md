@@ -117,9 +117,10 @@ The budget is type-specific:
 | `ondesk_handoff` | Handoff time, closeout summary, remaining decisions, WebUI entry question, explicit scope. |
 
 The detail card should hold the dense material: recommendation rationale,
-failure summary, evidence, Council details, shared next safe actions, choice
-impacts, and reply examples. If the detail card has insufficient structured
-data, it should say that explicitly instead of dumping request JSON.
+review-surface summary when present, failure summary, evidence, Council details,
+shared next safe actions, choice impacts, and reply examples. If the detail card
+has insufficient structured data, it should say that explicitly instead of
+dumping request JSON.
 
 All user-facing card surfaces must reject raw paths, request ids, secret-like
 values, raw JSON key dumps, and trace-only state. Those values belong in the

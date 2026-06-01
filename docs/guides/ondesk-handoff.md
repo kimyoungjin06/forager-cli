@@ -128,13 +128,17 @@ operator start Ondesk review now, keep it pending, or defer with a natural
 language condition. It should not approve cleanup, wiki promotion, provider
 retargeting, file movement, or deletion.
 
-Build the request from closeout and prompt-package artifacts:
+Build the shared review packet, then build the request from closeout,
+prompt-package, and review-surface artifacts:
 
 ```bash
+forager ondesk review-surface --project-key twinpaper --json > "$REVIEW_SURFACE_JSON"
+
 scripts/build_ondesk_handoff_request.py \
   --project-key twinpaper \
   --closeout-artifact-dir "$CLOSEOUT_DIR" \
   --prompt-package "$ONDESK_PROMPT_PACKAGE" \
+  --review-surface "$REVIEW_SURFACE_JSON" \
   --webui-url "$FORAGER_WEBUI_URL" \
   --out "$HANDOFF_REQUEST_JSON"
 ```
@@ -156,9 +160,12 @@ the handoff can be ingested into the profile decision ledger with
 handoff summary reads `closeout_receipt.acceptance_status` when a closeout
 review receipt exists. `accepted` means the output can move into Ondesk review;
 `approved_with_followups`, `revision_required`, and `blocked` remain visible as
-review-required states rather than accepted truth. The rendered message hides
-raw paths and ids. Those remain in the request, state, and result JSON for
-audit/debugging. The relay writes the state beside the result as
+review-required states rather than accepted truth. When a `review_surface.v1`
+packet is provided, Telegram detail replies render the same review summary used
+by `forager ondesk prompt-package`, including accepted-truth state, closeout
+risks, review queue counts, and artifact meanings before any paths. The rendered
+message hides raw paths and ids. Those remain in the request, state, and result
+JSON for audit/debugging. The relay writes the state beside the result as
 `<result-stem>.telegram_decision_state.json`, so simultaneous handoff and
 council prompts in the same directory do not overwrite each other's state
 artifacts.
