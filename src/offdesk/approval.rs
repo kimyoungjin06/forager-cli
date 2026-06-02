@@ -90,7 +90,8 @@ impl PendingActionApproval {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActionApprovalMetadata {
-    ProviderFallback(ProviderFallbackApprovalMetadata),
+    ProviderFallback(Box<ProviderFallbackApprovalMetadata>),
+    ArtifactRetention(Box<ArtifactRetentionApprovalMetadata>),
 }
 
 impl ActionApprovalMetadata {
@@ -112,24 +113,41 @@ impl ActionApprovalMetadata {
         let approval_brief =
             ApprovalBrief::provider_fallback(recommendation, runner_role, &candidates);
 
-        Some(Self::ProviderFallback(ProviderFallbackApprovalMetadata {
-            current_provider_id: operator_safe_text(&recommendation.current_provider_id),
-            current_model: recommendation
-                .current_model
-                .as_deref()
-                .map(operator_safe_text),
-            runner_role: operator_safe_text(runner_role),
-            generated_at: recommendation.generated_at,
-            candidate_limit,
-            candidates,
-            apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
-            approval_brief: Some(approval_brief),
-        }))
+        Some(Self::ProviderFallback(Box::new(
+            ProviderFallbackApprovalMetadata {
+                current_provider_id: operator_safe_text(&recommendation.current_provider_id),
+                current_model: recommendation
+                    .current_model
+                    .as_deref()
+                    .map(operator_safe_text),
+                runner_role: operator_safe_text(runner_role),
+                generated_at: recommendation.generated_at,
+                candidate_limit,
+                candidates,
+                apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
+                approval_brief: Some(approval_brief),
+            },
+        )))
     }
 
     pub fn as_provider_fallback(&self) -> Option<&ProviderFallbackApprovalMetadata> {
         match self {
             Self::ProviderFallback(metadata) => Some(metadata),
+            Self::ArtifactRetention(_) => None,
+        }
+    }
+
+    pub fn as_artifact_retention(&self) -> Option<&ArtifactRetentionApprovalMetadata> {
+        match self {
+            Self::ArtifactRetention(metadata) => Some(metadata),
+            Self::ProviderFallback(_) => None,
+        }
+    }
+
+    pub fn approval_brief(&self) -> Option<&ApprovalBrief> {
+        match self {
+            Self::ProviderFallback(metadata) => metadata.approval_brief.as_ref(),
+            Self::ArtifactRetention(metadata) => metadata.approval_brief.as_ref(),
         }
     }
 }
@@ -287,6 +305,31 @@ pub struct ProviderFallbackApprovalMetadata {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFallbackApplyScope {
     RequestMatchingProviderModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactRetentionApprovalMetadata {
+    pub generated_at: DateTime<Utc>,
+    pub artifact_id: String,
+    pub label: String,
+    pub source: String,
+    pub artifact_kind: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    pub present: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    pub retention_class: String,
+    pub review_status: String,
+    pub recommended_action: String,
+    pub requested_action: String,
+    pub reason: String,
+    pub why_it_matters: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_brief: Option<ApprovalBrief>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1186,7 +1229,7 @@ mod tests {
     }
 
     fn provider_fallback_metadata(now: DateTime<Utc>) -> ActionApprovalMetadata {
-        ActionApprovalMetadata::ProviderFallback(ProviderFallbackApprovalMetadata {
+        ActionApprovalMetadata::ProviderFallback(Box::new(ProviderFallbackApprovalMetadata {
             current_provider_id: "openai".to_string(),
             current_model: Some("gpt-4.1".to_string()),
             runner_role: "worker".to_string(),
@@ -1203,7 +1246,7 @@ mod tests {
             }],
             apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
             approval_brief: None,
-        })
+        }))
     }
 
     #[test]

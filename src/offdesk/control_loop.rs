@@ -1019,7 +1019,7 @@ mod tests {
             resolved_at: Some(now),
             resolved_by: Some("operator".to_string()),
             source_surface: "test".to_string(),
-            metadata: Some(ActionApprovalMetadata::ProviderFallback(
+            metadata: Some(ActionApprovalMetadata::ProviderFallback(Box::new(
                 ProviderFallbackApprovalMetadata {
                     current_provider_id: "openai".to_string(),
                     current_model: Some("gpt-4.1".to_string()),
@@ -1030,7 +1030,7 @@ mod tests {
                     apply_scope: ProviderFallbackApplyScope::RequestMatchingProviderModel,
                     approval_brief: None,
                 },
-            )),
+            ))),
         }
     }
 

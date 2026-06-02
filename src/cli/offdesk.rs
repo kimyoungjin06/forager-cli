@@ -11187,22 +11187,26 @@ fn print_approval_views(approvals: &[OffdeskPendingApprovalView]) {
         if !approval.reason.trim().is_empty() {
             println!("  reason:  {}", approval.reason);
         }
+        if let Some(brief) = approval
+            .metadata
+            .as_ref()
+            .and_then(crate::offdesk::ActionApprovalMetadata::approval_brief)
+        {
+            println!(
+                "  prompt: {} recommendation for {}",
+                brief.recommendation, brief.subject
+            );
+            for line in brief.summary_lines.iter().take(3) {
+                println!("    {}", line);
+            }
+            println!("  question: {}", brief.question);
+            println!("  scope: {}", brief.scope);
+        }
         if let Some(metadata) = approval
             .metadata
             .as_ref()
             .and_then(crate::offdesk::ActionApprovalMetadata::as_provider_fallback)
         {
-            if let Some(brief) = metadata.approval_brief.as_ref() {
-                println!(
-                    "  prompt: {} recommendation for {}",
-                    brief.recommendation, brief.subject
-                );
-                for line in brief.summary_lines.iter().take(3) {
-                    println!("    {}", line);
-                }
-                println!("  question: {}", brief.question);
-                println!("  scope: {}", brief.scope);
-            }
             println!(
                 "  fallback target: {} model {} ({})",
                 metadata.current_provider_id,
@@ -11217,6 +11221,20 @@ fn print_approval_views(approvals: &[OffdeskPendingApprovalView]) {
                     candidate.source
                 );
             }
+        }
+        if let Some(metadata) = approval
+            .metadata
+            .as_ref()
+            .and_then(crate::offdesk::ActionApprovalMetadata::as_artifact_retention)
+        {
+            println!(
+                "  artifact: {} [{} / {}]",
+                metadata.label, metadata.retention_class, metadata.review_status
+            );
+            println!(
+                "  requested: {} recommended: {}",
+                metadata.requested_action, metadata.recommended_action
+            );
         }
         print_next_safe_action(&approval_view.next_safe_action);
     }
