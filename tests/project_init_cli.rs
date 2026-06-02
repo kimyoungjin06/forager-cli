@@ -1076,5 +1076,119 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
     assert!(pending_stdout.contains("Approve the promote retention follow-up?"));
     assert!(pending_stdout.contains("artifact: Unreferenced human-facing output"));
     assert!(!pending_stdout.contains("outputs/plot.png"));
+
+    let approval_id = approval["approval_id"].as_str().expect("approval id");
+    let approve_output = forager_command(temp.path())
+        .args(["offdesk", "ok", approval_id, "--json"])
+        .output()?;
+    assert!(
+        approve_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&approve_output.stdout),
+        String::from_utf8_lossy(&approve_output.stderr)
+    );
+    let approved: Value = serde_json::from_slice(&approve_output.stdout)?;
+    assert_eq!(approved["approval_id"], approval_id);
+    assert_eq!(approved["status"], "approved");
+
+    let approved_request_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-request",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--path",
+            "outputs/plot.png",
+            "--action",
+            "promote",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        approved_request_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&approved_request_output.stdout),
+        String::from_utf8_lossy(&approved_request_output.stderr)
+    );
+    let approved_request: Value = serde_json::from_slice(&approved_request_output.stdout)?;
+    assert_eq!(approved_request["status"], "already_approved");
+    assert!(approved_request["next_commands"]
+        .as_array()
+        .expect("approved next commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .unwrap_or_default()
+            .contains("retention-apply")));
+
+    let deliverables_before = fs::read_to_string(repo.join("DELIVERABLES.md"))?;
+    let apply_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-apply",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        apply_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&apply_output.stdout),
+        String::from_utf8_lossy(&apply_output.stderr)
+    );
+    let application: Value = serde_json::from_slice(&apply_output.stdout)?;
+    assert_eq!(application["schema"], "artifact_retention_application.v1");
+    assert_eq!(application["status"], "applied_plan_recorded");
+    assert_eq!(application["approval_id"], approval_id);
+    assert_eq!(application["requested_action"], "promote");
+    assert_eq!(application["target"]["relative_path"], "outputs/plot.png");
+    assert_eq!(application["operation"]["mutation_performed"], false);
+    assert_eq!(application["operation"]["plan_only"], true);
+    assert!(application["operation"]["blockers"]
+        .as_array()
+        .expect("blockers")
+        .iter()
+        .any(|blocker| blocker
+            .as_str()
+            .unwrap_or_default()
+            .contains("DELIVERABLES.md")));
+    assert_eq!(application["approval"]["before_status"], "approved");
+    assert_eq!(application["approval"]["after_status"], "superseded");
+    assert_eq!(application["approval"]["consumed"], true);
+    assert_eq!(application["authority"]["writes_project_state"], false);
+    assert_eq!(application["authority"]["writes_files"], false);
+    let receipt_path = application["receipt_path"].as_str().expect("receipt path");
+    assert!(Path::new(receipt_path).exists());
+    let receipt: Value = serde_json::from_str(&fs::read_to_string(receipt_path)?)?;
+    assert_eq!(receipt["approval_id"], approval_id);
+    assert_eq!(
+        fs::read_to_string(repo.join("DELIVERABLES.md"))?,
+        deliverables_before
+    );
+
+    let stored_after_apply: Value = serde_json::from_str(&fs::read_to_string(&approvals_path)?)?;
+    assert_eq!(stored_after_apply[0]["approval_id"], approval_id);
+    assert_eq!(stored_after_apply[0]["status"], "superseded");
+
+    let apply_again_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-apply",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(!apply_again_output.status.success());
+    assert!(String::from_utf8_lossy(&apply_again_output.stderr)
+        .contains("must be approved before retention-apply"));
     Ok(())
 }

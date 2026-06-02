@@ -97,6 +97,17 @@ forager project retention-request /path/to/project --project-key <project> --art
 The request appears in `forager offdesk pending`; it does not mutate project
 files or consume the Ondesk review surface itself.
 
+Once approved, use `retention-apply` to consume the decision into a
+profile-local receipt before planning any project mutation:
+
+```bash
+forager project retention-apply /path/to/project --project-key <project> --approval-id <approval-id>
+```
+
+This records `artifact_retention_application.v1` with
+`mutation_performed=false`. It is the handoff record that a later deliverables,
+archive, or disposal workflow should reference.
+
 ## Knowledge Policy
 
 - `ondesk note` stores redacted, operator-safe JSONL in `ondesk_notes.jsonl`.

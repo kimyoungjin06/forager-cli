@@ -20,6 +20,10 @@ use crate::session::get_profile_dir;
 
 const ARTIFACT_INDEX_SCHEMA: &str = "artifact_index.v1";
 const ARTIFACT_RETENTION_REVIEW_SCHEMA: &str = "artifact_retention_review.v1";
+const ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA: &str = "artifact_retention_approval_request.v1";
+const ARTIFACT_RETENTION_APPLICATION_SCHEMA: &str = "artifact_retention_application.v1";
+const ARTIFACT_RETENTION_APPLICATIONS_DIR: &str = "artifact_retention_applications";
+const RETENTION_APPROVAL_ACTION: &str = "maintenance.artifact_cleanup";
 const DELIVERABLE_EXTENSIONS: &[&str] = &[".html", ".png", ".jpg", ".jpeg", ".pdf"];
 const OUTPUT_ROOTS: &[&str] = &["outputs", "web", "deliverables", "previews", "gallery"];
 const MAX_INDEX_ENTRIES: usize = 240;
@@ -92,6 +96,29 @@ pub struct ProjectRetentionRequestArgs {
     /// Pending approval TTL in minutes
     #[arg(long, default_value_t = 30)]
     ttl_minutes: i64,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProjectRetentionApplyArgs {
+    /// Project repository/root directory related to the approved retention decision.
+    /// Defaults to the current directory.
+    path: Option<PathBuf>,
+
+    /// Stable project key used to validate the approved retention decision
+    #[arg(long)]
+    project_key: String,
+
+    /// Approved artifact retention approval ID to consume
+    #[arg(long)]
+    approval_id: String,
+
+    /// Write the receipt to this path instead of the profile receipt directory
+    #[arg(long)]
+    receipt_out: Option<PathBuf>,
 
     /// Output machine-readable JSON
     #[arg(long)]
@@ -304,6 +331,74 @@ struct ArtifactRetentionApprovalRequestAuthority {
     does_not_authorize: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApplicationReport {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    status: String,
+    project_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_root: Option<String>,
+    approval_id: String,
+    request_id: String,
+    task_id: String,
+    action: &'static str,
+    requested_action: String,
+    risk_level: RiskLevel,
+    target: ArtifactRetentionApplicationTarget,
+    operation: ArtifactRetentionApplicationOperation,
+    approval: ArtifactRetentionApplicationApproval,
+    receipt_path: String,
+    next_actions: Vec<String>,
+    authority: ArtifactRetentionApplicationAuthority,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApplicationTarget {
+    artifact_id: String,
+    label: String,
+    source: String,
+    kind: String,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relative_path: Option<String>,
+    present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<u64>,
+    retention_class: String,
+    review_status: String,
+    why_it_matters: String,
+    refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApplicationOperation {
+    operation_id: String,
+    mutation_performed: bool,
+    plan_only: bool,
+    disposition: String,
+    summary: String,
+    planned_changes: Vec<String>,
+    blockers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApplicationApproval {
+    before_status: ApprovalStatus,
+    after_status: ApprovalStatus,
+    consumed: bool,
+    consumed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApplicationAuthority {
+    consumes_approval: bool,
+    writes_profile_receipt: bool,
+    writes_project_state: bool,
+    writes_files: bool,
+    does_not_authorize: Vec<&'static str>,
+}
+
 struct EntryInput {
     label: String,
     source: String,
@@ -379,14 +474,21 @@ pub async fn run_retention_request(profile: &str, args: ProjectRetentionRequestA
     Ok(())
 }
 
+pub async fn run_retention_apply(profile: &str, args: ProjectRetentionApplyArgs) -> Result<()> {
+    let json = args.json;
+    let report = build_retention_application(profile, args)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", retention_application_human_summary(&report));
+    }
+    Ok(())
+}
+
 fn build_retention_approval_request(
     profile: &str,
     args: ProjectRetentionRequestArgs,
 ) -> Result<ArtifactRetentionApprovalRequestReport> {
-    const ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA: &str =
-        "artifact_retention_approval_request.v1";
-    const RETENTION_APPROVAL_ACTION: &str = "maintenance.artifact_cleanup";
-
     let project_root = resolve_project_root(args.path.as_deref())?;
     let project_key = operator_safe_text(args.project_key.trim());
     if project_key.trim().is_empty() {
@@ -515,6 +617,384 @@ fn retention_request_human_summary(report: &ArtifactRetentionApprovalRequestRepo
     }
     lines.push(String::new());
     lines.join("\n")
+}
+
+fn build_retention_application(
+    profile: &str,
+    args: ProjectRetentionApplyArgs,
+) -> Result<ArtifactRetentionApplicationReport> {
+    let project_root = resolve_project_root(args.path.as_deref())?;
+    let project_key = operator_safe_text(args.project_key.trim());
+    if project_key.trim().is_empty() {
+        bail!("--project-key cannot be empty");
+    }
+    let approval_id = operator_safe_text(args.approval_id.trim());
+    if approval_id.trim().is_empty() {
+        bail!("--approval-id cannot be empty");
+    }
+
+    let generated_at = Utc::now();
+    let profile_name = if profile.is_empty() {
+        "default"
+    } else {
+        profile
+    };
+    let profile_dir = get_profile_dir(profile_name)?;
+    let ledger = ApprovalLedger::new(profile_dir.clone());
+    let (mut session, _) = ledger.begin_session(generated_at)?;
+    let approvals = ledger.load()?;
+    let approval = approvals
+        .iter()
+        .find(|approval| approval.approval_id == approval_id)
+        .cloned()
+        .with_context(|| format!("approval not found: {approval_id}"))?;
+
+    if approval.project_key != project_key {
+        bail!(
+            "approval {} belongs to project {}, not {}",
+            approval.approval_id,
+            approval.project_key,
+            project_key
+        );
+    }
+    if approval.action != RETENTION_APPROVAL_ACTION {
+        bail!(
+            "approval {} is for action {}, not {}",
+            approval.approval_id,
+            approval.action,
+            RETENTION_APPROVAL_ACTION
+        );
+    }
+    if approval.status != ApprovalStatus::Approved {
+        bail!(
+            "approval {} must be approved before retention-apply; current status is {}",
+            approval.approval_id,
+            retention_request_status(approval.status)
+        );
+    }
+    if approval.expires_at < generated_at {
+        bail!("approval {} is expired", approval.approval_id);
+    }
+
+    let metadata = approval
+        .metadata
+        .as_ref()
+        .and_then(ActionApprovalMetadata::as_artifact_retention)
+        .cloned()
+        .with_context(|| {
+            format!(
+                "approval {} does not contain artifact_retention metadata",
+                approval.approval_id
+            )
+        })?;
+    let requested_action = operator_safe_text(&metadata.requested_action);
+    if !matches!(
+        requested_action.as_str(),
+        "keep" | "promote" | "archive" | "dispose"
+    ) {
+        bail!(
+            "approval {} has unsupported retention action {}",
+            approval.approval_id,
+            requested_action
+        );
+    }
+
+    let receipt_path =
+        resolve_retention_application_receipt_path(&profile_dir, generated_at, &approval, &args)?;
+    let target = retention_application_target(&metadata);
+    let operation =
+        retention_application_operation(&requested_action, &metadata, &approval.approval_id);
+    let next_actions = retention_application_next_actions(
+        project_root.as_deref(),
+        &project_key,
+        &requested_action,
+    );
+
+    let consumed = session
+        .supersede_approval(&approval.approval_id, "retention_application_consumed")
+        .with_context(|| {
+            format!(
+                "approval {} was not available for consumption",
+                approval.approval_id
+            )
+        })?;
+    session.flush()?;
+
+    let report = ArtifactRetentionApplicationReport {
+        schema: ARTIFACT_RETENTION_APPLICATION_SCHEMA,
+        generated_at,
+        status: "applied_plan_recorded".to_string(),
+        project_key,
+        project_root: project_root
+            .as_deref()
+            .map(|root| operator_safe_path(root.to_string_lossy().as_ref())),
+        approval_id: approval.approval_id.clone(),
+        request_id: approval.request_id.clone(),
+        task_id: approval.task_id.clone(),
+        action: RETENTION_APPROVAL_ACTION,
+        requested_action,
+        risk_level: approval.risk_level,
+        target,
+        operation,
+        approval: ArtifactRetentionApplicationApproval {
+            before_status: ApprovalStatus::Approved,
+            after_status: consumed.status,
+            consumed: consumed.status == ApprovalStatus::Superseded,
+            consumed_at: generated_at,
+        },
+        receipt_path: operator_safe_path(receipt_path.to_string_lossy().as_ref()),
+        next_actions,
+        authority: ArtifactRetentionApplicationAuthority {
+            consumes_approval: true,
+            writes_profile_receipt: true,
+            writes_project_state: false,
+            writes_files: false,
+            does_not_authorize: vec![
+                "delete files",
+                "move files",
+                "archive files",
+                "edit DELIVERABLES.md",
+                "publish outputs",
+                "accept output as truth without review",
+            ],
+        },
+    };
+    write_retention_application_receipt(&receipt_path, &report)?;
+    Ok(report)
+}
+
+fn retention_application_human_summary(report: &ArtifactRetentionApplicationReport) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("Artifact retention apply: {}", report.status));
+    lines.push(format!(
+        "  decision: {} -> {}",
+        report.approval_id, report.requested_action
+    ));
+    lines.push(format!(
+        "  target: {} [{} / {}]",
+        report.target.label, report.target.retention_class, report.target.review_status
+    ));
+    lines.push(format!("  plan: {}", report.operation.summary));
+    lines
+        .push("  boundary: approval consumed; no project file mutation was performed.".to_string());
+    lines.push(format!("  receipt: {}", report.receipt_path));
+    if !report.next_actions.is_empty() {
+        lines.push("Next actions:".to_string());
+        for action in &report.next_actions {
+            lines.push(format!("  - {action}"));
+        }
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn retention_application_target(
+    metadata: &ArtifactRetentionApprovalMetadata,
+) -> ArtifactRetentionApplicationTarget {
+    ArtifactRetentionApplicationTarget {
+        artifact_id: metadata.artifact_id.clone(),
+        label: metadata.label.clone(),
+        source: metadata.source.clone(),
+        kind: metadata.artifact_kind.clone(),
+        path: metadata.path.clone(),
+        relative_path: metadata.relative_path.clone(),
+        present: metadata.present,
+        bytes: metadata.bytes,
+        retention_class: metadata.retention_class.clone(),
+        review_status: metadata.review_status.clone(),
+        why_it_matters: metadata.why_it_matters.clone(),
+        refs: metadata.refs.clone(),
+    }
+}
+
+fn retention_application_operation(
+    requested_action: &str,
+    metadata: &ArtifactRetentionApprovalMetadata,
+    approval_id: &str,
+) -> ArtifactRetentionApplicationOperation {
+    let operation_id = format!(
+        "retention-application-{}",
+        sanitize_id_fragment(approval_id)
+    );
+    let (summary, planned_changes, blockers) = match requested_action {
+        "keep" => (
+            "Record the artifact as retained for future review manifests.".to_string(),
+            vec![
+                "Keep the artifact available while the project remains active.".to_string(),
+                "Use the next retention review to confirm the artifact still has a live role."
+                    .to_string(),
+            ],
+            Vec::new(),
+        ),
+        "promote" => (
+            "Prepare a reviewed deliverables promotion without editing DELIVERABLES.md here."
+                .to_string(),
+            vec![
+                "Review the artifact preview and provenance before relying on it.".to_string(),
+                "Update the deliverables surface through a separate reviewed canonical mutation."
+                    .to_string(),
+            ],
+            vec![
+                "This command does not edit DELIVERABLES.md.".to_string(),
+                "A promotion mutation should have its own snapshot or review receipt.".to_string(),
+            ],
+        ),
+        "archive" => (
+            "Prepare an archive workflow without moving the artifact here.".to_string(),
+            vec![
+                "Create an archive manifest entry that explains why the artifact is no longer primary."
+                    .to_string(),
+                "Run a later archive mutation only after snapshot and restore planning.".to_string(),
+            ],
+            vec![
+                "This command does not move files.".to_string(),
+                "Archive execution needs a separate mutation workflow and restore plan.".to_string(),
+            ],
+        ),
+        "dispose" => (
+            "Prepare a disposal workflow without deleting the artifact here.".to_string(),
+            vec![
+                "Confirm the artifact has no remaining review, deliverable, or provenance role."
+                    .to_string(),
+                "Run a later destructive mutation only after snapshot and restore planning."
+                    .to_string(),
+            ],
+            vec![
+                "This command does not delete files.".to_string(),
+                "Disposal execution needs a separate destructive approval and restore plan."
+                    .to_string(),
+            ],
+        ),
+        _ => (
+            "Unsupported retention action was recorded without mutation.".to_string(),
+            Vec::new(),
+            vec![format!(
+                "Unsupported retention action: {}",
+                operator_safe_text(requested_action)
+            )],
+        ),
+    };
+
+    let mut planned_changes = planned_changes;
+    planned_changes.push(format!(
+        "Decision basis: {}",
+        operator_safe_text(&metadata.reason)
+    ));
+
+    ArtifactRetentionApplicationOperation {
+        operation_id,
+        mutation_performed: false,
+        plan_only: true,
+        disposition: requested_action.to_string(),
+        summary,
+        planned_changes,
+        blockers,
+    }
+}
+
+fn retention_application_next_actions(
+    project_root: Option<&Path>,
+    project_key: &str,
+    requested_action: &str,
+) -> Vec<String> {
+    let review_command = project_root
+        .map(|root| {
+            format!(
+                "forager project retention-review {} --project-key {}",
+                shell_arg(&root.to_string_lossy()),
+                shell_arg(project_key)
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "forager project retention-review --project-key {}",
+                shell_arg(project_key)
+            )
+        });
+    let mut actions = vec![review_command];
+    match requested_action {
+        "keep" => {
+            actions.push(
+                "Confirm the next retention review shows no remaining action for this artifact."
+                    .to_string(),
+            );
+        }
+        "promote" => {
+            actions.push(
+                "Open the artifact preview/provenance, then perform a separate reviewed DELIVERABLES.md update."
+                    .to_string(),
+            );
+        }
+        "archive" => {
+            actions.push(
+                "Design a separate archive mutation with snapshot verification before moving files."
+                    .to_string(),
+            );
+        }
+        "dispose" => {
+            actions.push(
+                "Design a separate destructive cleanup with snapshot and restore plan before deleting files."
+                    .to_string(),
+            );
+        }
+        _ => {}
+    }
+    actions
+}
+
+fn resolve_retention_application_receipt_path(
+    profile_dir: &Path,
+    generated_at: DateTime<Utc>,
+    approval: &PendingActionApproval,
+    args: &ProjectRetentionApplyArgs,
+) -> Result<PathBuf> {
+    if let Some(path) = args.receipt_out.as_ref() {
+        if path.exists() {
+            bail!("receipt output already exists: {}", path.display());
+        }
+        return Ok(path.clone());
+    }
+
+    let timestamp = generated_at.format("%Y%m%dT%H%M%SZ");
+    let approval_id = sanitize_id_fragment(&approval.approval_id);
+    let dir = profile_dir.join(ARTIFACT_RETENTION_APPLICATIONS_DIR);
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("artifact_retention_application_{timestamp}_{approval_id}.json")
+        } else {
+            format!("artifact_retention_application_{timestamp}_{approval_id}_{attempt:03}.json")
+        };
+        let path = dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+    bail!("could not allocate a unique artifact retention application receipt path")
+}
+
+fn write_retention_application_receipt(
+    path: &Path,
+    report: &ArtifactRetentionApplicationReport,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    if path.exists() {
+        bail!("receipt output already exists: {}", path.display());
+    }
+    let content = serde_json::to_string_pretty(report).context("serialize retention receipt")?;
+    fs::write(path, format!("{content}\n")).with_context(|| format!("write {}", path.display()))
+}
+
+fn shell_arg(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
 }
 
 fn retention_request_target(
@@ -802,6 +1282,14 @@ fn retention_request_next_commands(approval: Option<&PendingActionApproval>) -> 
             format!("forager offdesk ok {}", approval.approval_id),
             format!("forager offdesk deny {}", approval.approval_id),
             "forager offdesk pending".to_string(),
+        ],
+        ApprovalStatus::Approved => vec![
+            format!(
+                "forager project retention-apply --project-key {} --approval-id {}",
+                shell_arg(&approval.project_key),
+                shell_arg(&approval.approval_id)
+            ),
+            "forager offdesk pending --all".to_string(),
         ],
         _ => vec!["forager offdesk pending --all".to_string()],
     }

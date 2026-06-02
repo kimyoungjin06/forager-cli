@@ -38,6 +38,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project artifact-index`↴](#forager-project-artifact-index)
 * [`forager project retention-review`↴](#forager-project-retention-review)
 * [`forager project retention-request`↴](#forager-project-retention-request)
+* [`forager project retention-apply`↴](#forager-project-retention-apply)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -543,6 +544,7 @@ Initialize and inspect project operation packets
 * `artifact-index` — Build a read-only project/profile artifact index
 * `retention-review` — Build a read-only artifact retention review packet
 * `retention-request` — Create an approval-only artifact retention follow-up request
+* `retention-apply` — Consume an approved artifact retention decision into a profile receipt
 
 
 
@@ -681,6 +683,25 @@ Create an approval-only artifact retention follow-up request
 * `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
 
   Default value: `30`
+* `--json` — Output machine-readable JSON
+
+
+
+## `forager project retention-apply`
+
+Consume an approved artifact retention decision into a profile receipt
+
+**Usage:** `forager project retention-apply [OPTIONS] --project-key <PROJECT_KEY> --approval-id <APPROVAL_ID> [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory related to the approved retention decision. Defaults to the current directory
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key used to validate the approved retention decision
+* `--approval-id <APPROVAL_ID>` — Approved artifact retention approval ID to consume
+* `--receipt-out <RECEIPT_OUT>` — Write the receipt to this path instead of the profile receipt directory
 * `--json` — Output machine-readable JSON
 
 
