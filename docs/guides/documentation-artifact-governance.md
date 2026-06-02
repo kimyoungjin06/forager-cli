@@ -214,6 +214,28 @@ rows, action-required artifacts, and a keep sample. Missing artifacts,
 unreferenced human-facing outputs, archive candidates, and disposal candidates
 are surfaced as review work, not executed cleanup.
 
+When one review item needs an operator decision, create an approval-only bridge
+record:
+
+```bash
+forager project retention-request /path/to/project \
+  --project-key my-project \
+  --path outputs/plot.png \
+  --action promote \
+  --json
+```
+
+Use `--artifact-id <id>` instead of `--path` when the selector could be
+ambiguous. The command emits `artifact_retention_approval_request.v1` and
+records a pending `maintenance.artifact_cleanup` approval with an
+`artifact_retention` approval brief. The approval card states the requested
+action, the review reason, why the artifact matters, options for approve/deny/
+defer, and the non-authorized boundary.
+
+This bridge still does not mutate files. It does not delete, move, archive,
+edit `DELIVERABLES.md`, publish, or accept output as truth. Approval creates a
+reviewable decision record for a later explicit follow-up workflow.
+
 `forager ondesk review-surface --project-key <project> --json` embeds a compact
 projection of the matching profile-local artifact index and retention review.
 `forager ondesk prompt-package --project-key <project>` renders their counts in

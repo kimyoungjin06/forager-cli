@@ -37,6 +37,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project audit-docs`↴](#forager-project-audit-docs)
 * [`forager project artifact-index`↴](#forager-project-artifact-index)
 * [`forager project retention-review`↴](#forager-project-retention-review)
+* [`forager project retention-request`↴](#forager-project-retention-request)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -541,6 +542,7 @@ Initialize and inspect project operation packets
 * `audit-docs` — Audit documentation and human-facing artifact governance surfaces
 * `artifact-index` — Build a read-only project/profile artifact index
 * `retention-review` — Build a read-only artifact retention review packet
+* `retention-request` — Create an approval-only artifact retention follow-up request
 
 
 
@@ -648,6 +650,37 @@ Build a read-only artifact retention review packet
 ###### **Options:**
 
 * `--project-key <PROJECT_KEY>` — Stable project key used to filter profile-local Forager artifacts
+* `--json` — Output machine-readable JSON
+
+
+
+## `forager project retention-request`
+
+Create an approval-only artifact retention follow-up request
+
+**Usage:** `forager project retention-request [OPTIONS] --project-key <PROJECT_KEY> --action <ACTION> [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory to scan. Defaults to the current directory
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key used for approval and audit correlation
+* `--artifact-id <ARTIFACT_ID>` — Existing artifact_index/artifact_retention_review artifact id to request approval for
+* `--path <PATH_FILTER>` — Artifact path or relative path to request approval for
+* `--action <ACTION>` — Retention action to request approval for
+
+  Possible values: `keep`, `promote`, `archive`, `dispose`
+
+* `--request-id <REQUEST_ID>` — Request ID for approval correlation
+
+  Default value: `retention-review`
+* `--task-id <TASK_ID>` — Override task ID used for approval deduplication
+* `--reason <REASON>` — Extra operator-safe reason to include in the approval brief
+* `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
+
+  Default value: `30`
 * `--json` — Output machine-readable JSON
 
 

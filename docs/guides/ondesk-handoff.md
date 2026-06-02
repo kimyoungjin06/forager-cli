@@ -87,6 +87,16 @@ forager project artifact-index /path/to/project --project-key <project> --json
 forager project retention-review /path/to/project --project-key <project> --json
 ```
 
+When one retention item needs an operator decision before follow-up work,
+create a separate approval-only request:
+
+```bash
+forager project retention-request /path/to/project --project-key <project> --artifact-id <id> --action <keep|promote|archive|dispose>
+```
+
+The request appears in `forager offdesk pending`; it does not mutate project
+files or consume the Ondesk review surface itself.
+
 ## Knowledge Policy
 
 - `ondesk note` stores redacted, operator-safe JSONL in `ondesk_notes.jsonl`.

@@ -1,17 +1,21 @@
 //! Project and profile artifact inventory read model.
 
 use anyhow::{bail, Context, Result};
-use chrono::{DateTime, Utc};
-use clap::Args;
+use chrono::{DateTime, Duration, Utc};
+use clap::{Args, ValueEnum};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::offdesk::operator_safe_text;
+use crate::offdesk::{
+    operator_safe_text, ActionApprovalMetadata, ActionApprovalRequest, ApprovalBrief,
+    ApprovalBriefOption, ApprovalLedger, ApprovalStatus, ArtifactRetentionApprovalMetadata,
+    PendingActionApproval, RiskLevel,
+};
 use crate::session::get_profile_dir;
 
 const ARTIFACT_INDEX_SCHEMA: &str = "artifact_index.v1";
@@ -50,6 +54,101 @@ pub struct ProjectRetentionReviewArgs {
     /// Output machine-readable JSON
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProjectRetentionRequestArgs {
+    /// Project repository/root directory to scan. Defaults to the current directory.
+    path: Option<PathBuf>,
+
+    /// Stable project key used for approval and audit correlation
+    #[arg(long)]
+    project_key: String,
+
+    /// Existing artifact_index/artifact_retention_review artifact id to request approval for
+    #[arg(long, conflicts_with = "path_filter")]
+    artifact_id: Option<String>,
+
+    /// Artifact path or relative path to request approval for
+    #[arg(long = "path", conflicts_with = "artifact_id")]
+    path_filter: Option<String>,
+
+    /// Retention action to request approval for
+    #[arg(long, value_enum)]
+    action: RetentionRequestAction,
+
+    /// Request ID for approval correlation
+    #[arg(long, default_value = "retention-review")]
+    request_id: String,
+
+    /// Override task ID used for approval deduplication
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Extra operator-safe reason to include in the approval brief
+    #[arg(long)]
+    reason: Option<String>,
+
+    /// Pending approval TTL in minutes
+    #[arg(long, default_value_t = 30)]
+    ttl_minutes: i64,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum RetentionRequestAction {
+    Keep,
+    Promote,
+    Archive,
+    Dispose,
+}
+
+impl RetentionRequestAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Keep => "keep",
+            Self::Promote => "promote",
+            Self::Archive => "archive",
+            Self::Dispose => "dispose",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Keep => "Keep artifact",
+            Self::Promote => "Promote artifact",
+            Self::Archive => "Archive artifact",
+            Self::Dispose => "Dispose artifact",
+        }
+    }
+
+    fn risk_level(self) -> RiskLevel {
+        match self {
+            Self::Archive | Self::Dispose => RiskLevel::Destructive,
+            Self::Keep | Self::Promote => RiskLevel::CanonicalMutation,
+        }
+    }
+
+    fn approval_impact(self) -> &'static str {
+        match self {
+            Self::Keep => {
+                "Records approval to preserve this artifact in the retention plan; it does not edit project files."
+            }
+            Self::Promote => {
+                "Records approval to promote this artifact in a later reviewed surface update; it does not edit DELIVERABLES.md."
+            }
+            Self::Archive => {
+                "Records approval to prepare an archive step for this artifact; it does not move the file."
+            }
+            Self::Dispose => {
+                "Records approval to prepare a disposal step for this artifact; it does not delete the file."
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,6 +280,30 @@ struct ArtifactRetentionReviewAuthority {
     does_not_authorize: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApprovalRequestReport {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    status: String,
+    action: &'static str,
+    requested_action: RetentionRequestAction,
+    project_key: String,
+    request_id: String,
+    task_id: String,
+    risk_level: RiskLevel,
+    target: ArtifactRetentionReviewItem,
+    approval: Option<PendingActionApproval>,
+    detail: String,
+    next_commands: Vec<String>,
+    authority: ArtifactRetentionApprovalRequestAuthority,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionApprovalRequestAuthority {
+    records_approval_only: bool,
+    does_not_authorize: Vec<&'static str>,
+}
+
 struct EntryInput {
     label: String,
     source: String,
@@ -243,6 +366,498 @@ pub async fn run_retention_review(profile: &str, args: ProjectRetentionReviewArg
         );
     }
     Ok(())
+}
+
+pub async fn run_retention_request(profile: &str, args: ProjectRetentionRequestArgs) -> Result<()> {
+    let json = args.json;
+    let report = build_retention_approval_request(profile, args)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", retention_request_human_summary(&report));
+    }
+    Ok(())
+}
+
+fn build_retention_approval_request(
+    profile: &str,
+    args: ProjectRetentionRequestArgs,
+) -> Result<ArtifactRetentionApprovalRequestReport> {
+    const ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA: &str =
+        "artifact_retention_approval_request.v1";
+    const RETENTION_APPROVAL_ACTION: &str = "maintenance.artifact_cleanup";
+
+    let project_root = resolve_project_root(args.path.as_deref())?;
+    let project_key = operator_safe_text(args.project_key.trim());
+    if project_key.trim().is_empty() {
+        bail!("--project-key cannot be empty");
+    }
+    let request_id = operator_safe_text(args.request_id.trim());
+    if request_id.trim().is_empty() {
+        bail!("--request-id cannot be empty");
+    }
+
+    let index = build_artifact_index(profile, Some(&project_key), project_root.as_deref())?;
+    let target = retention_request_target(
+        &index,
+        args.artifact_id.as_deref(),
+        args.path_filter.as_deref(),
+    )?;
+    validate_retention_request_action(args.action, &target)?;
+
+    let generated_at = Utc::now();
+    let task_id = retention_request_task_id(args.action, &target, args.task_id.as_deref());
+    let risk_level = args.action.risk_level();
+    let brief = retention_request_approval_brief(args.action, &target, &project_key, &request_id);
+    let mut request = ActionApprovalRequest::new(
+        project_key.clone(),
+        request_id.clone(),
+        task_id.clone(),
+        RETENTION_APPROVAL_ACTION,
+        risk_level,
+    );
+    request.mutation_class = Some(RETENTION_APPROVAL_ACTION.to_string());
+    request.preview = retention_request_preview(args.action, &target);
+    request.reason = retention_request_reason(args.action, &target, args.reason.as_deref());
+    request.source_surface = "project.retention_request".to_string();
+    request.ttl = Duration::minutes(args.ttl_minutes.max(1));
+    request.metadata = Some(retention_request_metadata(
+        generated_at,
+        args.action,
+        &target,
+        brief,
+    ));
+
+    let ledger = ApprovalLedger::new(get_profile_dir(profile)?);
+    let (mut session, _) = ledger.begin_session(generated_at)?;
+    let pending = session.ensure_pending_without_consuming_grant(request, generated_at)?;
+    session.flush()?;
+
+    let approvals = ledger.load()?;
+    let approval = pending.or_else(|| {
+        matching_retention_approval(
+            &approvals,
+            &project_key,
+            &request_id,
+            &task_id,
+            RETENTION_APPROVAL_ACTION,
+            risk_level,
+        )
+    });
+    let approval_status = approval
+        .as_ref()
+        .map(|approval| approval.status)
+        .unwrap_or(ApprovalStatus::Superseded);
+    let status = approval
+        .as_ref()
+        .map(|_| retention_request_status(approval_status).to_string())
+        .unwrap_or_else(|| "not_created".to_string());
+    let detail = approval
+        .as_ref()
+        .map(|_| retention_request_detail(approval_status))
+        .unwrap_or_else(|| "No artifact retention approval was created.".to_string());
+    let next_commands = retention_request_next_commands(approval.as_ref());
+
+    Ok(ArtifactRetentionApprovalRequestReport {
+        schema: ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA,
+        generated_at,
+        status,
+        action: RETENTION_APPROVAL_ACTION,
+        requested_action: args.action,
+        project_key,
+        request_id,
+        task_id,
+        risk_level,
+        target,
+        approval,
+        detail,
+        next_commands,
+        authority: ArtifactRetentionApprovalRequestAuthority {
+            records_approval_only: true,
+            does_not_authorize: vec![
+                "delete files",
+                "move files",
+                "archive files",
+                "edit DELIVERABLES.md",
+                "publish outputs",
+                "accept output as truth without review",
+            ],
+        },
+    })
+}
+
+fn retention_request_human_summary(report: &ArtifactRetentionApprovalRequestReport) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Artifact retention approval request: {}",
+        report.status
+    ));
+    lines.push(format!(
+        "  action: {} ({})",
+        report.requested_action.as_str(),
+        retention_request_risk_label(report.risk_level)
+    ));
+    lines.push(format!(
+        "  target: {} [{} / {}]",
+        report.target.label, report.target.retention_class, report.target.review_status
+    ));
+    lines.push(format!("  why: {}", report.target.why_it_matters));
+    lines.push(format!("  detail: {}", report.detail));
+    if let Some(approval) = &report.approval {
+        lines.push(format!("  approval: {}", approval.approval_id));
+    }
+    lines.push("  boundary: approval-only; no file mutation was performed.".to_string());
+    if !report.next_commands.is_empty() {
+        lines.push("Next:".to_string());
+        for command in &report.next_commands {
+            lines.push(format!("  - {command}"));
+        }
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn retention_request_target(
+    index: &ArtifactIndex,
+    artifact_id: Option<&str>,
+    path_filter: Option<&str>,
+) -> Result<ArtifactRetentionReviewItem> {
+    let artifact_id = artifact_id.map(operator_safe_text);
+    let path_filter = path_filter.map(operator_safe_path);
+    match (artifact_id.as_deref(), path_filter.as_deref()) {
+        (Some(_), Some(_)) => bail!("provide only one of --artifact-id or --path"),
+        (None, None) => bail!("provide --artifact-id or --path"),
+        _ => {}
+    }
+
+    let matches = index
+        .entries
+        .iter()
+        .filter(
+            |entry| match (artifact_id.as_deref(), path_filter.as_deref()) {
+                (Some(id), None) => entry.id == id,
+                (None, Some(path)) => {
+                    entry.path == path
+                        || entry
+                            .relative_path
+                            .as_deref()
+                            .is_some_and(|rel| rel == path)
+                }
+                _ => false,
+            },
+        )
+        .map(retention_review_item)
+        .collect::<Vec<_>>();
+
+    match matches.as_slice() {
+        [target] => Ok(target.clone()),
+        [] => bail!("no artifact retention review item matched the selector"),
+        _ => bail!("selector matched multiple artifacts; use --artifact-id for a stable request"),
+    }
+}
+
+fn validate_retention_request_action(
+    action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+) -> Result<()> {
+    if !target.present && !matches!(action, RetentionRequestAction::Keep) {
+        bail!("only keep can be requested for a missing artifact reference");
+    }
+    if action == RetentionRequestAction::Dispose
+        && target.retention_class != "disposal_candidate"
+        && target.review_status != "needs_triage"
+    {
+        bail!("dispose requires a disposal candidate or needs_triage item");
+    }
+    if action == RetentionRequestAction::Archive
+        && target.retention_class != "archive_candidate"
+        && target.review_status != "needs_triage"
+    {
+        bail!("archive requires an archive candidate or needs_triage item");
+    }
+    Ok(())
+}
+
+fn retention_request_task_id(
+    action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+    override_task_id: Option<&str>,
+) -> String {
+    override_task_id
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "retention-{}-{}",
+                action.as_str(),
+                sanitize_id_fragment(&target.id)
+            )
+        })
+}
+
+fn retention_request_preview(
+    action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+) -> String {
+    format!(
+        "{} for artifact {} [{} / {}]. No file mutation is performed by this request.",
+        action.label(),
+        target.label,
+        target.retention_class,
+        target.review_status
+    )
+}
+
+fn retention_request_reason(
+    action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+    extra: Option<&str>,
+) -> String {
+    let mut reason = format!(
+        "{}. Review recommended: {}. {}",
+        target.reason,
+        target.recommended_action,
+        action.approval_impact()
+    );
+    if let Some(extra) = extra
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+    {
+        reason.push_str(" Operator note: ");
+        reason.push_str(&extra);
+    }
+    reason
+}
+
+fn retention_request_approval_brief(
+    action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+    project_key: &str,
+    request_id: &str,
+) -> ApprovalBrief {
+    let mut decision_impacts = HashMap::new();
+    decision_impacts.insert("approve".to_string(), action.approval_impact().to_string());
+    decision_impacts.insert(
+        "deny".to_string(),
+        "Keep the artifact index unchanged and require a revised scoped request if needed."
+            .to_string(),
+    );
+    decision_impacts.insert(
+        "defer".to_string(),
+        "Leave this approval pending while asking for more artifact context.".to_string(),
+    );
+
+    let mut context = HashMap::new();
+    context.insert("artifact_id".to_string(), target.id.clone());
+    context.insert("project_key".to_string(), project_key.to_string());
+    context.insert("request_id".to_string(), request_id.to_string());
+    context.insert("source".to_string(), target.source.clone());
+    context.insert("kind".to_string(), target.kind.clone());
+    context.insert("present".to_string(), target.present.to_string());
+    context.insert(
+        "retention_class".to_string(),
+        target.retention_class.clone(),
+    );
+    context.insert("review_status".to_string(), target.review_status.clone());
+    context.insert(
+        "recommended_action".to_string(),
+        target.recommended_action.clone(),
+    );
+    context.insert("requested_action".to_string(), action.as_str().to_string());
+
+    let mut evidence = vec![
+        format!("Why it matters: {}", target.why_it_matters),
+        format!("Review reason: {}", target.reason),
+    ];
+    evidence.extend(
+        target
+            .refs
+            .iter()
+            .take(3)
+            .map(|reference| format!("Reference: {reference}")),
+    );
+
+    ApprovalBrief {
+        schema: "approval_brief.v1".to_string(),
+        source: Some("project.retention_request".to_string()),
+        recommendation: action.as_str().to_string(),
+        subject: format!("artifact retention {}", action.as_str()),
+        summary_lines: vec![
+            "Artifact retention follow-up is waiting for operator approval.".to_string(),
+            format!("Artifact: {} ({})", target.label, target.kind),
+            format!(
+                "Review: {} / {}",
+                target.retention_class, target.review_status
+            ),
+            format!("Recommended by review: {}", target.recommended_action),
+        ],
+        scope: "Approves only the retention follow-up request for this artifact; does not delete, move, archive, edit DELIVERABLES.md, publish, or accept output as truth."
+            .to_string(),
+        question: format!("Approve the {} retention follow-up?", action.as_str()),
+        options: vec![
+            ApprovalBriefOption {
+                id: "approve".to_string(),
+                label: format!("Approve {}", action.as_str()),
+                description: action.approval_impact().to_string(),
+                natural_input_prompt: None,
+            },
+            ApprovalBriefOption {
+                id: "deny".to_string(),
+                label: "Deny".to_string(),
+                description:
+                    "Reject this request and keep the artifact index unchanged.".to_string(),
+                natural_input_prompt: Some(
+                    "Explain why this artifact should stay out of the requested retention action."
+                        .to_string(),
+                ),
+            },
+            ApprovalBriefOption {
+                id: "defer".to_string(),
+                label: "Need more detail".to_string(),
+                description:
+                    "Ask for more artifact context before making the retention decision."
+                        .to_string(),
+                natural_input_prompt: Some(
+                    "State what evidence, preview, or provenance you need first.".to_string(),
+                ),
+            },
+        ],
+        why_recommendation: vec![
+            target.reason.clone(),
+            target.why_it_matters.clone(),
+            "The approval is intentionally separated from any file mutation.".to_string(),
+        ],
+        evidence,
+        decision_impacts,
+        reply_examples: vec![
+            "approve".to_string(),
+            "deny - keep it until the final report is reviewed".to_string(),
+            "defer - show the preview and provenance first".to_string(),
+        ],
+        context,
+    }
+}
+
+fn retention_request_metadata(
+    generated_at: DateTime<Utc>,
+    action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+    brief: ApprovalBrief,
+) -> ActionApprovalMetadata {
+    ActionApprovalMetadata::ArtifactRetention(Box::new(ArtifactRetentionApprovalMetadata {
+        generated_at,
+        artifact_id: target.id.clone(),
+        label: target.label.clone(),
+        source: target.source.clone(),
+        artifact_kind: target.kind.clone(),
+        path: target.path.clone(),
+        relative_path: target.relative_path.clone(),
+        present: target.present,
+        bytes: target.bytes,
+        retention_class: target.retention_class.clone(),
+        review_status: target.review_status.clone(),
+        recommended_action: target.recommended_action.clone(),
+        requested_action: action.as_str().to_string(),
+        reason: target.reason.clone(),
+        why_it_matters: target.why_it_matters.clone(),
+        refs: target.refs.clone(),
+        approval_brief: Some(brief),
+    }))
+}
+
+fn retention_request_status(approval_status: ApprovalStatus) -> &'static str {
+    match approval_status {
+        ApprovalStatus::Pending => "pending_approval",
+        ApprovalStatus::Approved => "already_approved",
+        ApprovalStatus::Denied => "previously_denied",
+        ApprovalStatus::Expired => "expired",
+        ApprovalStatus::Superseded => "superseded",
+    }
+}
+
+fn retention_request_detail(approval_status: ApprovalStatus) -> String {
+    match approval_status {
+        ApprovalStatus::Pending => {
+            "Artifact retention approval is pending or was reused.".to_string()
+        }
+        ApprovalStatus::Approved => {
+            "A matching retention approval already exists; this command did not consume it."
+                .to_string()
+        }
+        ApprovalStatus::Denied => {
+            "A matching retention approval was previously denied; create a new scoped request if needed."
+                .to_string()
+        }
+        ApprovalStatus::Expired => "A matching retention approval is expired.".to_string(),
+        ApprovalStatus::Superseded => "A matching retention approval is superseded.".to_string(),
+    }
+}
+
+fn retention_request_next_commands(approval: Option<&PendingActionApproval>) -> Vec<String> {
+    let Some(approval) = approval else {
+        return vec!["forager offdesk pending".to_string()];
+    };
+    match approval.status {
+        ApprovalStatus::Pending => vec![
+            format!("forager offdesk ok {}", approval.approval_id),
+            format!("forager offdesk deny {}", approval.approval_id),
+            "forager offdesk pending".to_string(),
+        ],
+        _ => vec!["forager offdesk pending --all".to_string()],
+    }
+}
+
+fn retention_request_risk_label(risk_level: RiskLevel) -> &'static str {
+    match risk_level {
+        RiskLevel::Safe => "safe",
+        RiskLevel::RuntimeMutation => "runtime_mutation",
+        RiskLevel::CanonicalMutation => "canonical_mutation",
+        RiskLevel::Destructive => "destructive",
+        RiskLevel::ExternalSideEffect => "external_side_effect",
+    }
+}
+
+fn matching_retention_approval(
+    approvals: &[PendingActionApproval],
+    project_key: &str,
+    request_id: &str,
+    task_id: &str,
+    action: &str,
+    risk_level: RiskLevel,
+) -> Option<PendingActionApproval> {
+    approvals
+        .iter()
+        .find(|approval| {
+            approval.project_key == project_key
+                && approval.request_id == request_id
+                && approval.task_id == task_id
+                && approval.action == action
+                && approval.risk_level == risk_level
+                && approval.status == ApprovalStatus::Pending
+        })
+        .or_else(|| {
+            approvals.iter().find(|approval| {
+                approval.project_key == project_key
+                    && approval.request_id == request_id
+                    && approval.task_id == task_id
+                    && approval.action == action
+                    && approval.risk_level == risk_level
+            })
+        })
+        .cloned()
+}
+
+fn sanitize_id_fragment(value: &str) -> String {
+    let fragment = operator_safe_text(value)
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+        .take(32)
+        .collect::<String>();
+    if fragment.is_empty() {
+        "artifact".to_string()
+    } else {
+        fragment
+    }
 }
 
 pub(crate) fn build_profile_artifact_index_value(

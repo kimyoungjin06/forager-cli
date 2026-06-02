@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
-use super::artifact_index::{self, ProjectArtifactIndexArgs, ProjectRetentionReviewArgs};
+use super::artifact_index::{
+    self, ProjectArtifactIndexArgs, ProjectRetentionRequestArgs, ProjectRetentionReviewArgs,
+};
 use super::project_audit::{run_audit_docs, ProjectAuditDocsArgs};
 use crate::offdesk::operator_safe_text;
 use crate::session::get_profile_dir;
@@ -44,6 +46,10 @@ pub enum ProjectCommands {
     /// Build a read-only artifact retention review packet
     #[command(name = "retention-review")]
     RetentionReview(ProjectRetentionReviewArgs),
+
+    /// Create an approval-only artifact retention follow-up request
+    #[command(name = "retention-request")]
+    RetentionRequest(ProjectRetentionRequestArgs),
 }
 
 #[derive(Args)]
@@ -437,6 +443,9 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
         ProjectCommands::ArtifactIndex(args) => artifact_index::run(profile, args).await,
         ProjectCommands::RetentionReview(args) => {
             artifact_index::run_retention_review(profile, args).await
+        }
+        ProjectCommands::RetentionRequest(args) => {
+            artifact_index::run_retention_request(profile, args).await
         }
     }
 }

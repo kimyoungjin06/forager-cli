@@ -18,6 +18,20 @@ fn forager_command(home: &Path) -> Command {
     command
 }
 
+fn profile_dir(home: &Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        home.join(".config")
+            .join("forager")
+            .join("profiles")
+            .join("default")
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        home.join(".forager").join("profiles").join("default")
+    }
+}
+
 fn write_file(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -941,5 +955,126 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         item["relative_path"] == "outputs/plot.png"
             && item["recommended_action"] == "promote_to_deliverables_or_mark_disposable"
     }));
+
+    let request_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-request",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--path",
+            "outputs/plot.png",
+            "--action",
+            "promote",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        request_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&request_output.stdout),
+        String::from_utf8_lossy(&request_output.stderr)
+    );
+    let request: Value = serde_json::from_slice(&request_output.stdout)?;
+    assert_eq!(request["schema"], "artifact_retention_approval_request.v1");
+    assert_eq!(request["status"], "pending_approval");
+    assert_eq!(request["action"], "maintenance.artifact_cleanup");
+    assert_eq!(request["requested_action"], "promote");
+    assert_eq!(request["risk_level"], "canonical_mutation");
+    assert_eq!(request["target"]["relative_path"], "outputs/plot.png");
+    assert_eq!(request["target"]["review_status"], "needs_triage");
+    assert_eq!(request["authority"]["records_approval_only"], true);
+    assert!(request["authority"]["does_not_authorize"]
+        .as_array()
+        .expect("authority")
+        .iter()
+        .any(|item| item == "delete files"));
+    assert!(request["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .iter()
+        .all(|command| !command
+            .as_str()
+            .unwrap_or_default()
+            .contains("retention-apply")));
+
+    let approval = &request["approval"];
+    assert_eq!(approval["status"], "pending");
+    assert_eq!(approval["source_surface"], "project.retention_request");
+    assert_eq!(approval["metadata"]["kind"], "artifact_retention");
+    assert_eq!(approval["metadata"]["artifact_kind"], "png");
+    assert_eq!(approval["metadata"]["requested_action"], "promote");
+    assert_eq!(
+        approval["metadata"]["approval_brief"]["schema"],
+        "approval_brief.v1"
+    );
+    assert_eq!(
+        approval["metadata"]["approval_brief"]["source"],
+        "project.retention_request"
+    );
+    assert!(approval["metadata"]["approval_brief"]["scope"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("does not delete, move, archive"));
+    assert!(approval["metadata"]["approval_brief"]["options"]
+        .as_array()
+        .expect("options")
+        .iter()
+        .any(|option| option["id"] == "defer"
+            && option["natural_input_prompt"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("evidence")));
+
+    let approvals_path = profile_dir(temp.path()).join("pending_action_approvals.json");
+    let stored: Value = serde_json::from_str(&fs::read_to_string(&approvals_path)?)?;
+    assert_eq!(stored.as_array().expect("stored approvals").len(), 1);
+    assert_eq!(stored[0]["metadata"], approval["metadata"]);
+
+    let request_again_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-request",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--path",
+            "outputs/plot.png",
+            "--action",
+            "promote",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        request_again_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&request_again_output.stdout),
+        String::from_utf8_lossy(&request_again_output.stderr)
+    );
+    let request_again: Value = serde_json::from_slice(&request_again_output.stdout)?;
+    assert_eq!(
+        request_again["approval"]["approval_id"],
+        request["approval"]["approval_id"]
+    );
+    let stored_again: Value = serde_json::from_str(&fs::read_to_string(&approvals_path)?)?;
+    assert_eq!(stored_again.as_array().expect("stored approvals").len(), 1);
+
+    let pending_output = forager_command(temp.path())
+        .args(["offdesk", "pending"])
+        .output()?;
+    assert!(
+        pending_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&pending_output.stdout),
+        String::from_utf8_lossy(&pending_output.stderr)
+    );
+    let pending_stdout = String::from_utf8_lossy(&pending_output.stdout);
+    assert!(
+        pending_stdout.contains("prompt: promote recommendation for artifact retention promote")
+    );
+    assert!(pending_stdout.contains("Approve the promote retention follow-up?"));
+    assert!(pending_stdout.contains("artifact: Unreferenced human-facing output"));
+    assert!(!pending_stdout.contains("outputs/plot.png"));
     Ok(())
 }

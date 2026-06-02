@@ -747,23 +747,32 @@ Inputs:
 - Run identity.
 - Project/module association.
 - Retention class.
+- Retention review item selector.
 - Promotion or disposal decision.
 
 Outputs:
 - `artifact_index.v1`.
 - `artifact_retention_review.v1`.
+- `artifact_retention_approval_request.v1`.
 - Retention recommendation.
+- Approval-only retention decision card.
 - Review packet.
 - Disposal-safe manifest.
 
 Authorization Boundary:
 - May recommend retention or disposal.
-- Does not delete, move, or archive files without separate explicit approval.
+- May record an approval request for a single retention follow-up.
+- Does not delete, move, archive, edit deliverables, publish, or accept output
+  as truth without a later explicit mutation workflow.
 
 Acceptance Criteria:
 - Humans can find deliverables without opening every generated file.
 - Retention review separates keep, review, missing, archive, and disposal
   candidates without mutating files.
+- A specific review item can become a pending approval card with summary,
+  evidence, options, impact, and scope.
+- Repeating the same retention request reuses the pending approval instead of
+  creating duplicate decisions.
 - Runs do not create endless flat directories without review paths.
 - Logs and raw evidence remain available but are not the primary review surface.
 - Disposal candidates are inspectable before mutation.
@@ -771,13 +780,15 @@ Acceptance Criteria:
 Primary Surfaces:
 - `forager project artifact-index`.
 - `forager project retention-review`.
+- `forager project retention-request`.
 - `forager ondesk review-surface`.
 - Closeout artifacts.
 - Documentation governance reports.
 - Prompt-package summary.
 
 Open Design Questions:
-- What retention classes should be standard across projects?
+- What concrete apply/archive/dispose workflows should consume approved
+  retention decisions?
 
 ## FD-013 Provider And Model Routing
 
@@ -995,10 +1006,14 @@ Completed P1 operator workflow slice:
 5. Strengthen adaptive wiki promotion receipts and review summaries.
 6. Add `artifact_retention_review.v1` and project it into review/Ondesk
    surfaces.
+7. Add `project retention-request` as an approval-only bridge from retention
+   review items into the pending approval ledger.
 
 Remaining P1 operator workflow slice:
-1. Standardize retention-class names and cleanup approval workflows across
-   project templates before adding any mutation path.
+1. Standardize retention-class names across project templates.
+2. Design the reviewed apply/archive/dispose workflows that can consume
+   approved retention decisions without bypassing closeout and deliverable
+   authority.
 
 P2 expansion slice:
 1. Normalize hosted harness capability contracts for Claude Code, Codex,

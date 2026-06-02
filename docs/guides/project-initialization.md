@@ -164,6 +164,21 @@ This emits `artifact_retention_review.v1`, grouping missing references,
 unreviewed human-facing outputs, archive candidates, and disposal candidates
 without moving or deleting anything.
 
+When an item from that queue needs an operator decision, create the approval
+request without performing the follow-up:
+
+```bash
+forager project retention-request /path/to/project \
+  --project-key <project> \
+  --path outputs/plot.png \
+  --action promote
+```
+
+The command records an approval-only `artifact_retention` card in
+`pending_action_approvals.json`. It can approve, deny, or defer the retention
+follow-up, but it does not edit deliverables, move/archive/delete files, or
+publish outputs.
+
 ## Recommended Flow
 
 1. Run `forager project init`.
@@ -178,17 +193,20 @@ without moving or deleting anything.
    when the project has generated outputs or handoff artifacts to review, then
    `forager project retention-review /path/to/project --project-key <project>`
    when you need the shorter retention action queue.
-7. Review module candidates and decide which ones need a module operation
+7. For a specific retention item, run
+   `forager project retention-request /path/to/project --project-key <project> --artifact-id <id> --action <keep|promote|archive|dispose>`
+   to place the decision in the approval ledger before any follow-up mutation.
+8. Review module candidates and decide which ones need a module operation
    profile.
-8. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
+9. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
    module-profile and evidence preflight commands where available.
-9. Turn the evidence collector plan into a project-specific deterministic
+10. Turn the evidence collector plan into a project-specific deterministic
    bundle builder.
-10. Promote only reviewed wiki seeds.
-11. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-12. Prepare Offdesk with a matching module operation preflight artifact, for
+11. Promote only reviewed wiki seeds.
+12. Start Ondesk from `ONDESK_START_PACKAGE.md`.
+13. Prepare Offdesk with a matching module operation preflight artifact, for
    example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
-13. Enqueue Offdesk only after runtime capability, evidence, and closeout
+14. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.
 
 ## Operator Interpretation
