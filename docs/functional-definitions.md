@@ -754,14 +754,17 @@ Outputs:
 - `artifact_index.v1`.
 - `artifact_retention_review.v1`.
 - `artifact_retention_approval_request.v1`.
+- `artifact_retention_application.v1`.
 - Retention recommendation.
 - Approval-only retention decision card.
+- Profile-local retention application receipt.
 - Review packet.
 - Disposal-safe manifest.
 
 Authorization Boundary:
 - May recommend retention or disposal.
 - May record an approval request for a single retention follow-up.
+- May consume an approved retention decision into a profile-local plan receipt.
 - Does not delete, move, archive, edit deliverables, publish, or accept output
   as truth without a later explicit mutation workflow.
 
@@ -773,6 +776,10 @@ Acceptance Criteria:
   evidence, options, impact, and scope.
 - Repeating the same retention request reuses the pending approval instead of
   creating duplicate decisions.
+- An approved retention decision can be consumed exactly once into
+  `artifact_retention_application.v1`, which records the plan and keeps
+  `mutation_performed=false`.
+- Repeating `retention-apply` for the same consumed approval is rejected.
 - Runs do not create endless flat directories without review paths.
 - Logs and raw evidence remain available but are not the primary review surface.
 - Disposal candidates are inspectable before mutation.
@@ -781,14 +788,15 @@ Primary Surfaces:
 - `forager project artifact-index`.
 - `forager project retention-review`.
 - `forager project retention-request`.
+- `forager project retention-apply`.
 - `forager ondesk review-surface`.
 - Closeout artifacts.
 - Documentation governance reports.
 - Prompt-package summary.
 
 Open Design Questions:
-- What concrete apply/archive/dispose workflows should consume approved
-  retention decisions?
+- What later reviewed mutation workflow should execute archive/dispose moves
+  after the plan receipt, snapshot, and restore plan exist?
 
 ## FD-013 Provider And Model Routing
 

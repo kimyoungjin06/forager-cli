@@ -179,6 +179,19 @@ The command records an approval-only `artifact_retention` card in
 follow-up, but it does not edit deliverables, move/archive/delete files, or
 publish outputs.
 
+After approval, record the application receipt:
+
+```bash
+forager offdesk ok <approval-id>
+forager project retention-apply /path/to/project \
+  --project-key <project> \
+  --approval-id <approval-id>
+```
+
+`retention-apply` consumes the approved decision exactly once and writes
+`artifact_retention_application.v1` in the profile receipt directory. It records
+the keep/promote/archive/dispose plan but leaves project files unchanged.
+
 ## Recommended Flow
 
 1. Run `forager project init`.
@@ -196,17 +209,21 @@ publish outputs.
 7. For a specific retention item, run
    `forager project retention-request /path/to/project --project-key <project> --artifact-id <id> --action <keep|promote|archive|dispose>`
    to place the decision in the approval ledger before any follow-up mutation.
-8. Review module candidates and decide which ones need a module operation
+8. After approval, run
+   `forager project retention-apply /path/to/project --project-key <project> --approval-id <approval-id>`
+   to consume the decision into a profile receipt while keeping mutation
+   authority separate.
+9. Review module candidates and decide which ones need a module operation
    profile.
-9. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
+10. Read `MODULE_OPERATION_PREFLIGHT.json` and run/review the listed
    module-profile and evidence preflight commands where available.
-10. Turn the evidence collector plan into a project-specific deterministic
+11. Turn the evidence collector plan into a project-specific deterministic
    bundle builder.
-11. Promote only reviewed wiki seeds.
-12. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-13. Prepare Offdesk with a matching module operation preflight artifact, for
+12. Promote only reviewed wiki seeds.
+13. Start Ondesk from `ONDESK_START_PACKAGE.md`.
+14. Prepare Offdesk with a matching module operation preflight artifact, for
    example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
-14. Enqueue Offdesk only after runtime capability, evidence, and closeout
+15. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.
 
 ## Operator Interpretation

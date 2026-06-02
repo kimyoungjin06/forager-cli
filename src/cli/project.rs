@@ -12,7 +12,8 @@ use std::process::Command;
 use uuid::Uuid;
 
 use super::artifact_index::{
-    self, ProjectArtifactIndexArgs, ProjectRetentionRequestArgs, ProjectRetentionReviewArgs,
+    self, ProjectArtifactIndexArgs, ProjectRetentionApplyArgs, ProjectRetentionRequestArgs,
+    ProjectRetentionReviewArgs,
 };
 use super::project_audit::{run_audit_docs, ProjectAuditDocsArgs};
 use crate::offdesk::operator_safe_text;
@@ -50,6 +51,10 @@ pub enum ProjectCommands {
     /// Create an approval-only artifact retention follow-up request
     #[command(name = "retention-request")]
     RetentionRequest(ProjectRetentionRequestArgs),
+
+    /// Consume an approved artifact retention decision into a profile receipt
+    #[command(name = "retention-apply")]
+    RetentionApply(ProjectRetentionApplyArgs),
 }
 
 #[derive(Args)]
@@ -446,6 +451,9 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
         }
         ProjectCommands::RetentionRequest(args) => {
             artifact_index::run_retention_request(profile, args).await
+        }
+        ProjectCommands::RetentionApply(args) => {
+            artifact_index::run_retention_apply(profile, args).await
         }
     }
 }

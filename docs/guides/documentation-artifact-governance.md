@@ -236,6 +236,24 @@ This bridge still does not mutate files. It does not delete, move, archive,
 edit `DELIVERABLES.md`, publish, or accept output as truth. Approval creates a
 reviewable decision record for a later explicit follow-up workflow.
 
+After the operator approves the card with `forager offdesk ok <approval-id>`,
+consume that decision into a profile-local receipt:
+
+```bash
+forager project retention-apply /path/to/project \
+  --project-key my-project \
+  --approval-id approval_... \
+  --json
+```
+
+The command emits and writes `artifact_retention_application.v1` under the
+profile's `artifact_retention_applications/` directory. It consumes the
+approved approval so the same decision cannot be applied twice, records the
+requested keep/promote/archive/dispose plan, and keeps
+`mutation_performed=false`. Promotion still needs a separate reviewed
+`DELIVERABLES.md` update; archive and disposal still need a separate mutation
+workflow with snapshot and restore planning.
+
 `forager ondesk review-surface --project-key <project> --json` embeds a compact
 projection of the matching profile-local artifact index and retention review.
 `forager ondesk prompt-package --project-key <project>` renders their counts in
